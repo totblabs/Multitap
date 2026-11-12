@@ -366,54 +366,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get change => 'Change';
 
   @override
-  String get textTooLongSendEnter =>
-      'The text is too long to send. Enter it in parts.';
-
-  @override
-  String get disconnectConsole => 'Disconnect the console?';
-
-  @override
-  String get vmsPowerWindowsWorkStay =>
-      'The VM\'s power and Windows work stay as they are.';
-
-  @override
   String get disconnect => 'Disconnect';
 
   @override
   String get keyboard => 'Keyboard';
 
   @override
-  String get consoleKeyboard => 'Console keyboard';
-
-  @override
   String get screen => 'Screen';
-
-  @override
-  String get fitScreenOriginalSize => 'Fit to screen · original size';
 
   @override
   String get originalSize => 'Original size';
 
   @override
-  String get fitScreen => 'Fit to screen';
-
-  @override
-  String get keyCombos => 'Key combos';
-
-  @override
   String get windowsKey => 'Windows key';
-
-  @override
-  String get remote => 'Remote';
-
-  @override
-  String get remoteControl => 'Remote control';
-
-  @override
-  String get reconnecting => 'Reconnecting';
-
-  @override
-  String get waitingConsoleScreen => 'Waiting for the console screen';
 
   @override
   String get reconnect => 'Reconnect';
@@ -423,15 +388,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get console => 'Console';
-
-  @override
-  String get consoleTools => 'Console tools';
-
-  @override
-  String get textType => 'Text to type';
-
-  @override
-  String get send => 'Send';
 
   @override
   String get noPermissionOpenFolderChoose =>
@@ -3131,57 +3087,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get folder => 'Folder';
 
   @override
-  String get youDontHaveConsolePermission =>
-      'You don\'t have Console permission for this desktop. Ask your administrator.';
-
-  @override
-  String get signHasExpiredSignAgain2 =>
-      'Your sign-in has expired. Sign in again.';
-
-  @override
-  String get desktopIsntSoConsoleCant =>
-      'The desktop isn\'t on, so Console can\'t open. Start it, then reconnect.';
-
-  @override
-  String get couldntGetConsoleConnectionDetails =>
-      'Couldn\'t get Console connection details from Proxmox. Let your administrator know.';
-
-  @override
-  String get desktopDetailsHaveChangedClose =>
-      'Desktop details have changed. Close Console and refresh the list.';
-
-  @override
-  String get serverDoesntSupportConsole =>
-      'This server doesn\'t support Console.';
-
-  @override
-  String get serverCouldntVerifyProxmoxCertificate =>
-      'The server couldn\'t verify the Proxmox certificate. Let your administrator know.';
-
-  @override
-  String get serverCouldntVerifyDesktopsProxmox =>
-      'The server couldn\'t verify this desktop\'s Proxmox VM details. Let your administrator know.';
-
-  @override
-  String get consoleIsntAvailableRightNow =>
-      'Console isn\'t available right now. Reconnect in a moment.';
-
-  @override
-  String get couldntVerifyConsoleConnectionLet =>
-      'Couldn\'t verify the Console connection. Let your administrator know.';
-
-  @override
-  String get didntReceiveConsoleScreenReconnect =>
-      'Didn\'t receive the Console screen. Reconnect.';
-
-  @override
-  String get didntReceiveConsoleScreenReconnect2 =>
-      'Didn\'t receive the Console screen.\nReconnect.';
-
-  @override
-  String get consoleDisconnectedReconnect => 'Console disconnected. Reconnect.';
-
-  @override
   String get mediaFoundationDeviceNotVerified =>
       'Media Foundation · device not verified';
 
@@ -4277,17 +4182,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get waitingHostScreen => 'Waiting for the Host screen';
-
-  @override
-  String get preparingSwitchWindowsDisplay =>
-      'Preparing to switch the Windows display';
-
-  @override
-  String get preparingWindowsSignScreen =>
-      'Preparing the Windows sign-in screen';
-
-  @override
-  String get preparingWindowsDesktop => 'Preparing the Windows desktop';
 
   @override
   String get virtualDisplayTookTooLong =>
@@ -6191,13 +6085,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get windowsSign2 => 'Windows sign-in';
 
   @override
-  String get youCanConnectSignScreen => 'You can connect to the sign-in screen';
-
-  @override
-  String get typeWindowsPasswordRemoteScreen =>
-      'Type the Windows password on the remote screen.';
-
-  @override
   String get takeOverWindowsScreenConnect =>
       'Take over the Windows screen and connect';
 
@@ -6763,36 +6650,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get open => 'Open';
 
   @override
-  String get disconnectConsole2 => 'Disconnect Console?';
-
-  @override
-  String get onlyConsoleConnectionEndsDesktop =>
-      'Only the Console connection ends.\nThe desktop and running work stay as they are.';
-
-  @override
-  String get waitingConsoleScreenMayNot =>
-      'Waiting for the Console screen. It may not show if the desktop screen is off.';
-
-  @override
   String get closeRemoteWindow => 'Close remote window';
-
-  @override
-  String get fitWindow => 'Fit to window';
-
-  @override
-  String get sendCtrlAltDelete => 'Send Ctrl+Alt+Delete';
-
-  @override
-  String get aboutConsole => 'About Console';
-
-  @override
-  String get couldNotConnectKeyboardInput =>
-      '\nCould not connect keyboard input.\nClick the Console screen to try again.';
-
-  @override
-  String emergencyProxmoxConsoleScreenOff(Object n) {
-    return 'This is the emergency Proxmox Console.\nA screen that is off may not show.\nScreen, power and device settings are not changed automatically.$n';
-  }
 
   @override
   String get encoderApplied => 'Applied';
@@ -9541,6 +9399,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get serverResponseStatus => 'Server response status';
 
   @override
+  String get serverAddressSave => 'Save server address';
+
+  @override
+  String get systemErrorCode => 'System error code';
+
+  @override
   String get hostSettingsAction => 'Host settings action';
 
   @override
@@ -10788,9 +10652,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get checkingDesktopConnectionInfo =>
       'Checking the desktop connection info.';
-
-  @override
-  String get consoleOpensMainWindow => 'Console opens in the main window.';
 
   @override
   String get product => 'Product';

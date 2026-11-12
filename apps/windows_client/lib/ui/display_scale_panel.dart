@@ -151,8 +151,8 @@ class DisplayScalePanel extends StatelessWidget {
               ),
               const SizedBox(height: 12),
             ],
-            // One row of five steps (2026-11-10: 배율 sits inside 화면, so
-            // the steps lie across; the same steps, status and messages).
+            // One row of five steps (배율 sits inside 화면, so the steps lie
+            // across).
             Container(
               key: const Key('display-scale-steps'),
               padding: const EdgeInsets.all(3),

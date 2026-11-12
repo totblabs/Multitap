@@ -1,8 +1,8 @@
 #ifndef MULTITAP_CLIENT_TRAY_H_
 #define MULTITAP_CLIENT_TRAY_H_
 
-// The client's notification-area icon (2026-10-27: closing the main window
-// rests the client in the tray). Everything that touches Windows' shell goes
+// The client's notification-area icon (closing the main window rests the
+// client in the tray). Everything that touches Windows' shell goes
 // through ShellApi, so the smoke test drives the same code with a fake shell on
 // a private desktop and checks the exact add/modify/delete calls.
 

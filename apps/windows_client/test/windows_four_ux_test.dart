@@ -370,8 +370,8 @@ void main() {
     });
   }
 
-  // One question (2026-11-11: connecting asked "연결할까요?" and then the
-  // takeover question). The takeover question is the launcher's question.
+  // One question (not "연결할까요?" and then the takeover question). The
+  // takeover question is the launcher's question.
   testWidgets(
     'held by RDP: the takeover question alone, and accepting it connects with no second question',
     (t) async {
@@ -525,7 +525,7 @@ void main() {
         await t.pumpAndSettle();
         expect(find.byKey(const Key('stream-fps-label')), findsNothing);
         expect(find.byKey(const Key('stream-hardware-decode')), findsNothing);
-        // Sound is always on (2026-11-11): no 소리 switch, and a draft's
+        // Sound is always on: no 소리 switch, and a draft's
         // earlier 소리 꺼짐 is not shown or carried on.
         expect(find.text('소리'), findsNothing);
         expect(find.byKey(const Key('stream-audio')), findsNothing);
@@ -609,7 +609,7 @@ void main() {
           await _tap(t, 'stream-preset-saver');
           await _tap(t, 'apply-stream-settings');
           expect(f.reconnects, hasLength(1));
-          // The settings ask for sound (2026-11-11), whatever the draft had.
+          // The settings ask for sound, whatever the draft had.
           expect(f.reconnects.single.audio, isTrue);
           expect(f.reconnects.single.bitrate, 8000000);
         } else {

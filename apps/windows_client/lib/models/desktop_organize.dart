@@ -212,7 +212,7 @@ DesktopStatus effectiveStatus(
     ? DesktopStatus.all
     : status;
 
-/// The 구분 filter beside the 상태 filter: 전체 · VM · 로컬 PC (2026-11-03).
+/// The 구분 filter beside the 상태 filter: 전체 · VM · 로컬 PC.
 /// Shown only while the list holds both kinds; it ANDs with the 상태 filter,
 /// the 분류 chip and the search.
 enum DesktopKind {

@@ -2,7 +2,7 @@
 # Multitap broker Docker smoke test (CI-ready; needs Docker Engine with the
 # compose plugin, curl and a POSIX shell; no Node on the machine).
 #
-#   tools/oss/docker-smoke.sh
+#   sh tools/oss/docker-smoke.sh
 #
 # 1. builds image A from server/ with a download bundle (synthetic fixtures, or
 #    the prepared bundle in MULTITAP_SMOKE_BUNDLE), and image B with a second,
@@ -18,10 +18,20 @@
 # 4. switches the same volume to image B (the documented update path) and
 #    checks every A file is still listed and byte-identical, B's are added,
 #    the vault key is unchanged and the accounts were preserved;
-# 5. restarts once more and removes everything it created (KEEP=1 keeps it).
+# 5. restarts once more;
+# 6. completes the first setup and changes the server access settings the way
+#    the console does (the admin API): a save the server applies by itself
+#    (same container, the server process started again, the policy in the data
+#    volume), a save whose new main address cannot answer (the server goes back
+#    to the previous settings on its own), and the same settings read and
+#    written by access-cli.mjs, the command `multitap address` runs;
+# 7. as root only: runs deploy/docker/multitap itself against this project
+#    (status, address, an HTTPS-only policy and the wait that follows, backup);
+# 8. removes everything it created (KEEP=1 keeps it).
 #
 # Environment: MULTITAP_SMOKE_BUNDLE (prepared bundle directory for image A),
-# SMOKE_PORT (28480), SMOKE_UDP_PORT (28481), KEEP (0).
+# SMOKE_PORT (28480), SMOKE_UDP_PORT (28481), SMOKE_ADDRESS (this machine's IP
+# when it cannot be found), KEEP (0).
 # It never touches another compose project, volume or image.
 set -eu
 
@@ -32,7 +42,13 @@ volume="multitap-smoke-data-$id"
 image="multitap-broker-smoke-$id"
 port=${SMOKE_PORT:-28480}
 udp_port=${SMOKE_UDP_PORT:-28481}
-origin="http://127.0.0.1:$port"
+# This machine's own IP, not 127.0.0.1: a saved access change is checked by the
+# server asking its new main address, and inside the container 127.0.0.1 is
+# the container itself.
+address=${SMOKE_ADDRESS:-$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n 1)}
+[ -n "$address" ] || address=$(hostname -I 2>/dev/null | cut -d' ' -f1)
+origin="http://$address:$port"
+loopback="http://127.0.0.1:$port"
 work=$(mktemp -d "${TMPDIR:-/tmp}/multitap-smoke.XXXXXX")
 env_file="$work/smoke.env"
 base=$(sed -n 's/^FROM \([^ ]*\).*/\1/p' "$repo/server/Dockerfile" | head -n 1)
@@ -47,16 +63,17 @@ cleanup() {
   if [ "${KEEP:-0}" = 1 ]; then say "kept project $project, volume $volume, images $image:a/$image:b, work $work"; return; fi
   [ -f "$env_file" ] && compose down -v --remove-orphans >/dev/null 2>&1 || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
-  docker image rm "$image:a" "$image:b" >/dev/null 2>&1 || true
+  docker image rm "$image:a" "$image:b" "$image:$version" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
 
 [ -n "$base" ] && [ -n "$version" ] || fail "cannot read the base image or broker version"
+[ -n "$address" ] || fail "cannot find this machine's IP address (set SMOKE_ADDRESS)"
 command -v curl >/dev/null || fail "curl is required"
 docker compose version >/dev/null || fail "the Docker compose plugin is required"
 if docker volume inspect "$volume" >/dev/null 2>&1; then fail "volume $volume already exists"; fi
-say "broker $version, base $base, project $project"
+say "broker $version, base $base, project $project, address $origin"
 
 # Node in the pinned base image runs the repository's own bundle tool.
 node_run() { docker run --rm -u "$(id -u):$(id -g)" -v "$work:/work" -v "$repo/server/src:/app/src:ro" -w /work "$base" node "$@"; }
@@ -113,16 +130,20 @@ for name in a b; do
 done
 
 # $2 = bootstrap: no address yet, only the server address for the first setup.
+# $2 = http: the LAN HTTP address alone, as install.sh starts a server.
 # Otherwise an HTTPS address (no proxy here, so only its refusal over plain
 # HTTP is observable) with the LAN HTTP address beside it.
 write_env() {
-  if [ "${2:-}" = bootstrap ]; then addresses="MULTITAP_SERVER_ADDRESS=127.0.0.1"
+  if [ "${2:-}" = bootstrap ]; then addresses="MULTITAP_ALLOW_INSECURE_HTTP=0"
+  elif [ "${2:-}" = http ]; then addresses="MULTITAP_HTTP_ORIGIN=$origin
+MULTITAP_ALLOW_INSECURE_HTTP=1"
   else addresses="MULTITAP_PUBLIC_ORIGIN=https://smoke.invalid
 MULTITAP_HTTP_ORIGIN=$origin
 MULTITAP_ALLOW_INSECURE_HTTP=1"; fi
   cat >"$env_file" <<EOF
 MULTITAP_IMAGE=$image
 MULTITAP_VERSION=$1
+MULTITAP_SERVER_ADDRESS=$address
 $addresses
 MULTITAP_PUBLISH_PORT=0.0.0.0:$port
 MULTITAP_UDP_PUBLISH_PORT=$udp_port
@@ -219,4 +240,158 @@ compose restart broker >/dev/null
 wait_healthy
 catalog >"$work/catalog-c.json"
 cmp -s "$work/catalog-b.json" "$work/catalog-c.json" || fail "a plain restart changed the catalog"
+
+# ---- server access: a change saved the way the console saves it ---------------
+# The server starts from the LAN HTTP address alone, as install.sh leaves it.
+write_env b http
+compose up -d >/dev/null
+wait_healthy
+say "server access: first setup, then a save through the admin API"
+
+jar="$work/cookies"
+csrf=''
+password="Smoke-$id-pass"
+credentials="{\"username\":\"smoke-admin\",\"password\":\"$password\"}"
+# One value of the JSON on stdin by its dotted path (a list joined with commas),
+# read by the Node in the server's container.
+json() {
+  compose exec -T broker node -e 'let t="";process.stdin.on("data",d=>t+=d).on("end",()=>{let v=JSON.parse(t);for(const k of process.argv[1].split("."))v=v?.[k];process.stdout.write(Array.isArray(v)?v.join(","):v===null||v===undefined?"":typeof v==="object"?JSON.stringify(v):String(v))})' "$1"
+}
+api() { # api <method> <path> [json body]: the answer's body
+  if [ -n "${3:-}" ]; then
+    curl -sS -b "$jar" -c "$jar" -X "$1" -H "Origin: $origin" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' --data "$3" "$origin/api/v1/admin$2"
+  else
+    curl -sS -b "$jar" -c "$jar" -X "$1" -H "Origin: $origin" -H "X-CSRF-Token: $csrf" "$origin/api/v1/admin$2"
+  fi
+}
+sign_in() { # sign_in <json credentials>
+  csrf=''
+  csrf=$(api POST /login "$1" | json csrfToken)
+  [ -n "$csrf" ] || fail "sign-in failed"
+}
+access() { api GET /server-access; }
+# Until the console reports this state. The server restarts itself in between
+# and a saved policy gives each address its own sign-in, so it signs in again
+# whenever the answer is not a status.
+wait_access() { # wait_access <state>
+  i=0
+  state=''
+  while :; do
+    state=$(access 2>/dev/null | json state 2>/dev/null || true)
+    [ "$state" = "$1" ] && return 0
+    if [ -z "$state" ]; then csrf=$(api POST /login "$credentials" 2>/dev/null | json csrfToken 2>/dev/null || true); fi
+    i=$((i + 1))
+    [ "$i" -gt 60 ] && fail "server access did not reach \"$1\" (last: ${state:-no answer})"
+    sleep 2
+  done
+}
+# {config, baseRevision} for a test: the applied settings on stdin with one change (JavaScript on `c`).
+changed_config() {
+  compose exec -T broker node -e 'let t="";process.stdin.on("data",d=>t+=d).on("end",()=>{const s=JSON.parse(t),c=s.applied;eval(process.argv[1]);process.stdout.write(JSON.stringify({config:c,baseRevision:s.revision}))})' "$1"
+}
+save_access() { # save_access <change>: test, then save, as the page does
+  body=$(access | changed_config "$1")
+  test_id=$(api POST /server-access/test "$body" | json testId)
+  [ -n "$test_id" ] || fail "the server access test was refused"
+  body=$(printf '%s' "$body" | compose exec -T broker node -e 'let t="";process.stdin.on("data",d=>t+=d).on("end",()=>process.stdout.write(JSON.stringify({...JSON.parse(t),testId:process.argv[1],confirm:true})))' "$test_id")
+  api POST /server-access/save "$body" | grep -q '"accepted":true' || fail "the server access save was refused"
+}
+# The server's own command for the same settings (what `multitap address` runs).
+cli() { compose run --rm --no-deps -T --entrypoint node broker /app/src/access-cli.mjs "$@" 2>/dev/null </dev/null; }
+starts() { compose logs --no-color broker | grep -c '"service":"multitap-broker","version"' || true; }
+
+code=$(compose logs --no-color broker | grep -o '"setupCode":"[^"]*"' | tail -n 1 | cut -d'"' -f4)
+[ -n "$code" ] || fail "no setup code in the log"
+sign_in '{"username":"admin","password":"admin"}'
+api POST /setup "{\"username\":\"smoke-admin\",\"password\":\"$password\",\"passwordConfirmation\":\"$password\",\"setupCode\":\"$code\"}" | grep -q '"requiresLogin":true' || fail "the first setup did not complete"
+sign_in "$credentials"
+
+access >"$work/access-0.json"
+[ "$(json selfManaged <"$work/access-0.json")" = true ] || fail "this install does not manage its own access settings"
+[ "$(json applied.primaryOrigin <"$work/access-0.json")" = "$origin" ] || fail "the address from .env is not the applied one"
+# UDP: the server is told the published port and gives each side its own address at that port.
+[ "$(compose exec -T broker printenv MULTITAP_UDP_PUBLISHED_PORT </dev/null)" = "$udp_port" ] || fail "the container is not told the published UDP port"
+[ "$(json udpMedia.derivedPort <"$work/access-0.json")" = "$udp_port" ] || fail "no UDP address is derived from the published port"
+[ "$(status_of "$loopback/api/v1/downloads")" = 403 ] || fail "an address that is not listed answers"
+
+cid=$(compose ps -q broker)
+started=$(docker inspect -f '{{.State.StartedAt}}' "$cid")
+before=$(starts)
+# 1. One more HTTP address. The server writes the policy, starts again in the
+#    same container, reaches its main address and keeps the change.
+save_access "c.http={...c.http,extraOrigins:[...(c.http.extraOrigins??[]),'$loopback']}"
+wait_access applied
+[ "$(compose ps -q broker)" = "$cid" ] || fail "the container was replaced by a save"
+[ "$(docker inspect -f '{{.State.StartedAt}} {{.RestartCount}}' "$cid")" = "$started 0" ] || fail "the container itself was restarted by a save"
+[ "$(starts)" -eq $((before + 1)) ] || fail "the server process was not started again exactly once"
+[ "$(status_of "$loopback/api/v1/downloads")" = 200 ] || fail "the saved address does not answer"
+[ "$(status_of "$origin/api/v1/downloads")" = 200 ] || fail "the main address stopped answering"
+compose exec -T broker sh -c 'test "$(stat -c %u:%a /var/lib/multitap/access/policy.json)" = 1000:600' </dev/null || fail "the saved policy is not the server account's own file"
+cli show >"$work/show-1.txt" || fail "access-cli show failed"
+grep -qx 'source=saved' "$work/show-1.txt" || fail "access-cli does not see the saved policy"
+grep -qx "http=$origin,$loopback" "$work/show-1.txt" || fail "access-cli shows other addresses than the console saved"
+say "a save was applied by the server itself, in the same container"
+
+# 2. A new main address that cannot answer (no such name): the server starts
+#    with it, cannot reach it, puts the previous policy back and starts again.
+before=$(starts)
+save_access "c.primaryOrigin='https://smoke.invalid';c.https={...c.https,enabled:true,origin:'https://smoke.invalid'}"
+wait_access failed_rolled_back
+access >"$work/access-2.json"
+[ "$(json applied.primaryOrigin <"$work/access-2.json")" = "$origin" ] || fail "the previous primary address is not back"
+[ "$(json applied.https.enabled <"$work/access-2.json")" = false ] || fail "the refused HTTPS address stayed"
+[ "$(starts)" -eq $((before + 2)) ] || fail "going back did not take exactly two starts"
+[ "$(compose ps -q broker)" = "$cid" ] || fail "the container was replaced while going back"
+[ "$(status_of "$loopback/api/v1/downloads")" = 200 ] || fail "the previous addresses do not answer after going back"
+cli show >"$work/show-2.txt" || fail "access-cli show failed"
+grep -qx "http=$origin,$loopback" "$work/show-2.txt" || fail "access-cli shows other addresses after going back"
+grep -qx 'pending=' "$work/show-2.txt" || fail "a change is still pending after going back"
+say "a save whose address cannot answer was put back by the server"
+
+# 3. The same policy from the command line: set replaces it (read at the next
+#    start), revert puts back what set replaced.
+cli set "$origin" | grep -qx 'changed=1' || fail "access-cli set did not change the policy"
+compose restart broker >/dev/null
+wait_healthy
+[ "$(status_of "$loopback/api/v1/downloads")" = 403 ] || fail "an address removed by access-cli still answers"
+cli revert | grep -qx 'ok=1' || fail "access-cli revert failed"
+compose restart broker >/dev/null
+wait_healthy
+[ "$(status_of "$loopback/api/v1/downloads")" = 200 ] || fail "access-cli revert did not bring the address back"
+say "access-cli reads and writes the policy the console saved"
+
+# ---- the multitap command itself (root only) -----------------------------------
+# It manages the install in MULTITAP_DIR: a folder with this compose.yaml and
+# the same settings, tied to this project by name. Checked first: without that
+# name it would act on a project called "multitap".
+install_dir="$work/install"
+mkdir -p "$install_dir/backups"
+cp "$repo/compose.yaml" "$install_dir/compose.yaml"
+# The command confirms a release by the image's own version label, so the
+# install names image B by its real version, as a published image is named.
+docker tag "$image:b" "$image:$version"
+{ grep -v '^MULTITAP_VERSION=' "$env_file"; printf 'MULTITAP_VERSION=%s\nCOMPOSE_PROJECT_NAME=%s\nMULTITAP_LANG=en\n' "$version" "$project"; } >"$install_dir/.env"
+multitap() { MULTITAP_DIR="$install_dir" MULTITAP_UNIT_DIR="$work/units" MULTITAP_LOCAL=1 NO_COLOR=1 bash "$repo/deploy/docker/multitap" "$@"; }
+if [ "$(id -u)" != 0 ] || ! command -v bash >/dev/null; then
+  say "multitap command: skipped (needs root and bash)"
+elif [ "$(cd "$install_dir" && docker compose config 2>/dev/null | sed -n 's/^name: //p' | head -n 1)" != "$project" ]; then
+  say "multitap command: skipped (the folder is not tied to project $project)"
+else
+  mkdir -p "$work/units"
+  multitap status >"$work/multitap-status.txt" || fail "multitap status failed"
+  grep -q 'is running and answering' "$work/multitap-status.txt" || fail "multitap status does not see the server answering"
+  grep -q "$origin (primary)" "$work/multitap-status.txt" || fail "multitap status does not show the saved primary address"
+  multitap address | grep -q "$loopback" || fail "multitap address does not list the saved addresses"
+  # HTTPS only: no HTTP address answers any more, and the command's wait still ends.
+  multitap address https://smoke.invalid >"$work/multitap-address.txt" || { cat "$work/multitap-address.txt" >&2; fail "multitap address (HTTPS only) failed"; }
+  [ "$(status_of "$origin/api/v1/downloads")" = 403 ] || fail "HTTP still answers under an HTTPS-only policy"
+  multitap restart >/dev/null || fail "multitap restart did not see the HTTPS-only server answering"
+  multitap status | grep -q 'https://smoke.invalid (primary)' || fail "multitap status does not show the HTTPS-only policy"
+  grep -q '^MULTITAP_HTTP_ORIGIN=$' "$install_dir/.env" || fail "multitap address left the address lines in .env"
+  multitap address "$origin" >/dev/null || fail "multitap address could not bring the HTTP address back"
+  [ "$(status_of "$origin/api/v1/downloads")" = 200 ] || fail "the HTTP address does not answer after multitap address"
+  multitap backup >/dev/null || fail "multitap backup failed"
+  ls "$install_dir"/backups/multitap-data-*.tar.gz >/dev/null 2>&1 || fail "multitap backup left no copy"
+  say "multitap status, address, restart and backup work against this server"
+fi
 say "PASS"

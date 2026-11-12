@@ -41,9 +41,13 @@ A server installed with the install command from chapter 2 updates with one line
 `multitap update` works in this order.
 
 1. It downloads the server image of the new version. If that fails, the current server stays as it is.
-2. It backs up the whole data volume to `/opt/multitap/backups`.
-3. It switches to the new version's `compose.yaml` and `multitap` command and restarts the server.
+2. It stops the server and copies the data volume to `/opt/multitap/backups` (`…-before-update.tar.gz`). The app and Host setup files stay on the server, so this copy leaves them out.
+3. It switches to the new version's `compose.yaml` and `multitap` command and starts the server with the new version.
 4. It waits for the new version to answer. If it does not answer, it goes back to the previous version.
+5. It keeps the 3 most recent pre-update copies, and the server images of the current and the previous version. What it removes is shown.
+
+Copies you made yourself with `sudo multitap backup` and the safety backups of a restore are never removed automatically. Delete them from `/opt/multitap/backups` when you no longer need them.
+`sudo multitap status` shows the free disk space and says when it is low.
 
 **Check:** you see **✔ Updated to (version). Your data is unchanged.**, you can sign in to the new version, and existing users and desktop assignments are still there.
 Also connect once to a desktop you use every day.
@@ -102,6 +106,8 @@ Tell users first and let them save their open work.
 The backup holds the secret key (`vault.key`) and account details. Only root can read it; do not publish it or share it with regular users.
 `.env` is not in the backup file. Keep `/opt/multitap/.env` as well.
 
+Including this server's CT or VM in a Proxmox backup job is the complete backup: data, settings and Docker come back in one step.
+
 ### Restore from a backup
 
 On a server installed with the install command, `multitap restore` puts a backup back. Run it on the **Linux server**.
@@ -111,6 +117,7 @@ sudo multitap restore /opt/multitap/backups/multitap-data-(version)-(date).tar.g
 ```
 
 With a copy made by `multitap backup` or `multitap update`, the whole data volume goes back to that time.
+A copy made by `multitap update` (`…-before-update.tar.gz`) is for going back on that same server. To move to another server, use a `multitap backup` copy or a backup file from the admin console.
 A `.mtbk` backup file from the admin console is put back with the same command; it then asks for the backup password ([chapter 2: backup and restore](02-server-install.md#backup-and-restore--server-data-in-one-file)).
 
 1. It checks the file and shows when it was made, the server version and the numbers of accounts, desktops and assignments. Nothing changes yet.
@@ -120,7 +127,7 @@ A `.mtbk` backup file from the admin console is put back with the same command; 
 
 **Check:** **✔ Restored.** appears and the server answers. Tell users first: connections end during the restore.
 A backup made by a newer server version is not restored. Update first with `sudo multitap update`.
-`.env` does not change, and neither do the addresses.
+`.env` does not change, and the addresses stay as this server has them now.
 In scripts, `--yes` skips the question, and the backup password of a `.mtbk` file comes from the `MULTITAP_BACKUP_PASSPHRASE` environment variable.
 
 <details>

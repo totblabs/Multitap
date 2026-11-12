@@ -369,7 +369,7 @@ void main() {
       await closeMenu();
       expect(await readinessVersion(), 'Host 0.2.58 · 새 버전 0.2.59 설치 가능');
 
-      // Any account the VM is assigned to may update its Host (2026-10-26).
+      // Any account the VM is assigned to may update its Host.
       await _show(t, machine: _machine(), administrator: false);
       await _openManage(t);
       expect(find.text('Host 업데이트 · 0.2.58 → 0.2.59'), findsOneWidget);

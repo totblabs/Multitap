@@ -13,11 +13,11 @@ import '../data/broker_transport.dart';
 import '../ui/broker_transport_controls.dart';
 import '../data/client_settings.dart';
 import '../data/product_log.dart';
+import '../data/server_save_log.dart';
 import '../data/console_resume.dart';
 import '../data/desktop_mapping.dart';
 import '../data/desktop_previews.dart';
 import '../data/desktop_watch.dart';
-import '../data/emergency_console_session.dart';
 import '../models/vm_resources.dart';
 import '../data/product_updates.dart' show UpdateFailure, ProductRelease;
 import '../data/session_renewal.dart';
@@ -78,7 +78,6 @@ class AndroidVdiApp extends StatefulWidget {
     this.apiFactory,
     this.updatesFactory,
     this.updatePlatform,
-    this.consoleTransportFactory = openConsoleTransport,
     this.television,
     this.hardwareKeyboard,
     this.desktopWatchFactory,
@@ -87,7 +86,6 @@ class AndroidVdiApp extends StatefulWidget {
     this.clock = DateTime.now,
   });
   final AndroidStore? store;
-  final ConsoleTransportFactory consoleTransportFactory;
 
   /// Tests can supply device capability without a native Activity.
   final bool? television;
@@ -319,7 +317,6 @@ class _AndroidVdiAppState extends State<AndroidVdiApp> with WidgetsBindingObserv
           apiFactory: widget.apiFactory,
           updatesFactory: widget.updatesFactory,
           updatePlatform: widget.updatePlatform,
-          consoleTransportFactory: widget.consoleTransportFactory,
           desktopWatchFactory: widget.desktopWatchFactory,
           sessionRetryDelay: widget.sessionRetryDelay,
           sessionRenewalLead: widget.sessionRenewalLead,
@@ -358,7 +355,7 @@ HttpBrokerApi androidBrokerApi(
   // it (AndroidOpusDecoder.kt); PCM where not offered or not granted.
   requestAudioOpus: true,
   // ...except once this device's engine found no Opus decoder that plays:
-  // PCM then, so the sound is there (audio-path-v1, 2026-11-11).
+  // PCM then, so the sound is there (audio-path-v1).
   audioOpusDecodable: () => AndroidRemoteMedia.opusDecodable,
   // 마우스 잠금 with a connected mouse: relative-mouse-v1 (with the cursor in
   // the video, or echoed, where granted) and usb-v1 for the virtual USB mouse
@@ -385,7 +382,6 @@ class AndroidHome extends StatefulWidget {
     this.apiFactory,
     this.updatesFactory,
     this.updatePlatform,
-    this.consoleTransportFactory = openConsoleTransport,
     this.desktopWatchFactory,
     this.sessionRetryDelay = const Duration(seconds: 15),
     this.sessionRenewalLead = const Duration(minutes: 5),
@@ -412,7 +408,6 @@ class AndroidHome extends StatefulWidget {
   final BrokerApi Function(Uri origin)? apiFactory;
   final AndroidUpdates Function(Uri origin)? updatesFactory;
   final AndroidUpdatePlatform? updatePlatform;
-  final ConsoleTransportFactory consoleTransportFactory;
   @override
   State<AndroidHome> createState() => _AndroidHomeState();
 }
@@ -582,9 +577,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         _cancelFlow(id);
       }
       // 완전 종료 ends the sign-in at the server too. Left alive there, the
-      // next sign-in on this same phone asked "다른 곳에서 로그아웃하고 여기서
-      // 로그인할까요?" (inspection, 2026-11-12). A server that does not answer
-      // in time does not keep the app open.
+      // next sign-in on this same phone would ask "다른 곳에서 로그아웃하고
+      // 여기서 로그인할까요?". A server that does not answer in time does not
+      // keep the app open.
       final session = _session;
       if (session != null) {
         await _endSignIn(session, limit: const Duration(seconds: 3));
@@ -1054,7 +1049,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     // Visible but not focused (split screen, a system dialog) still counts.
     // Set before the sign-in check: a sign-in that expired while the app was
     // away must not leave this false, or the list never updates by itself
-    // after the next sign-in (inspection, 2026-11-12).
+    // after the next sign-in.
     _foreground =
         state == AppLifecycleState.resumed ||
         state == AppLifecycleState.inactive;
@@ -1776,10 +1771,10 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     });
     // The check can be made again, as on Windows (WorkspaceShell). Closing
     // the routes completes in a frame and no frame is drawn while the app is
-    // hidden, so a sign-out during a background stream timed out as
-    // unconfirmed and its 확인 never enabled (inspection, 2026-11-12). The
-    // retry is the 다시 확인 button, and it runs by itself when the app comes
-    // back (didChangeAppLifecycleState).
+    // hidden, so a sign-out during a background stream would time out as
+    // unconfirmed with its 확인 never enabled. The retry is the 다시 확인
+    // button, and it runs by itself when the app comes back
+    // (didChangeAppLifecycleState).
     final recoveryOwner = Object();
     var attempt = 0;
     bool current() =>
@@ -2010,7 +2005,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
 
   /// Assigned desktops whose Host can be updated now (the ⋯ entry's rule).
   /// The header's update button badges them too and the update panel lists
-  /// them (2026-11-03); the list push keeps both current.
+  /// them; the list push keeps both current.
   List<DesktopMachine> _hostUpdatable([Iterable<DesktopMachine>? machines]) =>
       _api is HostUpdateBrokerApi
       ? [
@@ -2171,7 +2166,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   /// After an RDP session the VM's Windows session lives in RDP: the broker
   /// then reports the console hand-over (as for the Windows client), which a
   /// press on 스트리밍 연결 performs first. Without it the tile would fall
-  /// through to "다시 시작" (2026-10-27: an RDP session meant a reboot).
+  /// through to "다시 시작", and an RDP session would mean a reboot.
   DesktopReadiness _readiness(DesktopMachine machine) => DesktopReadiness.of(
     machine,
     consoleRecovery: _api is ConsoleRecoveryApi,
@@ -2193,7 +2188,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     return null;
   }
 
-  /// 'Console 끊고 연결' (2026-11-09): after one confirmation that names both
+  /// 'Console 끊고 연결': after one confirmation that names both
   /// acts, end the VM's console connections, then connect as soon as the
   /// tile is ready (the console's display reservation clears with it), as
   /// the Windows launcher does (WorkspaceShell._endConsolesAndConnect). The
@@ -2413,7 +2408,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     _streamConnectPromptOpen = true;
     var accepted = false;
     try {
-      // One question (2026-11-11: it asked twice): when the Windows screen has
+      // One question, never two: when the Windows screen has
       // to be brought over from RDP, this question is that one.
       accepted = asksHandOver
           ? await _askHandOver(assigned)
@@ -2666,21 +2661,6 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
           // audio; Host capability and runtime diagnostics still decide
           // whether sound is actually available.
           options: _quality.options,
-          signinPromotionAuthorized: authorized,
-          refreshSigninDesktop: () async {
-            if (!authorized()) {
-              throw const BrokerException('session_expired', 401);
-            }
-            final listed = await api.desktops(session.token);
-            if (!authorized()) {
-              throw const BrokerException('session_expired', 401);
-            }
-            final matches = listed.where((value) => value.id == desktop.id);
-            if (matches.length != 1 || matches.single.kind != desktop.kind) {
-              throw const BrokerException('desktop_not_found', 404);
-            }
-            return _machine(matches.single);
-          },
           maxBitrate: desktop.maxBitrate,
           driveUnavailable: desktop.driveUnavailable,
           onConnectStep: (stage, ok, reason) =>
@@ -3254,7 +3234,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   }
 
   /// The tile's actions, as the Windows launcher gives its [DesktopTile]
-  /// (2026-11-03: one tile on both): the main button connects (or powers
+  /// (one tile on both): the main button connects (or powers
   /// on, then connects), [DesktopActions.attention] is the fix of a tile
   /// that needs one, ▾ holds 화질 옵션 and 긴급 콘솔, ⋯ manages, ⏻ powers.
   DesktopActions _actionsFor(BrokerDesktop desktop) {
@@ -3453,8 +3433,8 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     );
   }
 
-  /// The assigned desktops as the Windows launcher shows them (2026-11-03:
-  /// "카드뷰도 이상하고"): its [DesktopTile] by finger, in its grid
+  /// The assigned desktops as the Windows launcher shows them: its
+  /// [DesktopTile] by finger, in its grid
   /// ([desktopTileGrid]: responsive columns, one size for every tile).
   Widget _tiles(List<DesktopMachine> shown, TextScaler scaler, Size screen) =>
       LayoutBuilder(
@@ -3528,7 +3508,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         ? 32.0
         : 48.0;
     // A phone on its side: the filters and tools join the header row, so
-    // the first card's 연결 is on screen (backlog 2026-11-02).
+    // the first card's 연결 is on screen.
     final shortLandscape =
         !AndroidTvScope.of(context) &&
         size.width > size.height &&
@@ -3556,7 +3536,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       middle: middle,
     );
     // Every control of the title and filter rows is this tall and drawn as
-    // one pill or circle (2026-11-03, as on Windows; by finger ≥ 48 dp).
+    // one pill or circle (as on Windows; by finger ≥ 48 dp).
     final barHeight = organizerHeight(context, touch: true);
     // While the list is read 새로고침 keeps its shape and label; a spinner
     // takes the icon's place and presses wait. [label] false: one round icon
@@ -3685,7 +3665,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         kind != DesktopKind.all;
     final chips = chipsFor(machines);
     // The 구분 filter (전체 · VM · 로컬 PC) beside 상태, only while both kinds
-    // are assigned (2026-11-03, as on Windows).
+    // are assigned (as on Windows).
     final kindFilter = kinds
         ? DesktopKindFilter(
             selected: kind,
@@ -4270,11 +4250,15 @@ class _AndroidServerDialogState extends State<AndroidServerDialog> {
       return;
     }
     setState(() => _busy = true);
+    var stage = ServerSaveStage.save;
     try {
       await widget.save(tested);
+      stage = ServerSaveStage.keep;
       BrokerTransport.stored(tested);
       if (mounted) Navigator.pop(context, tested);
-    } catch (_) {
+    } catch (error) {
+      // The dialog only says it could not save; the log keeps why.
+      recordServerSaveFailure(error, stage);
       if (mounted) {
         setState(() {
           _busy = false;
@@ -4503,7 +4487,7 @@ class _AndroidStreamDialogState extends State<AndroidStreamDialog> {
     final p = AppPalette.of(context);
     return AppDialog(
       icon: Icons.tune_rounded,
-      // The Windows dialog's name, and the ▾ row's (2026-11-03).
+      // The Windows dialog's name, and the ▾ row's.
       title: l10n.streamingSettings,
       subtitle: widget.desktop.name,
       body: [

@@ -8,7 +8,7 @@ import 'korean_text.dart';
 import '../l10n/l10n.dart';
 
 /// "PC는 원격으로 켤 수 없어요" with one line of reason; what
-/// Wake-on-LAN needs stays behind 자세히 (2026-10-29 concise reading).
+/// Wake-on-LAN needs stays behind 자세히 (concise reading).
 Future<void> showPcWakeHelp(BuildContext context, {required String reason}) =>
     showDialog<void>(
       context: context,

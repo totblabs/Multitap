@@ -8,7 +8,7 @@ import 'korean_text.dart';
 import '../l10n/l10n.dart';
 
 /// Configures real VM displays from the session toolbar (the launcher menu
-/// has no count since 2026-10-26: connecting prepares it). Selecting which
+/// has no count: connecting prepares it). Selecting which
 /// existing display to view is separate. The confirmation is a step of this
 /// one dialog, not a second dialog stacked on top of it.
 class VirtualDisplayDialog extends StatefulWidget {

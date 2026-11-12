@@ -161,9 +161,9 @@ void main() {
     } finally { await f.close(t); }
   });
 
-  // The wait was removed only after the list had been read again: until
-  // then the card showed its step line with the whole session's time and
-  // 취소 (inspection, 2026-11-12).
+  // The wait must not stay until the list has been read again: until then
+  // the card would show its step line with the whole session's time and
+  // 취소.
   testWidgets('Android queued connection: its wait is gone as soon as the stream ends', (t) async {
     final api = _HeldListBroker([_desktop(pending: true)]);
     final f = _Fixture.of(api);

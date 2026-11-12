@@ -336,8 +336,8 @@ void main() {
     await backend.dispose();
   });
 
-  // Field 2026-11-02: each remote window has its own engine, so a device one
-  // window holds failed in another one as "usb_capture_failed".
+  // Each remote window has its own engine, so a device one window holds
+  // must not just fail in another one as "usb_capture_failed".
   test('another window: the list names it, this window names itself, and a device is asked for and handed over', () async {
     final backend = NativeUsbBackend(channel, 'WorkPC');
     final good = {

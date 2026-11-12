@@ -6,8 +6,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // AndroidOpusPipe with a stand-in for MediaCodec: the worker's side of an Opus
-// decoder made on another thread (2026-11-03: making it on the worker delayed
-// the start answer and the video decoder by 130-190 ms). Codecs are names;
+// decoder made on another thread (making it on the worker delays the start
+// answer and the video decoder by 130-190 ms). Codecs are names;
 // "made" is whatever the test hands to opened(), when it chooses.
 class AndroidOpusPipeTest {
     private class Input(val codec: String, val index: Int, val pts: Long)
@@ -184,7 +184,7 @@ class AndroidOpusPipeTest {
 
     @Test
     fun anUnusableOutputFormatPassesThatDecoderOverForTheNext() {
-        // 2026-11-11: the first decoder with an output format that cannot play ended the sound.
+        // The first decoder with an output format that cannot play must not end the sound.
         pipe.prepare()
         val attempt = codecs.asked.single()
         assertTrue(attempt.skip.isEmpty())

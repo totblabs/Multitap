@@ -167,8 +167,8 @@ void main() {
       isNull,
     );
     // A catalog that could not be read says nothing about the version: it
-    // throws, and the caller keeps the state it had (review 2026-11-12: one
-    // failed read turned the amber "새 버전" button back into the plain icon).
+    // throws, and the caller keeps the state it had (one failed read must
+    // not turn the amber "새 버전" button back into the plain icon).
     final unavailable = Transport(
       (_) => UpdateResponse(503, 0, const Stream.empty()),
     );
@@ -914,8 +914,8 @@ void main() {
     },
   );
 
-  // Review 2026-11-12: 다시 시도 after a failed "설치 프로그램으로 직접 설치"
-  // went back to the in-place restart.
+  // 다시 시도 after a failed "설치 프로그램으로 직접 설치" must not go back
+  // to the in-place restart.
   testWidgets(
     '다시 시도 repeats what failed: the installer window, not the in-place restart',
     (tester) async {
@@ -946,7 +946,7 @@ void main() {
     },
   );
 
-  // Review 2026-11-12: "약 N초 남음" stood still while no bytes arrived.
+  // "약 N초 남음" must not stand still while no bytes arrive.
   testWidgets('a download that stalls does not keep showing its last estimate', (
     tester,
   ) async {

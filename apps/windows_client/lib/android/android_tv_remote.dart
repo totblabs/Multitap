@@ -537,7 +537,7 @@ class _AndroidTvLocalPanelState extends State<AndroidTvLocalPanel> {
 }
 
 /// The TV's 단축키 panel (its remote has no key row; the phone's session
-/// menu has no 키 조합 since 2026-11-03): the entries and callbacks the
+/// menu has no 키 조합): the entries and callbacks the
 /// remote view gives, including disabled commands, protocol limits and the
 /// existing secure-attention boundary.
 Widget androidTvShortcuts(List<SessionMenuItem> items, VoidCallback close) =>

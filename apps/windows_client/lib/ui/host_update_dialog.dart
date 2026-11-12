@@ -109,7 +109,7 @@ class _HostUpdateConfirmDialogState extends State<HostUpdateConfirmDialog> {
     final p = AppPalette.of(context);
     final session = widget.machine.hostUpdate.sessionActive;
     final notes = _release?.changelog.trim() ?? '';
-    // Local PCs get Host updates too (2026-11-03); the texts name what it is.
+    // Local PCs get Host updates too; the texts name what it is.
     final kind = widget.machine.kind == MachineKind.pc
         ? l10n.localPcInSentence
         : l10n.desktopInSentence;
@@ -202,8 +202,8 @@ class _HostUpdateConfirmDialogState extends State<HostUpdateConfirmDialog> {
           ),
         ),
         const SizedBox(height: 12),
-        // Two short lines; how it is checked stays behind 자세히
-        // (2026-10-29 concise reading).
+        // Two short lines, for concise reading; how it is checked stays
+        // behind 자세히.
         AppDialog.message(
           context,
           l10n.hostDownloadsFromServerInstalls(kind),

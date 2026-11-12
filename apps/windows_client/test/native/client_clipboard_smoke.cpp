@@ -55,7 +55,7 @@ void onPasteCapture(const fs::path& root){
   // cannot reopen the old offer; the already admitted range remains readable.
   ++board.sequence;
   rejects([&]{serve("pullOpen",M{{V("offerId"),V(std::string("qa-small"))},{V("index"),V(int64_t(0))},{V("offset"),V(int64_t(0))}});});
-  // One call reads up to a block of chunks (one platform round trip per ~1 MiB, 2026-11-03): the file's end bounds it, the block caps it.
+  // One call reads up to a block of chunks (one platform round trip per ~1 MiB): the file's end bounds it, the block caps it.
   rejects([&]{serve("pullRead",M{{V("length"),V(int32_t(clip::formatsChunkBytes*clip::readAheadChunks+1))}});});
   require(std::get<std::vector<uint8_t>>(serve("pullRead",M{{V("length"),V(int32_t(3*clip::formatsChunkBytes))}}))==std::vector<uint8_t>({2,3}));serve("pullClose");
   board.files.clear();board.text=L"small text";++board.sequence;
@@ -150,8 +150,8 @@ void claimBeforeCommit(const fs::path& root){
   for(const auto& entry:fs::directory_iterator(root/L"receive-claim"))fs::remove_all(entry.path());
   fs::remove(root/L"receive-claim");
 }// Plain text and flat file lists are not the formats "Outgoing"/"Incoming" objects, but a formats pair moves them in the same
-// 45 KiB chunks as everything else (a stop-and-wait pair in 32 KiB). The adapter refused 45 KiB for both until 2026-10-27, so every
-// file above 32 KiB and every text above 32 KiB failed as clipboard_transfer_failed (found by tools/clipboard-e2e-qa).
+// 45 KiB chunks as everything else (a stop-and-wait pair in 32 KiB). An adapter that refuses 45 KiB for both fails every
+// file above 32 KiB and every text above 32 KiB as clipboard_transfer_failed (found by tools/clipboard-e2e-qa).
 void flatChunkSizes(const fs::path& root){
   clip::Snapshot board;multitap::ClientClipboardAccess access;DWORD counter=700;
   const HWND mine=reinterpret_cast<HWND>(static_cast<uintptr_t>(0x10));

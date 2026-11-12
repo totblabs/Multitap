@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/data/broker_transport.dart';
 import 'package:multitap_client/data/client_settings.dart';
-import 'package:multitap_client/data/broker_api.dart';
 import 'package:multitap_client/data/session_windows.dart';
 import 'package:multitap_client/models/session_display_mode.dart';
 import 'package:multitap_client/models/stream_options.dart';
@@ -232,20 +231,9 @@ void main() {
     );
   });
   test(
-    'HTTP console grants and child windows carry only the same scoped consent',
+    'HTTP child windows carry only the same scoped consent',
     () {
       approve(httpOrigin);
-      final grant = BrokerConsoleGrant.fromJson({
-        'id': '11111111-2222-4333-8444-555555555555',
-        'ticket': List.filled(43, 'a').join(),
-        'relayPath': '/relay/console/11111111-2222-4333-8444-555555555555',
-        'expiresAt': DateTime.now()
-            .toUtc()
-            .add(const Duration(seconds: 20))
-            .toIso8601String(),
-      }, httpOrigin);
-      expect(grant.relay.scheme, 'ws');
-      expect(grant.validFor(httpOrigin), isTrue);
       final launch = SessionWindowLaunch(
         origin: httpOrigin,
         token: 'fixture-token',

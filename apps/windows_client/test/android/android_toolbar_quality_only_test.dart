@@ -84,7 +84,7 @@ void main() {
     });
   }
   for (final audio in [true, false]) {
-    // Sound is always on (2026-11-11): a reconnect asks for it even from a
+    // Sound is always on: a reconnect asks for it even from a
     // connection without it.
     testWidgets('toolbar quality edits ask for sound (connection audio=$audio)', (
       tester,
@@ -171,7 +171,7 @@ void main() {
     });
   }
 
-  // 2026-11-10: Multitap adds no sound device. Where the Host reports none,
+  // Multitap adds no sound device. Where the Host reports none,
   // the panel says one plain line and offers nothing to press for it.
   for (final (name, size) in [
     ('upright', const Size(412, 915)),

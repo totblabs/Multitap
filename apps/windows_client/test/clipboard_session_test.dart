@@ -579,7 +579,7 @@ void main() {
     final records = <ProductLogEntry>[];
     final recording = ProductLog.instance.localRecords.listen(records.add);
     addTearDown(recording.cancel);
-    // The generic code alone said nothing about which side failed (field failure 2026-10-27).
+    // The generic code alone says nothing about which side failed.
     bridge.captured = const ClipboardCapture(
       format: 'files',
       items: [ClipboardItem(name: 'a.bin', size: 3)],

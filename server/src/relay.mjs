@@ -167,7 +167,7 @@ export class Relay {
     this.previews = new DesktopPreviews({ store, send: (host, value) => this.send(host.ws, value), ...previewOptions, allowed: host => ![...this.sessions.values()].some(session => session.host === host && session.signinPolicy) });
     // Null unless a UDP port is configured: no worker, socket or timer exists.
     // A session waiting for its Host (host-resume-v1) keeps its binding.
-    this.udp = udp && new UdpRelay({ ...udp, live: id => { const session = this.sessions.get(id); return !!session && (this.current(session) || !!session.hostHeld) && this.authorized(session); } });
+    this.udp = udp && new UdpRelay({ ...udp, hostRoute, live: id => { const session = this.sessions.get(id); return !!session && (this.current(session) || !!session.hostHeld) && this.authorized(session); } });
     if (this.udp) this.udp.onPeer = (id, role, candidates, scope) => {
       const session = this.sessions.get(id);
       if (!udpPeerDirectAllowed(this.udp) || !session?.udpDirect || !session.udpGranted || !this.authorized(session) || !this.current(session)) return;
@@ -1648,16 +1648,24 @@ export class Relay {
   // to whatever owns those private addresses on its own network. Reconnect and
   // takeover are new sessions, so stop() revoked the old grant and this issues
   // a new one. No ticket means the session stays on WebSocket.
+  // Each leg's relay list (udp-relay.mjs relaysFor). Null when one leg has no
+  // endpoint: nothing is granted and the session stays on WebSocket.
+  udpRelays(session) {
+    const client = this.udp.relaysFor('client', session.clientOrigin ?? this.publicOrigin), host = this.udp.relaysFor('host', session.host.origin ?? this.publicOrigin);
+    return client.length && host.length ? { client, host } : null;
+  }
   grantUdpMedia(session) {
     if(session.udpTracks){this.maybeGrantUdpTracks(session);return;}
     if (!session.udpMedia || session.udpGranted) return;
     session.udpGranted = true;
+    const relays = this.udpRelays(session);
+    if (!relays) return;
     const allowPeerDirect = udpPeerDirectAllowed(this.udp);
     const grant = this.udp.issue(session.id, { direct: allowPeerDirect && session.udpDirect && udpMediaAllowed(this.udp, session.desktopId) });
     if (!grant) return;
     const keys = udpMediaAllowed(this.udp, session.desktopId);
-    this.send(session.ws, udpGrantMessage(grant, this.udp.relays.client, grant.client, keys, session.udpDirect, this.udp.stun, allowPeerDirect));
-    this.send(session.host.ws, udpGrantMessage(grant, this.udp.relays.host, grant.host, keys, session.udpDirect, this.udp.stun, allowPeerDirect));
+    this.send(session.ws, udpGrantMessage(grant, relays.client, grant.client, keys, session.udpDirect, this.udp.stun, allowPeerDirect));
+    this.send(session.host.ws, udpGrantMessage(grant, relays.host, grant.host, keys, session.udpDirect, this.udp.stun, allowPeerDirect));
   }
   retireUdpTracks(session) {
     if (!session.udpTracks) return;
@@ -1680,6 +1688,8 @@ export class Relay {
     const generation = (session.udpTrackGeneration ?? 0) + 1;
     if (generation > 0xffffffff) { this.retireUdpTracks(session); return; }
     const scopes = info.tracks.map(row => ({track:row.id,topologyEpoch:info.topologyEpoch,epoch:row.epoch,generation}));
+    const relays = this.udpRelays(session);
+    if (!relays) return;
     const allowPeerDirect = udpPeerDirectAllowed(this.udp);
     const grant = this.udp.issue(session.id,{direct:allowPeerDirect&&session.udpDirect,tracks:scopes});
     if (!grant) return;
@@ -1692,7 +1702,7 @@ export class Relay {
       topologyEpoch:info.topologyEpoch,generation,tracks:grant.tracks.map(row => {
         const output = info.tracks.find(value => value.id === row.track);
         return {track:row.track,epoch:row.epoch,primary:output.primary,bitrateTarget:output.bitrateTarget,
-          grant:udpGrantMessage(grant,this.udp.relays[role],row[role],true,session.udpDirect,this.udp.stun,allowPeerDirect)};
+          grant:udpGrantMessage(grant,relays[role],row[role],true,session.udpDirect,this.udp.stun,allowPeerDirect)};
       })});
     // Host-first ordering is on the same tunnel as reliable input and leases.
     // A root Host channel would race the track worker's initialization.

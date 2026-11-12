@@ -7,7 +7,8 @@ import { trustedProxies } from './security.mjs';
 import { normalizeBrokerOrigin, deploymentPort, explicitHttpOptIn } from './transport-policy.mjs';
 import { parseUdpMediaScope, parseUdpRelays } from './udp-media.mjs';
 import { dockerUpdateFeed } from './docker-update-check.mjs';
-import { normalizeServerAccess, legacyServerAccess, allowedServerOrigins, serverAccessTransport, decodeServerAccessState, maxExtraOrigins } from '../update/server-access-policy.mjs';
+import { normalizeServerAccess, legacyServerAccess, allowedServerOrigins, serverAccessTransport, decodeServerAccessState, maxExtraOrigins, serverAccessHash } from '../update/server-access-policy.mjs';
+import { selfAccessPaths, selfAccessFixed, conformSelfAccess, decodeSelfPolicy, selfPolicyRevision, selfEnvSeed, revertUnloadableSelfPolicy } from './self-access.mjs';
 
 export function validatePublicOrigin(value, options) { return normalizeBrokerOrigin(value, options); }
 
@@ -17,7 +18,14 @@ export function validateDeploymentKind(value = 'unknown') {
 }
 
 // The UDP media relay stays off unless an administrator sets a port.
-function udpRelayConfiguration(env) {
+// Relay lists (MULTITAP_UDP_HOST_RELAYS, MULTITAP_UDP_CLIENT_RELAYS) name where
+// each side sends. A self-managed Docker install with neither list derives
+// them (`derivedPort`): each side is given the address it already reaches the
+// server at, on the UDP port Docker publishes (MULTITAP_UDP_PUBLISHED_PORT, as
+// compose passes it). Media then goes over UDP unless MULTITAP_UDP_MEDIA says
+// otherwise. Not derived while that port is not told or is published on
+// loopback only: sessions stay on WebSocket, as with empty lists anywhere.
+function udpRelayConfiguration(env, selfManaged = false) {
   const port = env.MULTITAP_UDP_PORT, host = env.MULTITAP_UDP_HOST || '0.0.0.0';
   if (!port) return null;
   if (!/^[1-9]\d{0,4}$/.test(port) || Number(port) > 65535) throw Error('invalid_udp_port');
@@ -26,7 +34,10 @@ function udpRelayConfiguration(env) {
   if (stun.length > 2) throw Error('invalid_udp_stun');
   // Peer routing is outside the supported relay path. Legacy STUN settings
   // remain syntactically validated but cannot enable it or reach a grant.
-  return { port: Number(port), host, allowPeerDirect: false, stun, media: parseUdpMediaScope(env.MULTITAP_UDP_MEDIA), relays: { host: parseUdpRelays(env.MULTITAP_UDP_HOST_RELAYS), client: parseUdpRelays(env.MULTITAP_UDP_CLIENT_RELAYS) } };
+  const relays = { host: parseUdpRelays(env.MULTITAP_UDP_HOST_RELAYS), client: parseUdpRelays(env.MULTITAP_UDP_CLIENT_RELAYS) };
+  const published = selfManaged && !relays.host.length && !relays.client.length ? /^(?:(\d{1,3}(?:\.\d{1,3}){3}):)?([1-9]\d{0,4})$/.exec(env.MULTITAP_UDP_PUBLISHED_PORT ?? '') : null;
+  const derivedPort = published && Number(published[2]) <= 65535 && (published[1] === undefined || (isIPv4(published[1]) && !published[1].startsWith('127.'))) ? Number(published[2]) : null;
+  return { port: Number(port), host, allowPeerDirect: false, stun, media: derivedPort !== null && !env.MULTITAP_UDP_MEDIA ? true : parseUdpMediaScope(env.MULTITAP_UDP_MEDIA), relays, ...(derivedPort !== null ? { derivedPort } : {}) };
 }
 
 // host-route-v1: where Hosts inside this network reach the public origin, so a router
@@ -38,12 +49,13 @@ function hostRoute(value) {
   return value;
 }
 
-// http-origin-v1 (Docker Compose, no root updater for the console's server
-// access page): MULTITAP_HTTP_ORIGIN is the plain HTTP address for the LAN,
-// beside the HTTPS address on the same listener or alone. Like an http://
-// public origin it needs the explicit MULTITAP_ALLOW_INSECURE_HTTP=1. Installs
-// with an updater keep their policy in the console: the updater derives the
-// revision from the same environment without this key.
+// http-origin-v1 (Docker Compose without an updater): MULTITAP_HTTP_ORIGIN is
+// the plain HTTP address for the LAN, beside the HTTPS address on the same
+// listener or alone. Like an http:// public origin it needs the explicit
+// MULTITAP_ALLOW_INSECURE_HTTP=1. These lines are the policy until one is saved
+// from the console or access-cli.mjs (self-access.mjs); a saved policy
+// supersedes them. Installs with an updater keep their policy in the console:
+// the updater derives the revision from the same environment without this key.
 // A comma-separated list adds exact extra addresses on the same listener,
 // e.g. the public IP a router forwards (access-origins-v1).
 function httpOriginSetting(env) {
@@ -89,11 +101,15 @@ function dockerSetupOrigin(env, kind) {
   catch { throw Error('invalid_server_address'); }
 }
 
-export function readProtectedAccessFile(path, { maximum = 32768, production = true } = {}) {
-  if (!isAbsolute(path) || !Number.isSafeInteger(maximum) || maximum < 1 || maximum > 262144) throw Error('server_access_storage_invalid');
+// `owner` is the account a production file must belong to: root for the
+// files the updater writes, the broker's own account for the ones a
+// self-managed Docker install keeps (self-access.mjs).
+export function readProtectedAccessFile(path, { maximum = 32768, production = true, owner = 0 } = {}) {
+  if (!isAbsolute(path) || !Number.isSafeInteger(maximum) || maximum < 1 || maximum > 262144 || !Number.isSafeInteger(owner) || owner < 0) throw Error('server_access_storage_invalid');
+  const uid = BigInt(owner);
   let stat;
   try { stat = lstatSync(path, { bigint: true }); } catch (error) { if (error.code === 'ENOENT') return null; throw Error('server_access_storage_invalid'); }
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1n || stat.size > BigInt(maximum) || (stat.mode & 0o022n) || (production && process.platform !== 'win32' && stat.uid !== 0n)) throw Error('server_access_storage_invalid');
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1n || stat.size > BigInt(maximum) || (stat.mode & 0o022n) || (production && process.platform !== 'win32' && stat.uid !== uid)) throw Error('server_access_storage_invalid');
   for (let parent = dirname(path); ; parent = dirname(parent)) {
     const directory = lstatSync(parent);
     if (!directory.isDirectory() || directory.isSymbolicLink()) throw Error('server_access_storage_invalid');
@@ -102,7 +118,7 @@ export function readProtectedAccessFile(path, { maximum = 32768, production = tr
   let fd;
   try {
     fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    const valid = actual => actual.isFile() && !actual.isSymbolicLink() && actual.dev === stat.dev && actual.ino === stat.ino && actual.size >= 1n && actual.size <= BigInt(maximum) && !(actual.mode & 0o022n) && (!production || process.platform === 'win32' || actual.uid === 0n);
+    const valid = actual => actual.isFile() && !actual.isSymbolicLink() && actual.dev === stat.dev && actual.ino === stat.ino && actual.size >= 1n && actual.size <= BigInt(maximum) && !(actual.mode & 0o022n) && (!production || process.platform === 'win32' || actual.uid === uid);
     if (!valid(fstatSync(fd, { bigint: true }))) throw Error('server_access_storage_invalid');
     // Read only this validated descriptor and at most maximum+1 bytes. A
     // rename/replacement between lstat and open cannot substitute another
@@ -115,15 +131,73 @@ export function readProtectedAccessFile(path, { maximum = 32768, production = tr
   finally { if (fd !== undefined) closeSync(fd); }
 }
 
+const dataDirectory = env => resolve(env.MULTITAP_DATA_DIR ?? fileURLToPath(new URL('../../.local/broker', import.meta.url)));
+// A Docker Compose install with no updater keeps its policy itself, in the
+// data volume (self-access.mjs). An updater's own files always come first.
+const selfManagedCandidate = env => env.MULTITAP_DEPLOYMENT_KIND === 'docker' && !env.MULTITAP_UPDATE_SOCKET && !env.MULTITAP_SERVER_ACCESS_FILE;
+const selfReader = (env, readAccessFile) => (path, maximum = 32768) => readAccessFile(path, { production: env.NODE_ENV === 'production', owner: process.getuid?.() ?? 0, maximum });
+// The .env address lines only seed an install that has saved no policy yet.
+// True when somebody changed them after the policy was last saved and they
+// name other addresses than it: they are ignored. Lines that are still the
+// ones the policy was saved beside (`savedSeed`) are the seed, not an edit.
+function ignoredEnvAddresses(env, saved, fixed, savedSeed) {
+  const seed = selfEnvSeed(env);
+  if (seed === null || seed === savedSeed) return false;
+  try {
+    const lines = httpOriginSetting(env), listed = value => JSON.stringify([value.primaryOrigin, ...allowedServerOrigins(value).sort()]);
+    return listed(conformSelfAccess(withHttpOrigin(legacyServerAccess(lines.env), lines.httpOrigins), fixed)) !== listed(saved.config);
+  } catch { return true; }
+}
+// Where a self-managed install keeps its files, without loading them
+// (access-cli.mjs removes a policy that does not load); null for any other install.
+export function selfAccessStorage(env = process.env, { readAccessFile = readProtectedAccessFile } = {}) {
+  if (!selfManagedCandidate(env) || (env.NODE_ENV === 'production' && !env.MULTITAP_DATA_DIR)) return null;
+  return { paths: selfAccessPaths(dataDirectory(env)), read: selfReader(env, readAccessFile) };
+}
+// index.mjs: a start that cannot load the policy a save has just written.
+export async function revertUnloadableSelfAccess(env = process.env, options = {}) {
+  const storage = selfAccessStorage(env, options);
+  return storage ? revertUnloadableSelfPolicy(storage.paths, storage.read) : false;
+}
+
 export function configuration(env = process.env, { readAccessFile = readProtectedAccessFile } = {}) {
   if (env.NODE_ENV === 'production' && !env.MULTITAP_DATA_DIR) throw new Error('MULTITAP_DATA_DIR_required');
-  const dataDir = resolve(env.MULTITAP_DATA_DIR ?? fileURLToPath(new URL('../../.local/broker', import.meta.url)));
-  const accessFile = env.MULTITAP_SERVER_ACCESS_FILE ?? resolve(dataDir, 'server-access.json');
-  const accessIdentityFile = resolve(dataDir, 'server-access.identity');
+  const dataDir = dataDirectory(env);
+  let accessFile = env.MULTITAP_SERVER_ACCESS_FILE ?? resolve(dataDir, 'server-access.json');
+  let accessIdentityFile = resolve(dataDir, 'server-access.identity');
   const options = { production: env.NODE_ENV === 'production' };
-  const bytes = readAccessFile(accessFile, options);
-  let saved = null;
-  if (bytes !== null) {
+  let bytes = readAccessFile(accessFile, options);
+  let self = null;
+  if (selfManagedCandidate(env) && bytes === null) {
+    const paths = selfAccessPaths(dataDir), read = selfReader(env, readAccessFile), policy = read(paths.policy);
+    let fixed = null;
+    // A container whose own transport settings are invalid is not managed
+    // here: the address settings below report them, unless a policy was saved.
+    try { fixed = selfAccessFixed(env); } catch (error) { if (policy !== null) throw error; }
+    if (fixed) { self = { paths, fixed, read }; bytes = policy; accessFile = paths.policy; accessIdentityFile = paths.identity; }
+  }
+  let saved = null, unreadable = null;
+  if (bytes !== null && self) {
+    try {
+      // The container's listener, TLS mode and certificate paths are not the policy's to choose.
+      const { config, updatedAt, publicIp, envSeed } = decodeSelfPolicy(bytes, self.fixed);
+      const identity = self.read(accessIdentityFile, 128);
+      if (identity === null) throw Error('server_access_identity_missing');
+      if (!/^[a-f0-9]{64}$/.test(identity.trim())) throw Error('server_access_identity_invalid');
+      saved = { schema: 1, protocol: config.protocol, revision: serverAccessHash(config), config, updatedAt }; self.publicIp = publicIp; self.savedEnvSeed = envSeed;
+    } catch (error) {
+      // A saved policy this container cannot use (damaged, written by another
+      // version, without its installation ID, or not servable here) does not
+      // end the server and is neither replaced nor stood in for by the .env
+      // lines: the server starts with no addresses, as before its first ones,
+      // so only the administration console answers at the server's own address
+      // and says why (`unreadable`). The file stays as it is until an
+      // administrator saves again or `access-cli.mjs reset` removes it. A file
+      // that cannot be read at all (owner, mode) still ends the start.
+      if (!/^server_access_[a-z_]{1,80}$/.test(error?.message ?? '') || error.message === 'server_access_storage_invalid') throw error;
+      unreadable = error.message;
+    }
+  } else if (bytes !== null) {
     try { saved = decodeServerAccessState(JSON.parse(bytes)); } catch { throw Error('server_access_state_invalid'); }
   }
   // The privileged apply writes this explicit file reference into its owned
@@ -132,20 +206,22 @@ export function configuration(env = process.env, { readAccessFile = readProtecte
   if (env.MULTITAP_SERVER_ACCESS_FILE && !saved) throw Error('server_access_state_missing');
   const deploymentKind = validateDeploymentKind(env.MULTITAP_DEPLOYMENT_KIND);
   // A saved policy supersedes the legacy environment, including its HTTP address.
-  const { env: legacyEnv, httpOrigins } = saved ? { env, httpOrigins: null } : httpOriginSetting(env);
-  const bootstrapOnly = saved === null && env.NODE_ENV === 'production' && !legacyEnv.MULTITAP_PUBLIC_ORIGIN;
+  const { env: legacyEnv, httpOrigins } = saved || unreadable ? { env, httpOrigins: null } : httpOriginSetting(env);
+  const bootstrapOnly = unreadable !== null || (saved === null && env.NODE_ENV === 'production' && !legacyEnv.MULTITAP_PUBLIC_ORIGIN);
   const accessConfig = saved?.config ?? (bootstrapOnly ? null : withHttpOrigin(legacyServerAccess(legacyEnv), httpOrigins));
   const transport = accessConfig ? serverAccessTransport(accessConfig) : { publicOrigin: null, allowInsecureHttp: false, tlsMode: 'proxy', tlsFiles: null, host: '0.0.0.0', port: Number(env.MULTITAP_PORT ?? 18480) };
   if (!Number.isInteger(transport.port) || transport.port < 1 || transport.port > 65535) throw Error('invalid_port');
   const proxies = accessConfig?.trustedProxies ?? [];
   trustedProxies(proxies.length ? proxies : 'none');
-  const identityBytes = readAccessFile(accessIdentityFile, { ...options, maximum: 128 });
-  const accessInstallationId = identityBytes?.trim() ?? null;
+  const identityBytes = self ? self.read(accessIdentityFile, 128) : readAccessFile(accessIdentityFile, { ...options, maximum: 128 });
+  const identityText = identityBytes?.trim() ?? null;
+  // Without a usable policy an installation ID that is not one is not used either.
+  const accessInstallationId = unreadable && !/^[a-f0-9]{64}$/.test(identityText ?? '') ? null : identityText;
   if (accessInstallationId !== null && !/^[a-f0-9]{64}$/.test(accessInstallationId)) throw Error('server_access_identity_invalid');
   if (saved && accessInstallationId === null) throw Error('server_access_identity_missing');
   const accessRevision = saved?.revision ?? createHash('sha256').update(accessConfig ? JSON.stringify(normalizeServerAccess(accessConfig)) : 'server-access-unconfigured').digest('hex');
   let legacyPublicOrigin = null;
-  if (!saved && legacyEnv.MULTITAP_PUBLIC_ORIGIN) {
+  if (!saved && !unreadable && legacyEnv.MULTITAP_PUBLIC_ORIGIN) {
     try { legacyPublicOrigin = normalizeBrokerOrigin(legacyEnv.MULTITAP_PUBLIC_ORIGIN, { allowInsecureHttp: env.MULTITAP_ALLOW_INSECURE_HTTP === '1' }); } catch { /* A saved policy supersedes stale legacy settings. */ }
   }
   const accessOperationId = env.MULTITAP_ACCESS_OPERATION_ID || null;
@@ -161,10 +237,16 @@ export function configuration(env = process.env, { readAccessFile = readProtecte
     dataDir,
     deploymentKind,
     updateSocket: env.MULTITAP_UPDATE_SOCKET || null,
+    // Set for a self-managed Docker install only: where it keeps its policy,
+    // what the container fixes, whether it follows the public IP, the .env
+    // address lines of now (`envSeed`) and of the last save (`savedEnvSeed`),
+    // and whether lines edited since then are being ignored.
+    selfAccess: self ? { ...self, saved: saved !== null, unreadable, publicIp: self.publicIp ?? { follow: false, origin: null }, revision: selfPolicyRevision(accessConfig, self.publicIp),
+      envSeed: selfEnvSeed(env), savedEnvSeed: self.savedEnvSeed ?? null, envAddressesIgnored: saved !== null && ignoredEnvAddresses(env, saved, self.fixed, self.savedEnvSeed ?? null) } : null,
     // Docker Compose installs without an updater socket: the signed public
     // release feed that docker-update-check.mjs reads (null = no check).
     dockerUpdateFeed: dockerUpdateFeed(env.MULTITAP_DOCKER_UPDATE_FEED),
-    udp: udpRelayConfiguration(env),
+    udp: udpRelayConfiguration(env, self !== null),
     hostRoute: hostRoute(env.MULTITAP_HOST_ROUTE),
   };
 }

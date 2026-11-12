@@ -180,8 +180,8 @@ void main() {
             .text,
         isEmpty,
       );
-      // Review 2026-11-12: the field lost the keyboard focus while the code
-      // was checked and did not get it back.
+      // The field must get the keyboard focus back after the code was
+      // checked.
       await tester.pump();
       await tester.pump();
       expect(

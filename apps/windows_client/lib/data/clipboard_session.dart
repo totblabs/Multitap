@@ -237,7 +237,7 @@ class ClipboardSession extends ChangeNotifier {
   }
 
   /// This client has 공유 폴더 to suggest for what the clipboard cannot
-  /// carry; Android has none (2026-11-02).
+  /// carry; Android has none.
   final bool sharedFolders;
 
   /// Only the Windows adapter can capture and publish rich text, images and
@@ -790,9 +790,9 @@ class ClipboardSession extends ChangeNotifier {
           // Two ordered lanes. A pull's data, end and failure (pull ids) are
           // handed to the platform at once: a paste reading on the clipboard
           // thread waits for exactly them, and a transfer message may itself
-          // wait for that thread (field 2026-11-02: a paste of a VM copy
-          // that had just been published stalled behind its own
-          // clipboard.complete until the user cancelled it).
+          // wait for that thread (in one lane, a paste of a VM copy that
+          // has just been published stalls behind its own
+          // clipboard.complete until the user cancels it).
           final decoded = _decode(message), id = decoded?['requestId'];
           if (_pulls != null &&
               id is String &&

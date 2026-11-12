@@ -5,10 +5,10 @@ import 'korean_text.dart';
 import '../l10n/l10n.dart';
 
 /// HTTPS or HTTP as two equal halves of one row at every width and text
-/// size (2026-11-02: two chips of their own widths wrapped unevenly). The
-/// labels are the scheme alone (2026-11-03: "HTTP · 암호화 없음" was cut in
-/// narrow windows); the line above the choice says what it means. No icons
-/// (2026-11-11: a lock beside both read as if HTTP were encrypted too).
+/// size (two chips of their own widths would wrap unevenly). The labels are
+/// the scheme alone ("HTTP · 암호화 없음" would be cut in narrow windows);
+/// the line above the choice says what it means. No icons: a lock beside
+/// both would read as if HTTP were encrypted too.
 class BrokerTransportChoice extends StatelessWidget {
   const BrokerTransportChoice({
     super.key,

@@ -14,8 +14,8 @@ class WindowCloseGuard {
   }
   // A close the app allowed passes every WM_CLOSE of that close for a few
   // seconds: ours, and the engine's re-dispatched one after the framework
-  // answered its exit request (2026-10-26: a single-use allowance was spent on
-  // the first and the exit question came back once more).
+  // answered its exit request (a single-use allowance would be spent on the
+  // first and the exit question would come back once more).
   bool RequestClose(Clock::time_point now = Clock::now()) {
     if (busy_) return false;
     allowed_until_ = now + std::chrono::seconds(5);

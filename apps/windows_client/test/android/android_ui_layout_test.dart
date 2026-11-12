@@ -97,7 +97,7 @@ BrokerDesktop _silent() => BrokerDesktop(
 );
 
 /// A local PC whose Host can be updated: the launcher then shows the 구분
-/// filter and badges the header's update button (2026-11-03).
+/// filter and badges the header's update button.
 BrokerDesktop _pc() => BrokerDesktop(
   id: 'pc-gaming',
   name: 'TOWER-PC',
@@ -395,7 +395,7 @@ void main() {
             multiline: const {'vdi.example'},
           );
           await _pop(t);
-          // 설정 (2026-11-11): the header's own ⚙ opens the settings window.
+          // 설정: the header's own ⚙ opens the settings window.
           expect(
             await _open(t, find.byKey(const Key('open-app-settings'))),
             isTrue,
@@ -424,7 +424,7 @@ void main() {
           semantics.dispose();
         });
 
-        // 2026-11-03, as on Windows: every control of the title and filter rows
+        // As on Windows: every control of the title and filter rows
         // (the short landscape header row too) is one height, at least 48 dp.
         testWidgets('header controls share one height at $at', (t) async {
           _language(english);
@@ -486,7 +486,7 @@ void main() {
           );
           _expectClean(t, 'stop question · $at', scale);
           await _pop(t);
-          // The sound badge is an indicator only (2026-11-10): a tap opens
+          // The sound badge is an indicator only: a tap opens
           // nothing, and the card stays clean with it.
           expect(
             await _open(t, find.byKey(const Key('sound-badge-pve-149'))),

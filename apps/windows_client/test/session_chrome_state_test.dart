@@ -35,8 +35,7 @@ const _quality = Key('session-quality');
 /// and in the bar's own quality menu (the bar on its own).
 const _qualityRow = '왕복 지연 · Host 응답';
 
-/// The bar's 설정 button and its panel (2026-11-10, session bar v2): 화질·
-/// 소리 and 바 열어 두기, the bar's former settings and pin buttons, are
+/// The bar's 설정 button and its panel: 화질·소리 and 바 열어 두기 are
 /// rows of it.
 const _settings = Key('remote-settings');
 const _settingsPanel = Key('session-settings-panel');
@@ -833,7 +832,7 @@ void main() {
         // is offered only once the change has finished.
         expect(find.byKey(const Key('session-minimize')), findsOneWidget);
         expect(find.byKey(const Key('session-restore')), findsOneWidget);
-        // And 화질 (in 설정 since 2026-11-10) can be opened at once.
+        // And 화질 (in 설정) can be opened at once.
         await _openSettings(tester);
         expect(
           tester.widget<InkWell>(_row('remote-stream-settings')).onTap,

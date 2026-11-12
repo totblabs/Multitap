@@ -19,8 +19,7 @@ import 'package:multitap_client/ui/desktop_readiness.dart';
 const _optionalPenChannel = MethodChannel('multitap/pen-input');
 
 /// A tile's main button, by the name the Windows tile gives it in each
-/// state (`open-`, `start-` or `attention-<id>`; Android renders that tile since
-/// 2026-11-03).
+/// state (`open-`, `start-` or `attention-<id>`; Android renders that tile).
 Finder mainButton(String id) => find.byWidgetPredicate(
   (widget) =>
       widget.key is ValueKey<String> &&
@@ -248,7 +247,7 @@ void main() {
     expect((save.arguments as Map)['remember'], false);
     expect(find.text('내 데스크톱'), findsOneWidget);
     expect(find.text('TESTER'), findsOneWidget);
-    // The Windows tile's status card says it is ready (2026-11-03).
+    // The Windows tile's status card says it is ready.
     expect(find.byKey(const Key('status-pve-149')), findsOneWidget);
     expect(mainButton('pve-149'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -671,7 +670,7 @@ void main() {
       ),
     );
     final readiness = DesktopReadiness.of(machine);
-    // Signed out: Console or a restart, never an in-stream sign-in (2026-11-09).
+    // Signed out: Console or a restart, never an in-stream sign-in.
     expect(readiness.headline, 'Windows에 로그인돼 있지 않아요');
     expect(readiness.detail, contains('Console'));
     expect(readiness.primary, ReadinessAction.console);
@@ -681,7 +680,7 @@ void main() {
   testWidgets('the account menu names the server with its own port', (
     tester,
   ) async {
-    // Review 2026-10-28 #15: a server on 8443 read like the one on 443.
+    // A server on 8443 must not read like the one on 443.
     await signedIn(
       tester,
       [vm()],

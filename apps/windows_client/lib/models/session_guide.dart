@@ -118,7 +118,7 @@ class SessionGuideContent {
   /// A negotiated relay URL already requires assignment permission and peer
   /// support. Its absence cannot distinguish denial from unsupported hardware.
   /// An unavailable tip says only what to do: its badge already says it is
-  /// unavailable (2026-11-03: the same fact twice per row).
+  /// unavailable (saying so again would be the same fact twice per row).
   factory SessionGuideContent.fromFacts({
     bool printerGranted = false,
     bool printerReady = false,

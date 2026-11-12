@@ -58,8 +58,8 @@ class AndroidPictureView {
       final exact = source * (pixelScale / dpr);
       // Exact only when the picture really is this screen's pixels: one the
       // encoder sent smaller (its box or pixel budget) is scaled up to fill,
-      // never shown 1:1 in the middle of the screen (Fold 8 unfolded,
-      // 2026-10-26: 1248×942 of a 2448×1848 output used a quarter of it).
+      // never shown 1:1 in the middle of the screen (on an unfolded Fold 8,
+      // 1248×942 of a 2448×1848 output would use a quarter of it).
       final fills =
           exact.width >= size.width - 2 / dpr ||
           exact.height >= size.height - 2 / dpr;

@@ -1,5 +1,5 @@
-// The Android card's 소리 없음 / 다시 시작 필요 badge is an indicator only
-// (2026-11-10): Multitap adds no sound device, the administrator adds an
+// The Android card's 소리 없음 / 다시 시작 필요 badge is an indicator
+// only: Multitap adds no sound device, the administrator adds an
 // audio device in Proxmox. A tap opens nothing, the tooltip is a plain
 // statement, and the ⋯ menu lists no sound-card row. Fake broker and store.
 import 'package:flutter/material.dart';

@@ -27,7 +27,6 @@ class SessionWindowLaunch {
     required this.expiresAt,
     required this.desktopId,
     required this.name,
-    this.console = false,
     this.localPcApproved = false,
     required this.mode,
     required this.options,
@@ -42,7 +41,6 @@ class SessionWindowLaunch {
   final Uri origin;
   final String token, desktopId, name;
   final DateTime expiresAt;
-  final bool console;
   final bool localPcApproved;
   final SessionDisplayMode mode;
   final StreamOptions options;
@@ -69,7 +67,6 @@ class SessionWindowLaunch {
     'expiresAt': expiresAt.toUtc().toIso8601String(),
     'desktopId': desktopId,
     'name': name,
-    'console': console,
     'localPcApproved': localPcApproved,
     'mode': mode.name,
     'options': options.toJson(),
@@ -95,7 +92,6 @@ class SessionWindowLaunch {
     final name = value['name'] as String;
     final expiry = DateTime.parse(value['expiresAt'] as String);
     final mode = SessionDisplayMode.values.byName(value['mode'] as String);
-    final console = value['console'] == true;
     final thumbnailKey = value['thumbnailKey'];
     final thumbnailEpoch = value['thumbnailEpoch'];
     final guideAccountKey = value['guideAccountKey'];
@@ -116,15 +112,12 @@ class SessionWindowLaunch {
         !RegExp(
           r'^(?:pve-[0-9]{1,12}|pc-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$',
         ).hasMatch(id) ||
-        (console && !id.startsWith('pve-')) ||
         (id.startsWith('pc-') && value['localPcApproved'] != true) ||
-        (value['console'] != null && value['console'] is! bool) ||
         name.isEmpty ||
         name.length > 256 ||
         (thumbnailKey != null && !isThumbnailAccountKey(thumbnailKey)) ||
         (thumbnailEpoch != null &&
             (thumbnailKey == null ||
-                console ||
                 !isThumbnailPrivacyEpoch(thumbnailEpoch))) ||
         (guideAccountKey != null &&
             !isSessionGuideAccountKey(guideAccountKey))) {
@@ -154,7 +147,6 @@ class SessionWindowLaunch {
             ),
       desktopId: id,
       name: name,
-      console: console,
       localPcApproved: value['localPcApproved'] == true,
       mode: mode,
       options: StreamOptions.fromJson(
@@ -360,7 +352,7 @@ class SessionWindows {
     final result = await channel.invokeMapMethod<Object?, Object?>('open', {
       'key': '${launch.origin}|${launch.desktopId}',
       'title':
-          '${launch.name} · ${launch.console ? 'Console' : l10n.streaming} · Multitap',
+          '${launch.name} · ${l10n.streaming} · Multitap',
       'payload': launch.toMap(),
     });
     if (result?['opened'] is! bool) return null;

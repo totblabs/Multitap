@@ -1,0 +1,38 @@
+name: Feature request / 기능 제안
+description: Suggest something Multitap should do. / Multitap에 있었으면 하는 기능을 제안합니다.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write in English or Korean. / 영어나 한국어로 적어 주세요.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Part / 어느 부분인가요
+      options:
+        - Server (admin console, install command) / 서버(관리자 페이지, 설치 명령)
+        - Windows app / Windows 앱
+        - Android app / Android 앱
+        - Host
+        - Website or guide / 홈페이지·가이드
+        - Not sure / 모름
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do / 무엇을 하려고 하나요
+      description: The situation, and what gets in the way today. / 어떤 상황인지, 지금은 무엇이 불편한지 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like / 바라는 동작
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead for now / 지금은 어떻게 하고 있나요

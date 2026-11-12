@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 // The Windows runner is the only place that joins the native clipboard adapter to Dart. A component test of either side cannot
-// notice a message that nobody forwards: the paste-pull events (an Explorer paste of files the VM offered) were produced by
-// ClientClipboardChannel but never delivered to Dart until 2026-10-27, so such a paste could only time out. These checks read
+// notice a message that nobody forwards: if the paste-pull events (an Explorer paste of files the VM offered) are produced by
+// ClientClipboardChannel but never delivered to Dart, such a paste can only time out. These checks read
 // the sources, like the other wiring tests; tools/clipboard-e2e-qa runs the real adapter against the real session.
 void main() {
   final runner = '${Directory.current.path}/windows/runner';

@@ -1,7 +1,7 @@
 // Actual RemoteView/RemoteSession notification ownership; device state is a
 // memory fake. No native device, file, clipboard, capture or window operation.
 //
-// 2026-11-10 (session bar v2): shared folders and USB devices are one bar
+// Shared folders and USB devices are one bar
 // button, 폴더·USB (key remote-share), lit with a green dot while anything
 // is connected; each side is a tab of its panel (keys remote-drives and
 // remote-usb) with its own count.

@@ -1,5 +1,5 @@
 // A remote window spanning two local monitors (모든 모니터 사용) keeps its
-// session bar and every popup on the primary monitor (2026-10-26). The
+// session bar and every popup on the primary monitor. The
 // native window and monitors are fixtures; this is layout only.
 import 'dart:async';
 import 'dart:ui' show DisplayFeature;

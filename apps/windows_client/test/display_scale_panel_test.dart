@@ -142,8 +142,8 @@ void main() {
           brightness: config.$2,
         );
         expect(tester.takeException(), isNull);
-        // The steps are one row of TextButtons (2026-11-10: 배율 sits inside
-        // the 화면 panel, so they lie across).
+        // The steps are one row of TextButtons (배율 sits inside the 화면
+        // panel, so they lie across).
         final steps = find.byKey(const Key('display-scale-steps'));
         expect(steps, findsOneWidget);
         expect(

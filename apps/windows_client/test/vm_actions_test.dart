@@ -22,7 +22,6 @@ const machine = DesktopMachine(
   status: MachineStatus.awaitingHost,
   specification: 'Windows',
   accent: Colors.blue,
-  consoleRelayProtocol: 'rfb-none-v1',
   powerState: 'running',
   powerStale: false,
   hostOnline: false,

@@ -13,7 +13,7 @@ import 'package:multitap_client/data/native_clipboard.dart';
 import '../clipboard_onpaste_test.dart' as onpaste;
 import '../clipboard_session_test.dart' as base;
 
-// Android's automatic clipboard (2026-11-03), through the real ClipboardSession
+// Android's automatic clipboard, through the real ClipboardSession
 // and NativeClipboardBridge(android: true). AndroidClipboard.kt is played by
 // [AndroidClipboardFake] on `multitap/clipboard` (a plain-text phone clipboard,
 // the foreground watch, the mark on a clip this app placed); the relay by

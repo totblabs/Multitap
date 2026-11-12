@@ -1,24 +1,21 @@
-// Public launcher/console intent ownership against fake broker and transport.
-// No native console, Proxmox, network connection or actual credentials.
+// Public launcher/console intent ownership against a fake broker.
+// No Proxmox, network connection or actual credentials.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/android/android_app.dart';
-import 'package:multitap_client/android/android_console_view.dart';
 import 'package:multitap_client/android/android_remote.dart';
 import 'package:multitap_client/android/android_session_keepalive.dart';
 import 'package:multitap_client/android/android_store.dart';
 import 'package:multitap_client/data/broker_api.dart';
 
-import '../emergency_console_session_test.dart' show FakeConsoleTransport;
 import 'android_launcher_test.dart' show FakeBroker, MemoryStore;
 
 BrokerDesktop desktop({
   String id = 'pve-149',
   String kind = 'vm',
-  String? protocol = 'rfb-none-v1',
   String? browserProtocol = 'console-browser-v1',
 }) => BrokerDesktop(
   id: id,
@@ -30,7 +27,6 @@ BrokerDesktop desktop({
   canConnect: false,
   canStream: false,
   hostConnected: false,
-  consoleRelayProtocol: protocol,
   consoleBrowserProtocol: browserProtocol,
   consoleWebViewProtocol: browserProtocol == 'console-browser-v1'
       ? 'console-webview-v1'
@@ -38,13 +34,9 @@ BrokerDesktop desktop({
   power: const BrokerPowerSnapshot(state: 'running', stale: false),
 );
 
-class ConsoleBroker extends FakeBroker
-    implements EmergencyConsoleBrokerApi, ConsoleWebViewBrokerApi {
-  ConsoleBroker(super.inventory, {this.origin = 'https://fixture.invalid'});
-  final String origin;
-  final creates = <(String, String)>[], releases = <(String, String)>[];
+class ConsoleBroker extends FakeBroker implements ConsoleWebViewBrokerApi {
+  ConsoleBroker(super.inventory);
   Completer<List<BrokerDesktop>>? nextRead;
-  int _nonce = 0;
   @override
   Future<BrokerConsoleWebViewGrant> createConsoleWebView(
     String token,
@@ -68,28 +60,6 @@ class ConsoleBroker extends FakeBroker
     calls.add('desktops');
     return pending.future;
   }
-
-  @override
-  Future<BrokerConsoleGrant> createConsole(
-    String token,
-    String desktopId,
-  ) async {
-    final id =
-        '01234567-89ab-cdef-8123-${(++_nonce).toRadixString(16).padLeft(12, '0')}';
-    creates.add((desktopId, id));
-    return BrokerConsoleGrant(
-      id: id,
-      ticket: 'fixture-one-use-ticket',
-      relay: Uri.parse(origin)
-          .replace(scheme: 'wss', path: '/relay/console/$id'),
-      expiresAt: DateTime.utc(2035),
-    );
-  }
-
-  @override
-  Future<void> releaseConsole(String token, String desktopId, String id) async {
-    releases.add((desktopId, id));
-  }
 }
 
 Future<void> bounded(WidgetTester t) async {
@@ -112,7 +82,6 @@ Future<void> boot(
   FakeBroker broker, {
   String origin = 'https://fixture.invalid',
   Key? key,
-  List<FakeConsoleTransport>? transports,
 }) async {
   t.view.physicalSize = const Size(390, 844);
   t.view.devicePixelRatio = 1;
@@ -136,22 +105,14 @@ Future<void> boot(
         );
   }
   await t.pumpWidget(
-    AndroidVdiApp(
-      key: key,
-      apiFactory: (_) => broker,
-      consoleTransportFactory: (_, _) async {
-        final transport = FakeConsoleTransport();
-        transports?.add(transport);
-        return transport;
-      },
-    ),
+    AndroidVdiApp(key: key, apiFactory: (_) => broker),
   );
   await t.pumpAndSettle();
   await t.enterText(find.byKey(const Key('sign-in-password')), 'fixture-only');
   await tap(t, 'login-submit');
 }
 
-/// ▾ beside the main button holds 긴급 콘솔, as on Windows (2026-11-03); a
+/// ▾ beside the main button holds 긴급 콘솔, as on Windows; a
 /// tile with no console to offer may have no ▾ at all.
 Future<void> menu(WidgetTester t, [String id = 'pve-149']) async {
   if (find.byKey(Key('stream-modes-$id')).evaluate().isEmpty) return;
@@ -226,48 +187,38 @@ void main() {
 
   for (final marker in <String?>[null, 'future']) {
     testWidgets(
-      'legacy native console with browser marker $marker offers update guidance only',
+      'a server without the WebView console marker ($marker) offers update guidance only',
       (t) async {
         final broker = ConsoleBroker([desktop(browserProtocol: marker)]);
-        final transports = <FakeConsoleTransport>[];
-        await boot(t, broker, transports: transports);
+        await boot(t, broker);
         await request(t);
         await tap(t, 'confirm-console-pve-149');
         expect(find.textContaining('Console을 열 수 없어요'), findsOneWidget);
         expect(browserCalls, isEmpty);
-        expect(broker.creates, isEmpty);
-        expect(transports, isEmpty);
-        expect(find.byType(AndroidConsoleView), findsNothing);
         await finish(t);
       },
     );
   }
 
-  testWidgets('HTTP console explains HTTPS without native fallback', (t) async {
+  testWidgets('HTTP console explains HTTPS', (t) async {
     final broker = ConsoleBroker([desktop()]);
     await boot(t, broker, origin: 'http://fixture.invalid');
     await menu(t);
     await tap(t, 'emergency-console-pve-149');
     expect(find.textContaining('HTTPS 주소로 다시 로그인'), findsOneWidget);
     expect(browserCalls, isEmpty);
-    expect(broker.creates, isEmpty);
-    expect(find.byType(AndroidConsoleView), findsNothing);
     await finish(t);
   });
 
   testWidgets(
-    'Host-offline running VM offers a console but cancel never creates a grant',
+    'Host-offline running VM offers a console but cancel opens nothing',
     (t) async {
       final broker = ConsoleBroker([desktop()]);
       await boot(t, broker);
       expect(find.byType(AndroidRemoteView), findsNothing);
       await request(t);
-      expect(broker.creates, isEmpty);
       await tap(t, 'cancel-console-connect');
-      expect(broker.creates, isEmpty);
-      expect(broker.releases, isEmpty);
       expect(browserCalls, isEmpty);
-      expect(find.byType(AndroidConsoleView), findsNothing);
       expect(broker.calls.contains('connect'), isFalse);
       await finish(t);
     },
@@ -275,7 +226,7 @@ void main() {
 
   for (final removedAssignment in [true, false]) {
     testWidgets(
-      'fresh read rejects ${removedAssignment ? 'removed assignment' : 'revoked capability'} before grant creation',
+      'fresh read rejects ${removedAssignment ? 'removed assignment' : 'revoked capability'} before opening',
       (t) async {
         final broker = ConsoleBroker([desktop()]);
         await boot(t, broker);
@@ -289,12 +240,10 @@ void main() {
           broker.calls.where((call) => call == 'desktops').length,
           greaterThan(reads),
         );
-        expect(broker.creates, isEmpty);
         expect(browserCalls, isEmpty);
         if (!removedAssignment) {
           expect(find.textContaining('Console을 열 수 없어요'), findsOneWidget);
         }
-        expect(find.byType(AndroidConsoleView), findsNothing);
         expect(broker.calls.contains('connect'), isFalse);
         await finish(t);
       },
@@ -305,8 +254,7 @@ void main() {
     'confirmed opens use only tokenless browser launch and preserve the launcher',
     (t) async {
       final broker = ConsoleBroker([desktop(), desktop(id: 'pve-150')]);
-      final transports = <FakeConsoleTransport>[];
-      await boot(t, broker, transports: transports);
+      await boot(t, broker);
       for (final id in ['pve-149', 'pve-149', 'pve-150']) {
         final before = browserCalls.length;
         await request(t, id);
@@ -319,11 +267,7 @@ void main() {
           'attachPath': '/console/$id/attach',
           'code': 'c' * 43,
         });
-        expect(find.byType(AndroidConsoleView), findsNothing);
         expect(find.byType(AndroidRemoteView), findsNothing);
-        expect(broker.creates, isEmpty);
-        expect(transports, isEmpty);
-        expect(broker.releases, isEmpty);
         expect(find.text('내 데스크톱'), findsOneWidget);
       }
       expect(browserCalls, hasLength(3));
@@ -333,7 +277,7 @@ void main() {
   );
 
   testWidgets(
-    'a late fresh inventory after sign-out and another login cannot create an old-account grant',
+    'a late fresh inventory after sign-out and another login cannot open an old-account console',
     (t) async {
       final broker = ConsoleBroker([desktop()]);
       await boot(t, broker);
@@ -341,7 +285,6 @@ void main() {
       final gate = Completer<List<BrokerDesktop>>();
       broker.nextRead = gate;
       await tap(t, 'confirm-console-pve-149');
-      expect(broker.creates, isEmpty);
       expect(browserCalls, isEmpty);
       await tap(t, 'account-menu');
       await tap(t, 'sign-out');
@@ -355,9 +298,7 @@ void main() {
       gate.complete([desktop()]);
       await bounded(t);
       expect(broker.calls, contains('login:another-account'));
-      expect(broker.creates, isEmpty);
       expect(browserCalls, isEmpty);
-      expect(find.byType(AndroidConsoleView), findsNothing);
       await finish(t);
     },
   );
@@ -366,9 +307,7 @@ void main() {
     'replacing the server scope while a fresh read is pending cannot open either server console',
     (t) async {
       final old = ConsoleBroker([desktop()]);
-      final current = ConsoleBroker([
-        desktop(),
-      ], origin: 'https://other.invalid');
+      final current = ConsoleBroker([desktop()]);
       await boot(t, old, key: const ValueKey('old-server'));
       await request(t);
       final gate = Completer<List<BrokerDesktop>>();
@@ -382,17 +321,14 @@ void main() {
       );
       gate.complete([desktop()]);
       await bounded(t);
-      expect(old.creates, isEmpty);
-      expect(current.creates, isEmpty);
       expect(browserCalls, isEmpty);
-      expect(find.byType(AndroidConsoleView), findsNothing);
       expect(find.text('내 데스크톱'), findsOneWidget);
       await finish(t);
     },
   );
 
   testWidgets(
-    'fresh-read permission failure makes no grant or streaming request',
+    'fresh-read permission failure opens nothing and makes no streaming request',
     (t) async {
       final broker = ConsoleBroker([desktop()]);
       await boot(t, broker);
@@ -404,28 +340,22 @@ void main() {
         const BrokerException('console_permission_denied', 403),
       );
       await bounded(t);
-      expect(broker.creates, isEmpty);
       expect(browserCalls, isEmpty);
       expect(broker.calls.contains('connect'), isFalse);
-      expect(find.byType(AndroidConsoleView), findsNothing);
       await finish(t);
     },
   );
 
   testWidgets(
-    'browser failure remains actionable and never creates native transport',
+    'browser failure remains actionable',
     (t) async {
       browserAvailable = false;
       final broker = ConsoleBroker([desktop()]);
-      final transports = <FakeConsoleTransport>[];
-      await boot(t, broker, transports: transports);
+      await boot(t, broker);
       await request(t);
       await tap(t, 'confirm-console-pve-149');
       expect(browserCalls, hasLength(1));
       expect(find.textContaining('네트워크를 확인하고 다시 시도'), findsOneWidget);
-      expect(broker.creates, isEmpty);
-      expect(broker.releases, isEmpty);
-      expect(transports, isEmpty);
       expect(broker.calls.contains('connect'), isFalse);
       await finish(t);
     },

@@ -5,8 +5,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// AndroidFramePacer while the app is not visible (2026-11-03: 15 phone
-// sessions decoded 17-60 fps with nothing drawn). Decoding goes on (no client
+// AndroidFramePacer while the app is not visible (a session still decodes
+// 17-60 fps then, with nothing drawn). Decoding goes on (no client
 // key frame request on WebSocket); no frame is rendered, and the newest one
 // shows on return.
 class AndroidFramePacerBackgroundTest {

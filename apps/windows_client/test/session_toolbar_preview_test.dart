@@ -1,4 +1,4 @@
-// Actual widget rendering of the streaming session bar (v2, 2026-11-10) over
+// Actual widget rendering of the streaming session bar over
 // a dark photo and a bright desktop, at 100% and 150%: the resting handle,
 // its hover tab, the open bar on one and two monitors, the 화면 panel, the
 // 설정 panel and 설정 › 화질. Fixture status only, not a remote desktop.

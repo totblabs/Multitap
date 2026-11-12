@@ -1,15 +1,15 @@
 # Multitap broker (docs/docker-deployment.md).
 #   Published image:   docker compose up -d
 #   Build from source: docker compose -f compose.yaml -f compose.build.yaml up -d --build
-# Settings live in .env (copy .env.example). Data, downloads and the vault stay
-# in the broker-data volume across image updates.
+# Settings live in .env (copy .env.example). Data, downloads, the vault and
+# the server access settings stay in the broker-data volume across image updates.
 name: multitap
 
 services:
   broker:
     # MULTITAP_VERSION is the release to run; the admin console's server update
     # page shows the exact commands when a newer signed release exists.
-    image: ${MULTITAP_IMAGE:-ghcr.io/totblabs/multitap-broker}:${MULTITAP_VERSION:-1.1.1}
+    image: ${MULTITAP_IMAGE:-ghcr.io/totblabs/multitap-broker}:${MULTITAP_VERSION:-1.1.2}
     user: "1000:1000"
     init: true
     restart: unless-stopped
@@ -24,20 +24,30 @@ services:
       # machine's own zone into .env, or set TZ there (an IANA name such as
       # Europe/Berlin).
       TZ: ${TZ:-UTC}
+      # The addresses apps and Hosts use, the primary address, the trusted
+      # proxies and public IP following are set in the admin console (Server
+      # access). The server keeps them in the data volume and applies a change
+      # itself. The three address lines and MULTITAP_TRUSTED_PROXIES only start
+      # a server that has saved nothing yet; what is saved supersedes them.
       MULTITAP_PUBLIC_ORIGIN: ${MULTITAP_PUBLIC_ORIGIN:-}
       # Plain HTTP for the LAN, alone or beside HTTPS (same listener).
       MULTITAP_HTTP_ORIGIN: ${MULTITAP_HTTP_ORIGIN:-}
       MULTITAP_ALLOW_INSECURE_HTTP: ${MULTITAP_ALLOW_INSECURE_HTTP:-0}
-      # First setup by IP: http://<server address>:<published port> while no
-      # address above is set. The container cannot see the server's own IP.
+      # What the container cannot see for itself: the server's own IP (the
+      # first setup opens at http://<server address>:<published port> while no
+      # address is set) and the ports Docker publishes below. The server brings
+      # the saved addresses to these; they are changed here, in .env.
       MULTITAP_SERVER_ADDRESS: ${MULTITAP_SERVER_ADDRESS:-}
       MULTITAP_PUBLISHED_PORT: ${MULTITAP_PUBLISH_PORT:-18480}
       MULTITAP_TLS_MODE: proxy
       MULTITAP_TRUSTED_PROXIES: ${MULTITAP_TRUSTED_PROXIES:-}
       MULTITAP_DOCKER_UPDATE_FEED: ${MULTITAP_DOCKER_UPDATE_FEED:-}
-      # UDP media relay on 18481 like the native install. Sessions use it once
-      # both relay lists name the public address and the port is open.
+      # UDP media relay on 18481 like the native install. Apps and Hosts send
+      # to the address they connected on, at the published UDP port: the server
+      # must be told that port. The two relay lists and MULTITAP_UDP_MEDIA are
+      # overrides (.env.example).
       MULTITAP_UDP_PORT: ${MULTITAP_UDP_PORT:-18481}
+      MULTITAP_UDP_PUBLISHED_PORT: ${MULTITAP_UDP_PUBLISH_PORT:-18481}
       MULTITAP_UDP_MEDIA: ${MULTITAP_UDP_MEDIA:-}
       MULTITAP_STUN_SERVERS: ${MULTITAP_STUN_SERVERS:-}
       MULTITAP_UDP_HOST_RELAYS: ${MULTITAP_UDP_HOST_RELAYS:-}
@@ -56,7 +66,9 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 128
-    mem_limit: 512m
+    # The most memory the server may use; more connections at once need more
+    # (MULTITAP_MEMORY_LIMIT in .env, e.g. 1g).
+    mem_limit: ${MULTITAP_MEMORY_LIMIT:-512m}
     stop_grace_period: 15s
     logging:
       driver: json-file

@@ -2,6 +2,8 @@
 # Select it once in .env with COMPOSE_FILE=compose.direct-https.yaml; plain
 # `docker compose pull && docker compose up -d` then uses this file.
 # Supplied certificate/key only. No trust-store or certificate-generation steps.
+# The HTTPS addresses are set in the admin console (Server access), as with
+# compose.yaml; this listener serves no plain HTTP beside them.
 name: multitap
 
 services:
@@ -20,7 +22,8 @@ services:
       TZ: ${TZ:-UTC}
       MULTITAP_PUBLIC_ORIGIN: ${MULTITAP_PUBLIC_ORIGIN:-}
       MULTITAP_ALLOW_INSECURE_HTTP: ${MULTITAP_ALLOW_INSECURE_HTTP:-0}
-      # First setup by IP (plain HTTP) while no public address is set.
+      # First setup by IP (plain HTTP) while no address is set. The address
+      # line above only starts a server that has saved none yet.
       MULTITAP_SERVER_ADDRESS: ${MULTITAP_SERVER_ADDRESS:-}
       MULTITAP_PUBLISHED_PORT: ${MULTITAP_PUBLISH_PORT:-18480}
       MULTITAP_TLS_MODE: direct
@@ -28,7 +31,10 @@ services:
       MULTITAP_TLS_KEY_FILE: /etc/multitap/tls/key.pem
       MULTITAP_TRUSTED_PROXIES: ${MULTITAP_TRUSTED_PROXIES:-}
       MULTITAP_DOCKER_UPDATE_FEED: ${MULTITAP_DOCKER_UPDATE_FEED:-}
+      # UDP media: apps and Hosts send to the address they connected on, at
+      # the published UDP port, as in compose.yaml.
       MULTITAP_UDP_PORT: ${MULTITAP_UDP_PORT:-18481}
+      MULTITAP_UDP_PUBLISHED_PORT: ${MULTITAP_UDP_PUBLISH_PORT:-18481}
       MULTITAP_UDP_MEDIA: ${MULTITAP_UDP_MEDIA:-}
       MULTITAP_STUN_SERVERS: ${MULTITAP_STUN_SERVERS:-}
       MULTITAP_UDP_HOST_RELAYS: ${MULTITAP_UDP_HOST_RELAYS:-}
@@ -53,7 +59,7 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 128
-    mem_limit: 512m
+    mem_limit: ${MULTITAP_MEMORY_LIMIT:-512m}
     stop_grace_period: 15s
     logging:
       driver: json-file

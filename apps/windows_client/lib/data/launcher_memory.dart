@@ -114,17 +114,16 @@ abstract class LauncherMemory {
   Future<LauncherPreferences> load(String server);
   Future<void> save(String server, LauncherPreferences preferences);
 
-  /// Drops what an earlier client saved for "마우스 가두기", removed on
-  /// 2026-11-03 (마우스 잠금 is the one lock left); it is never read.
+  /// Drops what an earlier client saved for "마우스 가두기" (마우스 잠금 is
+  /// the one lock); it is never read.
   Future<void> forgetPointerConfinement();
 
   // "마우스 잠금" (formerly 게임 마우스) is not remembered: every connection
   // starts with it off. A `gameMouse` key an earlier
   // client left in session.json is ignored, and dropped with the above.
 
-  /// Whether the one-time "keeps running in the tray" notice was shown
-  /// (2026-10-27). Kept once for this PC user across servers; never sent to a
-  /// broker.
+  /// Whether the one-time "keeps running in the tray" notice was shown.
+  /// Kept once for this PC user across servers; never sent to a broker.
   Future<bool> loadTrayNoticeShown();
   Future<void> saveTrayNoticeShown();
 }

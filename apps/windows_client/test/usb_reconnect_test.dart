@@ -1,5 +1,5 @@
-// After a stream reconnect the USB devices shared before are offered again
-// (2026-11-02), and the window says in one line how it went, never silently.
+// After a stream reconnect the USB devices shared before are offered again,
+// and the window says in one line how it went, never silently.
 // UsbSession with the fakes of usb_redirection_test.dart; RemoteView with
 // memory sessions. No device, driver or window operation.
 import 'dart:convert';

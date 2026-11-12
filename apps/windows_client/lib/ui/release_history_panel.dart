@@ -182,8 +182,8 @@ class _ReleaseHistoryPanelState extends State<ReleaseHistoryPanel> {
 
   // --- selection and keys -----------------------------------------------------
 
-  // Grows a little faster than the text (2026-11-03: two lines at 200 %
-  // overflowed a 86 px row by 2 px).
+  // Grows a little faster than the text (at the text's own pace two lines
+  // at 200 % overflow a 86 px row by 2 px).
   double _rowExtent(BuildContext context) {
     final scale = MediaQuery.textScalerOf(context).scale(1);
     return (30 + 28 * scale + 4 * (scale - 1)).clamp(58.0, 124.0);

@@ -1,5 +1,5 @@
-// A broker update restarts the server: nginx answers 502 for a few seconds
-// (field diagnostics 2026-11-02). Fake brokers, sockets and media for the
+// A broker update restarts the server: nginx answers 502 for a few
+// seconds. Fake brokers, sockets and media for the
 // Windows screens; the loopback HTTP parsing and diagnostics cases are in
 // broker_gateway_recovery_test.dart (a widget binding fakes HttpClient).
 import 'dart:async';

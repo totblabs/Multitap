@@ -86,7 +86,7 @@ class _Fixture {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('login-submit'))); await tester.pumpAndSettle();
     expect(broker.logins, 1);
-    // 2단계 인증 is in 설정 (2026-11-11): the header's own ⚙ on Windows and Android.
+    // 2단계 인증 is in 설정: the header's own ⚙ on Windows and Android.
     await tester.tap(find.byKey(const Key('open-app-settings'))); await tester.pumpAndSettle();
     expect(find.byKey(const Key('account-mfa')), findsOneWidget);
     await tester.tap(find.byKey(const Key('account-mfa'))); await tester.pumpAndSettle();

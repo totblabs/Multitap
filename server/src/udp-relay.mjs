@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { ID_BYTES, TICKET_BYTES, ackDatagram, bindDatagram, counterNames, dropReasons } from './media-udp.mjs';
 import { localCandidate, udpPeerDirectAllowed } from './udp-direct.mjs';
+import { parseUdpRelays } from './udp-media.mjs';
 
 const BINDINGS = counterNames.indexOf('bindings');
 // /proc/net/udp row of the relay's port: rx_queue (bytes the kernel holds for it, in
@@ -30,8 +31,10 @@ function newLeg() {
 // Owns the worker from the broker's main thread. `live(sessionId)` answers
 // whether a session may still hold a binding.
 export class UdpRelay {
-  constructor({ port, host = '0.0.0.0', media = false, allowPeerDirect = false, stun = [], relays = { host: [], client: [] }, live, logger = console, ticketMs = 30000, sweepMs = 100, restartMs = 5000, sessionBytesPerSecond = 32 * 1024 * 1024, globalBytesPerSecond = 128 * 1024 * 1024, burstMs = 100 }) {
-    Object.assign(this, { media, relays, live, logger, ticketMs, restartMs });
+  // `derivedPort`: no relay list is configured and each leg is given the
+  // address it already reaches the broker at, on this UDP port (config.mjs).
+  constructor({ port, host = '0.0.0.0', media = false, allowPeerDirect = false, stun = [], relays = { host: [], client: [] }, derivedPort = null, hostRoute = null, live, logger = console, ticketMs = 30000, sweepMs = 100, restartMs = 5000, sessionBytesPerSecond = 32 * 1024 * 1024, globalBytesPerSecond = 128 * 1024 * 1024, burstMs = 100 }) {
+    Object.assign(this, { media, relays, derivedPort, hostRoute, live, logger, ticketMs, restartMs });
     this.allowPeerDirect = allowPeerDirect === true;
     this.limits = { port, host, sessionBytesPerSecond, globalBytesPerSecond, burstMs };
     this.counters = new SharedArrayBuffer(counterNames.length * Float64Array.BYTES_PER_ELEMENT);
@@ -68,7 +71,28 @@ export class UdpRelay {
     this.reported = true;
     this.logger.warn(JSON.stringify({ event: 'udp_relay_failed', code: /^[A-Z0-9_]{1,40}$/.test(error?.code ?? '') ? error.code : 'worker_error' }));
   }
-  get available() { return this.running && this.relays.host.length > 0 && this.relays.client.length > 0; }
+  get available() { return this.running && (this.derivedPort !== null || (this.relays.host.length > 0 && this.relays.client.length > 0)); }
+  // One leg's relay list. `origin` is the address that leg's own connection
+  // to the broker was admitted on. A configured list is the same for everyone.
+  // A derived one is that address's host on the published UDP port; a Host is
+  // first given the address Hosts inside the network reach the broker at
+  // (host-route-v1). Empty where no IPv4 endpoint follows from the address
+  // (an IPv6 literal): that session stays on WebSocket.
+  relaysFor(role, origin) {
+    if (this.derivedPort === null) return this.relays[role];
+    let name;
+    try { name = new URL(origin).hostname.toLowerCase().replace(/\.$/, ''); } catch { return []; }
+    const list = [];
+    for (const host of new Set([...(role === 'host' && this.hostRoute ? [this.hostRoute] : []), name])) {
+      try { list.push(...parseUdpRelays(host + ':' + this.derivedPort)); } catch { /* no endpoint for this address */ }
+    }
+    return list;
+  }
+  // For the administration console: what is configured, not what a session got.
+  describe() {
+    return { running: this.running, port: this.limits.port, derivedPort: this.derivedPort, media: this.media === true ? 'on' : this.media instanceof Set ? 'desktops' : 'off',
+      relays: { host: this.relays.host.map(row => ({ ...row })), client: this.relays.client.map(row => ({ ...row })) }, hostRoute: this.derivedPort !== null ? this.hostRoute : null };
+  }
   // A failed check must neither keep a binding nor throw into a timer.
   allowed(sessionId) { try { return !!this.live(sessionId); } catch { return false; } }
   // Null while the relay is down: the session simply stays on WebSocket.

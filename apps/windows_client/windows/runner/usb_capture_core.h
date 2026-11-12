@@ -80,9 +80,9 @@ class Api {
 inline constexpr uint32_t kBackAbsent = 1, kBackNotStarted = 2, kBackNoChild = 3, kBackProblemBase = 100;
 
 // USBD_STATUS values (usb.h) the mapping knows. Checked against the SDK's
-// usb.h by the native test (until 2026-11-02 INTERNAL_HC_ERROR held ERROR_BUSY's
-// value and TIMEOUT held INVALID_PARAMETER's, so every stall UsbDk reports on a
-// control pipe reached the VM as -EPROTO, which usbip-win2 turns into BTSTUFF).
+// usb.h by the native test (with INTERNAL_HC_ERROR on ERROR_BUSY's value and
+// TIMEOUT on INVALID_PARAMETER's, every stall UsbDk reports on a control pipe
+// reaches the VM as -EPROTO, which usbip-win2 turns into BTSTUFF).
 inline constexpr uint32_t kUsbdStall = 0xC0000004u, kUsbdHalted = 0xC0000030u, kUsbdOverrun = 0xC0000008u, kUsbdBufferOverrun = 0xC000000Cu, kUsbdBabble = 0xC0000012u,
     kUsbdCanceled = 0xC0010000u, kUsbdInternalHc = 0x80000800u, kUsbdTimeout = 0xC0006000u, kUsbdNoResponse = 0xC0000005u, kUsbdDeviceGone = 0xC0007000u,
     kUsbdInvalidParameter = 0x80000300u;

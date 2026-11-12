@@ -40,7 +40,6 @@ DesktopMachine _pc({
   powerStale: false,
   powerBusy: powerBusy,
   powerCanForceStop: true,
-  consoleRelayProtocol: 'rfb-none-v1',
   consolePreparation: const ConsolePreparationState(
     supported: true,
     available: true,
@@ -74,7 +73,6 @@ void main() {
     expect(machine.canReboot, isFalse);
     expect(machine.canStop, isFalse);
     expect(machine.canRecoverConsole, isFalse);
-    expect(machine.emergencyConsoleSupported, isFalse);
   });
 
   testWidgets(

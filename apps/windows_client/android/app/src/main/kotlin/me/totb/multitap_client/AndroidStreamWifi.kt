@@ -5,7 +5,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 
 /**
- * The Wi-Fi lock of a stream that is shown (WifiManager.WifiLock, 2026-11-10).
+ * The Wi-Fi lock of a stream that is shown (WifiManager.WifiLock).
  * Without one the Wi-Fi radio keeps its power save and background scans
  * while a stream runs, which shows as late packets in bursts.
  *

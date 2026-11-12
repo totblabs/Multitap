@@ -234,7 +234,7 @@ void main() {
     }
     await tester.tap(find.byKey(const Key('power-start-pve-149')));
     await tester.pumpAndSettle();
-    // 켜기 asks like the other power actions (2026-10-27).
+    // 켜기 asks like the other power actions.
     expect(find.text('데스크톱을 켤까요?'), findsOneWidget);
     expect(actions, isEmpty);
     await tester.tap(find.byKey(const Key('confirm-power-start-pve-149')));

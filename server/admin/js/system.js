@@ -302,8 +302,12 @@ function clientTransport(info) {
 export function serverInformation(ctx) {
   const info = ctx.state.serverInfo, data = ctx.state.data;
   const transport = clientTransport(info), consoleOrigin = globalThis.location.origin;
+  // 서버 다시 시작: only where the server says ending it starts it again (a Docker Compose install without an updater).
+  const restarting = !!ctx.state.serverRestart;
+  const restart = info?.restart?.supported === true || restarting ? disable(button(t('system.restart'), ctx.restartServer, 'secondary', 'refresh', { 'data-server-restart': '' }), restarting ? t('system.restarting') : null) : null;
   return [ctx.pageHeader({ title: t('common.14') }),
-    panel({ title: t('system.147'), className: 'server-facts', actions: [ctx.link(t('system.148'), 'updates', null, { class: 'button quiet' })] }, facts([
+    panel({ title: t('system.147'), className: 'server-facts', actions: [restart, ctx.link(t('system.148'), 'updates', null, { class: 'button quiet' })].filter(Boolean) },
+      restarting ? el('p', { role: 'status', class: 'field-hint', 'data-server-restarting': '' }, t('system.restarting')) : null, facts([
       [t('system.149'), transport ? el('span', { class: 'mono-value' }, transport.publicOrigin) : ctx.state.serverInfoLoading ? t('common.30') : t('common.17'), transport ? t('system.transport', { scheme: transport.scheme === 'http' ? t('system.25') : t('system.150'), port: transport.port }) : t('system.153')],
       consoleOrigin !== transport?.publicOrigin ? [t('system.154'), el('span', { class: 'mono-value', title: t('system.155') }, consoleOrigin)] : null,
       [t('system.156'), info?.version ? el('span', { class: 'mono-value' }, info.version) : ctx.state.serverInfoLoading ? t('common.30') : t('common.17')],

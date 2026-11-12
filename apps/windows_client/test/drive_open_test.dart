@@ -134,8 +134,8 @@ void main() {
       });
     },
   );
-  // Review 2026-11-12: a failed 열기 stayed in the panel after a later
-  // action had succeeded.
+  // A failed 열기 must not stay in the panel after a later action has
+  // succeeded.
   testWidgets('what a failed open left goes with the next action in the panel', (
     t,
   ) async {

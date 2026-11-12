@@ -23,10 +23,11 @@ export function negotiateUdpMedia(requested, host, tracks, udp) {
   return requested === true && !tracks && udp?.available === true && udpMediaCapability(host?.capabilities);
 }
 
-// MULTITAP_UDP_MEDIA: `on` for every desktop, or a comma separated list of desktop
-// ids so a rollout can start with one VM. Anything else keeps media on WebSocket.
+// MULTITAP_UDP_MEDIA: `on` for every desktop, `off` (or nothing) for none, or a
+// comma separated list of desktop ids so a rollout can start with one VM.
 export function parseUdpMediaScope(value) {
   if (value === 'on') return true;
+  if (value === 'off') return false;
   return value ? new Set(value.split(',')) : false;
 }
 

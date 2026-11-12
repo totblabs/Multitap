@@ -264,8 +264,8 @@ void main() {
           // _copy selects the key "by keyboard", and the key's own text then
           // scrolls its selection into view over 100 ms. Let that end before
           // scrolling on: started in the same frame it pulled the dialog
-          // back up, which the taller field (its name is above it since the
-          // 2026-11-10 form parts) no longer survived by 3 px.
+          // back up, which the taller field (its name is above it) does not
+          // survive by 3 px.
           await tester.pumpAndSettle();
           await tester.ensureVisible(find.byKey(const Key('mfa-account-factor'))); await tester.pumpAndSettle();
           expect(find.byKey(const Key('mfa-account-factor')).hitTestable(), findsOneWidget);

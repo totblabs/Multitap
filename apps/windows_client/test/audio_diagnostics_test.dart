@@ -14,9 +14,9 @@ import 'audio_stats_test.dart' show AudioMedia, audio, native;
 import 'remote_session_test.dart' show SessionSocket, info, packet;
 import 'session_recovery_test.dart' show ManualClock;
 
-// 2026-11-03: Opus made Android connects slower, and no row could say which
-// sessions had Opus, how much it concealed, whether the player had failed or
-// whether a Windows decoder was prestarted. Fixed numbers only.
+// The rows say which sessions had Opus, how much it concealed, whether the
+// player had failed and whether a Windows decoder was prestarted (Opus can
+// make Android connects slower). Fixed numbers only.
 void main() {
   test('Opus concealment is a per-reading change, also across Android sessions; '
       'an engine that does not count it reports nothing', () {

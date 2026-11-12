@@ -541,9 +541,9 @@ internal inline fun <T> dropStaleNonReference(
  *
  * The start of each stream goes through [start] first (audio-start-cut-v1):
  * the audio that waited while the stream was set up arrives at once, and
- * written as it came it filled the track to the cap with its oldest part and
- * the rest was refused packet by packet (6-14 overruns and 60-140 ms lost at
- * every Android start, 2026-11-02), leaving the stale part queued for ~8 s of
+ * written as it comes it fills the track to the cap with its oldest part and
+ * the rest is refused packet by packet (6-14 overruns and 60-140 ms lost at
+ * every start), leaving the stale part queued for ~8 s of
  * one-packet trims. [start] holds packets until one arrives on time (at least
  * half a packet after the one before) with [target] frames held, keeping only
  * the newest [target]: the older backlog is dropped in one cut, counted as
@@ -587,7 +587,7 @@ internal class AndroidAudioTrim(
      * The level the track needs queued before it plays (its start threshold,
      * or before API 31 its whole effective buffer), as the track reported it.
      * The cap never stays below it: a track that waits for more than may be
-     * queued never starts (2026-11-11, audio-path-v1).
+     * queued never starts (audio-path-v1).
      */
     var startLevel = 0L
     val cap get() = maxOf(wantedCap, startLevel)
@@ -729,7 +729,7 @@ internal fun audioBufferFollowsCap(api: Int, startThresholdApplied: Boolean): Bo
  * A track that is written to and does not play: its played position stays
  * the same for [stuckNanos] while as much is queued as the trim allows
  * ([full]). AndroidMedia then makes the track again with its buffer
- * following the cap (2026-11-11): whatever level the platform waits for, the
+ * following the cap: whatever level the platform waits for, the
  * new track can reach it. A silent VM writes nothing and is never seen here.
  */
 internal class AudioStartWatch(private val stuckNanos: Long = 1_000_000_000L) {

@@ -1,5 +1,5 @@
-// Android shares the server-restart wait (field diagnostics 2026-11-02: nginx
-// answers 502 while a broker update restarts it). Fake broker, store, relay
+// Android shares the server-restart wait (nginx answers 502 while a broker
+// update restarts it). Fake broker, store, relay
 // socket and native media only.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

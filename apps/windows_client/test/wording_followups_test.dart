@@ -1,5 +1,5 @@
-// Wording that needed code (2026-11-10 audit follow-ups): a text that is only
-// true for one of the states it was shown in.
+// Wording that needs code: a text that is only true for one of the states
+// it is shown in.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/models/desktop_machine.dart';

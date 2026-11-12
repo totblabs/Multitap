@@ -369,7 +369,7 @@ void main() {
             .onChanged,
         isNull,
       );
-      // 확인 is the grey button since 2026-11-10 (it only closes the guide).
+      // 확인 is the grey button (it only closes the guide).
       final confirm = tester.widget<TextButton>(
         find.byKey(const Key('confirm-session-guide')),
       );

@@ -364,8 +364,7 @@ void main() {
     await tap(tester, 'confirm-android-exit');
     expect(calls, ['close']);
     // 완전 종료 ends the sign-in at the server first: left alive, the next
-    // sign-in on the same phone asked to sign out "elsewhere" (inspection,
-    // 2026-11-12).
+    // sign-in on the same phone would ask to sign out "elsewhere".
     expect(broker.calls.where((call) => call == 'logout'), hasLength(1));
     expect(signedOutBeforeClose, isTrue);
     expect(broker.calls.where((call) => call.startsWith('power:')), isEmpty);
@@ -399,8 +398,8 @@ void main() {
     await disposeApp(tester);
   });
 
-  // The sign-in button showed "로그인 중…" until the sign-out was answered
-  // (inspection, 2026-11-12).
+  // The sign-in button must not show "로그인 중…" until the sign-out is
+  // answered.
   testWidgets('로그아웃 while the server has not answered: the sign-in button '
       'waits without saying it is signing in', (tester) async {
     final broker = _SilentLogoutBroker([vm(id: 'pve-101', name: '데스크톱 1')]);

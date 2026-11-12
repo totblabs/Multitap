@@ -130,7 +130,7 @@ void main() {
     },
   );
 
-  // 2026-11-09 edge-case audit: a takeover says who; the code stays
+  // A takeover says who; the code stays
   // taken_over (no automatic reconnect, an ordinary end).
   testWidgets('A takeover end names the other account', (t) async {
     final socket = _ClosingSocket(), media = RecoveryMedia();

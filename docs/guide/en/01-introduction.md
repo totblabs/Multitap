@@ -2,7 +2,7 @@
 
 [Contents](README.md) · [Next: Server install](02-server-install.md) · [한국어](../01-소개.md)
 
-Multitap for Proxmox VE is a self-hosted Proxmox VDI.
+Multitap for Proxmox VE is a self-hosted VDI for Proxmox VE.
 With a server you run yourself, you use the Windows VMs of Proxmox VE from a PC or a phone.
 An administrator assigns desktops, and users connect to them from the app.
 
@@ -99,7 +99,7 @@ Creating a Multitap ID does not create a Windows account.
 The administrator gives users the server address and their Multitap account.
 Never give users a Proxmox account or API token.
 
-> `vdi.example.com` and `192.0.2.10` in this guide are examples for documents.
-> Typed as they are, they do not reach your server. Replace them with your real addresses.
+> `vdi.example.com` and `10.0.0.10` in this guide are examples.
+> Replace them with the addresses of your own server.
 
 **Ready?** When you can tell the PC, the desktop and the Linux server apart, and can sign in to each of them, go to [chapter 2](02-server-install.md).

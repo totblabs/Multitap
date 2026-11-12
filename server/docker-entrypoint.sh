@@ -21,4 +21,21 @@ esac
 
 # keep preserves existing accounts; an empty volume gets restricted admin/admin.
 node /app/src/bootstrap.mjs keep
-exec "$@"
+
+# The server runs as a child and is started again, in this same container,
+# when it ends with exit code 75: that is how it applies a saved change of its
+# own access settings (src/self-access.mjs). Any other end is the container's.
+child=
+trap 'if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null || true; fi' TERM INT
+while :; do
+  "$@" &
+  child=$!
+  code=0
+  wait "$child" || code=$?
+  # A forwarded signal interrupts wait: wait for the server's own exit.
+  while kill -0 "$child" 2>/dev/null; do
+    code=0
+    wait "$child" || code=$?
+  done
+  [ "$code" -eq 75 ] || exit "$code"
+done

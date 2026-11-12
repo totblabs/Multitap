@@ -290,8 +290,8 @@ void main() {
   });
 
   for (final edge in [AndroidBubbleEdge.right, AndroidBubbleEdge.bottom]) {
-    // At 200 % the labels used to double, break between syllables ("포인 / 터",
-    // "키보 / 드") and push their icons out (inspection, 2026-11-12). The
+    // At 200 % the labels would double, break between syllables ("포인 / 터",
+    // "키보 / 드") and push their icons out. The
     // cells follow the text size up to 130 %: one line, with the icon.
     testWidgets('rail labels keep one line and their icon at 200% on $edge', (
       tester,

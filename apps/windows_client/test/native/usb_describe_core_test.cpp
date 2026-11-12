@@ -87,7 +87,7 @@ void storage() {
   same(DescribeOne(stickDevice(L"A1B2", {volume(L"백업", L"")})).title, "백업 · 드라이브 문자 없음", "labelled, no letter");
   same(DescribeOne(stickDevice(L"A1B2", {volume(L"", L"")})).title, "USB 드라이브 · 드라이브 문자 없음", "no label, no letter");
   same(DescribeOne(stickDevice(L"A1B2", {})).title, "USB 드라이브 · 드라이브 문자 없음", "a disk without any volume (RAW or still mounting)");
-  // 2026-10-27 field test: a stick with no volume (or only one Windows has no file system for) has no drive the VM could show either.
+  // A stick with no volume (or only one Windows has no file system for) has no drive the VM could show either.
   require(DescribeOne(stickDevice(L"A1B2", {})).noReadableDrive, "a disk without any volume has no readable drive");
   require(DescribeOne(stickDevice(L"A1B2", {volume(L"", L"", 31000000000ull, false, L"")})).noReadableDrive, "a volume without a known file system has no readable drive");
   require(!DescribeOne(stickDevice(L"A1B2", {volume(L"백업", L"")})).noReadableDrive && !DescribeOne(stickDevice(L"A1B2", {volume(L"X", L"H")})).noReadableDrive, "a formatted volume (with or without a letter) is readable");

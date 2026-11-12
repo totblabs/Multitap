@@ -47,14 +47,14 @@ void main() {
       );
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
-      // No virtual-monitor choice (2026-10-26): the request keeps the
+      // No virtual-monitor choice: the request keeps the
       // VM's one active output.
       expect(find.textContaining('가상 화면'), findsNothing);
       await tester.tap(find.byKey(const Key('apply-stream-settings')));
       await tester.pumpAndSettle();
       expect(result!.monitor, '1');
       expect(result!.fps, 30);
-      // The settings always ask for sound (2026-11-11).
+      // The settings always ask for sound.
       expect(result!.audio, true);
       expect(tester.takeException(), isNull);
     },

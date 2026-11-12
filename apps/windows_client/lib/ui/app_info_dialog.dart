@@ -239,8 +239,8 @@ class _AppInfoDialogState extends State<AppInfoDialog> {
     final scale = MediaQuery.textScalerOf(context).scale(1);
     // The information and the server are as large as what they say (two or
     // three rows in a 640 px dialog). Only the license browser, a list beside
-    // a long text, takes the wide dialog and the window's height
-    // (2026-11-10: a 960 × 686 dialog held two rows).
+    // a long text, takes the wide dialog and the window's height (a
+    // 960 × 686 dialog would hold two rows).
     final browser = _tab == AppInfoTab.licenses;
     final browserHeight = (MediaQuery.sizeOf(context).height - 94 - 112 * scale)
         .clamp(160.0, 560.0)

@@ -15,7 +15,7 @@ import 'session_tools.dart';
 import 'usb_panel.dart';
 import '../l10n/l10n.dart';
 
-/// The session bar's panels (2026-11-10): 화면, 폴더·USB and 설정 each drop
+/// The session bar's panels: 화면, 폴더·USB and 설정 each drop
 /// down from their button, dark like the bar in either app appearance. A
 /// window too small for a panel gets the same content as a dialog. [popups]
 /// tracks them with the bar's menus, so a change under them (a resize,

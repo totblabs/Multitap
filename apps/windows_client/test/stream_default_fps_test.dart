@@ -104,7 +104,7 @@ void main() {
       final quality = AndroidStreamQuality.parse(saved);
       expect(quality.fps, fps);
       expect(quality.options.bitrate, 12000000);
-      // An earlier version's 소리 끔 is read past (2026-11-11): sound is always on.
+      // An earlier version's 소리 끔 is read past: sound is always on.
       expect(quality.options.audio, isTrue);
       expect(quality.encode(), contains('"audio":true'));
       expect(AndroidStreamQuality.parse(quality.encode()).fps, fps);
@@ -252,7 +252,7 @@ void main() {
     'Android fresh pre-connect settings start at 60 and send explicit 30',
     (tester) async {
       final broker = await android(tester);
-      // ▾ beside the main button holds 화질 옵션, as on Windows (2026-11-03).
+      // ▾ beside the main button holds 화질 옵션, as on Windows.
       await tester.ensureVisible(find.byKey(const Key('stream-modes-pve-149')));
       await tester.tap(find.byKey(const Key('stream-modes-pve-149')));
       await tester.pumpAndSettle();

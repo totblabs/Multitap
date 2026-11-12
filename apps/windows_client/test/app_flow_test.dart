@@ -96,7 +96,7 @@ void main() {
       await preview(tester);
       await account(tester, 'open-settings');
       await tester.pumpAndSettle();
-      // 2026-11-09: Multitap / 서버 / 오픈소스 라이선스 sections; the
+      // Multitap / 서버 / 오픈소스 라이선스 sections; the
       // preview's 서버 section says it is not connected to a real server.
       expect(find.byKey(const Key('app-info-facts')), findsOneWidget);
       await tester.tap(find.text('서버').last);

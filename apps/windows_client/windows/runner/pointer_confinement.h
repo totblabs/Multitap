@@ -1,7 +1,7 @@
 #pragma once
 // The picture rectangle and crash release for the mouse lock's clip
-// (relative_mouse.h). The separate mouse-confine mode was removed on
-// 2026-11-03. ASCII only: some QA targets build without /utf-8.
+// (relative_mouse.h). There is no separate mouse-confine mode.
+// ASCII only: some QA targets build without /utf-8.
 #include <windows.h>
 
 #include <algorithm>

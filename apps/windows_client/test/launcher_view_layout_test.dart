@@ -38,8 +38,8 @@ void main() {
             final selector = find.byKey(const Key('desktop-previews'));
             final selectorRect = t.getRect(selector);
             expect(selectorRect.left, greaterThanOrEqualTo(0), reason: label);
-            // One height with the title row's other buttons (2026-11-03:
-            // 미리보기 used to stand taller than 새로고침).
+            // One height with the title row's other buttons (미리보기 does
+            // not stand taller than 새로고침).
             expect(
               selectorRect.height,
               closeTo(

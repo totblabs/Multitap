@@ -2,7 +2,7 @@
 
 [한국어](../README.md)
 
-This guide is for people using Multitap for the first time.
+These chapters are the detailed reference, with every screen and setting. If you are installing for the first time, the [guide on the website](https://multitap.me/en/guide/) is shorter: nine chapters from install to the first connection. Come back here when you need the detail.
 Below, choose whether you **received an account** or **are installing it for the first time**.
 
 ## I received an account — connect to a desktop
@@ -66,7 +66,7 @@ With only the server installed, no desktop screen appears yet.
 
 ## Examples in this guide
 
-- `vdi.example.com`, `pve.example.com` and the account and desktop names on the screens are all examples. Use your own addresses and accounts.
+- `vdi.example.com`, `pve.example.com`, `10.0.0.10` and the account and desktop names on the screens are all examples. Use your own addresses and accounts.
 - The screen images are renders of the real apps and admin console with example data. The states and versions shown are examples.
 - The list of example screens is in the [image notes](../images/README.md).
 

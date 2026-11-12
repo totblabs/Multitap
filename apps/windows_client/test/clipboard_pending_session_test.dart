@@ -760,8 +760,8 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
-  // Field 2026-11-02: a VM copy failed at its binding (clipboard_changed) and
-  // the next automatic PC capture read our own dead placeholder back
+  // A VM copy that fails at its binding (clipboard_changed) leaves our own
+  // dead placeholder for the next automatic PC capture to read back
   // (clipboard_read_failed). Returning to the window within the grace must
   // neither take our own placeholder for a PC copy nor re-arm the watch.
   Future<void> deliverText(

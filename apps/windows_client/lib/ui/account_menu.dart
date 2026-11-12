@@ -160,8 +160,8 @@ typedef AccountMenuButtonBuilder = Widget Function(
 
 /// The signed-in account's menu, one design on Windows and Android: an
 /// identity card (who and where), then 앱 (정보, 로그 보기), 모양 (테마, 배경),
-/// 로그아웃 and 완전 종료 on its own (2026-11-11: 언어, 자동 로그아웃, 2단계
-/// 인증 and 비밀번호 변경 moved to 설정, [showAppSettings]), each group set
+/// 로그아웃 and 완전 종료 on its own (언어, 자동 로그아웃, 2단계 인증 and
+/// 비밀번호 변경 are in 설정, [showAppSettings]), each group set
 /// apart by a hairline. Icons are neutral; only the rows that end what is
 /// open are red. Nothing is highlighted on open: a menu opened from the
 /// keyboard focuses its first row and shows the focus ring, one opened by
@@ -236,7 +236,7 @@ class _AccountMenuState extends State<AccountMenu> {
     // takes focus, as in a native menu. A mouse click also leaves Flutter in
     // its keyboard highlight mode, so the press itself is what tells them
     // apart; a click or tap leaves focus on the button until ↓ or ↑
-    // (2026-11-03: the first row looked selected on every open).
+    // (otherwise the first row looks selected on every open).
     final keyboard = HardwareKeyboard.instance.logicalKeysPressed.any(
       _activationKeys.contains,
     );

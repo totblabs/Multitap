@@ -39,7 +39,7 @@ class StreamSettingsBody extends StatefulWidget {
 
   /// The Host reported that the desktop has no playback device: only then
   /// the one line saying so shows (no action: the administrator adds the
-  /// device in Proxmox, 2026-11-10).
+  /// device in Proxmox).
   final bool audioDeviceMissing;
 
   /// The request the current choices make, after every change.
@@ -75,7 +75,7 @@ class StreamSettingsBody extends StatefulWidget {
     maxHeight: StreamOptions.codecMaxHeight,
     fps: fps,
     bitrate: mbps * 1000000,
-    // Always sound (2026-11-11): an earlier 소리 끔 choice is not carried on.
+    // Always sound: an earlier 소리 끔 choice is not carried on.
     audio: true,
     monitor: base.monitor,
     bitrateMode: auto ? StreamBitrateMode.auto : StreamBitrateMode.fixed,
@@ -444,8 +444,8 @@ class _StreamSettingsDialogState extends State<StreamSettingsDialog> {
 const streamSettingsPanelWidth = 360.0, streamSettingsPanelMinHeight = 300.0;
 
 /// Opens the in-session settings as a panel that drops down from the session
-/// bar's button at [anchor] (2026-10-26: a combo-style panel, not a centred
-/// dialog). It closes on an outside click, Escape, or when another menu or
+/// bar's button at [anchor] (a combo-style panel, not a centred dialog).
+/// It closes on an outside click, Escape, or when another menu or
 /// dialog opens; 재연결 applies the changed choices (it stays off until
 /// something changed). Falls back to [StreamSettingsDialog] when the panel
 /// cannot fit, e.g. a narrow window. Resolves to the options to reconnect

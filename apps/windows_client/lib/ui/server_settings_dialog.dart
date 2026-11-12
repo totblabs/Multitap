@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/broker_probe.dart';
 import '../data/client_settings.dart';
 import '../data/broker_transport.dart';
+import '../data/server_save_log.dart';
 import 'broker_transport_controls.dart';
 import 'app_dialog.dart';
 import 'app_theme.dart';
@@ -156,14 +157,18 @@ class _ServerSettingsFormState extends State<ServerSettingsForm> {
       _error = null;
       _saveFailed = false;
     });
+    var stage = ServerSaveStage.save;
     try {
       await widget.onSave(uri);
+      stage = ServerSaveStage.keep;
       BrokerTransport.stored(uri);
       if (mounted) {
         _setSaving(false);
         widget.onClose(true);
       }
-    } catch (_) {
+    } catch (error) {
+      // The form only says it could not save; the log keeps why.
+      recordServerSaveFailure(error, stage);
       if (mounted) {
         setState(() {
           _saveFailed = true;

@@ -1,5 +1,5 @@
-// The tile menus on Android are the Windows tile's (DesktopMenu, by finger,
-// 2026-11-03): an open menu belongs to its tile. It goes with the tile, a
+// The tile menus on Android are the Windows tile's (DesktopMenu, by
+// finger): an open menu belongs to its tile. It goes with the tile, a
 // row whose permission is gone is greyed in place and does nothing, and a
 // dialog opened meanwhile stays.
 import 'dart:async';

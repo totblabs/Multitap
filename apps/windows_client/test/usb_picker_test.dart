@@ -662,8 +662,8 @@ void main() {
       },
     );
 
-    // Review 2026-11-12: "연결할 USB 장치가 없어요." stood right above "기타 USB
-    // 장치 (1)", and a connected printer was hidden in the closed fold.
+    // "연결할 USB 장치가 없어요." must not stand right above "기타 USB 장치
+    // (1)", nor a connected printer hide in the closed fold.
     testWidgets(
       '기타 opens by itself while it holds the only devices or a connected one, and can still be folded',
       (tester) async {

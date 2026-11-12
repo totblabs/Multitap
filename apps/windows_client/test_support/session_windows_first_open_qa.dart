@@ -98,7 +98,6 @@ Future<void> main(List<String> arguments) async {
       final first = await _wait(1);
       final checks = {
         'freshAuthenticationAlive': first['childAuthenticationRetired'] == 0,
-        'freshConsoleAcquireEligible': first['childConsoleAcquireEligible'] == 1,
         'firstFrameCompleted': first['childFirstFrames'] == 1,
         'actualShowGateEligible': first['childShowEligible'] == 1,
       };
@@ -109,7 +108,6 @@ Future<void> main(List<String> arguments) async {
       final reused = await _wait(1);
       _check(
         reused['childAuthenticationRetired'] == 0 &&
-            reused['childConsoleAcquireEligible'] == 1 &&
             reused['childShowEligible'] == 1,
         'dedup_must_keep_same_live_owner',
       );

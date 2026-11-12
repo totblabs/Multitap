@@ -1,6 +1,6 @@
 // The picture rectangle the mouse lock clips to (pointer_confinement.h), pure
-// arithmetic: no window, no clip, no input. The separate mouse-confine mode
-// and its Ctrl+Alt chord were removed on 2026-11-03.
+// arithmetic: no window, no clip, no input. There is no separate
+// mouse-confine mode and no Ctrl+Alt chord.
 #include "pointer_confinement.h"
 
 #include <climits>

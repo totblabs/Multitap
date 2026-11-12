@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <climits>
+#include <limits>
 #include <algorithm>
 #include <flutter/standard_method_codec.h>
 #include <flutter/standard_message_codec.h>
@@ -389,7 +390,7 @@ void FlutterWindow::ConfigureSessionWindows() {
     if (call.method_name() == "openConsoleInLauncher") {
       // A session window cannot open the Console WebView itself (it belongs to the
       // launcher and its sign-in); it asks the launcher, which opens it for this VM
-      // after its own checks (2026-11-09 edge-case audit: signed out/locked VM).
+      // after its own checks (a signed out or locked VM).
       const auto* args = std::get_if<M>(call.arguments());
       if (!session_owner_ || !session_owner_->GetHandle() || !session_owner_->sessions_channel_ ||
           session_owner_->authentication_retired_) {
@@ -429,13 +430,12 @@ void FlutterWindow::ConfigureSessionWindows() {
     // Compiled solely into the isolated no-network QA executable.
     if (call.method_name() == "qaSnapshot") {
       int32_t windows = 0, engines = flutter_controller_ ? 1 : 0;
-      int32_t retired = 0, console_eligible = 0, frames = 0, show_eligible = 0;
+      int32_t retired = 0, frames = 0, show_eligible = 0;
       for (const auto& child : session_windows_) {
         if (child->GetHandle()) ++windows;
         if (child->flutter_controller_) ++engines;
         if (!child->GetHandle()) continue;
         if (child->authentication_retired_) ++retired;
-        if (child->console_input_owner_.CanAcquire(std::string(32, 'a'), 1, false)) ++console_eligible;
         if (child->first_frame_completed_) ++frames;
         if (child->first_frame_completed_ && !child->authentication_retired_ &&
             !authentication_retired_ && child->authentication_owner_ == authentication_owner_)
@@ -451,7 +451,6 @@ void FlutterWindow::ConfigureSessionWindows() {
           {V("parentFirstFrameCompleted"), V(first_frame_completed_)},
           {V("updateRevealRequests"), V(qa_update_reveal_requests_)},
           {V("childAuthenticationRetired"), V(retired)},
-          {V("childConsoleAcquireEligible"), V(console_eligible)},
           {V("childFirstFrames"), V(frames)},
           {V("childShowEligible"), V(show_eligible)}}));
       return;
@@ -865,29 +864,16 @@ bool FlutterWindow::OnCreate() {
         (NoticeText(&event,"event")=="key" || NoticeText(&event,"event")=="text")) AuthenticationHuman();
     if(authentication_retired_ && NoticeText(&event,"type")=="input")return;
     if(NoticeText(&event,"type")=="capture.released")relative_mouse_.End("focus");
-    if(console_input_owner_.valid()) {
-      const auto stamp=console_input_owner_.stamp();
-      const auto type=NoticeText(&event,"type");
-      if(type=="input.reset"||type=="capture.released")console_input_owner_.ResetCapture();
-      if(type=="input"&&!console_input_owner_.captured())return;
-      if(console_input_channel_) {
-        using V=flutter::EncodableValue;
-        event[V("owner")]=V(stamp.owner);event[V("generation")]=V(stamp.generation);event[V("lease")]=V(stamp.lease);
-        console_input_channel_->InvokeMethod("event",std::make_unique<V>(std::move(event)));
-      }
-      return;
-    }
     const auto lease=remote_media_?remote_media_->Lease():0;
     if (remote_sink_ && lease > 0) {
       event[flutter::EncodableValue("lease")] = flutter::EncodableValue(lease);
       remote_sink_->Success(flutter::EncodableValue(std::move(event)));
     }
   });
-  ConfigureConsoleInput();
   // cursor-v1: presents only while keyboard capture is active, over the
   // picture whose Flutter cursor is `none` (cursor_presenter.h).
   cursor_presenter_ = std::make_unique<multitap::CursorPresenter>(
-      [this] { return remote_input_ && remote_input_->captured() && !console_input_owner_.valid(); });
+      [this] { return remote_input_ && remote_input_->captured(); });
   cursor_presenter_->Attach(flutter_controller_->view()->GetNativeWindow());
   // cursor-echo-v1: a pinned 게임 마우스 pointer stands on each echoed VM position.
   cursor_presenter_->SetPin([this](POINT screen) { return relative_mouse_.Pin(screen); });
@@ -900,7 +886,7 @@ bool FlutterWindow::OnCreate() {
       [this](const auto*, auto sink) -> std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>> {
         remote_sink_ = std::move(sink); return nullptr;
       }, [this](const auto*) -> std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>> {
-        if(!console_input_owner_.BlocksOtherStart())remote_input_->Capture(nullptr, false); remote_sink_.reset(); return nullptr;
+        remote_input_->Capture(nullptr, false); remote_sink_.reset(); return nullptr;
       }));
   remote_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       flutter_controller_->engine()->messenger(), "multitap/remote",
@@ -1046,7 +1032,6 @@ bool FlutterWindow::OnCreate() {
       const auto* text_field = multitap::MediaField(*args, "textInput");
       const auto* text_enabled = text_field ? std::get_if<bool>(text_field) : nullptr;
       if (text_field && !text_enabled) { result->Error("invalid_arguments", "Text input flag must be boolean."); return; }
-      if(*enabled&&console_input_owner_.BlocksOtherStart()){result->Error("input_busy","Console owns input.");return;}
       bool accepted=false;const HRESULT hr=remote_media_->Capture(lease,[&]{
         // Configure only the lease admitted by the media owner. A stale call
         // must never change another session's Unicode capture policy.
@@ -1060,7 +1045,6 @@ bool FlutterWindow::OnCreate() {
     }
     if(call.method_name()=="startTracks"){
       if(stream_size_queries_)stream_size_queries_->Retire();
-      if(console_input_owner_.BlocksOtherStart()){result->Error("input_busy","Console view owns this window.");return;}
       multitap::tracks::Configuration configuration;
       if(!multitap::TrackConfiguration(multitap::MediaField(*args,"configuration"),configuration)){result->Error("invalid_stream","Invalid independent output configuration.");return;}
       // The "hardware decoding" setting (default on); false keeps the CPU path.
@@ -1098,7 +1082,6 @@ bool FlutterWindow::OnCreate() {
     }
     if (call.method_name() == "start") {
       if(stream_size_queries_)stream_size_queries_->Retire();
-      if(console_input_owner_.BlocksOtherStart()){result->Error("input_busy","Console view owns this window.");return;}
       auto integer = [args](const char* key) -> int64_t {
         auto it = args->find(flutter::EncodableValue(key)); if (it == args->end()) return 0;
         if (auto* value = std::get_if<int32_t>(&it->second)) return *value;
@@ -1479,8 +1462,7 @@ void FlutterWindow::OnDestroy() {
   retire(sessions_channel_); retire(close_channel_); retire(window_channel_);
   retire(clipboard_channel_); retire(remote_channel_); retire(drive_channel_); retire(usb_channel_);
   retire(input_channel_); retire(credential_channel_); retire(relative_channel_);
-  retire(print_channel_); retire(transfer_notice_channel_); retire(console_input_channel_);
-  RetireConsoleInput();console_input_owner_.Close();console_input_channel_.reset();
+  retire(print_channel_); retire(transfer_notice_channel_);
   relative_channel_.reset();
   if (GetHandle()) {
     KillTimer(GetHandle(), kSessionCloseTimer);
@@ -1708,7 +1690,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     CheckSessionWindowsClosed();
     return 0;
   }
-  // The app asks in its own dialog (2026-10-26: every exit is confirmed) and
+  // The app asks in its own dialog (every exit is confirmed) and
   // is told whether remote windows would close too.
   if (message == WM_CLOSE && !session_owner_ && close_guard_.BlocksClose()) {
     if (close_channel_) {
@@ -1765,10 +1747,10 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   // questions (no remote session is open; the update was the confirmed step).
   if(message==multitap::ProductUpdateTask::close_message){
     if(!session_owner_&&update_worker_&&update_worker_->Busy()){
-      // 2026-11-09: with a remote window open this used to stay open, and the
-      // installer then terminated the app mid-stream (mouse lock, cursor and
-      // pending clipboard left behind for the relaunched version). Now every
-      // remote window closes through its normal cleanup first; the dashboard
+      // With a remote window open, staying open would let the installer
+      // terminate the app mid-stream (mouse lock, cursor and pending
+      // clipboard left behind for the relaunched version). So every remote
+      // window closes through its normal cleanup first; the dashboard
       // closes when the last one is gone (CheckSessionWindowsClosed).
       if(HasSessionWindows()){close_for_update_=true;if(!sessions_closing_)RequestSessionWindowsClose("application_close",false);}
       else{ShowWindow(hwnd,SW_HIDE);DestroyWindow(hwnd);}
@@ -1970,65 +1952,6 @@ void FlutterWindow::DeliverThumbnails() {
   }
 }
 
-void FlutterWindow::RetireConsoleInput() {
-  if(!console_input_owner_.valid())return;
-  const auto stamp=console_input_owner_.stamp();
-  // Reset/up is delivered with the retiring stamp before it is invalidated.
-  if(remote_input_)remote_input_->Capture(nullptr,false);
-  console_input_owner_.Release(stamp);
-}
-
-void FlutterWindow::ConfigureConsoleInput() {
-  using V=flutter::EncodableValue;using M=flutter::EncodableMap;
-  console_input_channel_=std::make_unique<flutter::MethodChannel<V>>(
-    flutter_controller_->engine()->messenger(),"multitap/console-input",&flutter::StandardMethodCodec::GetInstance());
-  console_input_channel_->SetMethodCallHandler([this](const auto& call,auto result){
-    const auto* args=std::get_if<M>(call.arguments());
-    const auto owner=NoticeText(args,"owner");const auto generation=NoticeNumber(args,"generation");
-    if(!args||!multitap::ConsoleInputOwnership::ValidOwner(owner)||!generation||*generation<1||*generation>INT32_MAX){
-      result->Error("invalid_arguments","Console input identity required.");return;
-    }
-    const auto reply=[&](const multitap::ConsoleInputStamp& stamp,bool accepted){
-      result->Success(V(M{{V("protocol"),V("console-input-v1")},{V("owner"),V(owner)},
-        {V("generation"),V(*generation)},{V("lease"),V(stamp.lease)},{V("accepted"),V(accepted)},
-        {V("captured"),V(accepted&&console_input_owner_.Current(stamp)&&console_input_owner_.captured())}}));
-    };
-    const bool other=remote_media_&&remote_media_->Lease()>0;
-    if(call.method_name()=="acquire") {
-      if(!session_owner_||!session_bootstrapped_||!session_ready_||session_destroyed_||session_teardown_in_progress_||!console_input_owner_.CanAcquire(owner,*generation,other)){
-        reply({owner,*generation,0},false);return;
-      }
-      RetireConsoleInput();
-      const auto stamp=console_input_owner_.Acquire(owner,*generation,other);
-      reply(stamp,stamp.lease>0);return;
-    }
-    if(call.method_name()=="retireView") {
-      if(!console_input_owner_.CanRetireView(owner,*generation)){reply({owner,*generation,0},false);return;}
-      RetireConsoleInput();console_input_owner_.RetireView(owner,*generation);reply({owner,*generation,0},true);return;
-    }
-    const auto lease=NoticeNumber(args,"lease");
-    const multitap::ConsoleInputStamp stamp{owner,*generation,lease?*lease:0};
-    if(!console_input_owner_.Current(stamp)){reply(stamp,false);return;}
-    if(call.method_name()=="release") {
-      RetireConsoleInput();reply(stamp,true);return;
-    }
-    if(call.method_name()=="capture") {
-      const auto enabledField=multitap::MediaField(*args,"enabled");const auto* enabled=enabledField?std::get_if<bool>(enabledField):nullptr;
-      if(!enabled){result->Error("invalid_arguments","Capture flag required.");return;}
-      const auto view=flutter_controller_?flutter_controller_->view()->GetNativeWindow():nullptr;
-      const auto focused=GetFocus();
-      const bool foreground=view&&IsWindow(view)&&(focused==view||IsChild(view,focused))&&
-        GetAncestor(GetForegroundWindow(),GA_ROOT)==GetAncestor(view,GA_ROOT);
-      if(!console_input_owner_.CanCapture(stamp,*enabled,foreground,other)) {reply(stamp,false);return;}
-      console_input_owner_.Captured(stamp,*enabled);
-      const bool captured=remote_input_&&remote_input_->Capture(view,*enabled);
-      if(console_input_owner_.Current(stamp))console_input_owner_.Captured(stamp,*enabled&&captured);
-      reply(stamp,captured&&console_input_owner_.Current(stamp));return;
-    }
-    result->NotImplemented();
-  });
-}
-
 void FlutterWindow::ReleaseForegroundOwnership() {
   if (clipboard_worker_) clipboard_worker_->ForegroundLost();
   if (remote_input_) remote_input_->Capture(nullptr, false);
@@ -2039,7 +1962,6 @@ void FlutterWindow::ReleaseForegroundOwnership() {
 // A media start/stop releases input capture and retires every cursor shape.
 void FlutterWindow::ResetRemoteInput() {
   relative_mouse_.End("focus");
-  if(console_input_owner_.BlocksOtherStart())return;
   if (remote_input_) remote_input_->Capture(nullptr, false);
   if (cursor_presenter_) cursor_presenter_->Reset();
 }
@@ -2098,7 +2020,7 @@ void FlutterWindow::ConfigureRelativeMouse() {
     // as nothing; the Host draws the VM's cursor into the video.
     int32_t path = 0;
     if (session_owner_ && GetHandle() && remote_input_ && remote_input_->captured() &&
-        !console_input_owner_.valid() && remote_media_ && remote_media_->Lease() > 0 &&
+        remote_media_ && remote_media_->Lease() > 0 &&
         !multitap::RemoteDesktopSession()) {
       std::optional<RECT> area;
       bool pin = false, conceal = false;

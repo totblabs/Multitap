@@ -20,7 +20,7 @@ enum _View { bar, handle }
 enum SessionHandleStatus { mouseLock, resuming, poor, normal }
 
 /// Local session commands at the top centre of the remote picture, in the
-/// place of Windows' remote desktop connection bar (v2, 2026-11-10).
+/// place of Windows' remote desktop connection bar.
 ///
 /// One handle opens and folds it. Folded, the handle is a small tongue
 /// hanging from the top edge with a dot in the latency colour; under the
@@ -40,7 +40,7 @@ enum SessionHandleStatus { mouseLock, resuming, poor, normal }
 /// switched in the session's 설정 panel) is on. In a window too narrow for
 /// the row the commands become one 메뉴 that lists their entries.
 ///
-/// Its menus and panels belong to the moment they opened (2026-10-26): when
+/// Its menus and panels belong to the moment they opened: when
 /// the bar's own area changes (a window resize or DPI change) or
 /// [layoutKey] changes, they close and an unpinned bar folds; when
 /// [contentKey] changes they close. A bar kept open stays open, inside its
@@ -303,7 +303,7 @@ class SessionToolbarState extends State<SessionToolbar> {
     super.dispose();
   }
 
-  // Switching menus takes one click (2026-10-26): a press that closes the
+  // Switching menus takes one click: a press that closes the
   // open menu or panel over another control of this bar also uses that
   // control. The popup's barrier takes the press, so it is noted here and
   // repeated on the control once the popup has gone. A press anywhere else
@@ -758,7 +758,7 @@ class SessionToolbarState extends State<SessionToolbar> {
   );
 
   // Bars and the number only: the colour says how good it is, the tooltip
-  // and the chip's panel say it in words (2026-10-26).
+  // and the chip's panel say it in words.
   Widget _quality(SessionChrome chrome) {
     final color = widget.connected
         ? chrome.latencyColor(_measured)
@@ -862,7 +862,7 @@ class SessionToolbarState extends State<SessionToolbar> {
             : chrome.muted,
       );
 
-  // An icon like every other command (2026-10-26): danger red once there is
+  // An icon like every other command: danger red once there is
   // something to cut off, its own separator at the end, and the question.
   Widget _disconnect(SessionChrome chrome) {
     const size = Size(_square, SessionChrome.button);

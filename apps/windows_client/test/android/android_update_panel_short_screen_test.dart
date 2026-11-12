@@ -1,6 +1,6 @@
-// Inspection 2026-11-12: in English on a phone held sideways the app update
-// dialog's three buttons stack and left about 40 px for the versions; at
-// 200 % text Close was cut and the layout overflowed by 28 px. On a short
+// In English on a phone held sideways the app update dialog's three
+// buttons stack and leave about 40 px for the versions; at 200 % text
+// Close is cut and the layout overflows by 28 px. On a short
 // screen the whole dialog scrolls, so the versions, the notes and every
 // button can be reached. Fake catalog and platform; no network or device.
 import 'package:flutter/material.dart';

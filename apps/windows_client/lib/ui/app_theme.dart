@@ -51,7 +51,7 @@ ThemeData buildAppTheme({Brightness brightness = Brightness.light}) {
       ),
     ),
     // A toast is a small card at the bottom centre, never a bar as wide as
-    // the window (2026-11-10: 1,888 px in a 1920 px window). showAppToast
+    // the window (1,888 px in a 1920 px window). showAppToast
     // (app_toast.dart) adds the result's icon and fits narrow windows and
     // large text; this is what a plain SnackBar gets.
     snackBarTheme: SnackBarThemeData(
@@ -158,7 +158,7 @@ ThemeData buildAppTheme({Brightness brightness = Brightness.light}) {
         // SegmentedButton resolves this once for the whole control (frame
         // and dividers) and calls the control "selected" whenever any
         // segment is chosen. A colour for the selected state therefore
-        // framed every segment, chosen or not (2026-11-10: the amber frame).
+        // frames every segment, chosen or not (an amber frame around all).
         // The one state that does belong to the whole control is keyboard
         // focus: its ring, as on the dialog buttons.
         side: WidgetStateProperty.resolveWith(

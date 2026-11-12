@@ -13,7 +13,7 @@ import 'clipboard_pull_test.dart' as pull;
 import 'clipboard_scale_test.dart' as scale;
 import 'clipboard_session_test.dart' as base;
 
-// The on-paste revision (X-Multitap-Clipboard-OnPaste: 1, 2026-10-27): a copy is silent. Files and folders are never pushed, text and images
+// The on-paste revision (X-Multitap-Clipboard-OnPaste: 1): a copy is silent. Files and folders are never pushed, text and images
 // only while small; everything else is announced (clipboard.offer) and rendered when something pastes. A new copy withdraws the older offers,
 // the Host reports a paste that waits (clipboard.paste.waiting), our card is the only progress (no Explorer dialog) and a cancel ends what
 // is blocked in the platform. Every other pair keeps its behaviour.

@@ -2,8 +2,8 @@
 // granted touch-input-v1 every finger is a real Windows touch contact
 // (android_touch.dart: _Phase.native), so the phone's own mouse gestures (a
 // pinch that zooms the picture, a two-finger right click, a double-tap drag, a
-// tap held back for a double tap) do not exist there. The panel described them
-// anyway (2026-11-10 wording audit D#38).
+// tap held back for a double tap) do not exist there, and the panel must not
+// describe them.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/android/android_session_ui.dart';

@@ -263,8 +263,8 @@ class ClipboardPulls {
   /// Explorer's copy operation open (its "replace or skip" question may wait
   /// between two files), or a file finished moments ago (the next one is asked
   /// for right away). A newer copy in the VM does not end such a paste; the
-  /// Host keeps serving it (2026-11-09 edge-case audit, as RDP locks the
-  /// clipboard data of a paste). An explicit withdraw still ends it.
+  /// Host keeps serving it (as RDP locks the clipboard data of a paste). An
+  /// explicit withdraw still ends it.
   bool pasting(String offerId) {
     if (_closed) return false;
     if (_active?.offerId == offerId ||

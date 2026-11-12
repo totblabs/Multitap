@@ -479,7 +479,7 @@ void main() {
     }
   });
 
-  // ---- review 2026-11-12 ---------------------------------------------------
+  // ---- failures and stale states said in their own place ---------------------
 
   Widget shell({
     List<DesktopMachine> machines = const [_machine],

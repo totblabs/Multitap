@@ -161,7 +161,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     private val audioTrim = AndroidAudioTrim(
         targetFrames = AUDIO_TARGET_FRAMES, capFrames = AUDIO_LIMIT_FRAMES,
         maxTargetFrames = AUDIO_MAX_TARGET_FRAMES, capacityFrames = AUDIO_CAPACITY_FRAMES)
-    // audio-path-v1 (2026-11-11): the current track's own accounting. Frames written to it (audioFrames
+    // audio-path-v1: the current track's own accounting. Frames written to it (audioFrames
     // counts every track of the stream), whether its effective buffer follows the trim's cap and the cap
     // last applied, the start watch, and the tracks made again (dead, or written to and not playing).
     private var trackWritten = 0L
@@ -687,7 +687,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             "audioError" to (if (decoder?.failed == true) -1 else audioError), "error" to error,
             // audio-opus-v1 streams: 10 ms frames concealed (repeated and faded) for lost packets, the app's total.
             "audioConcealed" to (if (audioOpus) concealedBefore + (decoder?.stream?.concealed ?: 0L) else null),
-            // audio-path-v1 (2026-11-11), fixed numbers only: which decoder plays the sound (0 none: PCM or
+            // audio-path-v1, fixed numbers only: which decoder plays the sound (0 none: PCM or
             // no sound; 1 the platform's software Opus decoder, 2 another Opus decoder, 3 none could be used),
             // the format it stated, the track's start level and whether its buffer follows the cap, tracks
             // made again (dead / written to and not playing), audio focus (AudioFocusPolicy.State ordinal:
@@ -1351,9 +1351,9 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         /**
          * 48 kHz stereo frames: track capacity 200 ms; the target starts at 40 ms and grows after underruns
          * up to 120 ms, the cap 40 ms above it (80 ms at the start, 160 ms at most); playback starts at 30 ms
-         * where the start threshold takes. 2026-11-11: the target could grow only to 80 ms and the cap
-         * reach 120 ms (80 ms before Android 12), less than the Windows client's 200 ms queue, so a device
-         * whose packets come in bursts (Wi-Fi power saving, a busy relay) kept dropping 10 ms pieces.
+         * where the start threshold takes. With a target of at most 80 ms and a cap of at most 120 ms
+         * (less than the Windows client's 200 ms queue), a device whose packets come in bursts (Wi-Fi
+         * power saving, a busy relay) keeps dropping 10 ms pieces.
          */
         private const val AUDIO_CAPACITY_FRAMES = 48L * 200
         private const val AUDIO_LIMIT_FRAMES = 48L * 80

@@ -1,6 +1,6 @@
 // A viewport resize keeps the previous picture and reports its stage timing
-// (tuning backlog #1, 2026-11-02: the window went black for 0.5-2 s and the
-// 780 ms p50 had no breakdown). Socket, decoder and native texture are
+// (otherwise the window goes black for 0.5-2 s and its ~780 ms has no
+// breakdown). Socket, decoder and native texture are
 // fixtures: this proves the session's protocol and bookkeeping, not a
 // measured field resize.
 import 'dart:convert';

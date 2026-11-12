@@ -358,8 +358,8 @@ void main() {
     },
   );
 
-  // Field 2026-11-02: a stick shared in the Code2 window, then 연결 in the
-  // WorkPC window failed five times with usb_capture_failed.
+  // A stick shared in one window: 연결 in another window must not just fail
+  // with usb_capture_failed.
   test('이 창으로 옮기기 across two windows: the holding window detaches it through its own session, then the other one takes it', () async {
     final physical = _Physical();
     final code2 = _Window('Code2', physical);

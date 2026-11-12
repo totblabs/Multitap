@@ -160,7 +160,7 @@ void main() {
 
   // Resolution is now a separate bounded source choice where resize is granted.
   // 배율 is in this panel where the Host sets it, between the view rows and
-  // the resolution as in the Windows 화면 panel (2026-11-11); pointer speed
+  // the resolution as in the Windows 화면 panel; pointer speed
   // stays under input mode.
   const trimmed = ['android-screen-fit'];
   const gone = [

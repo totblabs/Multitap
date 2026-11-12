@@ -153,8 +153,8 @@ void main() {
               .data,
           allOf(contains('원격 해상도 990 × 990'), contains('실제 값 미확인')),
         );
-        // The 배율 caption does not say the two lines a second time
-        // (inspection, 2026-11-12): only that the two apply separately.
+        // The 배율 caption does not say the two lines a second time: only
+        // that the two apply separately.
         expect(
           t
               .widget<AndroidPanelChoices>(

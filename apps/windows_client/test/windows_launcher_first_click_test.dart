@@ -37,7 +37,6 @@ class _LauncherBroker extends NativePolicyBroker {
     StreamOptions? options,
     InitialViewport? initialViewport,
     int? displayScale,
-    String? signinAvailabilityId,
   }) async {
     mediaRequests++;
     throw StateError('The launcher must open the native child, not own media');

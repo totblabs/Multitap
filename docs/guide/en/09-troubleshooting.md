@@ -14,6 +14,7 @@ If there is an error message, look for the same message below.
 | --- | --- |
 | Installing the server for the first time, and the admin console does not open | In [chapter 2](02-server-install.md#step-2-run-the-install-command), check the server IP, whether it is running, and the port. On the server, `sudo multitap status` shows the status and the address. |
 | **Test connection** fails in the app | Check the address and certificate in [Server address and sign-in](#server-address-and-sign-in). |
+| Apps and Hosts that worked can no longer connect, all of them | The administrator checks [When the saved access settings could not be read](#when-the-saved-access-settings-could-not-be-read). |
 | The server connects but sign-in fails | Check that it is a Multitap account the administrator made. Keep it apart from your Windows and Proxmox passwords. |
 | Signed in, but my desktops are empty | Ask the administrator to check your [desktop assignment](05-users-and-desktops.md). |
 | The desktop card shows Host offline or a screen setup error | See [Host and virtual display](#host-is-offline-or-the-screen-is-not-ready). |
@@ -42,11 +43,40 @@ After changing the address settings, run **Test connection → Save** in the app
 
 1. Open **Server access** in the left menu of the admin console.
 2. Compare the address the user entered with the allowed addresses.
-3. On the server, run the `multitap address …` command the page shows.
+3. If the address is missing, add it on the same page, then click **Connection test** and **Save changes**.
 4. Run **Test connection** again in the client.
 
 If you use an HTTPS proxy and get `403 http_disabled`, the trusted proxy setting may be missing.
-Check the real proxy address and `MULTITAP_TRUSTED_PROXIES` as described in [Docker deployment](../../docker-deployment.md).
+Check that **Trusted proxy IPs** in **Server access** lists the real proxy address. When the proxy runs on the same machine as the server, click **The proxy is on this server**.
+
+If a save ends with **The server couldn't be reached on the new address, so the previous settings were restored**, the server could not connect to itself at that address.
+Check the address, DNS, the proxy and the router's port forwarding. It also happens when the router does not pass connections from inside back to its own public address.
+
+When the admin console cannot be reached, check and fix it on the **Linux server**.
+
+```sh
+sudo multitap status
+sudo multitap address
+sudo multitap address http://10.0.0.10:18480
+```
+
+`multitap status` shows whether the server answers, the current addresses and the free disk space, and the last lines of the server log when it does not answer.
+`multitap address <address>` changes to that address and restarts the server ([chapter 2](02-server-install.md#step-2-check-the-address-hosts-and-apps-use)).
+
+### When the saved access settings could not be read
+
+No app or Host can connect, and **Server access** shows **The saved access settings couldn't be read, so the server started with only the admin console open.**
+The server is running without addresses: only the admin console opens, and apps, Hosts and downloads are refused. Fix it in one of two ways.
+
+1. Open `http://<server IP>:18480` in a browser, sign in, enter the addresses again in **Server access**, then click **Connection test** and **Save changes**.
+2. Or remove the saved settings and set new ones on the **Linux server**.
+
+   ```sh
+   sudo multitap address --reset http://10.0.0.10:18480
+   ```
+
+`sudo multitap status` says the same and shows the console's address.
+That console address does not open when Docker publishes the port on the server only (`MULTITAP_PUBLISH_PORT=127.0.0.1:18480`), or when a hand-written compose file has no `MULTITAP_SERVER_ADDRESS`. Use the command from step 2 there.
 
 Do not connect by ignoring certificate errors.
 To run over HTTP on the same internal network, read [Security](10-security.md) first.

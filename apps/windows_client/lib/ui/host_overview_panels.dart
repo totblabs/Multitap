@@ -8,8 +8,8 @@ import 'korean_text.dart';
 
 /// The pieces of the Host settings overview (개요): the readiness said once
 /// in plain words beside the desktop's name, one banner for one problem and
-/// plain rows that open a page (2026-11-11: the three-point route picture
-/// and the "정상" on every row said the same thing three times). They only
+/// plain rows that open a page (a route picture and a "정상" on every row
+/// would say the same thing three times). They only
 /// draw what they are given; host_overview.dart decides it.
 
 Color _routeColor(AppPalette p, HostRouteState state) => switch (state) {

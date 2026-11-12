@@ -1,5 +1,5 @@
 // The shared-folder panel: live rows with the VM drive letter or the reason,
-// 공유 해제 applying at once (no 읽기 전용 switch since 2026-11-12), 폴더 추가… with its limits, and
+// 공유 해제 applying at once (no 읽기 전용 switch), 폴더 추가… with its limits, and
 // the ended state. Fake socket and file system.
 import 'dart:async';
 
@@ -178,7 +178,7 @@ void main() {
     expect(find.text(driveOfflineText), findsOneWidget);
     expect(find.text('Y: 연결됨'), findsNothing);
     expect(find.byKey(ValueKey('drive-retry-${share.id}')), findsOneWidget);
-    // Not the green of a folder the desktop can use (review 2026-11-12).
+    // Not the green of a folder the desktop can use.
     const p = AppPalette(true);
     Color folderIcon() =>
         tester.widget<Icon>(find.byIcon(Icons.folder_rounded)).color!;
@@ -437,8 +437,8 @@ void main() {
     expect(find.text('‘Data’ 폴더가 삭제돼서 공유를 끝냈어요'), findsOneWidget);
     expect(socket.lastOf('drive.shares')['shares'], isEmpty);
     expect(files.closed, contains(id));
-    // Review 2026-11-12: the line stayed for the whole connection. It goes
-    // with the person's next action in the panel.
+    // The line does not stay for the whole connection: it goes with the
+    // person's next action in the panel.
     await tester.runAsync(() async {
       files.pick = const DrivePick(r'C:\Other', 'Other');
       expect(await drive.addFolder(), isNull);
@@ -450,8 +450,8 @@ void main() {
     expect(find.byKey(const Key('drive-gone')), findsNothing);
   });
 
-  // Review 2026-11-12: an open 폴더·USB panel told the person to reconnect
-  // and pick the folders again while the channel was coming back by itself.
+  // An open 폴더·USB panel must not tell the person to reconnect and pick
+  // the folders again while the channel is coming back by itself.
   testWidgets('a channel that is coming back by itself says so', (tester) async {
     final drive = await open(tester, const [
       DriveFolder(path: r'C:\Data', label: 'Data'),

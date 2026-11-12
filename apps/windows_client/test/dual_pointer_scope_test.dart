@@ -162,7 +162,7 @@ void main() {
           find.text('모니터 구성이 변경됐어요. 연결을 끊은 뒤 화면 모드를 다시 선택하세요.'),
           findsOneWidget,
         );
-        // Still connected (review 2026-11-12: the card's headline read
+        // Still connected (the card's headline must not read
         // "연결돼 있지 않아요").
         expect(find.text('화면을 표시할 수 없어요'), findsOneWidget);
         expect(find.text('연결돼 있지 않아요'), findsNothing);

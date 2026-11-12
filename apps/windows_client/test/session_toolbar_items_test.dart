@@ -1,6 +1,6 @@
 // Which session-bar commands the streaming view offers, and when
-// (2026-10-26: show a command only while it applies), and the panels that
-// drop down from the bar (2026-11-10, session bar v2: 화면 · 폴더·USB · 설정
+// (a command shows only while it applies), and the panels that
+// drop down from the bar (화면 · 폴더·USB · 설정
 // and the quality chip's 연결 panel; 화질, 바 열어 두기 and 사용안내
 // are rows of 설정). Media, socket and the native window are fixtures; no
 // real monitors or VM are involved.
@@ -40,7 +40,7 @@ import 'stream_display_mode_transition_test.dart' show layout;
 const _bar = Key('session-command-bar');
 const _panel = Key('stream-settings-panel');
 
-/// The bar's 설정 button and its panel (2026-11-10).
+/// The bar's 설정 button and its panel.
 const _settings = Key('remote-settings');
 const _settingsPanel = Key('session-settings-panel');
 const _overflow = Key('session-toolbar-overflow');
@@ -701,7 +701,7 @@ void main() {
         expect(panel.width, streamSettingsPanelWidth);
         // The bar stays open under its panel, its button lit.
         expect(find.byKey(_bar), findsOneWidget);
-        // Sound is always on (2026-11-11): no 소리 switch at any level; the
+        // Sound is always on: no 소리 switch at any level; the
         // detail controls remain reachable through an explicit disclosure.
         expect(find.byKey(const Key('stream-current-summary')), findsOneWidget);
         expect(find.byKey(const Key('stream-audio')), findsNothing);
@@ -856,7 +856,7 @@ void main() {
             tester.getRect(find.byKey(const Key('stream-advanced'))).top,
           ),
         );
-        // Multitap adds no sound device (2026-11-10): nothing to press.
+        // Multitap adds no sound device: nothing to press.
         expect(find.byKey(const Key('stream-add-sound-card')), findsNothing);
         expect(find.textContaining('사운드카드'), findsNothing);
         expect(
@@ -866,7 +866,7 @@ void main() {
           ),
           findsNothing,
         );
-        // Sound cannot be turned off (2026-11-11): the line stays.
+        // Sound cannot be turned off: the line stays.
         expect(find.byKey(const Key('stream-audio')), findsNothing);
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();

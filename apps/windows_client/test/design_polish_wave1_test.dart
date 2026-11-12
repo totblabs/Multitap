@@ -1,5 +1,5 @@
-// Design polish wave 1 (2026-11-10 audit): what the shared theme, palette and
-// dialog code promise after it. Widgets only; nothing outside the test
+// Design polish wave 1: what the shared theme, palette and dialog code
+// promise. Widgets only; nothing outside the test
 // process is touched.
 //
 //   F-04 a segmented choice has no amber frame (none around an unchosen

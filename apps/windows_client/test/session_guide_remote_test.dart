@@ -37,7 +37,7 @@ Finder get _dialog => find.byKey(const Key('session-guide-dialog'));
 String _key(String account) =>
     sessionGuideAccountKey(Uri.parse('https://fixture.invalid'), account)!;
 
-/// 사용안내 where the real bar has it (2026-11-10): a row of the 설정 panel,
+/// 사용안내 where the real bar has it: a row of the 설정 panel,
 /// or of the narrow bar's 메뉴. Opens the collapsed bar, then that panel or
 /// menu, and returns the row to tap.
 Future<Finder> _helpCommand(WidgetTester tester) async {

@@ -1,6 +1,6 @@
 // The Host settings overview (개요): its readiness said ONCE in plain words
-// beside the desktop's name (2026-11-11: no route picture, no "정상" pill or
-// row words), ONE banner with ONE action for the most important problem,
+// beside the desktop's name (no route picture, no "정상" pill or row
+// words), ONE banner with ONE action for the most important problem,
 // and plain rows. Every value comes from the status the window already
 // reads (FakeHostSettings).
 import 'package:flutter/material.dart';
@@ -110,7 +110,7 @@ void main() {
     expect(pill(t).label, '스트리밍 가능');
     expect(pill(t).state, _ok);
     expect(text(t, 'host-machine-line'), 'Proxmox VM · pve-173');
-    // Readiness is said once, in words, beside the name (2026-11-11): no
+    // Readiness is said once, in words, beside the name: no
     // route picture, no pill, no "정상" on every row.
     expect(find.text('스트리밍 가능'), findsOneWidget);
     expect(find.byKey(const Key('host-route')), findsNothing);

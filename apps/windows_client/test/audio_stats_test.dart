@@ -115,8 +115,8 @@ void main() {
     'A new stream does not report the counts of earlier streams again',
     () {
       // Android's AndroidAudioTrim counts for the whole app: 17 overruns in one
-      // session stayed 17 in every later one, and each session start or resize
-      // reset the tracker (field data 2026-11-03: 249 sent for 31 real).
+      // session stay 17 in every later one, and a tracker reset at each
+      // session start or resize would send them again (249 for 31 real).
       final tracker = AudioStatsTracker();
       var reading = tracker.read(native(overruns: 17, trimmed: 480))!;
       expect(reading.overruns, 17);

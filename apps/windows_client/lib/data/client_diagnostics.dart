@@ -30,7 +30,7 @@ const diagnosticEvents = {
   // drive-v1 brokers only: recorded only in a session such a broker granted.
   'drive',
   // usb-v1 brokers only (recorded only in a session such a broker granted USB).
-  // It was missing until 2026-10-27, so no USB record ever reached the broker.
+  // Without this entry no USB record reaches the broker.
   'usb',
   // stream-stall-v1 brokers only: sent after the broker acknowledged it.
   'streamStall',

@@ -200,7 +200,7 @@ internal class UdpReceiver(private var epoch: Int, nowUs: Long) {
     // It may be early (a gap filled since), never late.
     private var nackDue = Long.MAX_VALUE
 
-    // Diagnostics only (phone, 2026-11-02): the Host leaves UDP when FEEDBACK shows
+    // Diagnostics only: the Host leaves UDP when FEEDBACK shows
     // nothing newer made whole for 1 s (hostAction 271 reason 3, cause 3). [watch]
     // runs the same test here and records which wait it was; nothing sent changes.
     private var finished = 0L  // the newest message the Host finished, from TAIL

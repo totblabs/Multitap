@@ -346,8 +346,8 @@ void main() {
     },
   );
 
-  // 2026-11-10 (design audit F-05): two rows of information no longer sit
-  // in a 960 x 686 window with a second, window-wide 닫기 under them.
+  // Two rows of information do not sit in a 960 x 686 window with a
+  // second, window-wide 닫기 under them.
   for (final brightness in Brightness.values) {
     testWidgets(
       'the information is as large as what it says; only the license '

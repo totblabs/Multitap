@@ -342,8 +342,8 @@ void main() {
     expect(formatMonthDay(DateTime(2026, 11, 12)), '11월 12일');
   });
 
-  // Review 2026-11-12: English sentences that read wrong once their pieces
-  // were put together.
+  // English sentences that could read wrong once their pieces are put
+  // together.
   test('English sentences read as sentences with what is put into them', () {
     AppLanguageController.debugSystemLanguage = 'en';
     // The release history toggle (was "Whole screen", the zoom's word).

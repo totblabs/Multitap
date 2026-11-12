@@ -340,8 +340,8 @@ void main() {
       ),
       contains('이전 버전을 다시 열었어요'),
     );
-    // Review 2026-11-12: the app's own update told its user to check the
-    // Host service. Only a Host update has one.
+    // The app's own update must not tell its user to check the Host
+    // service. Only a Host update has one.
     expect(
       updateFailureMessage('rollback_failed', product: 'host'),
       contains('Host의 서비스 상태를 확인'),

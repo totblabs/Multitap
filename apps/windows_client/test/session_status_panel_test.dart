@@ -131,7 +131,7 @@ void main() {
         onAlternative: () => alternatives++,
       );
       final actions = find.byType(AppDialogActions);
-      // The bar measures its own labels in the card's width (2026-11-03).
+      // The bar measures its own labels in the card's width.
       final actionBounds = t.getRect(actions);
       final retry = find.byKey(const Key('retry-remote-connection'));
       final alternative = find.byKey(

@@ -2,7 +2,7 @@
 // CAPTURE_UI requires an explicit, fresh CAPTURE_DIR. Fonts are the shipped
 // Pretendard and Flutter Material Icons; pointer/keyboard events stay in tests.
 //
-// Session bar v2 (2026-11-10): the bar is the chip, 화면, 폴더·USB, 설정, the
+// The session bar: it is the chip, 화면, 폴더·USB, 설정, the
 // window's buttons in full screen and disconnect; everything else is in the
 // panel its button opens (or, in a narrow bar, in the 메뉴). The fixture is
 // the real bar with the real panels (ToolbarV2Bar).

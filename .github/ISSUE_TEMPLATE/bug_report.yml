@@ -1,0 +1,80 @@
+name: Bug report / 버그 신고
+description: Something does not work, or works differently from the guide. / 동작하지 않거나 가이드와 다르게 동작합니다.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write in English or Korean. / 영어나 한국어로 적어 주세요.
+
+        **Security vulnerability?** Do not report it here. Follow the [security policy](https://github.com/totblabs/Multitap/security/policy).
+        **보안 취약점**은 여기에 적지 말고 [보안 정책](https://github.com/totblabs/Multitap/security/policy)을 따라 주세요.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Part / 어느 부분인가요
+      options:
+        - Server (admin console, install command) / 서버(관리자 페이지, 설치 명령)
+        - Windows app / Windows 앱
+        - Android app / Android 앱
+        - Host
+        - Website or guide / 홈페이지·가이드
+    validations:
+      required: true
+  - type: input
+    id: server-version
+    attributes:
+      label: Server version / 서버 버전
+      description: Shown by `sudo multitap status`. / `sudo multitap status`에 나옵니다.
+      placeholder: "1.2.3"
+  - type: input
+    id: app-version
+    attributes:
+      label: App version (Windows or Android) / 앱 버전(Windows 또는 Android)
+      placeholder: "Windows 1.2.3"
+  - type: input
+    id: host-version
+    attributes:
+      label: Host version / Host 버전
+      placeholder: "1.2.3"
+  - type: dropdown
+    id: install-type
+    attributes:
+      label: Server install type / 서버 설치 방식
+      options:
+        - Install command (install.sh) / 설치 명령(install.sh)
+        - Docker Compose, set up by hand / Docker Compose 직접 구성
+        - Directly on Linux (systemd) / Linux에 직접 설치(systemd)
+        - Not sure / 모름
+  - type: input
+    id: os
+    attributes:
+      label: OS and environment / OS와 환경
+      description: Proxmox VE version, the server's OS (CT or VM), Windows or Android version. / Proxmox VE 버전, 서버 OS(CT인지 VM인지), Windows나 Android 버전.
+      placeholder: "Proxmox VE 8.4, Debian 12 CT, Windows 11 24H2"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened / 무슨 일이 있었나요
+      description: Copy any error message exactly. / 오류 문구가 있으면 그대로 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected / 어떻게 되기를 기대했나요
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 재현 순서
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and screenshots / 로그와 화면 캡처
+      description: |
+        Before you paste, remove passwords, tokens, setup codes and public IP addresses.
+        붙여넣기 전에 비밀번호, 토큰, 설정 코드, 공인 IP 주소를 지워 주세요.

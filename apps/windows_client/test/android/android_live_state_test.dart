@@ -145,8 +145,8 @@ void main() {
   testWidgets(
     'boot steps with the Host connected are progress on the Android tile, not warnings',
     (tester) async {
-      // windows_login is no longer a waiting step: the tile offers Console
-      // at once (2026-11-09), see the test below.
+      // windows_login is not a waiting step: the tile offers Console at
+      // once, see the test below.
       for (final (reason, prep, label) in [
         ('display_preparing', StreamPreparation.display, '화면 준비 중'),
         ('session_preparing', StreamPreparation.session, '연결 준비 중'),

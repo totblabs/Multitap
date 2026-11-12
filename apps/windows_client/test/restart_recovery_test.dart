@@ -1,4 +1,4 @@
-// Restart recovery (2026-11-03): after a broker update ends the stream as
+// Restart recovery: after a broker update ends the stream as
 // server_stopping, the window waits for the broker and then for its desktop's
 // Host. Fake time, sockets, media and broker answers; no real broker or Host.
 import 'dart:async';

@@ -88,8 +88,8 @@ void main() {
     },
   );
 
-  // Review 2026-11-12 (signin-light-1280): under the card the scene is dark
-  // in both appearances, and the light theme drew its dark ink on it.
+  // Under the card the scene is dark in both appearances: the light theme
+  // must not draw its dark ink on it.
   testWidgets(
     'The line under the card and the version mark use the ink that reads on the scene in both themes',
     (tester) async {
@@ -133,8 +133,8 @@ void main() {
     },
   );
 
-  // Review 2026-11-12: the password was emptied on any failure (a network
-  // error, a cancelled two-step verification), and the server dot stayed
+  // The password is not emptied on just any failure (a network error, a
+  // cancelled two-step verification), and the server dot does not stay
   // green right after the server could not be reached.
   testWidgets(
     'Only a wrong ID or password empties the password field; an unreachable server turns the dot',

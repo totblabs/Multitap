@@ -215,7 +215,7 @@ abstract interface class ClipboardPullBridge {
   Future<void> closeOffers(String owner);
 }
 
-/// The on-paste revision (2026-10-27: a copy is silent, data moves when pasted). Only the Windows adapter has it; the session announces
+/// The on-paste revision (a copy is silent, data moves when pasted). Only the Windows adapter has it; the session announces
 /// the header only for a bridge that does. [onPaste] is set once the relay confirmed the revision for the pair: [captureWithOffer] then
 /// offers every file copy and the big text / rich text / image copies instead of pushing them, and [publishOfferOnPaste] publishes the
 /// peer's offer as a data object that shows no Explorer dialog of its own and renders CF_HDROP / text / images on demand.
@@ -451,7 +451,7 @@ class NativeClipboardBridge
   /// The Android adapter (AndroidClipboard.kt, text only). It negotiates the
   /// same on-paste pair as Windows so that a VM copy can reach the phone: on
   /// that pair a VM copy is read only after the Host announced it settled,
-  /// as text or an image, never files (2026-11-03). It publishes no offers
+  /// as text or an image, never files. It publishes no offers
   /// and has no pending placeholder or pull queue.
   final bool android;
   bool get _windows => !android && Platform.isWindows;

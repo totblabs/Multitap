@@ -184,7 +184,7 @@ Future<void> _tap(WidgetTester t, String key) async {
   await t.pumpAndSettle();
 }
 
-// The one Windows account form (2026-10-29): saving it also applies or takes
+// The one Windows account form: saving it also applies or takes
 // over automatic login. A saved account opens it with host-edit-account.
 Future<void> _draft(WidgetTester t) async {
   if (find.byKey(const Key('host-account-password')).evaluate().isEmpty) {

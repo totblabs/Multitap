@@ -325,7 +325,7 @@ void main() {
           for (var i = 0; i < 6; i++) {
             await t.pump();
           }
-          // 마우스 잠금 is a switch row of the bar's 설정 panel (2026-11-10).
+          // 마우스 잠금 is a switch row of the bar's 설정 panel.
           // No time passes in these frames, so the panel is up at the start
           // of its entrance and goes at once when the row is chosen.
           await t.tap(find.byKey(const Key('remote-settings')));

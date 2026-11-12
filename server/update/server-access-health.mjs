@@ -86,7 +86,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href &
     process.stdout.write(JSON.stringify(result) + '\n');
   } catch { process.stdout.write('null\n'); process.exitCode = 1; }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && process.argv[2] === '--container-health') {
+// Not awaited at the top level: config.mjs imports self-access.mjs, which
+// imports this module, and an import of a module that still waits at its own
+// top level never settles (Node ends with exit code 13 and the health check
+// fails although the server answers).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && process.argv[2] === '--container-health') void (async () => {
   try {
     const { configuration } = await import('../src/config.mjs'), { readFile } = await import('node:fs/promises');
     const current = configuration(), version = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -97,4 +101,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href &
     if (!current.accessConfig && !validBootstrapLocalHealth(value, localTransport)) throw Error();
     if (current.accessInstallationId && !validAccessHealth(value, { config: current.accessConfig, revision: current.accessRevision, installationId: current.accessInstallationId, origin: current.accessConfig?.primaryOrigin ?? bootstrapHealthOrigin(localTransport), localTransport, allowHealthProbeOnly: true })) throw Error();
   } catch { process.exitCode = 1; }
-}
+})();

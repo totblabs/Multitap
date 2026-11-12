@@ -50,9 +50,8 @@ class StreamOptions {
     // still desktop costs little while text stays sharp.
     // With the automatic mode this is the manual value kept for later.
     this.bitrate = 20000000,
-    // Every connection the app makes asks for sound (2026-11-11: no switch on
-    // the PC or Android). False only in tests and the sign-in stream request
-    // (signin-stream-v1, which carries no sound).
+    // Every connection the app makes asks for sound (no switch on the PC or
+    // Android). False only in tests.
     this.audio = true,
     this.monitor = '0',
     this.bitrateMode = StreamBitrateMode.fixed,
@@ -181,7 +180,7 @@ class StreamOptions {
       fps: data['fps'] as int,
       bitrate: data['bitrate'] as int,
       // The wire value as it is: the broker's echo of a request must match
-      // what was asked (the sign-in stream asks without sound). The app's
+      // what was asked. The app's
       // own choices always ask for sound (StreamSettingsBody, Android
       // AndroidStreamQuality), and the Windows client stores no choice.
       audio: data['audio'] as bool,

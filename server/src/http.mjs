@@ -126,7 +126,7 @@ function accessFailure(error) {
   return new HttpError(503, 'session_access_unavailable');
 }
 
-export async function buildServer({ store, vault, proxmox = new Proxmox(), publicOrigin, allowInsecureHttp = false, tls = null, accessConfig = undefined, accessRevision = null, accessInstallationId = null, accessIdentityFile = null, accessOperationId = null, legacyAdminOrigin = null, bootstrap = false, setupOrigin = null, accessClient = null, restoreClient = null, backupDir = null, backupOptions = {}, deploymentKind = 'unknown', dataDir = null, downloadDir, serverUpdate = null, sessionTtlMs = 8 * 60 * 60 * 1000, sessionMaxLifetimeMs = 7 * 24 * 60 * 60 * 1000, loginLimit = 8, addressLimit = 60, trustedProxies: proxies, initialSetupOptions = {}, relayOptions = {}, browserConsoleOptions = {}, powerOptions = {}, relocationOptions = {}, resourceOptions = {}, pcPowerOptions = {}, desktopEventOptions = {}, vmStateOptions = {}, catalogWatchOptions = {}, hostRequestOptions = {}, hostUpdateOptions = {}, sessionAccessOptions = {}, mfaOptions = {}, certificateMonitor = null, logger = console }) {
+export async function buildServer({ store, vault, proxmox = new Proxmox(), publicOrigin, allowInsecureHttp = false, tls = null, accessConfig = undefined, accessRevision = null, accessInstallationId = null, accessIdentityFile = null, accessIdentityRead = null, accessOperationId = null, legacyAdminOrigin = null, bootstrap = false, setupOrigin = null, accessClient = null, restoreClient = null, backupDir = null, backupOptions = {}, deploymentKind = 'unknown', dataDir = null, downloadDir, serverUpdate = null, restartServer = null, sessionTtlMs = 8 * 60 * 60 * 1000, sessionMaxLifetimeMs = 7 * 24 * 60 * 60 * 1000, loginLimit = 8, addressLimit = 60, trustedProxies: proxies, initialSetupOptions = {}, relayOptions = {}, browserConsoleOptions = {}, powerOptions = {}, relocationOptions = {}, resourceOptions = {}, pcPowerOptions = {}, desktopEventOptions = {}, vmStateOptions = {}, catalogWatchOptions = {}, hostRequestOptions = {}, hostUpdateOptions = {}, sessionAccessOptions = {}, mfaOptions = {}, certificateMonitor = null, logger = console }) {
   const strictAccess = accessConfig !== undefined || bootstrap;
   // A fresh installation has only its management listener, not a fabricated
   // public domain. Legacy direct API callers retain their negotiated profile.
@@ -347,6 +347,21 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
     return false;
   }
   const brokerStartedAt = Date.now();
+  // What a save of the access settings reads and ends. The updater asks over
+  // the fenced loopback routes below; a self-managed Docker install asks in
+  // this process and takes the same fence itself (self-access.mjs).
+  const accessActivity = () => ({ protocol: 'server-access-activity-v1', fence: true, activity: activitySnapshot({ relay, desktopEvents, store, startedAt: brokerStartedAt }), connections: connectionCounts(relay) });
+  const endAccessConnections = () => {
+    const operation = accessRuntime.connectionsEnding();
+    if (!operation) return null;
+    const ended = endConnections(relay);
+    if (ended.sessions + ended.consoles > 0) {
+      try { store.audit(operation.event, operation.actor, `${operation.operationId}:${ended.people}:${ended.sessions + ended.consoles}`); } catch { /* Audit I/O cannot keep connections open. */ }
+    }
+    return { protocol: 'server-access-connections-v1', fence: true, ended };
+  };
+  accessClient?.attach?.({ activity: accessActivity, endConnections: endAccessConnections, hold: options => accessRuntime.hold(options), release: lease => accessRuntime.release(lease),
+    blocked: () => accessRuntime.blocked, settle: () => accessRuntime.status({ managementOrigin: null }) });
   // At most one re-check per event-loop turn, however many responses ask.
   let revalidateQueued = false, notifyQueued = false;
   const revalidateSoon = notify => {
@@ -387,17 +402,11 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
         if (snapshot) { send(200, snapshot, false); return; }
         throw new HttpError(404, 'not_found');
       }
-      if (path === '/internal/server-access/activity' && req.method === 'GET' && !url.search && localActivityRequest(req) && accessRuntime.accepts(req.headers['x-multitap-access-fence'])) { send(200, { protocol: 'server-access-activity-v1', fence: true, activity: activitySnapshot({ relay, desktopEvents, store, startedAt: brokerStartedAt }), connections: connectionCounts(relay) }, false); return; }
+      if (path === '/internal/server-access/activity' && req.method === 'GET' && !url.search && localActivityRequest(req) && accessRuntime.accepts(req.headers['x-multitap-access-fence'])) { send(200, accessActivity(), false); return; }
       // Saving the server access settings ends the connections.
       // Only the holder of the current fence, on this
       // machine, may ask; the broker ends them itself and records how many.
-      if (path === '/internal/server-access/end-connections' && req.method === 'POST' && !url.search && localActivityRequest(req) && accessRuntime.accepts(req.headers['x-multitap-access-fence'])) {
-        const operation = accessRuntime.connectionsEnding(), ended = endConnections(relay);
-        if (ended.sessions + ended.consoles > 0) {
-          try { store.audit(operation.event, operation.actor, `${operation.operationId}:${ended.people}:${ended.sessions + ended.consoles}`); } catch { /* Audit I/O cannot keep connections open. */ }
-        }
-        send(200, { protocol: 'server-access-connections-v1', fence: true, ended }, false); return;
-      }
+      if (path === '/internal/server-access/end-connections' && req.method === 'POST' && !url.search && localActivityRequest(req) && accessRuntime.accepts(req.headers['x-multitap-access-fence'])) { send(200, endAccessConnections(), false); return; }
       const internalHealth = strictAccess && path === '/healthz' && req.method === 'GET' && !url.search && localActivityRequest(req);
       let context = { origin: publicOrigin, bootstrapOnly: false };
       if (strictAccess) {
@@ -457,8 +466,12 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
           // An updater upgraded after this broker may create its protected
           // installation identity. Observe that one file without restarting
           // an active broker; once accepted, this process keeps the same ID.
+          // A self-managed Docker install reads its own file the same way
+          // (`accessIdentityRead`): access-cli.mjs makes it with a first policy
+          // while the server runs, and the container's health check compares
+          // this answer with that file.
           try {
-            const value = readProtectedAccessFile(accessIdentityFile, { maximum: 128, production: true });
+            const value = accessIdentityRead ? accessIdentityRead() : readProtectedAccessFile(accessIdentityFile, { maximum: 128, production: true });
             if (value !== null) {
               if (!/^[a-f0-9]{64}$/.test(value.trim())) throw Error();
               accessInstallationId = value.trim(); accessRuntime.installationId = accessInstallationId;
@@ -584,7 +597,7 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
       // The standalone viewer shares password admission/session issuance. A
       // future MFA provider is passed here before any cookie can be issued.
       if (await browserConsole.handle(req, res, path, { origin: requestOrigin, body, send, login, confirmLogin, mfaRoutes })) return;
-      if (await adminRoutes({ store, vault, proxmox, relay, power, hostRequests, notices, resources: adminResources, login, mfaRoutes, passwordJob, body, backup, stream: entry => { res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': entry.size, 'Content-Disposition': 'attachment; filename="' + entry.filename + '"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'", ...securityHeaders, 'X-Request-Id': requestId }); const file = createReadStream(entry.path); file.once('error', () => res.destroy()); file.pipe(res); }, publicOrigin: requestOrigin, setupScriptSha256: () => proxmoxSetupSha256(requestOrigin), cookieScope: strictAccess ? requestOrigin : null, legacyCookieOrigin: legacyAdminOrigin, accessRuntime, hostRemovalActivity: id => desktopActivitySnapshot({ relay, vmAudio, store }, id), serverUpdate, initialSetup, certificates: certificateMonitor, agentAccess: { denied: () => vmStates.agentRefused(), reset: () => vmStates.resetAgentDenial() }, audioInventory: (config, vms) => vmAudio.observeInventory(config, vms), consoleAccess: { state: () => consolePrivilege, record: granted => { consolePrivilege = typeof granted === 'boolean' ? granted : null; } }, relocation: vmRelocation, serverInfo: { service: 'multitap-broker', version: VERSION, transport: strictAccess ? currentTransport : transport, listener: req.socket.localPort ? { address: req.socket.localAddress, port: req.socket.localPort } : null, deployment: { kind: deploymentKind, configured: deploymentKind !== 'unknown' }, udpPort: relayOptions.udp?.port ?? null, update: { state: 'not_configured', feedConfigured: false, applySupported: false } } })(req, res, path, send)) return;
+      if (await adminRoutes({ store, vault, proxmox, relay, power, hostRequests, notices, resources: adminResources, login, mfaRoutes, passwordJob, body, backup, stream: entry => { res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': entry.size, 'Content-Disposition': 'attachment; filename="' + entry.filename + '"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'", ...securityHeaders, 'X-Request-Id': requestId }); const file = createReadStream(entry.path); file.once('error', () => res.destroy()); file.pipe(res); }, publicOrigin: requestOrigin, setupScriptSha256: () => proxmoxSetupSha256(requestOrigin), cookieScope: strictAccess ? requestOrigin : null, legacyCookieOrigin: legacyAdminOrigin, accessRuntime, restartServer, hostRemovalActivity: id => desktopActivitySnapshot({ relay, vmAudio, store }, id), serverUpdate, initialSetup, certificates: certificateMonitor, agentAccess: { denied: () => vmStates.agentRefused(), reset: () => vmStates.resetAgentDenial() }, audioInventory: (config, vms) => vmAudio.observeInventory(config, vms), consoleAccess: { state: () => consolePrivilege, record: granted => { consolePrivilege = typeof granted === 'boolean' ? granted : null; } }, relocation: vmRelocation, serverInfo: { service: 'multitap-broker', version: VERSION, transport: strictAccess ? currentTransport : transport, listener: req.socket.localPort ? { address: req.socket.localAddress, port: req.socket.localPort } : null, deployment: { kind: deploymentKind, configured: deploymentKind !== 'unknown' }, udpPort: relayOptions.udp?.port ?? null, startedAt: new Date(brokerStartedAt).toISOString(), restart: { supported: typeof restartServer === 'function' }, update: { state: 'not_configured', feedConfigured: false, applySupported: false } } })(req, res, path, send)) return;
       if (path === '/api/v1/hosts/requests' || path === '/api/v1/hosts/requests/status' || path === '/api/v1/hosts/requests/cancel') {
         if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
         const input = await body(req, path === '/api/v1/hosts/requests' ? 2048 : 512);

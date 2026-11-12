@@ -670,7 +670,7 @@ void main() {
     });
 
     testWidgets('same height as the neighbouring header buttons', (t) async {
-      // 2026-11-03: 새로고침 was shorter and 미리보기 taller and square.
+      // 새로고침 is not shorter, 미리보기 not taller or square.
       for (final (size, scale, expected) in [
         (const Size(1440, 1400), 1.0, 34.0),
         (const Size(1440, 1400), 1.5, 37.3),

@@ -30,7 +30,7 @@ translatePage(document); wireLanguageSwitch(document);
 for (const node of document.querySelectorAll('[data-icon]')) node.replaceChildren(icon(node.getAttribute('data-icon')));
 
 const state = { user: null, csrf: '', route: { page: 'overview', id: null }, data: null, loading: false, pveBusy: false, pveError: '', pveLoaded: false, onboarding: null,
-  serverInfo: null, serverInfoLoading: false, serverInfoError: '', serverUpdatePending: false, serverUpdateSubmitting: false,
+  serverInfo: null, serverInfoLoading: false, serverInfoError: '', serverUpdatePending: false, serverUpdateSubmitting: false, serverRestart: null,
   resources: new Map(), ui: {}, expanded: new Map(), assignmentSaving: false };
 let modalRevision = 0, serverInfoRevision = 0, serverInfoAt = 0, serverApplyAt = 0, serverUpdateTimer = null, hostUpdateTimer = null, pollTimer = null, serverLost = false;
 let modalDraftDirty = () => false;
@@ -302,7 +302,7 @@ function showLogin({ completedMfa } = {}) {
   const submit = $('#login-form').querySelector('button'); submit.disabled = false; submit.textContent = t('common.16');
   for (const button of $('#setup-form').querySelectorAll('button')) button.disabled = false;
   serverUpdateBadge.clear(); serverInfoAt = 0;
-  clearTimeout(serverUpdateTimer); serverUpdateTimer = null; state.serverUpdatePending = false; state.serverUpdateSubmitting = false;
+  clearTimeout(serverUpdateTimer); serverUpdateTimer = null; state.serverUpdatePending = false; state.serverUpdateSubmitting = false; state.serverRestart = null;
   clearTimeout(hostUpdateTimer); hostUpdateTimer = null; clearInterval(pollTimer); pollTimer = null;
   modalRevision++;
   activeModalSubmission = null;
@@ -359,6 +359,8 @@ async function loadServerInfo() {
     if (info.service !== 'multitap-broker' || typeof info.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(info.version) || !['unknown', 'docker', 'systemd', 'external'].includes(info.deployment?.kind) || typeof info.update?.feedConfigured !== 'boolean' || typeof info.update?.applySupported !== 'boolean' || !Number.isFinite(Date.parse(info.checkedAt))) throw Error(t('app.10'));
     state.serverInfo = info; state.serverInfoError = ''; $('#broker-version').textContent = info.version; $('#server-version-header').textContent = info.version;
     serverUpdateBadge.update(info, badgeTicket); serverLost = false;
+    // 서버 다시 시작: the server that answers now started after the one that was asked to end.
+    if (state.serverRestart && info.startedAt !== state.serverRestart.startedAt) { state.serverRestart = null; notice(t('app.restarted')); }
     followServerVersion(info.version);
     // Right after 업데이트 was accepted the updater may still answer 'available' for a moment: that is not the end of it.
     const justApplied = info.update.state === 'available' && Date.now() - serverApplyAt < 8000;
@@ -366,19 +368,38 @@ async function loadServerInfo() {
   } catch {
     if (!sessionCurrent(owner) || revision !== serverInfoRevision) return;
     serverUpdateBadge.fail(badgeTicket);
-    if (!state.serverUpdatePending) { state.serverInfo = null; $('#broker-version').textContent = '—'; $('#server-version-header').textContent = t('common.17'); }
-    state.serverInfoError = state.serverUpdatePending ? t('app.11') : t('app.12');
+    if (!state.serverUpdatePending && !state.serverRestart) { state.serverInfo = null; $('#broker-version').textContent = '—'; $('#server-version-header').textContent = t('common.17'); }
+    state.serverInfoError = state.serverUpdatePending || state.serverRestart ? t('app.11') : t('app.12');
   } finally {
     if (sessionCurrent(owner) && revision === serverInfoRevision) {
       state.serverInfoLoading = false; if (usesServerInfo() && state.data) render(); else { renderExpiryBanner(); renderUpdateBadge(); }
       clearTimeout(serverUpdateTimer); serverUpdateTimer = null;
-      if (state.serverUpdatePending || updateActive.has(state.serverInfo?.update?.state)) {
+      // A restart that gave no answer for two minutes is no longer waited for.
+      if (state.serverRestart && Date.now() - state.serverRestart.at > serverRestartWaitMs) { state.serverRestart = null; notice(t('app.restartTimeout'), true); if (usesServerInfo() && state.data) render(); }
+      if (state.serverUpdatePending || state.serverRestart || updateActive.has(state.serverInfo?.update?.state)) {
         serverUpdateTimer = setTimeout(() => { if (sessionCurrent(owner)) void loadServerInfo(); }, 1500); serverUpdateTimer.unref?.();
       }
     }
   }
 }
 const usesServerInfo = () => ['updates', 'overview', 'server-info', 'licenses'].includes(state.route.page);
+// 서버 다시 시작 (서버 정보): confirmed like every action that ends connections, with 먼저 알리기 while somebody is
+// signed in. The page then reads the server until one that started later answers.
+const serverRestartWaitMs = 120000;
+function restartServer() {
+  const info = state.serverInfo;
+  if (info?.restart?.supported !== true || state.serverRestart) return;
+  const announce = noticesPage.announceFirst(ctx, { audience: noticesPage.everyoneAudience(ctx), text: noticesPage.announcements.serverRestart });
+  const restart = async () => {
+    if (state.serverRestart) return;
+    const owner = sessionOwner();
+    const result = await api('/server-restart', 'POST', { confirm: true });
+    if (!sessionCurrent(owner)) return;
+    state.serverRestart = { startedAt: typeof result?.startedAt === 'string' ? result.startedAt : info.startedAt, at: Date.now() };
+    render(); void loadServerInfo();
+  };
+  modal(t('system.restartConfirm'), announce ? [{ node: announce.node }] : [], announce ? announce.wrap(restart) : restart, { description: t('system.restartDescription'), save: t('system.restart'), danger: true, reload: false });
+}
 async function checkServerUpdate() {
   if (state.serverUpdateSubmitting) return; state.serverUpdateSubmitting = true; render();
   const owner = sessionOwner();
@@ -948,7 +969,7 @@ const desktopById = id => state.data?.desktops.find(d => d.id === id) ?? null;
 const userByName = name => state.data?.users.find(u => u.username === name) ?? null;
 const userById = id => state.data?.users.find(u => u.id === id) ?? null;
 const ctx = { state, api, render, navigate, link, hashFor, modal, confirmAction, modalCurrent, submitModal, pageAction, notice, change, refresh, syncProxmox, readProxmoxStatus, setupRequired, load, resource, value,
-  loadServerInfo, checkServerUpdate, applyServerUpdate, scheduleHostUpdatePoll, searchInput, pageHeader, desktopById, userByName, userById, productRelease,
+  loadServerInfo, checkServerUpdate, applyServerUpdate, restartServer, scheduleHostUpdatePoll, searchInput, pageHeader, desktopById, userByName, userById, productRelease,
   announceAtLogin: text => { loginNotice = typeof text === 'string' ? text : ''; },
   openAccountSecurity: () => { if (state.user && !setupRequired()) void accountSecurityController.open(); } };
 

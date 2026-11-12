@@ -71,7 +71,7 @@ class _SessionWindowState extends State<SessionWindow> {
         origin: widget.launch.origin,
         diagnosticsDesktopId: widget.launch.desktopId,
         diagnosticsMode: 'stream',
-        enableDiagnostics: !widget.launch.console,
+        enableDiagnostics: true,
         // Nested remote keyboards can commit Unicode instead of physical keys.
         requestTextInput: true,
         // Negotiate live DPI control without changing Windows' current scale.
@@ -106,7 +106,6 @@ class _SessionWindowState extends State<SessionWindow> {
   Timer? _restartRetry;
   bool _configuring = false;
   bool _displayScaleAvailable = false, _displayScaleOutputsAvailable = false;
-  late final bool _console = widget.launch.console;
   SessionRenewer? _renewer;
 
   /// 공지 (data/notices.dart): this window reads its sign-in's notices itself
@@ -205,7 +204,7 @@ class _SessionWindowState extends State<SessionWindow> {
     if (waited != null) _windowStages!['windowMs'] = waited;
     _loadWatch.start();
     // Before a view is bound nothing is connected yet (loading or failed):
-    // closing just closes (2026-10-26).
+    // closing just closes.
     _actions.fallback = _closeWindow;
     _guard.attach(_actions.requestClose);
     unawaited(_guard.update(busy: false, dirty: true));
@@ -789,28 +788,6 @@ class _SessionWindowState extends State<SessionWindow> {
                   onRetry: _error == null || _retired ? null : _retryLoad,
                 ),
               )
-            : _console
-            ? Scaffold(
-                body: SessionStatusPanel(
-                  machine: machine.name,
-                  // The launcher owns the Console window (2026-11-09:
-                  // the stream window asks it, as on the end card).
-                  message: l10n.consoleOpensMainWindow,
-                  busy: false,
-                  backLabel: l10n.closeRemoteWindow,
-                  alternativeLabel: l10n.openConsole2,
-                  onAlternative: machine.kind == MachineKind.vm
-                      ? () => unawaited(() async {
-                          if (await SessionWindows.openConsoleInLauncher(
-                            machine.id,
-                          )) {
-                            await _actions.requestClose();
-                          }
-                        }())
-                      : null,
-                  onBack: () => unawaited(_actions.requestClose()),
-                ),
-              )
             : RemoteView(
                 sessionGuideEnabled: true,
                 guideAccountKey: widget.launch.guideAccountKey,
@@ -821,7 +798,7 @@ class _SessionWindowState extends State<SessionWindow> {
                 onWaitHostReady: _waitHostReady,
                 onPrepareConsole: _resumeConsole,
                 // Windows signed out or locked, or the Host away: the
-                // launcher opens this VM's Console (2026-11-09 edge-case audit).
+                // launcher opens this VM's Console.
                 onOpenConsole: machine.kind == MachineKind.vm
                     ? () async {
                         await SessionWindows.openConsoleInLauncher(machine.id);

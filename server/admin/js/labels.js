@@ -5,7 +5,7 @@ import { t } from './i18n.js';
 
 export const messages = {
   server_access_unavailable: t('labels.messages.server_access_unavailable'),
-  server_update_unavailable: t('labels.messages.server_update_unavailable'), update_busy: t('labels.messages.update_busy'), update_check_required: t('labels.messages.update_check_required'), update_version_changed: t('labels.messages.update_version_changed'), update_confirmation_required: t('labels.messages.update_confirmation_required'), update_recovery_required: t('labels.messages.update_recovery_required'), update_manual_docker: t('labels.messages.update_manual_docker'),
+  server_update_unavailable: t('labels.messages.server_update_unavailable'), server_restart_unavailable: t('labels.messages.server_restart_unavailable'), update_busy: t('labels.messages.update_busy'), update_check_required: t('labels.messages.update_check_required'), update_version_changed: t('labels.messages.update_version_changed'), update_confirmation_required: t('labels.messages.update_confirmation_required'), update_recovery_required: t('labels.messages.update_recovery_required'), update_manual_docker: t('labels.messages.update_manual_docker'),
   invalid_credentials: t('labels.messages.invalid_credentials'),
   password_confirmation_mismatch: t('labels.messages.password_confirmation_mismatch'), proxmox_import_required: t('labels.messages.proxmox_import_required'),
   authentication_required: t('labels.messages.authentication_required'), session_expired: t('labels.messages.session_expired'),
@@ -315,7 +315,7 @@ export const eventNames = { user_created: t('labels.eventNames.user_created'), u
   // server/src/store.mjs relocateRegisteredVm: the desktop followed its VM to another node or VM ID (migration, HA, restore).
   desktop_vm_relocated: t('labels.eventNames.desktop_vm_relocated'),
   display_requested: t('labels.eventNames.display_requested'), display_completed: t('labels.eventNames.display_completed'), display_result_detail: t('labels.eventNames.display_result_detail'), console_resume_requested: t('labels.eventNames.console_resume_requested'), console_resume_completed: t('labels.eventNames.console_resume_completed'),
-  server_update_checked: t('labels.eventNames.server_update_checked'), server_update_requested: t('labels.eventNames.server_update_requested'), initial_setup_requested: t('labels.eventNames.initial_setup_requested'), initial_setup_completed: t('labels.eventNames.initial_setup_completed'), proxmox_synchronized: t('labels.eventNames.proxmox_synchronized'),
+  server_update_checked: t('labels.eventNames.server_update_checked'), server_update_requested: t('labels.eventNames.server_update_requested'), server_restart_requested: t('labels.eventNames.server_restart_requested'), initial_setup_requested: t('labels.eventNames.initial_setup_requested'), initial_setup_completed: t('labels.eventNames.initial_setup_completed'), proxmox_synchronized: t('labels.eventNames.proxmox_synchronized'),
   // server/src/relay.mjs dropHost: a Host connection that ended sessions or ended for a known cause.
   host_channel_closed: t('labels.eventNames.host_channel_closed'),
   // server/src/relay.mjs hostMachineChanged: a copy of a registered desktop (full clone) refused (host-machine-v1).

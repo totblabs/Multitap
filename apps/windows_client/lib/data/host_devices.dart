@@ -65,8 +65,8 @@ enum HostDeviceAction {
 /// The four rows, or none when the Host did not report devices (an older
 /// HostTool or a malformed reply): absence is never shown as ready.
 ///
-/// A row is its name, its state word and one short fact (2026-11-11: "공유
-/// 폴더 · 준비됨 · WinFsp 사용"); a state word that says it all ("확인 불가")
+/// A row is its name, its state word and one short fact ("공유 폴더 ·
+/// 준비됨 · WinFsp 사용"); a state word that says it all ("확인 불가")
 /// has no fact. [HostDeviceRow.next] is a sentence only when there is
 /// something to do.
 List<HostDeviceRow> hostDeviceRows(Object? devices) {

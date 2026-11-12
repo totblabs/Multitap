@@ -10,9 +10,6 @@ import 'package:multitap_client/data/text_input.dart';
 import 'package:multitap_client/models/stream_options.dart';
 
 import 'remote_session_test.dart' show SessionSocket, info, packet, flush;
-import 'signin_stream_contract_test.dart'
-    show signinConnectionJson, signinBindingJson;
-import 'signin_stream_session_test.dart' show phaseInfo, signinFrame;
 import 'track_stream_test.dart' as tracks;
 
 const _remote = MethodChannel('multitap/remote');
@@ -35,9 +32,9 @@ class _Clipboard extends Fake implements ClipboardSession {
 }
 
 class _NativeRig {
-  _NativeRig(this.granted, {this.signin = false, this.track = false});
+  _NativeRig(this.granted, {this.track = false});
   final bool granted;
-  final bool signin, track;
+  final bool track;
   final socket = SessionSocket();
   final calls = <MethodCall>[];
   late RemoteSession session;
@@ -69,46 +66,27 @@ class _NativeRig {
     });
     messenger.setMockMethodCallHandler(_events, (_) async => null);
     session = RemoteSession(
-      connection: signin
-          ? BrokerConnection.fromJson(
-              {
-                ...signinConnectionJson(),
-                'signin': signinBindingJson(),
-                if (granted) 'textInputProtocol': 'text-input-v1',
-              },
-              Uri.parse('https://cloud.example.com'),
-              requestedSignin: true,
-              requestedTextInput: granted,
-            )
-          : BrokerConnection(
-              sessionId: track ? 'track-session' : 'nested-test',
-              webSocketUrl: Uri.parse(
-                'wss://fixture.invalid/api/v1/sessions/nested-test',
-              ),
-              textInput: granted,
-              trackPlan: track ? tracks.plan() : null,
-              options: track ? tracks.options : const StreamOptions(),
-            ),
+      connection: BrokerConnection(
+        sessionId: track ? 'track-session' : 'nested-test',
+        webSocketUrl: Uri.parse(
+          'wss://fixture.invalid/api/v1/sessions/nested-test',
+        ),
+        textInput: granted,
+        trackPlan: track ? tracks.plan() : null,
+        options: track ? tracks.options : const StreamOptions(),
+      ),
       token: 'synthetic-token',
       dialer: (_, _) async => socket,
     );
     unawaited(session.start());
     await flush();
-    socket.incoming.add(
-      jsonEncode(
-        signin
-            ? phaseInfo()
-            : track
-            ? tracks.info()
-            : info,
-      ),
-    );
+    socket.incoming.add(jsonEncode(track ? tracks.info() : info));
     await flush();
     if (track) {
       socket.incoming.add(tracks.packet(0));
       socket.incoming.add(tracks.packet(1));
     } else {
-      socket.incoming.add(signin ? signinFrame() : packet());
+      socket.incoming.add(packet());
     }
     await flush();
     for (var n = 0; n < 150 && !session.frameReady; n++) {
@@ -416,30 +394,4 @@ void main() {
     expect(rig.input.single['vk'], 13);
   });
 
-  test('Default native signin capture stays text-disabled without changing existing phase-wrapped direct text', () async {
-    final rig = _NativeRig(true, signin: true);
-    await rig.start();
-    addTearDown(rig.close);
-    expect(
-      (rig.calls.lastWhere((c) => c.method == 'capture').arguments as Map)
-          .containsKey('textInput'),
-      isFalse,
-    );
-    var flushes = 0;
-    rig.session.bindPointerOrdering(beforeKey: () => flushes++, discard: () {});
-    await rig.emit({'type': 'input', 'event': 'text', 'text': 'native-denied'});
-    expect(flushes, 0);
-    expect(rig.socket.sent.where((v) => v['type'] == 'input.phase'), isEmpty);
-    rig.session.input({
-      'type': 'input',
-      'event': 'text',
-      'text': 'direct-granted',
-    });
-    expect(rig.socket.sent.single['type'], 'input.phase');
-    expect(rig.socket.sent.single['input'], {
-      'type': 'input',
-      'event': 'text',
-      'text': 'direct-granted',
-    });
-  });
 }

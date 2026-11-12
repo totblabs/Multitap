@@ -39,7 +39,7 @@ bool androidReconnectRefusalFinal(Object error) =>
     error is BrokerException &&
     const {400, 401, 403, 404, 410, 422}.contains(error.status);
 
-/// Restart recovery (host-ready-wait-v1, 2026-11-03): the Windows remote
+/// Restart recovery (host-ready-wait-v1): the Windows remote
 /// window's own wait (waitForStreamDisplayControl), so the two cannot drift.
 /// A restarting broker (502-504, a refused or reset port) is asked again
 /// every 250 ms; while [machine]'s Host is away, a broker whose list offers

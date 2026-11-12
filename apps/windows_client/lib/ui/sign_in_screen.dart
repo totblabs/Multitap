@@ -56,7 +56,9 @@ class _SignInScreenState extends State<SignInScreen> {
   final _password = TextEditingController();
   bool _rememberPassword = false;
   bool _submitting = false;
-  bool _serverOpen = false;
+  // With no server yet, the address form is the first thing to fill in, so
+  // it starts open.
+  late bool _serverOpen = widget.serverOrigin == null;
   bool _serverSaving = false;
   bool _infoOpen = false;
 
@@ -265,7 +267,7 @@ class _SignInScreenState extends State<SignInScreen> {
               0.0,
               392.0,
             );
-            // The product's own surfaces (2026-11-10 audit): the tile, 18 px
+            // The product's own surfaces: the tile, 18 px
             // corners and a hairline, as on every dialog.
             final card = DecoratedBox(
               decoration: BoxDecoration(
@@ -615,7 +617,7 @@ class _SignInScreenState extends State<SignInScreen> {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(4, 2, 0, 2),
             // The label never shares a line with its hint: side by side,
-            // narrow windows and large text cut "비밀번호 기억" (2026-11-03).
+            // narrow windows and large text cut "비밀번호 기억".
             child: Row(
               children: [
                 Expanded(

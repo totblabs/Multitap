@@ -42,14 +42,14 @@ class ThemedApp extends StatefulWidget {
   final MfaAccountHost? mfaHost;
   final String title;
 
-  /// Ask before the window closes (the client's main window, 2026-10-26).
+  /// Ask before the window closes (the client's main window).
   final bool confirmExit;
 
   /// For tests; the native window guard otherwise.
   final WindowCloseGuard? exitGuard;
 
-  /// The notification-area hand-off of the main window (2026-10-27: closing
-  /// the window rests the client in the tray); the native one when null and
+  /// The notification-area hand-off of the main window (closing the window
+  /// rests the client in the tray); the native one when null and
   /// [confirmExit] is set.
   final ClientTray? tray;
 

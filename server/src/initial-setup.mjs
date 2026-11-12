@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { HttpError } from './errors.mjs';
 import { newSetupCode, normalizeSetupCode, setupCodeHash, setupCodeMatches } from './verification-codes.mjs';
 
@@ -7,9 +9,10 @@ import { newSetupCode, normalizeSetupCode, setupCodeHash, setupCodeMatches } fro
 // docker logs) and stored as a hash. Commissioned servers have no pending
 // setup account, so they never issue or need one.
 export const setupCodeSetting = 'initial_setup_code';
-const defaultAnnounce = (code, guide = null) => {
+const defaultAnnounce = (code, guide = null, { lasting = false } = {}) => {
   console.log(JSON.stringify({ service: 'multitap-broker', event: 'initial_setup_code', setupCode: code,
-    message: 'First administrator setup code. Enter it in the admin console setup screen; restarting the server issues a new code.' }));
+    message: lasting ? 'First administrator setup code. Enter it in the admin console setup screen; starting the container again issues a new code.'
+      : 'First administrator setup code. Enter it in the admin console setup screen; restarting the server issues a new code.' }));
   // The address to open, right beside the code: the root URL leads to setup.
   if (guide) console.log(JSON.stringify({ service: 'multitap-broker', event: 'initial_setup_url', urls: guide.urls, message: guide.message }));
 };
@@ -27,28 +30,63 @@ export function setupGuide({ bootstrapOnly, setupOrigin = null, allowedOrigins =
   return { urls: [], message: '처음 설정: http://<서버 IP>:' + bootstrapPort + ' 를 브라우저로 여세요 / First setup: open http://<server IP>:' + bootstrapPort + ' in a browser' };
 }
 
+// The code that was issued earlier still stands: said without the code (only
+// its hash is kept), beside the address to open.
+const defaultAnnounceKept = (guide = null) => {
+  console.log(JSON.stringify({ service: 'multitap-broker', event: 'initial_setup_code_kept',
+    message: 'The first administrator setup code issued earlier in this container is still the one to enter.' }));
+  if (guide) console.log(JSON.stringify({ service: 'multitap-broker', event: 'initial_setup_url', urls: guide.urls, message: guide.message }));
+};
+
+// One run of a container: the same until the container is started again.
+// Inside it the server may start several times (it ends itself to apply a
+// change and the entrypoint starts it again), and the log that printed the
+// code is still there. Process 1 lives exactly that long: its start time,
+// with the machine's boot ID, names the run. Null where that cannot be read.
+export function containerRun(read = process.platform === 'linux' ? path => readFileSync(path, 'latin1') : null) {
+  if (!read) return null;
+  try {
+    // /proc/1/stat: "1 (name) state ..."; the start time is the 22nd field.
+    const stat = read('/proc/1/stat'), start = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[19], boot = read('/proc/sys/kernel/random/boot_id').trim();
+    if (!/^\d{1,20}$/.test(start ?? '') || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(boot)) return null;
+    return createHash('sha256').update('multitap-container-run-v1:' + boot + ':' + start).digest('hex');
+  } catch { return null; }
+}
+
+// `run` (index.mjs gives containerRun() on a Docker install): a code issued in
+// this run stays the code for every later start of the server in it. Stored
+// is the code's hash and, with a run, that run's name: `<hash>:<run>`.
 export class InitialSetupCode {
-  constructor(store, { announce = defaultAnnounce, guide = null, attempts = 10, windowMs = 60000, now = Date.now } = {}) {
-    Object.assign(this, { store, announce, guide, attempts, windowMs, now }); this.windows = new Map();
+  constructor(store, { announce = defaultAnnounce, announceKept = defaultAnnounceKept, guide = null, run = null, attempts = 10, windowMs = 60000, now = Date.now } = {}) {
+    Object.assign(this, { store, announce, announceKept, guide, attempts, windowMs, now }); this.windows = new Map();
+    this.run = typeof run === 'string' && /^[a-f0-9]{64}$/.test(run) ? run : null;
   }
   pending() { return !!this.store.db.prepare("SELECT 1 FROM users WHERE role='admin' AND disabled=0 AND must_change_credentials=1 LIMIT 1").get(); }
+  stored() {
+    const value = this.store.setting(setupCodeSetting);
+    if (!value) return null;
+    const [hash, run = null] = value.split(':');
+    return { hash, run };
+  }
   issue() {
     const code = newSetupCode();
-    this.store.db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(setupCodeSetting, setupCodeHash(normalizeSetupCode(code)));
-    try { this.announce(code, this.guide); } catch { /* The log line is best effort; a new start prints another code. */ }
+    this.store.db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(setupCodeSetting, setupCodeHash(normalizeSetupCode(code)) + (this.run ? ':' + this.run : ''));
+    try { this.announce(code, this.guide, { lasting: this.run !== null }); } catch { /* The log line is best effort; a new start prints another code. */ }
   }
   // At startup: a pending setup gets a fresh code (any earlier one stops
-  // working); otherwise no code may linger.
+  // working), unless its code was issued in this same container run;
+  // otherwise no code may linger.
   startup() {
-    if (this.pending()) this.issue();
-    else this.store.db.prepare('DELETE FROM settings WHERE key=?').run(setupCodeSetting);
+    if (!this.pending()) { this.store.db.prepare('DELETE FROM settings WHERE key=?').run(setupCodeSetting); return; }
+    if (this.run !== null && this.stored()?.run === this.run) { try { this.announceKept(this.guide); } catch { /* The log line is best effort. */ } return; }
+    this.issue();
   }
   // Throws unless `value` is the current code. A setup that became pending
   // after startup (bootstrap reset-initial) gets its code issued here.
   // Attempts are limited per admin session (`key`): 60 random bits are not
   // guessable, and one hostile admin/admin session cannot lock out another.
   verify(value, key) {
-    const stored = this.store.setting(setupCodeSetting);
+    const stored = this.stored()?.hash;
     if (!stored) { this.issue(); throw new HttpError(403, 'setup_code_required'); }
     const now = this.now();
     let window = this.windows.get(key);

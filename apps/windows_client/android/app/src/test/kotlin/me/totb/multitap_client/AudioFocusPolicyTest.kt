@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// AudioFocusPolicy (AndroidAudioFocus.kt, 2026-11-10): the VM sound follows audio focus by volume only.
+// AudioFocusPolicy (AndroidAudioFocus.kt): the VM sound follows audio focus by volume only.
 class AudioFocusPolicyTest {
     private val p = AudioFocusPolicy()
 

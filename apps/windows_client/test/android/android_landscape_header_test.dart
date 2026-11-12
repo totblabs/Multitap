@@ -1,6 +1,6 @@
-// Backlog 2026-11-02: on a phone on its side the launcher's header, title and
-// filters took about half the height, so the first card's 연결 was below the
-// fold. In-process fixtures only: no broker, VM or device.
+// On a phone on its side the launcher's header, title and filters on rows of
+// their own take about half the height, so the first card's 연결 is below
+// the fold. In-process fixtures only: no broker, VM or device.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

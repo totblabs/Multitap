@@ -294,8 +294,8 @@ class AndroidStore {
   Future<void> saveScene(BackgroundScene scene) =>
       _save('appearance.scene', scene.name);
 
-  // One card grid, the Windows launcher's (2026-11-03): a 'launcher.view'
-  // saved by an earlier version is not read.
+  // One card grid, the Windows launcher's: a saved 'launcher.view' is not
+  // read.
   Future<bool> launcherPreviews() async =>
       (await _preferences())['launcher.previews'] != 'off';
 
@@ -312,8 +312,8 @@ class AndroidStore {
     final values = await _preferences();
     final toolbar = double.tryParse(values['session.toolbar'] ?? '');
     return AndroidSessionSettings(
-      // 포인터 became the default (2026-10-26): the earlier key held the
-      // former 직접 터치 default for everyone, so it is not read.
+      // 포인터 is the default: the earlier key holds a 직접 터치 that was
+      // only its default, not a choice, so it is not read.
       touch: AndroidTouchMode.parse(values['session.input']),
       speed: AndroidPointerSpeed.parse(values['session.pointer']),
       toolbar: toolbar != null && toolbar >= 0 && toolbar <= 1

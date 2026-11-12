@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { resolve, join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { publishedRelease, maxCatalogEntries, maxReleaseManifestBytes, maxDownloadSize } from './downloads.mjs';
-import { releaseHistoryMerge, releaseHistoryWrite } from './release-history-core.mjs';
+import { releaseHistoryMerge, releaseHistoryWrite, releaseHistoryRecord, releaseHistoryFileName, releaseHistoryReadRecord } from './release-history-core.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const samePath = (a, b) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -226,14 +226,32 @@ export function mergeDownloadCatalog(existing, incoming) {
 // Every catalog entry of the volume also gets its notes-only history record
 // (release-history-core.mjs), on each start: this is the Docker backfill, and
 // it is idempotent. A record without a catalog date takes the installer's
-// publication time on this volume. Notes are not part of the integrity of the
-// seed, so a failure is reported instead of stopping the broker's start.
+// publication time on this volume, once: the file's time only fills a record
+// that has no date yet. A record that already has one keeps it, whatever the
+// file's time is now (a volume put back from a copy has whole-second or other
+// file times, and that is not another release date). A date or notes the
+// catalog itself states still have to agree with the record, or it is a
+// conflict. Notes are not part of the integrity of the seed, so a failure is
+// reported instead of stopping the broker's start.
 async function recordSeededHistory(target, entries) {
   try {
+    const io = { open, lstat, readdir, mkdir, link, unlink, rename, chmod, chown, randomUUID };
+    const dated = new Map();
+    const recordedDate = async entry => {
+      const record = releaseHistoryRecord({ product: entry.product, version: entry.version });
+      if (!record) return false;
+      const name = releaseHistoryFileName(record);
+      if (!dated.has(name)) {
+        let existing = null;
+        try { existing = await releaseHistoryReadRecord(io, constants, target, name); } catch { /* An unreadable record is reported by the write below. */ }
+        dated.set(name, existing?.record?.releasedAt !== undefined);
+      }
+      return dated.get(name);
+    };
     const candidates = [];
     for (const entry of entries) {
       let releasedAt = entry.releasedAt;
-      if (releasedAt === undefined) {
+      if (releasedAt === undefined && !await recordedDate(entry)) {
         try {
           const stat = await lstat(join(target, entry.filename));
           if (stat.isFile() && !stat.isSymbolicLink() && stat.size === entry.size) releasedAt = new Date(Math.floor(stat.mtimeMs)).toISOString();
@@ -241,7 +259,6 @@ async function recordSeededHistory(target, entries) {
       }
       candidates.push({ ...entry, releasedAt });
     }
-    const io = { open, lstat, readdir, mkdir, link, unlink, rename, chmod, chown, randomUUID };
     const result = await releaseHistoryWrite(io, constants, target, releaseHistoryMerge(candidates));
     return { recorded: result.written + result.completed, unchanged: result.unchanged, conflicts: result.conflicts.length };
   } catch { return { failed: true }; }

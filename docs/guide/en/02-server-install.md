@@ -18,7 +18,7 @@ Run the commands in this chapter **inside the Linux where you install Multitap**
 Copy only what is inside a command box. Do not type labels such as `sh`.
 When you type a password, nothing (not even `*`) is shown, but it is being typed.
 
-> `192.0.2.10` and `vdi.example.com` are examples, not addresses you can reach.
+> `10.0.0.10` and `vdi.example.com` are examples.
 > Replace them with your server's IP and domain. Do the first setup on an internal network you trust.
 
 ## Install the server
@@ -31,6 +31,7 @@ When the server runs, go on to **Basic server setup** below.
 **Where: the Proxmox web UI, then the Linux server**
 
 1. Prepare a CT or VM with Debian or Ubuntu. Only x86_64 (amd64) works.
+   A VM is the safer place and a CT the lighter one. Docker inside a CT depends on the CT's nesting feature, and there have been cases where containers in a CT stopped starting after a Proxmox or Docker update. For a server you keep for a long time, a VM is recommended.
 2. For a CT, turn on **nesting** under **CT → Options → Features** in Proxmox. For an unprivileged CT, turn on **keyctl** too.
 3. If you changed the features, restart the CT.
 4. Sign in to Linux as root, or with an account that can use `sudo`.
@@ -44,6 +45,15 @@ You do not need to install Docker first. The install command installs it if it i
 
 **Where: Linux server**
 
+The command runs inside the CT or VM, never on the Proxmox node.
+
+| Where you install | How to get in |
+| --- | --- |
+| CT | `pct enter <CT number>` in the Proxmox node's **Shell**, or **CT → Console** in the Proxmox web UI |
+| VM | **VM → Console** in the Proxmox web UI. If pasting does not work there, type the line or SSH to the VM's IP. `ip -4 a` in the Console shows the IP |
+
+If SSH says `Permission denied (publickey)`, the VM accepts keys only, as VMs made from a cloud image do. Use the Console.
+
 Run this one line in a root terminal.
 
 ```sh
@@ -56,20 +66,24 @@ If you are not root, add `sudo`.
 curl -fsSL https://raw.githubusercontent.com/totblabs/Multitap/main/deploy/docker/install.sh | sudo env MULTITAP_LANG=en bash
 ```
 
+If you see `curl: command not found`, install it with `apt update && apt install -y curl` and run again. If you are not root, put `sudo` in front of both commands.
+
 `MULTITAP_LANG=en` shows the messages in English (`ko` for Korean). Without it, the install follows the Linux language setting: Korean when it is Korean, English otherwise.
 
 The install runs in four steps: **[1/4] Checking the system → [2/4] Docker → [3/4] Server files and image → [4/4] Starting the server**.
-On the way it asks two questions. Pressing Enter means **yes**.
+On the way it asks two questions. Pressing Enter means **yes** to the first and **no** to the second.
 
 | Question | What it means |
 | --- | --- |
 | **Let apps and Hosts connect at this address?** `http://<server IP>:18480` | Apps and Hosts on the same network connect at this address. It is not encrypted. |
-| **Allow connections from outside too (router port forwarding)?** `http://<public IP>:18480` | The server's public IP is found and registered automatically, and followed within 10 minutes when it changes. Asked only when a public IP is found. |
+| **Also allow HTTP connections from outside? (router port forwarding)** `http://<public IP>:18480` | With `y`, the server's public IP is registered as an HTTP address, and the server follows it within 10 minutes when it changes. It is not encrypted over the internet, so an HTTPS address is recommended from outside. You can turn it on later in **Server access**. Asked only when a public IP is found. |
+
+The two questions only give a new server its first addresses. After that, addresses are changed in **Server access** in the admin console.
 
 **Check:** at the end you see **✔ Installed** and three lines.
 
 ```text
-  ① Open in a browser   http://192.0.2.10:18480
+  ① Open in a browser   http://10.0.0.10:18480
   ② First sign-in       admin / admin
   ③ Setup code          (one-time code)
 ```
@@ -80,12 +94,16 @@ You use these three lines in **Basic server setup** next. Do not send the setup 
 <summary>The install stopped — ✖ Stopped</summary>
 
 Under **✖ Stopped** you see the reason and what to do next.
+The install log is kept in `/var/log/multitap-install.log` (readable by root only; the setup code is not written to it).
 
 - **Run this as root**: use the `sudo` command above.
+- **Nesting is off in this CT…**: checked before anything is installed. Turn on nesting as the message says (and keyctl for an unprivileged CT), restart the CT, and run the same command again.
+- **A command failed in step…**: the failed command and the last lines of the log are shown together. The reason is in those lines.
+- **Could not download the server image**: the reason Docker gives (access denied, DNS, a timeout and so on) is shown as it is.
+- **this distribution's packages have no 'docker compose' (Compose v2)**: check that Docker's own repository (`download.docker.com`) can be reached, then run the command again.
 - **Multitap installs only on Debian or Ubuntu**: on another distribution, use the Compose method in the [Docker deployment guide](../../docker-deployment.md).
 - **Docker could not run a container in this CT**: turn on nesting from step 1 (and keyctl for an unprivileged CT), restart the CT, and run the same command again.
 - **The server did not answer within 3 minutes**: check the log shown above. To see it again: `sudo multitap logs`.
-- `curl: command not found`: install it with `apt-get install -y curl` and run again.
 
 Running the same command again is safe. A finished install is left unchanged, and an install that stopped half way continues with the settings and data already there.
 
@@ -104,7 +122,7 @@ Settings you can put in front of `bash` (like `MULTITAP_LANG=en`):
 | --- | --- |
 | `MULTITAP_VERSION=1.2.3` | Installs this version instead of the newest |
 | `MULTITAP_LAN_HTTP=0` | Answers **no** to the first question without asking (`1` is **yes**) |
-| `MULTITAP_PUBLIC_HTTP=0` | Does not register the address from outside (`1` registers it without asking). Run without a terminal, it is registered only with `1` |
+| `MULTITAP_PUBLIC_HTTP=1` | Registers the HTTP address from outside without asking (`0`: does not register it, without asking). Run without a terminal, it is registered only with `1` |
 
 To use Docker Compose yourself, or to install on another Linux, see the [Docker deployment guide](../../docker-deployment.md).
 
@@ -115,12 +133,13 @@ To use Docker Compose yourself, or to install on another Linux, see the [Docker 
 | `sudo multitap status` | Status, version and address |
 | `sudo multitap logs` | The server's log (Ctrl+C to stop) |
 | `sudo multitap code` | Shows the first-setup code again |
-| `sudo multitap address <address>…` | Changes the addresses apps and Hosts use. Without an address: shows them |
-| `sudo multitap public-ip [on\|off]` | Turns public IP following on or off. Without on/off: shows the state |
+| `sudo multitap address` | Shows the addresses apps and Hosts use. They are changed in **Server access** |
+| `sudo multitap address <address>…` | Changes the same address settings on the server when the admin console cannot be reached |
+| `sudo multitap public-ip [on\|off]` | Turns public IP following on or off (the same switch as in **Server access**). Without on/off: shows the state |
 | `sudo multitap update [version]` | Backs up, then updates to the new version ([chapter 8](08-updates.md#server--installed-with-the-install-command)) |
 | `sudo multitap backup` | Copies all data to `/opt/multitap/backups` |
 | `sudo multitap restore <file>` | Puts a backup back ([backup and restore below](#backup-and-restore--server-data-in-one-file), [chapter 8](08-updates.md#restore-from-a-backup)) |
-| `sudo multitap restart` · `stop` · `start` | Restart, stop, start |
+| `sudo multitap restart` · `stop` · `start` | Restart, stop, start. A restart also works from **Server info → Restart server** in the admin console |
 | `sudo multitap uninstall` | Stops and removes the server. The data stays |
 
 ## Basic server setup
@@ -158,6 +177,7 @@ You must change both the username and the password.
 ### Step 2. Check the address Hosts and apps use
 
 Host and client connections and downloads work only at the addresses in **Server access**.
+The addresses, the primary server address, the trusted proxy IPs and public IP following are all set on that page, and the server applies them itself.
 
 #### Same home or office network — already applied at install
 
@@ -170,25 +190,34 @@ If you answered **yes** (Enter) to the first question during the install, `http:
 
 **Check:** opening `/get/host` at that address on your PC starts the Host download.
 
-If you answered **no**, or want to change the address, enter the addresses in **Server access**.
-The page shows the **command to run on the Multitap server (CT or VM)**. Run that command on the **Linux server**.
+If you answered **no**, or want to change the address, change it on the same page.
 
-```sh
-sudo multitap address http://192.0.2.10:18480
-```
+1. Enter or correct the addresses. Up to 4 HTTPS and 4 HTTP addresses.
+2. Click **Connection test**, then **Save changes**.
+3. The server ends open connections and starts again with the new addresses. The admin console drops for a moment too.
+4. The server checks that it can reach itself at the new address. If it cannot, the previous settings come back and the page says so.
 
-Separate several addresses with spaces. Up to 4 HTTP addresses and 1 HTTPS address.
-The server restarts with the new addresses, and goes back to the previous settings if it cannot start.
+An HTTP address made of the server's IP must use the port Docker opens (`18480`). The page shows that port.
 
 > **HTTP is not encrypted.** Sign-in details and screens travel as they are.
 > If you use it from the internet often, use a domain and HTTPS.
 
 <details>
-<summary>If the server was installed directly on Linux (systemd)</summary>
+<summary>When the admin console cannot be reached — setting the address on the server</summary>
 
-With this method you run no command.
-Enter the addresses in **Server access** and click **Save changes**: open connections are closed and the new settings apply at once.
-If they cannot be applied, the previous settings come back.
+When a wrong address was saved and the admin console does not open, or when the port Docker opens has to change, run this on the **Linux server**.
+It reads and writes the same settings as the admin console.
+
+```sh
+sudo multitap address
+sudo multitap address http://10.0.0.10:18480
+```
+
+Without an address it shows the current ones. With addresses, they replace all current ones; separate several with spaces.
+With an HTTP address, the port Docker opens follows that address's port.
+While public IP following is on, the address it follows stays in the list. To drop it, run `sudo multitap public-ip off` first.
+The server restarts, and goes back to the previous settings if it cannot start with the new addresses.
+`sudo multitap address --help` shows how to set the primary address and the trusted proxies as well.
 
 </details>
 
@@ -197,24 +226,20 @@ Also check what your router and the Proxmox firewall allow ([Docker documentatio
 
 #### Connecting from outside — public IP and port forwarding
 
-If you answered **yes** to the second question during the install, the public IP address (`http://<public IP>:18480`) is registered too.
-When the public IP changes, the server switches to the new address by itself within 10 minutes.
+The simple way in from outside, without a domain. It works, but it is HTTP and not encrypted. For long-term use from outside, the HTTPS way below is recommended.
 
-To get in from outside, set up port forwarding on your router.
+**Where: the admin console on your PC, and your router**
 
-1. In your router settings, forward **TCP 18480** and **UDP 18481** to the Linux server's IP.
-2. If the server has a firewall, open the same two ports.
+1. In **Server access**, turn on **Follow the public IP** under the HTTP address and save.
+   The server finds its public IP, registers it as an HTTP address, checks it every 10 minutes and follows it when it changes.
+   If you answered `y` to the second question during the install, it is on already.
+2. In your router settings, forward **TCP 18480** and **UDP 18481** to the Linux server's IP.
+3. If the server has a firewall, open the same two ports.
 
 Until you forward the ports, nothing comes in from outside. The same network keeps working.
+Public IP following needs one other HTTP address, and the public IP address cannot be the primary server address.
 
-To turn it on or off later, run this on the **Linux server**.
-
-```sh
-sudo multitap public-ip on
-sudo multitap public-ip off
-```
-
-`on` finds and registers the public IP and checks it every 10 minutes. `off` only stops the check; the registered address stays.
+The same switch can be turned on the server: `sudo multitap public-ip on`, `sudo multitap public-ip off`. Turned off, the registered address stays.
 
 #### Connecting from the internet — HTTPS
 
@@ -229,67 +254,73 @@ A reverse proxy is a program that accepts HTTPS connections and passes them on t
 3. Set the proxy's upstream address to `http://127.0.0.1:18480`.
 4. Pass on `Host`, `X-Forwarded-Proto: https` and the WebSocket `Upgrade` and `Connection` headers.
 5. Set the proxy's WebSocket read timeout long enough.
+6. Allow TCP 443 to the proxy in the server firewall and, if you use a router, forward outside TCP 443 to the proxy.
 
 A complete nginx example is in the [Docker deployment guide](../../docker-deployment.md).
 
-On the **Linux server**, find the gateway address of the Docker network.
+Continue in the **admin console on your PC**.
 
-```sh
-sudo docker network inspect multitap_default -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
-```
-
-Continue on the **Linux server**.
-
-1. Open the settings file with `sudo nano /opt/multitap/.env`.
-2. Put the gateway IP you just found after `MULTITAP_TRUSTED_PROXIES=`.
-3. If you use HTTPS only, change it to `MULTITAP_PUBLISH_PORT=127.0.0.1:18480`.
-4. Save and close with `Ctrl+O`, Enter, `Ctrl+X`.
-5. If you use HTTPS only and public IP following is on, turn it off with `sudo multitap public-ip off`.
-6. Apply the address. If you keep HTTP addresses too, add them after it, separated by spaces.
-
-   ```sh
-   sudo multitap address https://vdi.example.com
-   ```
-
-7. Allow TCP 443 to the proxy in the server firewall.
-8. If you use a router, forward outside TCP 443 to the proxy.
-9. Sign in from the browser on your PC at the real HTTPS address.
+1. In **Server access**, enter the domain in the HTTPS address field, for example `https://vdi.example.com`.
+2. Under **Trusted proxy IPs**, click **The proxy is on this server**. The address the proxy arrives from is added to the list.
+3. Click **Connection test**, then **Save changes**.
+4. Sign in from the browser on your PC at the real HTTPS address.
 
 Replace the domain in `https://vdi.example.com` with your real domain.
 Hosts and apps you already use must also test the connection at the new address and save it.
+If you use HTTPS only, delete the HTTP addresses and turn off public IP following.
 
 If the proxy is on another machine, do not use the `127.0.0.1` upstream address.
-Forward to the broker's real address, and put the proxy's real address, as the broker sees it, in `MULTITAP_TRUSTED_PROXIES`.
+Forward to the broker's real address, and enter the proxy's real address, as the broker sees it, under **Trusted proxy IPs**.
 
-If you use HTTP as well, keep the published address at `0.0.0.0:18480`. `multitap address` sets it so when you give HTTP addresses too.
+To use HTTPS only and keep the Docker port open only inside the server, change `/opt/multitap/.env` on the **Linux server** to `MULTITAP_PUBLISH_PORT=127.0.0.1:18480` and run `sudo multitap start`.
 To use TLS directly without a proxy, see the [Docker deployment guide](../../docker-deployment.md).
 
 </details>
 
-### Step 3. UDP media — can be set up after basic access works
+### Step 3. Screen streaming over UDP — forward one port on the router
 
-UDP is an extra path for screen and sound.
-If it is not set up, or blocked, connections use the WebSocket path.
+UDP is a faster path for screen and sound.
+Apps and Hosts send to UDP port 18481 of the server address they connected on. Nothing has to be set on the server.
 
 1. Allow UDP 18481 in the server firewall.
-2. If you use a router for access from outside, forward UDP 18481 to the Linux server.
-3. On the **Linux server**, open `sudo nano /opt/multitap/.env` and add the lines below.
-4. Replace `vdi.example.com` with the real address Hosts and apps can reach.
-5. Save, then run `sudo multitap start`. It recreates the server with the changed settings.
+2. For access from outside, forward UDP 18481 on your router to the Linux server.
+
+Where UDP does not arrive, the screen uses the WebSocket path. It is a little slower, but it connects.
+UDP is not used in these cases.
+
+- Docker's UDP port is open only inside the server
+- the address is an IPv6 literal
+- the HTTPS address points at a proxy or tunnel on another machine that does not forward UDP
+
+In the last case you can name the address that receives UDP in `/opt/multitap/.env`. Both lines are needed; save, then run `sudo multitap start`.
 
 ```dotenv
-MULTITAP_UDP_HOST_RELAYS=vdi.example.com:18481
-MULTITAP_UDP_CLIENT_RELAYS=vdi.example.com:18481
+MULTITAP_UDP_HOST_RELAYS=udp.example.com:18481
+MULTITAP_UDP_CLIENT_RELAYS=udp.example.com:18481
 MULTITAP_UDP_MEDIA=on
 ```
 
-For an install that uses HTTP on the internal network only, use the real server IP with `:18481` on both lines.
-Both address lists must be set.
-
 > TCP 443 and UDP 18481 are separate. Forward UDP on its own, apart from the HTTPS proxy.
 
-**Check:** later, after you connect via streaming, look at the UDP/TCP path in **Connection quality**.
-Saving the settings file alone does not show that UDP works.
+**Check:** **Screen streaming over UDP** in **Server access** shows the current state. After you connect by streaming, check the UDP/TCP path under **Connection quality**.
+
+### What the server contacts on its own
+
+Without a request from a user, the server connects out only to these.
+
+| Where | When and why | How to turn it off |
+| --- | --- | --- |
+| `github.com` (the project's releases) | While the admin console is open, at most once an hour: the signed information about a new version | `MULTITAP_DOCKER_UPDATE_FEED=off` in `/opt/multitap/.env` |
+| `1.1.1.1` (Cloudflare's address echo) | Only while **Follow the public IP** is on, every 10 minutes: the server's public IP | Turn off public IP following in **Server access** |
+| The Proxmox you connected | For the desktop list, power and Console | Remove the Proxmox connection |
+
+The install command and `multitap update` download files when you run them: from `github.com`, `ghcr.io` (the server image) and `download.docker.com` (when Docker is missing).
+The install command looks up the public IP once, for the second question.
+
+### Memory the server uses
+
+The server container uses up to 512 MB of memory. Giving the CT or VM more memory does not change that limit.
+If many people connect at once and it is not enough, put `MULTITAP_MEMORY_LIMIT=1g` (for example) in `/opt/multitap/.env` and run `sudo multitap start`.
 
 ### Backup and restore — server data in one file
 
@@ -346,7 +377,7 @@ If the restore or the start fails, it puts that safety backup back and shows the
 
 **Check:** **✔ Restored.** appears, and you can sign in with an admin account from the backup.
 
-- The addresses (`.env`) and the download files stay this server's own. To change the addresses, use `sudo multitap address`.
+- The addresses and the download files stay this server's own. Addresses are changed in **Server access**.
 - A newly installed server is restored the same way once the install has finished.
 - A backup made by a newer server version is not restored. Update first with `sudo multitap update`.
 - A data volume copy made with `sudo multitap backup` is put back with the same command ([chapter 8](08-updates.md#restore-from-a-backup)).
@@ -358,7 +389,17 @@ If the restore or the start fails, it puts that safety backup back and shows the
 - [ ] `/get/host` at that address starts a download.
 
 If all of this works, go to [chapter 3: Connect Proxmox](03-connect-proxmox.md).
-**Running** in `sudo multitap status` means the server process runs; it does not mean a desktop screen is ready.
+**is running and answering** in `sudo multitap status` is about the server; it does not mean a desktop screen is ready.
 
 > Accounts and desktop assignments are stored in the Docker data volume.
 > `multitap uninstall` keeps the data too. Do not run `docker compose down -v` or delete the volume.
+
+When you remove Multitap completely, also remove the dedicated user and role it created in Proxmox. `multitap uninstall` does not touch Proxmox.
+Run this in the **Proxmox node's Shell**. The names are listed under **Datacenter → Permissions → Users** and **Roles** in the Proxmox web UI.
+
+```sh
+pveum user delete multitap-<name>@pve
+pveum role delete Multitap-<12 characters>
+```
+
+Deleting the user also removes its API token and its permissions.

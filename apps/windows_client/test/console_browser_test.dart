@@ -16,7 +16,6 @@ import 'auth_flow_test.dart' show TestBroker, TestLoginMemory;
 final origin = Uri.parse('https://console.fixture.invalid:8443');
 BrokerDesktop desktop({
   String? marker = 'console-browser-v1',
-  String? nativeMarker,
   String kind = 'vm',
   String id = 'lab_149',
 }) => BrokerDesktop(
@@ -31,16 +30,14 @@ BrokerDesktop desktop({
   consoleWebViewProtocol: marker == 'console-browser-v1'
       ? 'console-webview-v1'
       : null,
-  consoleRelayProtocol: nativeMarker,
 );
 
 class BrowserFixtureBroker extends TestBroker
-    implements EmergencyConsoleBrokerApi, ConsoleWebViewBrokerApi {
+    implements ConsoleWebViewBrokerApi {
   BrowserFixtureBroker() {
     assigned = [desktop()];
   }
   Completer<List<BrokerDesktop>>? fresh;
-  int nativeGrants = 0;
   int webViewGrants = 0, webViewCloses = 0;
   @override
   Future<BrokerConsoleWebViewGrant> createConsoleWebView(
@@ -65,21 +62,6 @@ class BrowserFixtureBroker extends TestBroker
   }
 
   @override
-  Future<BrokerConsoleGrant> createConsole(
-    String token,
-    String desktopId,
-  ) async {
-    nativeGrants++;
-    throw StateError('The launcher must not acquire a native console.');
-  }
-
-  @override
-  Future<void> releaseConsole(
-    String token,
-    String desktopId,
-    String id,
-  ) async => throw StateError('The launcher does not own a native console.');
-  @override
   Future<List<BrokerDesktop>> desktops(String token) =>
       fresh?.future ?? Future.value(assigned);
 }
@@ -99,12 +81,9 @@ void main() {
     );
     messenger.setMockMethodCallHandler(AndroidStore.channel, null);
   });
-  test('optional capability means assignedVM browser route, never native or screen readiness; every clone preserves it', () {
+  test('optional capability means assignedVM browser route, never screen readiness; every clone preserves it', () {
     final value = desktop(), m = machineFromBroker(value);
     expect(value.browserConsoleSupported, isTrue);
-    expect(value.emergencyConsoleSupported, isFalse);
-    expect(m.hasEmergencyConsole, isTrue);
-    expect(m.emergencyConsoleSupported, isFalse);
     expect(m.isReady, isFalse);
     final copies = [
       m.withPower(state: 'running', checkedAt: null, stale: false, busy: false),
@@ -268,13 +247,12 @@ void main() {
         },
       ]);
       expect(broker.connects, 0);
-      expect(broker.nativeGrants, 0);
       expect(find.byKey(const Key('desktop-more-lab_149')), findsOneWidget);
     },
   );
   for (final marker in <String?>[null, 'future']) {
     testWidgets(
-      'Windows legacy native capability and browser marker $marker require update without fallback',
+      'Windows browser marker $marker requires update',
       (t) async {
         final calls = <String>[];
         messenger.setMockMethodCallHandler(
@@ -286,9 +264,8 @@ void main() {
         );
         final broker = BrowserFixtureBroker()
           ..assigned = [
-            desktop(id: 'pve-149', marker: marker, nativeMarker: 'rfb-none-v1'),
+            desktop(id: 'pve-149', marker: marker),
           ];
-        expect(broker.assigned.single.emergencyConsoleSupported, isTrue);
         await windows(t, broker);
         await tap(t, 'stream-modes-pve-149');
         await tap(t, 'emergency-console-pve-149');
@@ -297,13 +274,12 @@ void main() {
         expect(find.textContaining('관리자에게 알려 주세요'), findsOneWidget);
         expect(calls, isNot(contains('openConsoleWebView')));
         expect(calls, isNot(contains('openSessionWindow')));
-        expect(broker.nativeGrants, 0);
         expect(broker.connects, 0);
       },
     );
   }
   testWidgets(
-    'Windows HTTP console explains HTTPS and never opens native or browser',
+    'Windows HTTP console explains HTTPS and never opens a browser',
     (t) async {
       final calls = <String>[];
       messenger.setMockMethodCallHandler(
@@ -326,7 +302,6 @@ void main() {
       expect(find.textContaining('HTTPS 주소로 다시 로그인'), findsOneWidget);
       expect(calls, isNot(contains('openConsoleWebView')));
       expect(calls, isNot(contains('openSessionWindow')));
-      expect(broker.nativeGrants, 0);
     },
   );
   testWidgets(
@@ -354,11 +329,10 @@ void main() {
       await t.pumpAndSettle();
       expect(find.textContaining('관리자에게 알려 주세요'), findsOneWidget);
       expect(opens, 0);
-      expect(broker.nativeGrants, 0);
     },
   );
   testWidgets(
-    'Windows browser launch failure never falls back to a native console',
+    'Windows browser launch failure is reported',
     (t) async {
       messenger.setMockMethodCallHandler(
         const MethodChannel('multitap/window'),
@@ -371,7 +345,6 @@ void main() {
       await t.tap(find.text('Console로 열기').last);
       await t.pumpAndSettle();
       expect(find.textContaining('네트워크를 확인하고 다시 시도'), findsOneWidget);
-      expect(broker.nativeGrants, 0);
       expect(broker.connects, 0);
     },
   );
@@ -398,7 +371,6 @@ void main() {
         await t.tap(find.text('Console로 열기').last);
         await t.pumpAndSettle();
         expect(opens, 0);
-        expect(broker.nativeGrants, 0);
         expect(broker.connects, 0);
       },
     );
@@ -428,7 +400,6 @@ void main() {
       await t.pumpAndSettle();
       expect(find.byKey(const Key('login-submit')), findsOneWidget);
       expect(opens, 0);
-      expect(broker.nativeGrants, 0);
     },
   );
   testWidgets(
@@ -489,7 +460,7 @@ void main() {
       await t.pumpWidget(AndroidVdiApp(apiFactory: (_) => broker));
       await t.pumpAndSettle();
       await tap(t, 'login-submit');
-      // ▾ holds 콘솔 on Android as on Windows (2026-11-03).
+      // ▾ holds 콘솔 on Android as on Windows.
       await tap(t, 'stream-modes-lab_149');
       await tap(t, 'emergency-console-lab_149');
       expect(opened, isEmpty);

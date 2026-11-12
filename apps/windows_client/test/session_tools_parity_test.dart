@@ -57,7 +57,7 @@ const sessionToolOrder = [
   // 설정: the Windows bar's button; 화질 is the former 설정.
   ('more', '설정'),
   ('settings', '화질'),
-  // 2026-11-03: the former 게임 마우스, and 마우스 가두기 is gone.
+  // The one mouse entry (no 게임 마우스, no 마우스 가두기).
   ('gameMouse', '마우스 잠금'),
   ('pin', '툴바 열어 두기'),
   ('guide', '사용안내'),
@@ -69,11 +69,11 @@ const sessionToolOrder = [
 /// Only Windows: the PC's own devices (폴더·USB with its 공유 폴더 and USB
 /// 장치 tabs), which Android does not redirect; 툴바 열어 두기 (Android's
 /// menu is a card, not a bar, and its three buttons are always there); and
-/// the window's buttons in full screen (최소화, 창 모드로). 설정 is on both
-/// since 2026-11-11: Android's menu has the same row with the same panel.
+/// the window's buttons in full screen (최소화, 창 모드로). 설정 is on
+/// both: Android's menu has the same row with the same panel.
 const windowsOnly = {'share', 'drives', 'usb', 'pin', 'minimize', 'restore'};
 
-/// Only Android: nothing of the vocabulary (2026-11-03). Its extras are the
+/// Only Android: nothing of the vocabulary. Its extras are the
 /// cluster's one-tap buttons and [androidPanelExtras] below, which are not
 /// entries of the vocabulary.
 const androidOnly = <String>{};
@@ -83,8 +83,8 @@ const androidOnly = <String>{};
 /// 사용안내.
 const androidPanelExtras = [('android-session-input', '입력 방식')];
 
-/// Android's one-tap buttons beside ⋯ (2026-11-02: always outside the
-/// menu), in their cluster order under ⋯ (2026-11-03): not menu entries.
+/// Android's one-tap buttons beside ⋯ (always outside the menu), in their
+/// cluster order under ⋯: not menu entries.
 const androidCluster = [
   ('android-remote-touch-mode-button', '입력 방식'),
   ('android-remote-keyboard-button', '키보드'),
@@ -446,8 +446,8 @@ void main() {
       'entries, in the shared order and names', (tester) async {
     final view = await _windows(tester);
     const bar = Key('session-command-bar');
-    // 마우스 가두기 is gone (2026-11-03): 마우스 잠금 is the only mouse
-    // entry, and nothing is called 게임 마우스 any more.
+    // 마우스 잠금 is the only mouse entry: nothing is called 마우스 가두기
+    // or 게임 마우스.
     void noOldMouseNames(String where) {
       expect(find.byKey(const Key('session-pointer-confine')), findsNothing);
       for (final gone in const ['가두기', '게임 마우스']) {
@@ -497,7 +497,7 @@ void main() {
       ].map((element) => (element.widget as Tooltip).message);
       expect(tooltips, contains(startsWith(_label(id))), reason: id);
     }
-    // Nothing of a group sits on the bar itself (2026-11-10), there is no
+    // Nothing of a group sits on the bar itself, there is no
     // full-screen toggle, and no command carries a chevron.
     for (final MapEntry(key: id, value: key) in _windowsPanelKeys.entries) {
       expect(find.byKey(Key(key)), findsNothing, reason: id);
@@ -571,9 +571,8 @@ void main() {
       expect(onMenu, ['quality', 'screen', 'more', 'disconnect']);
       expect(_shown(tester, _androidMenu, Axis.vertical), onMenu);
       final menu = find.byKey(const Key('session-command-bar'));
-      // Nothing else in the menu (2026-11-03): every row is a shared entry
-      // with its one name and icon, and the no-longer Android-only 클립보드
-      // and 키 조합 are gone.
+      // Nothing else in the menu: every row is a shared entry with its one
+      // name and icon, and there is no Android-only 클립보드 or 키 조합.
       final rows = tester
           .widgetList<AndroidBarMenuRow>(
             find.descendant(of: menu, matching: find.byType(AndroidBarMenuRow)),
@@ -598,9 +597,8 @@ void main() {
           reason: id,
         );
       }
-      // The Windows bar has no captions and neither has the card
-      // (2026-11-11): 화면 and 설정 are rows, not captions over rows. No
-      // 공유 group on a phone, and the former captions are gone.
+      // The Windows bar has no captions and neither has the card: 화면 and
+      // 설정 are rows, not captions over rows. No 공유 group on a phone.
       expect(
         find.descendant(of: menu, matching: find.byType(AndroidMenuCaption)),
         findsNothing,
@@ -640,7 +638,7 @@ void main() {
       final tools = tester.getRect(
         find.byKey(const Key('expand-session-toolbar')),
       );
-      // ⋯, then 입력 방식, then 키보드 (2026-11-03).
+      // ⋯, then 입력 방식, then 키보드.
       expect(tools.top, lessThanOrEqualTo(ordered.first.top));
       expect(ordered.first.top, lessThan(ordered.last.top));
 

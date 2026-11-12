@@ -386,7 +386,7 @@ void main() {
           await t.tap(find.byKey(const Key('expand-session-toolbar')));
           await t.pump();
         }
-        // 배율 is in the 화면 panel, under the screen modes (2026-11-10).
+        // 배율 is in the 화면 panel, under the screen modes.
         await t.tap(find.byKey(const Key('stream-menu-화면')));
         await t.pump();
         await t.pump(const Duration(milliseconds: 400));

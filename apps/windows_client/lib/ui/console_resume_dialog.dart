@@ -23,8 +23,8 @@ class ConsoleResumeDialog extends StatefulWidget {
   State<ConsoleResumeDialog> createState() => _ConsoleResumeDialogState();
 }
 
-// No second question: the tile already says the Windows screen is taken over
-// (2026-10-26), so opening this starts at once and only shows progress or the
+// No second question: the tile already says the Windows screen is taken
+// over, so opening this starts at once and only shows progress or the
 // failure. Cancelling retires this connection intent, never reverses a Windows
 // transfer that the Host may have started already.
 class _ConsoleResumeDialogState extends State<ConsoleResumeDialog> {

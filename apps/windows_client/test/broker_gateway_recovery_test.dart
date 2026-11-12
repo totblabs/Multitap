@@ -259,7 +259,7 @@ void main() {
     );
   });
 
-  // 2026-11-09 edge-case audit: a recovering connection waits out a lost
+  // A recovering connection waits out a lost
   // network path (no DNS answer, a timeout) the way it waits out a restart;
   // a first preparation still reports it at once.
   group('network outage during recovery', () {
@@ -298,7 +298,7 @@ void main() {
     });
   });
 
-  // 2026-11-09 edge-case audit: Windows restarting inside the VM keeps the
+  // Windows restarting inside the VM keeps the
   // Host away past the ordinary recovery wait.
   group('Host away with the VM running', () {
     DesktopMachine away({String power = 'running'}) => DesktopMachine(

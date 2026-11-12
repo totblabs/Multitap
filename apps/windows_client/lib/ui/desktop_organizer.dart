@@ -377,7 +377,7 @@ class DesktopStatusFilter extends StatelessWidget {
   );
 }
 
-/// The 구분 filter (2026-11-03): 전체 · VM · 로컬 PC with live counts, in the
+/// The 구분 filter: 전체 · VM · 로컬 PC with live counts, in the
 /// 상태 filter's segmented pill and behaviour. The launcher shows it only
 /// while both kinds are assigned.
 class DesktopKindFilter extends StatelessWidget {
@@ -723,8 +723,8 @@ class DesktopFilterReset extends StatelessWidget {
 }
 
 /// A button of the launcher's title row (미리보기, 새로고침), drawn like the
-/// search, the filters and the sort button around it (2026-11-03: 새로고침
-/// was shorter and 미리보기 square): [organizerHeight] high, a pill with the
+/// search, the filters and the sort button around it (none shorter, none
+/// square): [organizerHeight] high, a pill with the
 /// glass fill and hairline edge, a 17 px icon 6 px before a 12.5 px label.
 /// Without a [label] it is a round icon button; its [tooltip] names it.
 ///
@@ -895,8 +895,8 @@ class _DesktopSideScrollState extends State<DesktopSideScroll> {
   }
 
   /// More chips hide before / after the visible part: that edge fades, so a
-  /// cut chip reads as "scroll for more" (2026-11-03: "꺼짐" was cut flat at
-  /// 360 px and looked broken).
+  /// cut chip reads as "scroll for more" (cut flat, as "꺼짐" is at 360 px,
+  /// it looks broken).
   bool _before = false, _after = false;
 
   bool _metrics(ScrollMetrics metrics) {

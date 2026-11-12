@@ -86,8 +86,8 @@ void main() {
             .onPressed,
         isNotNull,
       );
-      // The account menu chooses the scene (2026-10-26: theme and scene moved
-      // there from their own header button); the light theme shows its day.
+      // The account menu chooses the scene (theme and scene have no header
+      // button of their own); the light theme shows its day.
       expect(find.byKey(const Key('appearance-menu')), findsNothing);
       await tester.tap(find.byKey(const Key('workspace-account')));
       await tester.pumpAndSettle();

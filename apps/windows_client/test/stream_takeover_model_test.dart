@@ -73,8 +73,8 @@ void main() {
           'deviceLabel': null,
         },
     ];
-    // The date by locale (docs/i18n.md; review 2026-11-12: it read
-    // "11-11 10:20부터" / "since 11-11 10:20").
+    // The date by locale (docs/i18n.md), not "11-11 10:20부터" /
+    // "since 11-11 10:20".
     expect(streamTakeoverSessionLines(StreamTakeoverOffer.parse(raw)), [
       '연결 중인 계정 kim.minji · 11월 11일 10:20부터',
       '연결 중인 계정 lee.jun · 1월 5일 07:03부터',

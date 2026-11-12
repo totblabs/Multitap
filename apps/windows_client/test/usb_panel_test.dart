@@ -410,8 +410,8 @@ void main() {
     },
   );
 
-  // Field 2026-11-02: the WorkPC window said "내 PC에서 장치를 가져오지 못했어요"
-  // for a stick the Code2 window had.
+  // One window must not say "내 PC에서 장치를 가져오지 못했어요" for a stick
+  // another window has.
   testWidgets(
     'A device another window holds names that window; 이 창으로 옮기기 asks its own question first and 취소 changes nothing',
     (tester) async {
@@ -434,8 +434,7 @@ void main() {
 
       await tester.tap(move);
       await tester.pumpAndSettle();
-      // Its own words (review 2026-11-12: it asked "USB 연결 끊기" with a
-      // 연결 끊기 button).
+      // Its own words (not "USB 연결 끊기" with a 연결 끊기 button).
       expect(find.text('이 창으로 옮길까요?'), findsOneWidget);
       expect(find.text('USB 연결 끊기'), findsNothing);
       expect(
@@ -508,8 +507,8 @@ void main() {
     await tester.runAsync(usb.close);
   });
 
-  // Review 2026-11-12: the row said "'PC로 되돌리기'를 눌러 주세요" under a
-  // button that read 이 창으로 옮기기.
+  // The row must not say "'PC로 되돌리기'를 눌러 주세요" under a button
+  // that reads 이 창으로 옮기기.
   testWidgets(
     'A moved device that did not come back to the PC offers PC로 되돌리기, as its line says',
     (tester) async {
@@ -541,7 +540,7 @@ void main() {
     },
   );
 
-  // Review 2026-11-12: "장치는 한 번에 4개까지…" stayed after a device was
+  // "장치는 한 번에 4개까지…" must not stay after a device is
   // disconnected.
   testWidgets('A notice goes once the list changed, not only with the next action', (
     tester,
@@ -578,8 +577,8 @@ void main() {
     await tester.runAsync(usb.close);
   });
 
-  // Review 2026-11-12: after a channel loss the rows of connected devices
-  // read a red "장치를 연결하지 못했어요."
+  // After a channel loss the rows of connected devices must not read a
+  // red "장치를 연결하지 못했어요."
   testWidgets(
     'A device the ended channel gave back says so, not that it could not be connected',
     (tester) async {

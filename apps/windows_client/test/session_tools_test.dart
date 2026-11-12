@@ -23,7 +23,7 @@ void main() {
     expect(groups, [...groups]..sort());
     expect(SessionTool.quality.group, 0);
     expect(SessionTool.disconnect.group, groups.last);
-    // 2026-11-10: the bar's three groups and what each holds.
+    // The bar's three groups and what each holds.
     List<SessionTool> of(int group) => [
       for (final tool in SessionTool.values)
         if (tool.group == group) tool,
@@ -75,7 +75,7 @@ void main() {
       SessionTool.named(SessionTool.scale.androidLabel),
       SessionTool.scale,
     );
-    // 2026-11-10: '설정' is the group's button; the streaming choices are
+    // '설정' is the group's button; the streaming choices are
     // 화질, and the pin is 바 열어 두기.
     expect(SessionTool.named('설정'), SessionTool.more);
     expect(SessionTool.named('화질'), SessionTool.settings);
@@ -83,7 +83,7 @@ void main() {
     expect(SessionTool.named('툴바 열어 두기'), SessionTool.pin);
     expect(SessionTool.named('창 모드로'), SessionTool.restore);
     expect(SessionTool.named('스트리밍 설정'), isNull);
-    // 2026-11-03: renamed, and 마우스 가두기 is gone.
+    // Not names of the vocabulary.
     expect(SessionTool.named('게임 마우스'), isNull);
     expect(SessionTool.named('마우스 가두기'), isNull);
     expect(SessionTool.named('리모컨'), isNull);

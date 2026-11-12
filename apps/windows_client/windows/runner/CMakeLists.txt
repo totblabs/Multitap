@@ -141,12 +141,6 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
-# Pure console keyboard ownership policy: no HWND/hook/GUI/network/input.
-add_executable(multitap_console_input_ownership_test EXCLUDE_FROM_ALL "../../test/native/console_input_ownership_test.cpp")
-target_include_directories(multitap_console_input_ownership_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_compile_features(multitap_console_input_ownership_test PRIVATE cxx_std_17)
-set_target_properties(multitap_console_input_ownership_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/qa")
-
 # usb-v1 capture on a substituted UsbDk: listing, capture, request translation,
 # cancellation, release and unplugging. No driver, device or installation.
 add_executable(multitap_usb_capture_smoke EXCLUDE_FROM_ALL "../../test/native/usb_capture_core_test.cpp")

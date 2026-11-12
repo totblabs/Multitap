@@ -2189,8 +2189,8 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   }
 
   // Every page but the overview opens with its title, and with ONE status
-  // only when the area needs the user (2026-11-11: a "● 정상" on every page
-  // said nothing).
+  // only when the area needs the user (a "● 정상" on every page says
+  // nothing).
   Widget _sectionHeading() {
     final state = _setupStates[_page];
     final label = state.needsUser
@@ -4234,7 +4234,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         if (status.observedAt != null)
           _windowsDetail(l10n.signChecked, status.observedAt!),
         const SizedBox(height: 8),
-        // No in-stream sign-in screen (2026-11-09): a signed-out or locked
+        // No in-stream sign-in screen: a signed-out or locked
         // Windows is reached through the Proxmox console or a restart.
         KeepAllText(
           _forMachine(

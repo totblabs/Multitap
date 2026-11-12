@@ -67,7 +67,7 @@ struct PendingClipboard::State {
   std::shared_ptr<Record> RequireRecord(const PendingClipboardLease& lease,const std::string& request) {pendingRequire(Same(lease)&&Live(lease)&&current->request==request&&current->phase!=Phase::failed,"clipboard_changed");return current;}
   // Ownership never left our window: anyone else's EmptyClipboard makes them the owner (and fails the record by WM_DESTROYCLIPBOARD). A
   // number that moved meanwhile is Windows finishing our own publication (it can move it when a clipboard closes, adding the formats it
-  // derives from text) or a render; it is adopted, not taken for a PC copy. 2026-11-02: an exact-number test refused every binding.
+  // derives from text) or a render; it is adopted, not taken for a PC copy. An exact-number test would refuse every binding.
   bool Current(Record& r) {
     if(!writer||access.owner()!=writer)return false;
     const DWORD now=access.sequence();if(!now)return false;

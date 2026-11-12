@@ -8,8 +8,8 @@ import '../l10n/l10n.dart';
 /// The menus and panels one session bar has open, so they close when what
 /// they show no longer applies: the window was resized or lost focus, the
 /// screen mode or the remote resolution changed, the connection ended or
-/// was replaced (2026-10-26: a pinned bar's quality menu stayed open over a
-/// new resolution with the old numbers). Closing removes them at once,
+/// was replaced (a pinned bar's quality menu must not stay open over a new
+/// resolution with the old numbers). Closing removes them at once,
 /// without their exit animation; their futures complete with null, so a
 /// panel applies nothing. A presenter's native popup (e.g. a Windows menu
 /// over a native picture) closes too when its presenter [holdNative]s it.
@@ -876,7 +876,7 @@ class _SessionToolbarMenuState extends State<SessionToolbarMenu> {
                       ),
               ),
               // The bar's commands all open something under themselves: no
-              // chevron on each (2026-11-10).
+              // chevron on each.
               if (!windowsCommand &&
                   (!widget.command || widget.onPressedAt != null)) ...[
                 SizedBox(width: widget.denseLabel ? 2 : 3),

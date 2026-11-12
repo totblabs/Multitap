@@ -351,6 +351,7 @@ String _label(LogEvent event) => switch (event) {
   LogEvent.drive => l10n.driveSharing,
   LogEvent.usb => l10n.usbDevices,
   LogEvent.print => l10n.androidPrinting,
+  LogEvent.serverSave => l10n.serverAddressSave,
 };
 
 // Records whose title already says everything (no field list under them).
@@ -524,5 +525,6 @@ String _field(String value) =>
       'usbUrbs': l10n.handledRequests,
       'usbKib': l10n.kibTransferred,
       'usbClass': l10n.deviceType,
+      'osError': l10n.systemErrorCode,
     }[value] ??
     value;

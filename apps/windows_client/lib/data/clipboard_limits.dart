@@ -27,7 +27,7 @@ const clipboardScaleHeader = 'X-Multitap-Clipboard-Scale';
 const clipboardScaleHeaderValue = '1';
 
 /// Sent in addition (a relay that does not know it ignores it) by a peer of the
-/// on-paste revision (2026-10-27: a copy is silent): files and folders are never
+/// on-paste revision (a copy is silent): files and folders are never
 /// pushed at copy time, text and images only while small (1 MiB of text, 8 MiB of
 /// PNG); everything else is announced and rendered when something pastes. The
 /// relay tells both peers only when both announced it together with the scale
@@ -432,7 +432,7 @@ class ClipboardLimits {
   /// says which limit it met.
   ///
   /// [sharedFolders]: this client has 공유 폴더 (Windows). Android has none,
-  /// so its advice never points there (2026-11-02).
+  /// so its advice never points there.
   String message([String? detail, bool sharedFolders = true]) {
     final pack = sharedFolders ? l10n.zipThemMoveThemShared : l10n.zipThemFirst;
     final big = sharedFolders

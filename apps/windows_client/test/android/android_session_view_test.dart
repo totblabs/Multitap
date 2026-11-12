@@ -606,7 +606,7 @@ void main() {
           '이 데스크톱에는 소리 장치가 없어요. 관리자가 Proxmox에서 오디오 장치를 추가해야 해요.',
         );
         expect(message.data, audioDeviceMissingText);
-        // Multitap adds no sound device (2026-11-10): nothing to press.
+        // Multitap adds no sound device: nothing to press.
         expect(
           find.byKey(const Key('android-remote-notice-action')),
           findsNothing,
@@ -655,9 +655,8 @@ void main() {
     }
   });
 
-  // The wait for a desktop restart is no longer asked from this view (the
-  // sound-card flow that did was removed 2026-11-10): the Host going away
-  // with the desktop running starts it. Its limit and its cancel:
+  // The wait for a desktop restart is never asked from this view: the Host
+  // going away with the desktop running starts it. Its limit and its cancel:
   testWidgets(
     'the wait for a Host away with the VM running says so past its limit, and 기다리기 취소 stops at once',
     (tester) async {
@@ -2388,8 +2387,8 @@ void main() {
     await _close(tester);
   });
 
-  // The Windows 모든 모니터 minimize bug (2026-11-02: a minimized window's
-  // 0x0 size read as a monitor change and refreshed the session), on the
+  // The Windows 모든 모니터 minimize case (a minimized window's 0x0 size
+  // must not read as a monitor change and refresh the session), on the
   // phone: Android may report an empty surface while the app is away.
   testWidgets('an empty surface while away is no change: picture and input '
       'come back without a reconnect or resize', (tester) async {
@@ -2554,7 +2553,7 @@ void main() {
     await _openScale(tester);
     expect(find.byKey(const Key('android-scale-panel')), findsNothing);
     // The panel's first lines say it once; the 배율 caption does not repeat
-    // them (inspection, 2026-11-12).
+    // them.
     expect(
       find.textContaining('현재 175% · 수동 100% 요청', findRichText: true),
       findsNothing,
@@ -3272,7 +3271,7 @@ void main() {
     await _close(tester);
   });
 
-  // 2026-11-09 edge-case audit: the end says who took the VM.
+  // The end says who took the VM.
   testWidgets('a takeover by another account names it', (tester) async {
     final h = await _open(tester);
     h.socket.incoming.add(
@@ -3304,7 +3303,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.byKey(const Key('android-reconnecting')), findsOneWidget);
     // Another network than the marked one stays the default and reports each
-    // change of its capabilities (field 2026-11-02: 3 connects within 2 s).
+    // change of its capabilities (each must not start a connect: 3 within 2 s).
     final counts = <int>[];
     for (var tenth = 1; tenth <= 75; tenth++) {
       network.events.add('available');
@@ -3391,7 +3390,7 @@ void main() {
     await _close(tester);
   });
 
-  // Restart recovery (host-ready-wait-v1, 2026-11-03): the Windows wait.
+  // Restart recovery (host-ready-wait-v1): the Windows wait.
   testWidgets('a broker restart waits on the broker every 250 ms, then on '
       'host-ready, and reconnects within one answer', (tester) async {
     final broker = _HostReadyBroker()..list = () => throw _refused;
@@ -3576,7 +3575,7 @@ void main() {
     await _close(tester);
   });
 
-  // A Host update ended the stream (host_update, 2026-11-03, as on Windows).
+  // A Host update ended the stream (host_update, as on Windows).
   testWidgets('a Host update end waits on the update (list every 2 s) and on '
       'its Host, then reconnects by itself', (tester) async {
     final broker = _HostReadyBroker()
@@ -3630,7 +3629,7 @@ void main() {
     await _close(tester);
   });
 
-  // 2026-11-09 edge-case audit: Windows restarted inside the VM keeps its
+  // Windows restarted inside the VM keeps its
   // Host away for longer than the 90 s back-off; the view waits like its own
   // VM restart (3 minutes) and reconnects when the Host is back.
   testWidgets('a Host away with the VM running is waited for past 90 s and '
@@ -4250,9 +4249,9 @@ void main() {
     await _close(tester);
   });
 
-  // 화면 이동 stayed on after 전체 보기 took the picture back to the whole
-  // view: its handle was gone, yet the next Back only switched it off and
-  // nothing visible happened (inspection, 2026-11-12).
+  // 화면 이동 must not stay on after 전체 보기 takes the picture back to the
+  // whole view: its handle is gone, and the next Back would only switch it
+  // off with nothing visible happening.
   testWidgets('전체 보기 ends 화면 이동: the next Back asks to leave', (
     tester,
   ) async {
@@ -4623,7 +4622,7 @@ void main() {
       (asked.fps, asked.bitrate, asked.automaticBitrate),
       (30, 8000000, false),
     );
-    // Sound is always on (2026-11-11): the reconnect asks for it.
+    // Sound is always on: the reconnect asks for it.
     expect(asked.audio, isTrue);
     expect(find.byKey(const Key('session-command-bar')), findsNothing);
     expect(find.byKey(const Key('android-settings-panel')), findsNothing);

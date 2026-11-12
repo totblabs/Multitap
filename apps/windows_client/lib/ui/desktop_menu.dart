@@ -9,7 +9,7 @@ import 'korean_text.dart';
 import '../l10n/l10n.dart';
 
 /// The words for a client power action, as the ⏻ menu shows them
-/// (Proxmox's 종료 / 정지 since 2026-10-26; "정상 종료" read as jargon).
+/// (Proxmox's 종료 / 정지; "정상 종료" reads as jargon).
 String powerActionLabel(String action) => switch (action) {
   'start' => l10n.start,
   'reboot' => l10n.restart,
@@ -18,7 +18,7 @@ String powerActionLabel(String action) => switch (action) {
 };
 
 /// Why 정지 alone is unavailable while 종료 is offered: the broker does not
-/// report the stop permission (a broker before client stop, 2026-10-26).
+/// report the stop permission (a broker without client stop).
 /// Null when the shared power reason or the VM state explains it.
 String? stopUnavailableReason(DesktopMachine m) => !m.canStop && m.canShutdown
     ? l10n.stopIsntAvailableServerYet
@@ -109,7 +109,7 @@ class DesktopActions {
   final bool pcPower;
 
   /// 켜기, 다시 시작, 종료 (graceful shutdown) and 정지 (immediate
-  /// power-off, Proxmox stop; 2026-10-26).
+  /// power-off, Proxmox stop).
   final VoidCallback? start, reboot, shutdown, stop;
 
   /// Why the power actions are unavailable right now (tooltip on the greyed
@@ -148,9 +148,9 @@ class DesktopActions {
 }
 
 /// Which part of the tile menu a trigger opens. ▾ chooses how to connect, ⋯
-/// manages the VM, ⏻ holds the power actions (2026-10-26: out of ⋯ onto
-/// its own button), and a right click shows all three (2026-10-25: one menu
-/// behind both buttons read as a duplicate).
+/// manages the VM, ⏻ holds the power actions (on its own button, not in
+/// ⋯), and a right click shows all three (one menu behind both buttons
+/// would read as a duplicate).
 enum DesktopMenuKind { connect, manage, power, all }
 
 /// The tile menu in the shared menu geometry ([AppMenu]). Connect: streaming
@@ -159,11 +159,11 @@ enum DesktopMenuKind { connect, manage, power, all }
 /// 켜기, 종료, 다시 시작 and, apart in red, 정지 (Proxmox's start / shutdown / reboot / stop; never
 /// reset).
 ///
-/// No virtual-monitor count here (2026-10-26): connecting already prepares
+/// No virtual-monitor count here: connecting already prepares
 /// one output for a window or full screen and two for 모든 모니터, and the
 /// session toolbar keeps its own count control.
 ///
-/// Android shows the same menu ([touch], 2026-11-03), less the window modes
+/// Android shows the same menu ([touch]), less the window modes
 /// it does not have ([mode] null): 48 dp rows, and a greyed row says why
 /// under its label (no hover on a phone).
 class DesktopMenu extends StatefulWidget {
@@ -405,10 +405,10 @@ class _DesktopMenuState extends State<DesktopMenu> {
     ];
 
     final manage = <Widget>[
-      // No sound-card row (2026-11-02): the card is added in Proxmox; the
+      // No sound-card row: the card is added in Proxmox; the
       // tile's sound badge still opens the dialog.
       // Listed only while a newer Host can be installed now; a greyed
-      // "최신 버전" row read as a broken button (2026-10-26).
+      // "최신 버전" row would read as a broken button.
       if (actions.hostUpdate != null) ...[
         item(
           key: 'host-update-$id',
@@ -448,7 +448,7 @@ class _DesktopMenuState extends State<DesktopMenu> {
           onPressed: actions.start,
           disabledReason: actions.powerReason,
         ),
-      // Proxmox's words (2026-10-26): 종료 asks Windows to shut down, 정지
+      // Proxmox's words: 종료 asks Windows to shut down, 정지
       // cuts the power at once and stands apart in red. An offline PC has
       // only 켜기; a PC never has 정지.
       if (actions.showPower && !(actions.pcPower && actions.showStart)) ...[

@@ -99,7 +99,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   window.SetMinimumSize(Win32Window::Size(host_settings ? 600 : 760,host_settings ? 520 : 560));
   Win32Window::Point origin(60, 50);
   // Host settings opens at the size its overview was designed for (680×760
-  // inside the frame, 2026-11-09 design): the status, the route, one banner
+  // inside the frame): the status, the route, one banner
   // and every area fit without scrolling. A smaller work area still fits it.
   Win32Window::Size size(host_settings ? 696 : 1440, host_settings ? 800 : 900);
   if (!window.Create(host_settings ? L"Multitap Host" : L"Multitap", origin, size)) {

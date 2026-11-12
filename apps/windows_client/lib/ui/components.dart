@@ -252,8 +252,8 @@ class Brand extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // One weight and one colour (2026-11-11; "Multi" and "tap" differed
-        // before). The key is older than the name.
+        // One weight and one colour for the whole word. The key is older
+        // than the name.
         KeepAllText(
           'Multitap',
           key: const Key('brand-vdi'),
@@ -270,8 +270,8 @@ class Brand extends StatelessWidget {
         ),
         SizedBox(height: 1.5 * scale),
         // A third-party tool for Proxmox VE, not a Proxmox product: "for", and
-        // the name in Multitap's own amber, not Proxmox's orange (2026-10-26;
-        // the notice is in 클라이언트 정보).
+        // the name in Multitap's own amber, not Proxmox's orange (the notice
+        // is in 클라이언트 정보).
         Text.rich(
           key: const Key('brand-for'),
           TextSpan(

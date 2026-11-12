@@ -20,7 +20,7 @@ import 'package:multitap_client/ui/workspace_shell.dart';
 import 'notices_test.dart'
     show FakeNotices, FakeRemovableNotices, hex, wire;
 import 'session_recovery_test.dart' show mockPresentation;
-import 'session_window_lifecycle_test.dart' show desktop, launch;
+import 'session_window_lifecycle_test.dart' show launch;
 
 // 공지 on screen (lib/ui/notice_widgets.dart): the launcher's banner and bell,
 // the list behind the bell, and the banner over a stream.
@@ -259,10 +259,10 @@ Future<void> stream(
 
 class _SessionApi extends Fake implements BrokerApi, NoticeBrokerApi {
   final notices_ = FakeNotices();
+  // No desktop: the window stays on its "could not load" panel, which is
+  // enough content for a notice to rise over.
   @override
-  Future<List<BrokerDesktop>> desktops(String token) async => [
-    desktop(consoleProtocol: 'rfb-none-v1'),
-  ];
+  Future<List<BrokerDesktop>> desktops(String token) async => [];
   @override
   Future<List<BrokerNotice>> notices(String token) => notices_.notices(token);
   @override
@@ -691,17 +691,14 @@ void main() {
       MaterialApp(
         builder: PrimaryRegionScope.builder,
         home: SessionWindow(
-          launch: SessionWindowLaunch.fromMap({
-            ...launch().toMap(),
-            'console': true,
-          }),
+          launch: SessionWindowLaunch.fromMap(launch().toMap()),
           api: api,
           guard: _Guard(),
         ),
       ),
     );
     await settle(t);
-    expect(find.textContaining('Console은 메인 창에서 열려요.'), findsOneWidget);
+    expect(find.text('원격 창 닫기'), findsOneWidget);
     expect(api.notices_.tokens, {'fixture-token'}, reason: 'its own read');
     expect(find.byKey(const Key('notice-banner')), findsOneWidget);
     expect(find.text('방금 온 공지'), findsOneWidget);
@@ -724,7 +721,7 @@ void main() {
   }
 
   Finder removeOf(int n) => find.byKey(ValueKey('notice-remove-${hex(n)}'));
-  // The one question before a removal (2026-11-11).
+  // The one question before a removal.
   Future<void> answer(WidgetTester t, {bool accept = true}) async {
     await t.pumpAndSettle();
     expect(find.byKey(const Key('notice-remove-confirm')), findsOneWidget);

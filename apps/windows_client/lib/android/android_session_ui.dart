@@ -1139,7 +1139,7 @@ class AndroidTouchHelp extends StatelessWidget {
                 ),
               const SizedBox(height: 8),
               KeepAllText(
-                // Three short lines (2026-10-29: concise reading). Real
+                // Three short lines, for concise reading. Real
                 // touch has no delayed tap and no zoom of the picture itself.
                 l10n.longPressInputModeButton(windowsTouch ? l10n.zoomScreenItselfSwitchInput : l10n.tapClicksLittleSlowWhile),
                 style: _text(12, color: chrome.muted, height: 1.45),

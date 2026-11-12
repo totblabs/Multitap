@@ -342,7 +342,7 @@ V ClientClipboardState::Run(const std::string& method, const M& args, HWND owner
   }
   // This client's own clipboard changed: the offers it kept are no longer served. The ids come back so that the session can say so.
   // One a paste in the VM is still reading stays until that paste is quiet (OfferRegistry::pasteHold), as RDP keeps locked clipboard
-  // data: copying something else on the PC no longer breaks a paste already under way (2026-11-09 edge-case audit).
+  // data: copying something else on the PC does not break a paste already under way.
   if (method=="dropOffers") {
     flutter::EncodableList ids; const auto dropped=s.offers.dropIdle();
     for(const auto& id:dropped) ids.emplace_back(V(id));

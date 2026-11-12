@@ -1,4 +1,4 @@
-// The Android account menu is the Windows one by finger (2026-11-03): the
+// The Android account menu is the Windows one by finger: the
 // same groups and order, one 48 dp row grid with the 테마/배경 choices on it,
 // neutral icons with red only on 로그아웃 and 완전 종료, nothing highlighted
 // on open, and Back closes it before anything else. Widget renders with
@@ -175,7 +175,7 @@ void main() {
         return inside;
       }
 
-      // 설정 is the header's own ⚙ (2026-11-11), so the menu opens on 정보·라이선스.
+      // 설정 is the header's own ⚙, so the menu opens on 정보·라이선스.
       expect(focused('android-update-menu'), isTrue);
       final material = t.widget<Material>(
         find

@@ -1291,8 +1291,8 @@ void main() {
     },
   );
 
-  // Review 2026-11-12: pulling out a connected stick waited 10 s for it to
-  // come back and then said "장치가 PC로 돌아오지 않았어요".
+  // Pulling out a connected stick must not wait 10 s for it to come back
+  // and then say "장치가 PC로 돌아오지 않았어요".
   test(
     'A device pulled out while connected keeps that reason: no wait for its return, no not-returned state, and the list is read again',
     () async {
@@ -1337,8 +1337,8 @@ void main() {
     },
   );
 
-  // Review 2026-11-12: a USB 3 stick in a USB 3 port (bMaxPacketSize0 = 9)
-  // was counted as unreadable and the panel said to plug it in again.
+  // A USB 3 stick in a USB 3 port (bMaxPacketSize0 = 9) must not be
+  // counted as unreadable, with the panel saying to plug it in again.
   test(
     'A SuperSpeed device is refused as before but counted on its own, not as unreadable',
     () async {
@@ -1543,8 +1543,8 @@ void main() {
     await session.close();
   });
 
-  // Field 2026-11-02: a stick shared in the Code2 window failed in the WorkPC
-  // window with "내 PC에서 장치를 가져오지 못했어요" five times.
+  // A stick shared in one window must not fail in another window with
+  // "내 PC에서 장치를 가져오지 못했어요".
   test('A device another window holds is not offered; it moves here only after that window let it go and Windows took it back', () async {
     final (session, socket, backend) = await started(
       devices: [stick(otherWindow: 'Code2')],

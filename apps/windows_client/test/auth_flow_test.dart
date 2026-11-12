@@ -396,8 +396,8 @@ void main() {
     );
   }
 
-  // Review 2026-11-12: the server's error line stayed while the ID or the
-  // password was being edited (the local one did clear).
+  // The server's error line must not stay while the ID or the password is
+  // being edited (as the local one clears).
   testWidgets('The error of the last attempt goes with the next edit', (
     tester,
   ) async {
@@ -567,7 +567,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.byKey(const Key('session-disconnect')));
       await tester.pumpAndSettle();
-      // Only a live connection asks first (2026-10-26).
+      // Only a live connection asks first.
       if (find.text('연결을 끊을까요?').evaluate().isNotEmpty) {
         await tester.tap(find.widgetWithText(FilledButton, '연결 끊기'));
         await tester.pumpAndSettle();
@@ -777,7 +777,7 @@ void main() {
       await tester.tap(find.byKey(const Key('stream-advanced')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('30 fps'));
-      // Sound is always on (2026-11-11): there is no switch to turn it off.
+      // Sound is always on: there is no switch to turn it off.
       expect(find.byKey(const Key('stream-audio')), findsNothing);
       await tester.drag(
         find.byKey(const Key('stream-bitrate')),
@@ -825,7 +825,7 @@ void main() {
       await tester.tap(find.byKey(const Key('stream-settings-dual-vm')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('stream-resolution')), findsNothing);
-      // 2026-10-26: no 화면 selector even with two remote outputs — a window
+      // No 화면 selector even with two remote outputs — a window
       // or full screen shows one output, 모든 모니터 사용 shows both.
       expect(find.byKey(const Key('stream-monitor-0')), findsNothing);
       expect(find.textContaining('가상 화면'), findsNothing);
@@ -885,8 +885,8 @@ void main() {
       await start(tester, api);
       await login(tester);
       await confirmWorkspaceSignOut(tester);
-      // Its own line, not the list's error (review 2026-11-12: 다시 시도 there
-      // reloaded the list): it says what failed and signs out again.
+      // Its own line, not the list's error (다시 시도 there would reload the
+      // list): it says what failed and signs out again.
       expect(find.byKey(const Key('workspace-error')), findsNothing);
       expect(find.byKey(const Key('workspace-error-card')), findsNothing);
       expect(
@@ -923,13 +923,9 @@ void main() {
     await tester.pumpWidget(MultitapApp(api: api, loginMemory: memory));
     await tester.pumpAndSettle();
     expect(memory.loads, 0);
-    expect(
-      tester.widget<TextField>(find.byKey(const Key('sign-in-id'))).enabled,
-      isFalse,
-    );
-    expect(find.text('서버 설정하고 시작'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('login-submit')));
-    await tester.pumpAndSettle();
+    // The address form is open from the start: it is the first thing to fill in.
+    expect(find.byKey(const Key('login-server-form')), findsOneWidget);
+    expect(find.byKey(const Key('sign-in-id')), findsNothing);
     expect(
       tester
           .widget<TextField>(find.byKey(const Key('server-origin')))
@@ -943,6 +939,17 @@ void main() {
           .onPressed,
       isNull,
     );
+    // Cancelled, the card shows the sign-in fields disabled and the way back.
+    await tester.tap(find.byKey(const Key('cancel-server-settings')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(find.byKey(const Key('sign-in-id'))).enabled,
+      isFalse,
+    );
+    expect(find.text('서버 설정하고 시작'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('login-submit')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('login-server-form')), findsOneWidget);
     expect(api.logins, 0);
   });
 

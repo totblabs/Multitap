@@ -59,14 +59,14 @@ export class AccessRuntime {
     return { operationId: this.lease.operationId, actor: this.lease.actor ?? 'server', event: this.lease.event ?? 'server_access_connections_ended' };
   }
   async status(context) {
-    // deploymentKind lets the console show a Compose install its .env lines.
-    if (!this.client) return { protocol: 'server-access-v1', revision: this.revision ?? (this.config ? serverAccessHash(this.config) : 'bootstrap'), applied: this.config, pending: null, supported: false, errorCode: 'server_access_unavailable', managementOrigin: context.managementOrigin, bootstrapListener: context.listener ?? null, deploymentKind: context.deploymentKind ?? 'unknown', udpPort: context.udpPort ?? null };
+    // udpMedia: how UDP media is configured, for the console (udp-relay.mjs describe).
+    if (!this.client) return { protocol: 'server-access-v1', revision: this.revision ?? (this.config ? serverAccessHash(this.config) : 'bootstrap'), applied: this.config, pending: null, supported: false, errorCode: 'server_access_unavailable', managementOrigin: context.managementOrigin, bootstrapListener: context.listener ?? null, deploymentKind: context.deploymentKind ?? 'unknown', udpPort: context.udpPort ?? null, udpMedia: context.udpMedia ?? null };
     const state = await this.client.status();
     // Only a terminal observation of this very operation releases the fence.
     const terminal = state.state === 'succeeded' || (state.state === 'rolled_back' && state.rollbackVerified === true) || (state.state === 'failed' && state.unchangedVerified === true);
     if (this.lease?.operationId === state.operationId && terminal) this.lease = null;
     const phase = state.state === 'succeeded' ? 'applied' : state.state === 'rolled_back' && state.rollbackVerified === true ? 'failed_rolled_back' : state.state;
-    return { ...state, applied: state.config ?? null, state: phase, pending: state.pendingConfig ? { config: state.pendingConfig, state: phase, operationId: state.operationId, ...(state.errorCode ? { errorCode: state.errorCode } : {}) } : null, supported: state.managed === true && state.applySupported === true, managementOrigin: context.managementOrigin, bootstrapListener: context.listener ?? null, udpPort: context.udpPort ?? null };
+    return { ...state, applied: state.config ?? null, state: phase, pending: state.pendingConfig ? { config: state.pendingConfig, state: phase, operationId: state.operationId, ...(state.errorCode ? { errorCode: state.errorCode } : {}) } : null, supported: state.managed === true && state.applySupported === true, managementOrigin: context.managementOrigin, bootstrapListener: context.listener ?? null, udpPort: context.udpPort ?? null, udpMedia: context.udpMedia ?? null };
   }
   async test(input, context) {
     if (!this.client) throw new HttpError(503, 'server_access_unavailable');

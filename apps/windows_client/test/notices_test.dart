@@ -405,8 +405,8 @@ void main() {
       async.flushMicrotasks();
       expect(old.reads, 2);
       expect(quiet.supported, isFalse);
-      // The server was updated while this sign-in went on (2026-11-10: the
-      // launcher's bell stayed empty until the next sign-in). Its push, or
+      // The server was updated while this sign-in went on (the launcher's
+      // bell must not stay empty until the next sign-in). Its push, or
       // the channel coming back, asks again and the notice shows.
       old
         ..readError = null

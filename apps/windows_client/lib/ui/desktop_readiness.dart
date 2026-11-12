@@ -12,7 +12,7 @@ enum CheckState { ok, pending, warn, unknown }
 
 /// A step the signed-in user can take from the tile or the checklist.
 /// [console]: Windows is signed out or locked; its Proxmox console opens the
-/// real sign-in screen (2026-11-09: no in-stream sign-in screen).
+/// real sign-in screen (the stream never shows it).
 /// [releaseConsole]: a console connection holds the VM; end it and stream.
 enum ReadinessAction { start, reboot, refresh, console, releaseConsole }
 
@@ -48,7 +48,7 @@ class DesktopReadiness {
   /// update's own tile line.
   final bool hostMissing;
 
-  /// The Host is away because its update restarts it (2026-11-02): the
+  /// The Host is away because its update restarts it: the
   /// [detail] says how far it got, in place of the update's tile line.
   final bool hostUpdating;
 
@@ -66,7 +66,7 @@ class DesktopReadiness {
 
   /// The previous connection's cleanup is still running (normally a second
   /// or two). The tile looks ready and a press connects as soon as it clears
-  /// (2026-10-26: the blocking "이전 연결을 정리하고 있어요" card was in the way).
+  /// (a blocking "이전 연결을 정리하고 있어요" card would be in the way).
   final bool settling;
 
   /// Streaming opens through the console hand-over dialog first.
@@ -193,12 +193,8 @@ class DesktopReadiness {
     final stalled = cleanup.pending && m.cleanupStalled;
     final console =
         !preview && !m.isReady && consoleRecovery && m.canRecoverConsole;
-    final signinReady = m.signinReadyAt(now ?? DateTime.now());
     final ready =
-        (preview && m.status == MachineStatus.ready) ||
-        m.isReady ||
-        signinReady ||
-        console;
+        (preview && m.status == MachineStatus.ready) || m.isReady || console;
 
     ReadinessCheck power() {
       if (m.powerBusy) {
@@ -452,14 +448,6 @@ class DesktopReadiness {
       );
     }
     if (ready) {
-      if (signinReady) {
-        return make(
-          TilePhase.ready,
-          l10n.windowsSign2,
-          l10n.youCanConnectSignScreen,
-          l10n.typeWindowsPasswordRemoteScreen,
-        );
-      }
       return console
           ? make(
               TilePhase.ready,
@@ -513,7 +501,7 @@ class DesktopReadiness {
             );
     }
     // A console connection holds the VM and its display: say so and offer
-    // to end it, instead of a display-preparation wait (2026-11-09).
+    // to end it, instead of a display-preparation wait.
     if (m.consoleInUse && m.kind == MachineKind.vm && hostUp) {
       return make(
         TilePhase.attention,
@@ -607,9 +595,9 @@ class DesktopReadiness {
       // send 'preparing', and the attention texts below apply.
       // Windows has nobody signed in (or is locked): the Proxmox console shows
       // the real sign-in screen, and a VM restart signs in automatically
-      // (2026-11-09: the in-stream sign-in screen was dropped). Right after the
-      // Host connects this may still be the automatic login, which switches
-      // the tile to 스트리밍 연결 by itself.
+      // (the stream never shows the sign-in screen). Right after the Host
+      // connects this may still be the automatic login, which switches the
+      // tile to 스트리밍 연결 by itself.
       final signedOut =
           m.vmStateReason == 'windows_login' ||
           m.streamPreparation == StreamPreparation.login ||

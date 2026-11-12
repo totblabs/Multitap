@@ -1,4 +1,4 @@
-// The session bar's first-connection hint (2026-11-10, session bar v2):
+// The session bar's first-connection hint:
 // "도구는 여기 있어요.", once per account on this PC, under the bar it opens
 // after the first picture; never together with 사용안내. Real RemoteView and
 // RemoteSession; media, socket, the native window and the store that

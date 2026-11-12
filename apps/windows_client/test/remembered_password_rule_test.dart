@@ -8,7 +8,7 @@ import 'pc_login_replacement_lifetime_test.dart' show AuthWatch;
 import 'session_access_lifetime_test.dart' show IdleBroker;
 import 'session_renewal_test.dart' show VirtualClock;
 
-// The one rule of the Windows sign-in screen (2026-11-11): with "비밀번호 기억"
+// The one rule of the Windows sign-in screen: with "비밀번호 기억"
 // on, the saved password is filled in every time the screen appears; with it
 // off, nothing is saved and nothing is filled. There is no second option.
 

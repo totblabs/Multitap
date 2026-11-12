@@ -163,8 +163,8 @@ int wmain(int argc, wchar_t** argv) {
     Check(!Peer::Dispatch(input, VK_DELETE, 0x53, true, LLKHF_EXTENDED), "Secure attention Delete was consumed");
     Check(!Peer::Installed(input) && Type(events.back()) == "capture.released", "Secure attention did not release capture");
     capture();
-    // A lone Ctrl+Alt is ordinary input: the mouse-confine release chord was
-    // removed (2026-11-03), so it reaches the remote and keeps capture.
+    // A lone Ctrl+Alt is ordinary input (there is no mouse-confine release
+    // chord), so it reaches the remote and keeps capture.
     key(VK_LCONTROL, 0x1D, true); key(VK_LMENU, 0x38, true);
     key(VK_LMENU, 0x38, false); key(VK_LCONTROL, 0x1D, false);
     Check(Peer::Installed(input) && !FieldBool(events.back(), "down"), "A lone Ctrl+Alt released input");

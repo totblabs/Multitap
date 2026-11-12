@@ -12,7 +12,7 @@ Multitap 브로커(관리자 페이지, 인증 중계, 다운로드 서버)를 D
 
 | 입력 위치 | HTTPS 예시 | HTTP 예시 (같은 네트워크) |
 | --- | --- | --- |
-| `.env` | `MULTITAP_PUBLIC_ORIGIN=https://vdi.example.com` | `MULTITAP_HTTP_ORIGIN=http://192.168.0.10:18480` |
+| 관리자 페이지의 **서버 접속 설정** | `https://vdi.example.com` | `http://192.168.0.10:18480` |
 | Windows 앱·Android 앱의 서버 주소 | `https://vdi.example.com` | `HTTP`를 고르고 `192.168.0.10:18480` |
 | 관리자 페이지 | `https://vdi.example.com` | `http://192.168.0.10:18480` |
 | 리버스 프록시 업스트림 | `http://127.0.0.1:18480` (같은 서버) | 없음 |
@@ -43,26 +43,19 @@ Multitap 브로커(관리자 페이지, 인증 중계, 다운로드 서버)를 D
 
    컨테이너가 다시 시작될 때마다 새 코드가 나옵니다. 새 아이디와 비밀번호를 정하면 Proxmox 연결 화면으로 갑니다. 이 주소는 접속 주소를 정하기 전까지 처음 설정에만 쓰이고, 앱·Host 연결과 다운로드는 거절됩니다.
 
-4. 접속 주소를 정합니다. 관리자 페이지의 **서버 접속 설정**에 HTTPS 주소나 HTTP 주소를 넣으면 `.env`에 넣을 줄이 나옵니다. `.env`의 같은 이름 줄을 바꾸고 다시 시작합니다.
+4. 접속 주소를 정합니다. 관리자 페이지의 **설정 → 서버 접속 설정**에 HTTPS 주소나 HTTP 주소를 넣고 **연결 테스트**, **변경 저장**을 누릅니다.
 
-   ```sh
-   docker compose up -d
-   ```
+   서버가 정책을 데이터 볼륨(`access/`)에 저장하고 스스로 적용합니다. 접속 중인 연결을 끊고 같은 컨테이너에서 다시 시작한 뒤, 새 주소로 자기 자신에게 닿는지 확인합니다. 닿지 못하면 이전 설정으로 돌아갑니다([서버 접속 주소 관리](server-access-v1.md#docker-compose-설치-스스로-관리)).
 
-   - HTTPS만: `MULTITAP_PUBLIC_ORIGIN=https://vdi.example.com`. 프록시가 같은 서버에 있으면 `MULTITAP_PUBLISH_PORT=127.0.0.1:18480`으로 바깥에서 직접 오는 연결을 막고, 아래 5번을 합니다.
-   - HTTP만: [HTTP로 쓰기](#http로-쓰기-같은-네트워크-인증서-없이)의 세 줄.
+   - HTTPS만: `https://vdi.example.com`. 프록시가 같은 서버에 있으면 아래 5번을 함께 저장합니다. 바깥에서 직접 오는 연결을 막으려면 `.env`의 `MULTITAP_PUBLISH_PORT=127.0.0.1:18480`으로 바꾸고 `docker compose up -d`를 실행합니다.
+   - HTTP만: [HTTP로 쓰기](#http로-쓰기-인증서-없이).
    - 둘 다: 두 주소를 모두 넣습니다. 같은 계정과 데스크톱을 씁니다.
 
-   Compose 설치에는 서버 접속 설정을 직접 적용할 root 업데이트 도구가 없어서 `.env`로 적용합니다.
+   주소, 기본 서버 주소, 신뢰할 프록시 IP, 공인 IP 따라가기는 이 화면에서만 정합니다. `.env`에 남는 것은 컨테이너가 스스로 알 수 없는 값입니다: 서버 IP(`MULTITAP_SERVER_ADDRESS`)와 Docker가 게시하는 포트(`MULTITAP_PUBLISH_PORT`, `MULTITAP_UDP_PUBLISH_PORT`).
 
-5. (HTTPS 프록시) 프록시를 신뢰하게 합니다. 같은 서버의 프록시가 보낸 요청은 컨테이너에서 `127.0.0.1`이 아니라 Docker 네트워크 게이트웨이 주소로 보입니다. 이 주소를 넣지 않으면 프록시를 거친 요청이 `403 http_disabled`로 거절됩니다.
+5. (HTTPS 프록시) 프록시를 신뢰하게 합니다. 같은 서버의 프록시가 보낸 요청은 컨테이너에서 `127.0.0.1`이 아니라 Docker 네트워크 게이트웨이 주소로 보입니다. 이 주소를 믿지 않으면 프록시를 거친 요청이 `403 http_disabled`로 거절됩니다.
 
-   ```sh
-   docker network inspect multitap_default -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
-   # 예: 172.18.0.1
-   echo 'MULTITAP_TRUSTED_PROXIES=172.18.0.1' >> .env
-   docker compose up -d
-   ```
+   서버 접속 설정의 **신뢰할 프록시 IP**에서 **프록시가 이 서버에 있어요**를 누르면 그 게이트웨이 주소가 목록에 들어갑니다. HTTPS 주소와 함께 저장합니다.
 
    프록시가 다른 서버에 있으면 그 서버의 주소를 넣습니다. `docker compose down`으로 네트워크를 지웠다면 게이트웨이가 바뀔 수 있으니 다시 확인합니다.
 
@@ -73,26 +66,28 @@ Multitap 브로커(관리자 페이지, 인증 중계, 다운로드 서버)를 D
    curl -fsS https://vdi.example.com/healthz      # 또는 http://192.168.0.10:18480/healthz
    ```
 
-처음부터 주소를 알면 1번에서 `MULTITAP_PUBLIC_ORIGIN`이나 `MULTITAP_HTTP_ORIGIN`을 바로 넣어도 됩니다. 이때도 브라우저로 그 주소를 열면 첫 설정 화면이 나옵니다.
+처음부터 주소를 알면 1번에서 `.env`의 `MULTITAP_PUBLIC_ORIGIN`이나 `MULTITAP_HTTP_ORIGIN`(`MULTITAP_ALLOW_INSECURE_HTTP=1`과 함께)에 넣어 시작할 수 있습니다. 이때도 브라우저로 그 주소를 열면 첫 설정 화면이 나옵니다. 이 줄들은 아무것도 저장하지 않은 서버의 시작값입니다. 서버 접속 설정에서 한 번 저장하면 읽지 않습니다.
+
+관리자 페이지에 들어갈 수 없게 되면 서버의 명령으로 같은 정책을 읽고 씁니다. `deploy/docker/install.sh`로 설치한 서버는 `sudo multitap address`가 이 일을 합니다.
+
+```sh
+docker compose run --rm --no-deps -T --entrypoint node broker /app/src/access-cli.mjs show
+docker compose run --rm --no-deps -T --entrypoint node broker /app/src/access-cli.mjs set http://192.168.0.10:18480
+docker compose restart broker
+```
 
 관리자 페이지 모니터링의 날짜는 `.env`의 `TZ`(IANA 이름, 예: `Asia/Seoul`)를 따르고, 비워 두면 UTC입니다. `deploy/docker/install.sh`로 설치하면 `.env`를 새로 만들 때 서버의 시간대를 넣습니다.
 
-## HTTP로 쓰기 (같은 네트워크, 인증서 없이)
+## HTTP로 쓰기 (인증서 없이)
 
-> **HTTP는 암호화하지 않습니다.** 로그인 비밀번호, 원격 화면, 키 입력이 그대로 네트워크에 흐릅니다. 믿을 수 있는 내부망에서만 쓰고, 공유기 포트 전달로 인터넷에 열지 마세요.
+> **HTTP는 암호화하지 않습니다.** 로그인 비밀번호, 원격 화면, 키 입력이 그대로 네트워크에 흐릅니다. 믿을 수 있는 내부망에서 쓰세요. 공유기 포트 전달로 밖에서 HTTP로 접속하는 것도 동작하지만 그 내용이 인터넷을 그대로 지나갑니다. 밖에서 쓸 때는 HTTPS를 권합니다.
 
-`.env`:
+서버 접속 설정의 HTTP 주소에 `http://192.168.0.10:18480`을 넣고 저장합니다.
 
-```sh
-MULTITAP_HTTP_ORIGIN=http://192.168.0.10:18480
-MULTITAP_ALLOW_INSECURE_HTTP=1
-MULTITAP_PUBLISH_PORT=0.0.0.0:18480
-```
-
-- HTTPS 주소(`MULTITAP_PUBLIC_ORIGIN`)와 함께 둘 수 있습니다. 같은 컨테이너 포트가 프록시의 HTTPS와 내부망의 HTTP를 함께 받습니다. `compose.direct-https.yaml`(브로커 자체 TLS)에서는 함께 쓸 수 없습니다.
-- 주소의 포트는 게시 포트와 같아야 합니다. 게시는 `0.0.0.0:18480`(모든 IPv4 주소)으로 합니다. `18480`만 쓰면 IPv6 연결이 Docker를 거쳐 게이트웨이 주소로 들어와, 신뢰한 프록시처럼 보일 수 있습니다. 서버 방화벽이 있으면 TCP 18480을 엽니다.
-- 주소를 쉼표로 이어 4개까지 넣을 수 있습니다. 예: `MULTITAP_HTTP_ORIGIN=http://192.168.0.10:18480,http://<공인 IP>:18480`(공유기가 TCP 18480을 이 서버로 전달할 때). 적은 주소로만 접속되고, 다른 주소는 `origin_not_allowed`로 막힙니다. 게시 포트는 첫 주소의 포트입니다.
-- `MULTITAP_ALLOW_INSECURE_HTTP=1`이 없으면 시작하지 않습니다(`http_origin_requires_allow_insecure_http`).
+- HTTPS 주소와 함께 둘 수 있습니다. 같은 컨테이너 포트가 프록시의 HTTPS와 내부망의 HTTP를 함께 받습니다. `compose.direct-https.yaml`(브로커 자체 TLS)에서는 함께 쓸 수 없습니다.
+- 서버 IP로 만든 주소의 포트는 게시 포트와 같아야 합니다. 게시는 `.env`의 `MULTITAP_PUBLISH_PORT=0.0.0.0:18480`(모든 IPv4 주소)으로 합니다. `18480`만 쓰면 IPv6 연결이 Docker를 거쳐 게이트웨이 주소로 들어와, 신뢰한 프록시처럼 보일 수 있습니다. 서버 방화벽이 있으면 TCP 18480을 엽니다.
+- 주소는 4개까지 넣을 수 있습니다. 적은 주소로만 접속되고, 다른 주소는 `origin_not_allowed`로 막힙니다.
+- 밖에서 공인 IP로 들어오게 하려면 공유기에서 TCP 18480을 이 서버로 전달하고, HTTP 주소의 **공인 IP 따라가기**를 켭니다. 서버가 공인 IP를 HTTP 주소로 등록하고 10분마다 확인해 바뀌면 따라갑니다. 다른 HTTP 주소가 하나 있어야 켤 수 있습니다.
 - Windows 앱: 서버 설정 → `HTTP` → 주소 `192.168.0.10:18480` → 연결 테스트 → 확인 창의 **이 주소에 HTTP 사용** → 저장. 동의는 그 주소·포트에만 적용됩니다.
 - 서버 로그에 `cleartext_http_enabled` 경고가 시작할 때마다 남습니다.
 
@@ -126,22 +121,40 @@ server {
 
 ## UDP 미디어
 
-브로커는 직접 설치와 같은 UDP 18481에서 미디어 중계를 시작하고, Compose가 이 포트를 서버에 게시합니다. 영상이 손실에 덜 멈추도록 UDP 경로를 쓰려면:
+브로커는 직접 설치와 같은 UDP 18481에서 미디어 중계를 시작하고, Compose가 이 포트를 서버에 게시합니다. 앱과 Host는 각자 자기가 접속한 서버 주소의 호스트와 게시된 UDP 포트로 보냅니다. Compose가 그 포트를 컨테이너에 알려 줍니다(`MULTITAP_UDP_PUBLISHED_PORT`). 따로 적을 주소는 없습니다.
 
-1. 서버 방화벽에서 UDP 18481을 열고, 공유기에서 이 서버로 UDP 18481을 전달합니다(TCP 443과 별도).
-2. `.env`에 Host와 클라이언트가 찾아올 주소를 넣고 `docker compose up -d`를 실행합니다.
+1. 서버 방화벽에서 UDP 18481을 엽니다.
+2. 밖에서 접속한다면 공유기에서 이 서버로 UDP 18481을 전달합니다(TCP 443과 별도).
 
-   ```sh
-   MULTITAP_UDP_HOST_RELAYS=vdi.example.com:18481
-   MULTITAP_UDP_CLIENT_RELAYS=vdi.example.com:18481
-   MULTITAP_UDP_MEDIA=on
-   ```
+UDP가 닿지 않으면 연결은 WebSocket(HTTPS 또는 HTTP)으로 그대로 동작합니다. 다음 경우에는 UDP를 쓰지 않습니다.
 
-두 목록 중 하나라도 비어 있거나 UDP가 막혀 있으면 연결은 WebSocket(HTTPS 또는 HTTP)으로 그대로 동작합니다. 바깥 포트를 바꾸려면 `MULTITAP_UDP_PUBLISH_PORT`를 바꾸고 목록에도 그 포트를 적습니다. Host가 같은 내부망에 있고 공유기가 자기 공인 주소로 되돌아오는 연결을 처리하지 못하면 `MULTITAP_HOST_ROUTE`에 브로커의 내부 IPv4 주소를 넣습니다.
+- UDP 포트가 루프백(`127.0.0.1`)에만 게시돼 있을 때
+- 접속 주소가 IPv6 숫자 주소일 때
+- HTTPS 주소가 UDP를 전달하지 않는 다른 서버의 프록시나 터널을 가리킬 때
+- 아래 두 목록 중 하나만 설정했을 때
 
-Host·클라이언트·서버가 모두 `udp-direct-v1`을 지원하면 단일 화면의 자동 비트레이트 세션은 인증된 UDP 직결도 시도합니다. 실패하면 UDP 중계, 이후 기존 WebSocket 경로를 사용합니다. 다중 화면과 고정 비트레이트 세션은 기존 경로를 유지합니다.
+UDP를 받을 주소가 접속 주소와 다르면 `.env`에 따로 적고 `docker compose up -d`를 실행합니다. 두 목록과 `MULTITAP_UDP_MEDIA=on`을 모두 적습니다.
 
-외부 주소 탐색은 기본 `stun.cloudflare.com:3478`을 사용합니다. 이 서버에는 공인 소켓 주소와 임의 트랜잭션만 전달되고 로그인 정보·화면은 전달되지 않습니다. `.env`에 `MULTITAP_STUN_SERVERS=off`를 넣으면 외부 STUN을 끌 수 있습니다. 자체 STUN을 쓰려면 `host:port`를 쉼표로 구분해 최대 2개 설정합니다. STUN을 꺼도 UDP 중계와 같은 LAN의 직결 시도는 유지됩니다. 클라이언트/Host 쪽 공유기 포트 개방이나 Windows 보안 설정 변경은 필요하지 않습니다.
+```sh
+MULTITAP_UDP_HOST_RELAYS=udp.example.com:18481
+MULTITAP_UDP_CLIENT_RELAYS=udp.example.com:18481
+MULTITAP_UDP_MEDIA=on
+```
+
+목록 없이 `MULTITAP_UDP_MEDIA=off`를 넣으면 UDP 경로는 확인만 하고 화면은 WebSocket으로 보냅니다. 바깥 포트를 바꾸려면 `MULTITAP_UDP_PUBLISH_PORT`를 바꿉니다. Host가 같은 내부망에 있고 공유기가 자기 공인 주소로 되돌아오는 연결을 처리하지 못하면 `MULTITAP_HOST_ROUTE`에 브로커의 내부 IPv4 주소를 넣습니다.
+
+지금 상태는 서버 접속 설정의 **UDP 화면 전송**에 나옵니다. 미디어는 브로커의 중계를 거칩니다. 브로커는 STUN 서버에 접속하지 않습니다.
+
+## 서버가 스스로 연결하는 곳
+
+| 연결하는 곳 | 언제, 왜 | 끄는 방법 |
+| --- | --- | --- |
+| `github.com`(프로젝트의 릴리스) | 관리자 페이지가 열려 있는 동안 최대 1시간에 한 번, 서명된 새 버전 정보 확인 | `.env`에 `MULTITAP_DOCKER_UPDATE_FEED=off` |
+| `https://1.1.1.1/cdn-cgi/trace` | 공인 IP 따라가기가 켜져 있을 때만 10분마다, 서버의 공인 IPv4 확인 | 서버 접속 설정에서 공인 IP 따라가기 끄기 |
+| 연결한 Proxmox | 데스크톱 목록, 전원, Console | Proxmox 연결 지우기 |
+| 저장한 자기 주소 | 서버 접속 설정을 저장한 직후, 새 주소로 자기 자신에게 닿는지 확인 | (저장할 때만) |
+
+`install.sh`와 `multitap update`는 실행할 때 `github.com`·`raw.githubusercontent.com`(버전 확인, `compose.yaml`과 `multitap`), `ghcr.io`(이미지), `download.docker.com`(Docker가 없을 때)에서 받습니다. `install.sh`는 밖에서 접속하는 주소를 묻기 위해 공인 IP를 한 번 확인합니다.
 
 ## 업데이트
 
@@ -234,10 +247,11 @@ node tools/release/github-release-bundle.mjs bundle <모은 폴더> server/relea
 ## 데이터·권한
 
 - 컨테이너는 UID/GID `1000:1000`으로 실행하고, 루트 파일시스템은 읽기 전용, Linux capability는 모두 제거, `no-new-privileges`를 씁니다. 쓰기 위치는 데이터 볼륨과 작은 `/tmp`뿐입니다.
-- 데이터 볼륨에는 SQLite DB와 WAL, `vault.key`, 초기 계정 안내 파일, `downloads/`가 있습니다. Proxmox 토큰은 DB 안에서 `vault.key`로 암호화되므로 **DB와 `vault.key`를 함께 백업**합니다.
+- 데이터 볼륨에는 SQLite DB와 WAL, `vault.key`, 초기 계정 안내 파일, `downloads/`, 서버 접속 설정(`access/`)이 있습니다. Proxmox 토큰은 DB 안에서 `vault.key`로 암호화되므로 **DB와 `vault.key`를 함께 백업**합니다.
 - 한 데이터 볼륨을 두 브로커 컨테이너가 동시에 쓰지 않습니다. 같은 서버에 두 번째 설치를 만들려면 다른 폴더에서 `MULTITAP_DATA_VOLUME`과 포트를 바꿉니다.
 - bind mount를 쓰려면 새 전용 디렉터리를 `1000:1000`, 0700으로 준비합니다. 컨테이너가 소유권을 바꾸지 않습니다.
-- 헬스체크는 `/healthz`의 서비스 이름, 상태, 인증 방식, 이미지 버전 일치를 봅니다. Proxmox 연결이나 원격 화면 검증은 아닙니다.
+- 헬스체크는 컨테이너 안에서 브로커의 `/healthz`를 물어 서비스 이름, 상태, 인증 방식, 이미지 버전, 쓰고 있는 접속 설정의 일치를 봅니다. 접속 주소가 무엇이든 동작합니다. Proxmox 연결이나 원격 화면 검증은 아닙니다. `multitap` 명령은 서버가 떴는지를 이 결과와 이미지의 버전 라벨로 확인합니다.
+- 컨테이너의 메모리 한도는 512 MB입니다. 동시에 접속하는 사람이 많아 모자라면 `.env`에 `MULTITAP_MEMORY_LIMIT=1g`처럼 적고 `docker compose up -d`를 실행합니다.
 - 기반 이미지는 `node:24-bookworm-slim@sha256:55fb5f5a…d205`(Docker Hub 공식)로 고정합니다.
 
 ## 기존 systemd 설치를 옮길 때
@@ -249,10 +263,12 @@ node tools/release/github-release-bundle.mjs bundle <모은 폴더> server/relea
 - **Install:** `cp .env.example .env`, set `MULTITAP_SERVER_ADDRESS=<server IP>`, run `docker compose pull && docker compose up -d`, then open `http://<server IP>:18480` in a browser: the root address leads to the first setup. Until an address is set, that origin serves only the setup pages (no client, Host or download access).
 - **First administrator:** sign in with `admin`/`admin`; the setup screen asks for a one-time code that only the server log shows, next to the URL to open: `docker compose logs broker | grep initial_setup` (a new code on every restart).
 - **Time zone:** the days of the console's monitoring follow `TZ` in `.env` (an IANA name such as `Europe/Berlin`; empty = UTC). `deploy/docker/install.sh` writes the machine's time zone there when it creates `.env`.
-- **Addresses:** the console's Server access page writes the `.env` lines (Compose has no root updater to apply them); change them and run `docker compose up -d`. HTTPS: `MULTITAP_PUBLIC_ORIGIN=https://<domain>`; with a reverse proxy on the same machine use `MULTITAP_PUBLISH_PORT=127.0.0.1:18480` and trust the Docker network gateway with `MULTITAP_TRUSTED_PROXIES=<gateway>` (from `docker network inspect multitap_default`), otherwise proxied requests get `403 http_disabled`.
-- **HTTP on the LAN (no certificate):** `MULTITAP_HTTP_ORIGIN=http://<server IP>:18480`, `MULTITAP_ALLOW_INSECURE_HTTP=1`, `MULTITAP_PUBLISH_PORT=0.0.0.0:18480` (IPv4 only: with a bare `18480`, Docker's IPv6 proxy hop arrives from the network gateway and can pose as the trusted HTTPS proxy). Works alone or beside the HTTPS address on the same listener (not with `compose.direct-https.yaml`). **No encryption:** passwords, screens and keystrokes travel in clear; use it only on a trusted network and never forward it to the internet. In the Windows client choose `HTTP`, enter `<server IP>:18480`, run the connection test and accept the per-address HTTP prompt.
+- **Addresses:** set them in the console's Server access page (addresses, the primary address, the trusted proxy IPs, public IP following). The server keeps the policy in its data volume (`access/`), applies a save itself (it ends connections, starts again in the same container, checks that it reaches itself at the new main addresses and goes back to the previous policy if it cannot). The `.env` lines `MULTITAP_PUBLIC_ORIGIN`, `MULTITAP_HTTP_ORIGIN`, `MULTITAP_ALLOW_INSECURE_HTTP` and `MULTITAP_TRUSTED_PROXIES` only start a server that has saved nothing yet. `.env` keeps what the container cannot know: `MULTITAP_SERVER_ADDRESS` and the published ports (`MULTITAP_PUBLISH_PORT`; HTTPS through a proxy on the same machine only: `127.0.0.1:18480`). For a reverse proxy on the same machine, click "The proxy is on this server" under Trusted proxy IPs; otherwise proxied requests get `403 http_disabled`. When the console cannot be reached: `docker compose run --rm --no-deps -T --entrypoint node broker /app/src/access-cli.mjs show | set <url>...`, then `docker compose restart broker` (`sudo multitap address` on an install made by `install.sh`). Details: [server-access-v1.md](server-access-v1.md).
+- **HTTP (no certificate):** enter `http://<server IP>:18480` as the HTTP address in Server access; the published port must be `MULTITAP_PUBLISH_PORT=0.0.0.0:18480` (IPv4 only: with a bare `18480`, Docker's IPv6 proxy hop arrives from the network gateway and can pose as the trusted HTTPS proxy). Works alone or beside the HTTPS address on the same listener (not with `compose.direct-https.yaml`). **No encryption:** passwords, screens and keystrokes travel in clear. Use it on a trusted network. Forwarding it from the internet works too (turn on "Follow the public IP" to keep the public IP registered), but then all of it crosses the internet in clear: HTTPS is the recommendation from outside. In the Windows client choose `HTTP`, enter `<server IP>:18480`, run the connection test and accept the per-address HTTP prompt.
 - **Reverse proxy:** forward HTTPS to `http://127.0.0.1:18480` with `Host`, `X-Forwarded-Proto: https` and WebSocket upgrade headers (nginx example above).
-- **UDP media:** the relay listens on UDP 18481 (as on the native install) and Compose publishes it. Open and forward UDP 18481 in the firewall and router, then set `MULTITAP_UDP_HOST_RELAYS` and `MULTITAP_UDP_CLIENT_RELAYS` (e.g. `vdi.example.com:18481`) and `MULTITAP_UDP_MEDIA=on`. Without them, or with UDP blocked, sessions stay on WebSocket (over HTTPS or HTTP).
+- **UDP media:** the relay listens on UDP 18481 (as on the native install) and Compose publishes it and tells the server the published port. Apps and Hosts send to the host of the address they connected on, at that port, so opening and forwarding UDP 18481 in the firewall and router is all it takes. UDP stays off (sessions stay on WebSocket) when the UDP port is published on loopback only, when the address is an IPv6 literal, when the HTTPS name is a proxy or tunnel on another machine that does not forward UDP, or when only one relay list is set. `MULTITAP_UDP_HOST_RELAYS`, `MULTITAP_UDP_CLIENT_RELAYS` (both) with `MULTITAP_UDP_MEDIA=on` name another UDP address. The server contacts no STUN server.
 - **Updates:** the admin console checks the project's signed `server-updates-docker.json` (GitHub Releases, Ed25519, pinned key) and shows the exact commands; it never pulls or restarts by itself. `MULTITAP_DOCKER_UPDATE_FEED=off` disables the outbound check. Feed: `https://github.com/totblabs/Multitap/releases/latest/download/server-updates-docker.json`. Images: built by GitHub Actions for linux/amd64 on every GitHub Release and pushed as `ghcr.io/totblabs/multitap-broker:<version>` and `:latest` ([docs/releasing.md](releasing.md)). Data, `vault.key` and downloads live in the `multitap-broker-data` volume; never use `down -v`.
 - **Build from source:** `docker compose -f compose.yaml -f compose.build.yaml up -d --build`, with a prepared bundle in `server/release-bundle/` (the release's `multitap-release-bundle-<version>.tar.gz`: `rm -rf server/release-bundle && mkdir server/release-bundle && tar -xzf multitap-release-bundle-<version>.tar.gz -C server/release-bundle`), or an empty development bundle and `MULTITAP_ALLOW_EMPTY_RELEASE_BUNDLE=true`.
-- **CI smoke test:** `tools/oss/docker-smoke.sh` builds two images, runs them through `compose.yaml` on a private project and volume, and checks the first setup by IP from the root URL, the LAN HTTP address beside an HTTPS one (the client's HTTP health profile), health, the catalog (client, Host, Android), `/get/*` links and that an image update keeps every earlier file.
+- **Outbound connections:** the signed release feed on GitHub (at most hourly while the console is open; `MULTITAP_DOCKER_UPDATE_FEED=off`), `https://1.1.1.1/cdn-cgi/trace` every 10 minutes only while public IP following is on, the Proxmox you connected, and its own new addresses right after a save.
+- **Memory:** the container is limited to 512 MB; `MULTITAP_MEMORY_LIMIT=1g` in `.env` raises it.
+- **CI smoke test:** `tools/oss/docker-smoke.sh` builds two images, runs them through `compose.yaml` on a private project and volume, and checks the first setup by IP from the root URL, the LAN HTTP address beside an HTTPS one (the client's HTTP health profile), health, the catalog (client, Host, Android), `/get/*` links, that an image update keeps every earlier file, and the server access settings: a save through the admin API that the server applies in the same container, a save it puts back because the new address cannot answer, and the same policy through `access-cli.mjs`.

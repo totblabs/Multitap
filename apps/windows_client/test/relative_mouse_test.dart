@@ -401,7 +401,7 @@ class _ViewRig {
     }
   }
 
-  /// The bar's 설정 panel, where 마우스 잠금 and 바 열어 두기 are (2026-11-10).
+  /// The bar's 설정 panel, where 마우스 잠금 and 바 열어 두기 are.
   /// No time passes here, so the panel is up at the start of its entrance
   /// and a choice or a pop removes it at once.
   Future<void> openSettings(WidgetTester tester) async {
@@ -1560,7 +1560,7 @@ void main() {
   });
 
   group('마우스 잠금 option', () {
-    // 마우스 잠금 is a switch row of the bar's 설정 panel (2026-11-10).
+    // 마우스 잠금 is a switch row of the bar's 설정 panel.
     const button = 'session-game-mouse';
     Future<void> toggle(WidgetTester tester, _ViewRig rig) =>
         rig.toggleGameMouse(tester);

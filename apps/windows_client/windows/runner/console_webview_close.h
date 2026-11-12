@@ -2,8 +2,8 @@
 #include <string_view>
 
 namespace multitap {
-// The console page asks the window's close question in its own dialog
-// (2026-11-03). The window sends only this request; the page answers only
+// The console page asks the window's close question in its own dialog.
+// The window sends only this request; the page answers only
 // with the strings below. Anything else is ignored.
 inline constexpr wchar_t kConsoleCloseRequest[]=L"multitap-console:close-request";
 enum class ConsolePageMessage{Ignored,Ready,Shown,Confirm,Cancel};

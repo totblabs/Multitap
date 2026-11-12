@@ -10,7 +10,7 @@ std::wstring CurrentUserSid(){
   std::wstring value(sid);LocalFree(sid);return value;
 }
 // The first instance of a client that rests in the notification area: its main
-// window exists but is hidden (the 2026-10-27 close-to-tray). Another launch
+// window exists but is hidden (close-to-tray). Another launch
 // must bring that window back, also when it was minimized before it was hidden.
 int TrayOwner(const wchar_t* scope,const wchar_t* first,const wchar_t* second){
   const auto parse=[](const wchar_t* text){return reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(std::wcstoull(text,nullptr,16)));};

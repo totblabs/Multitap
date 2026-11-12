@@ -4,12 +4,12 @@ package me.totb.multitap_client
  * What this app run remembers about H.264 decoders that failed before their
  * first frame (AvcDecoders). Pure, so the JVM tests run it.
  *
- * Until 2026-11-10 one such failure sent the decoder to the end of the trial
- * order, which on most devices means the software decoder for the rest of
- * the run. A decoder that was started with any latency tuning (avcTuningFlags
- * bits 1-8) is now first tried once more with the plain format, the
+ * Sending the decoder to the end of the trial order at one such failure
+ * would mean, on most devices, the software decoder for the rest of the
+ * run. So a decoder that was started with any latency tuning (avcTuningFlags
+ * bits 1-8) is first tried once more with the plain format, the
  * platform's defaults: only a failure of that is taken as the decoder's own
- * and demotes it as before.
+ * and demotes it.
  *
  * A decoder started ahead of the key frame that fails is, as before, started
  * at the key frame with the parameter sets in its format, tuning unchanged.

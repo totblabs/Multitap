@@ -15,7 +15,7 @@ import '../l10n/l10n.dart';
 ///
 /// Opening it asks the broker for the desktop's state again ([onCheck]); the
 /// rows follow each list refresh and the footer shows when that state was
-/// received, with "다시 점검" (2026-10-26: it only showed a stale snapshot).
+/// received, with "다시 점검" (never only a stale snapshot).
 class ReadinessDialog extends StatelessWidget {
   const ReadinessDialog({
     super.key,
@@ -231,7 +231,7 @@ class ReadinessDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // The AppDialog header (2026-11-03): what this is as the
+              // The AppDialog header: what this is as the
               // title, the VM as the subtitle, as in every other dialog.
               Row(
                 children: [

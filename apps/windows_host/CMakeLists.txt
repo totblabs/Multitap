@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.1 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.2 LANGUAGES CXX)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
 option(MULTITAP_PRIVATE_SIGNIN_DIAGNOSTIC_TRIAL "Compile the local preparation diagnostic listener for private qualification only" OFF)
 enable_language(RC)
@@ -209,7 +209,7 @@ add_executable(MultitapHostInputTest src/input_test.cpp)
 add_executable(MultitapHostPointerReliabilityTest EXCLUDE_FROM_ALL src/pointer_reliability_test.cpp)
 add_executable(MultitapHostWorkerServiceBindingTest EXCLUDE_FROM_ALL src/worker_service_binding_test.cpp)
 target_compile_options(MultitapHostWorkerServiceBindingTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-target_link_libraries(MultitapHostWorkerServiceBindingTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostWorkerServiceBindingTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostPointerReliabilityTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 target_link_libraries(MultitapHostPointerReliabilityTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
 add_executable(MultitapWindowCloseTest src/window_close_test.cpp)
@@ -220,7 +220,7 @@ add_executable(MultitapHostServiceTest src/service_test.cpp)
 add_executable(MultitapHostSessionStopTest EXCLUDE_FROM_ALL src/session_stop_test.cpp)
 target_compile_definitions(MultitapHostSessionStopTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST MULTITAP_SESSION_STOP_TEST)
 target_compile_options(MultitapHostSessionStopTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-target_link_libraries(MultitapHostSessionStopTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
+target_link_libraries(MultitapHostSessionStopTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
 add_executable(MultitapHostWorkerExitFenceTest EXCLUDE_FROM_ALL src/worker_exit_fence_test.cpp)
 target_compile_options(MultitapHostWorkerExitFenceTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostTrackSourceTest EXCLUDE_FROM_ALL src/track_source_test.cpp
@@ -303,11 +303,11 @@ target_compile_options(MultitapHostTextInputTest PRIVATE /W4 /WX /permissive- /E
 # crash recovery (substituted DisplayConfig/record) and Session0 forwarding.
 # stream-size-v1: decoder limits, full-size encoding, measured-load scale controller.
 add_executable(MultitapHostStreamSizeTest EXCLUDE_FROM_ALL src/stream_size_test.cpp)
-target_link_libraries(MultitapHostStreamSizeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
+target_link_libraries(MultitapHostStreamSizeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
 target_compile_options(MultitapHostStreamSizeTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # Secure desktop notice: UAC of an unlocked session keeps the stream with a notice picture.
 add_executable(MultitapHostSecureDesktopNoticeTest EXCLUDE_FROM_ALL src/secure_desktop_notice_test.cpp)
-target_link_libraries(MultitapHostSecureDesktopNoticeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
+target_link_libraries(MultitapHostSecureDesktopNoticeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
 target_compile_options(MultitapHostSecureDesktopNoticeTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # Secure desktop scope: Role::secure scope matrix, input allowlist, helper source switch (pure).
 add_executable(MultitapHostSecureDesktopScopeTest EXCLUDE_FROM_ALL src/secure_desktop_scope_test.cpp)
@@ -316,23 +316,23 @@ target_compile_options(MultitapHostSecureDesktopScopeTest PRIVATE /W4 /WX /permi
 # service's dispatch and input routing, the helper's control loop, and all of them end to end over a real unnamed
 # section and the service's real input pipe (no SYSTEM process, no secure desktop).
 add_executable(MultitapHostSecureDesktopBridgeTest EXCLUDE_FROM_ALL src/secure_desktop_bridge_test.cpp)
-target_link_libraries(MultitapHostSecureDesktopBridgeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
+target_link_libraries(MultitapHostSecureDesktopBridgeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
 target_compile_options(MultitapHostSecureDesktopBridgeTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # System input (system_input.hpp): which stream gets the SYSTEM injector, the injector's loop, the service's routing
 # and marker, pointer geometry, the pipe's reach, and the time of one input over the real pipe. Fakes only.
 add_executable(MultitapHostSystemInputTest EXCLUDE_FROM_ALL src/system_input_test.cpp)
-target_link_libraries(MultitapHostSystemInputTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
+target_link_libraries(MultitapHostSystemInputTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
 target_compile_options(MultitapHostSystemInputTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # System input on independent outputs: the service keeps the client's event, the worker's real track plan places it,
 # the injector gets it at that desktop pixel (two and three outputs, plan changes, answers a worker may not give).
 add_executable(MultitapHostSecureDesktopTracksTest EXCLUDE_FROM_ALL src/secure_desktop_tracks_test.cpp)
-target_link_libraries(MultitapHostSecureDesktopTracksTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
+target_link_libraries(MultitapHostSecureDesktopTracksTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
 target_compile_options(MultitapHostSecureDesktopTracksTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostSystemInputTracksTest EXCLUDE_FROM_ALL src/system_input_tracks_test.cpp)
-target_link_libraries(MultitapHostSystemInputTracksTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
+target_link_libraries(MultitapHostSystemInputTracksTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 gdi32 user32)
 target_compile_options(MultitapHostSystemInputTracksTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostResolutionV2Test EXCLUDE_FROM_ALL src/resolution_v2_test.cpp)
-target_link_libraries(MultitapHostResolutionV2Test PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
+target_link_libraries(MultitapHostResolutionV2Test PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
 target_compile_options(MultitapHostResolutionV2Test PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostDisplayScaleTest EXCLUDE_FROM_ALL src/display_scale_test.cpp)
 target_compile_definitions(MultitapHostDisplayScaleTest PRIVATE MULTITAP_INPUT_LATENCY_TEST MULTITAP_AGENT_PUBLICATION_TEST)
@@ -422,9 +422,9 @@ add_executable(MultitapHostSettingsRpcTest EXCLUDE_FROM_ALL src/settings_rpc_tes
 add_executable(MultitapHostConsoleTransferTest EXCLUDE_FROM_ALL src/console_transfer_test.cpp)
 add_executable(MultitapHostStreamConsoleRecoveryTest EXCLUDE_FROM_ALL src/stream_console_recovery_test.cpp)
 add_executable(MultitapHostStreamConsoleWorkerTest EXCLUDE_FROM_ALL src/stream_console_worker_test.cpp)
-target_link_libraries(MultitapHostStreamConsoleWorkerTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
+target_link_libraries(MultitapHostStreamConsoleWorkerTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
 target_compile_options(MultitapHostStreamConsoleWorkerTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-target_link_libraries(MultitapHostStreamConsoleRecoveryTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
+target_link_libraries(MultitapHostStreamConsoleRecoveryTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
 target_compile_options(MultitapHostStreamConsoleRecoveryTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostNativeDisplayContractTest EXCLUDE_FROM_ALL src/native_display_contract_test.cpp)
 add_executable(MultitapHostNativeDisplayTopologyTest EXCLUDE_FROM_ALL src/native_display_topology_test.cpp)
@@ -471,22 +471,22 @@ target_link_libraries(MultitapHostNativeStreamCancelRecoveryTest PRIVATE host_en
 target_compile_options(MultitapHostNativeStreamCancelRecoveryTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostNativeStreamCancelServiceTest EXCLUDE_FROM_ALL src/native_stream_cancel_service_test.cpp)
 target_compile_definitions(MultitapHostNativeStreamCancelServiceTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostNativeStreamCancelServiceTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostNativeStreamCancelServiceTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostNativeStreamCancelServiceTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostInitialViewportTest EXCLUDE_FROM_ALL src/initial_viewport_test.cpp)
 target_compile_definitions(MultitapHostInitialViewportTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostInitialViewportTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostInitialViewportTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostInitialViewportTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostViewportEncoderLimitsTest EXCLUDE_FROM_ALL src/viewport_encoder_limits_test.cpp)
 target_compile_definitions(MultitapHostViewportEncoderLimitsTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostViewportEncoderLimitsTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostViewportEncoderLimitsTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostViewportEncoderLimitsTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostNativeStreamTrackCommitTest EXCLUDE_FROM_ALL src/native_stream_track_commit_test.cpp)
 target_link_libraries(MultitapHostNativeStreamTrackCommitTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
 target_compile_options(MultitapHostNativeStreamTrackCommitTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostNativeStreamTrackServiceTest EXCLUDE_FROM_ALL src/native_stream_track_service_test.cpp)
 target_compile_definitions(MultitapHostNativeStreamTrackServiceTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostNativeStreamTrackServiceTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostNativeStreamTrackServiceTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostNativeStreamTrackServiceTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostNativeStreamTrackLedgerTest EXCLUDE_FROM_ALL src/native_stream_track_ledger_test.cpp)
 target_link_libraries(MultitapHostNativeStreamTrackLedgerTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
@@ -501,17 +501,17 @@ add_executable(MultitapHostInitialProfileTracksTest EXCLUDE_FROM_ALL src/initial
 add_executable(MultitapHostProfileTrackResizeTest EXCLUDE_FROM_ALL src/profile_track_resize_test.cpp)
 add_executable(MultitapHostProfileTrackCapabilityTest EXCLUDE_FROM_ALL src/profile_track_capability_test.cpp)
 target_compile_definitions(MultitapHostProfileTrackCapabilityTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostProfileTrackCapabilityTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostProfileTrackCapabilityTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostProfileTrackCapabilityTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 target_compile_definitions(MultitapHostProfileTrackResizeTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostProfileTrackResizeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostProfileTrackResizeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostProfileTrackResizeTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 target_compile_definitions(MultitapHostInitialProfileTracksTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostInitialProfileTracksTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostInitialProfileTracksTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostInitialProfileTracksTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostNativeCountObservedLayoutTest EXCLUDE_FROM_ALL src/native_count_observed_layout_test.cpp)
 target_compile_definitions(MultitapHostNativeCountObservedLayoutTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostNativeCountObservedLayoutTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostNativeCountObservedLayoutTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostNativeCountObservedLayoutTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 target_link_libraries(MultitapHostNativeStreamPrimaryProfileTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
 target_compile_options(MultitapHostNativeStreamPrimaryProfileTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
@@ -541,7 +541,7 @@ target_link_libraries(MultitapHostNativeRecoveryResetTest PRIVATE host_engine wi
 target_compile_options(MultitapHostNativeRecoveryResetTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostNativeRecoveryResetServiceTest EXCLUDE_FROM_ALL src/native_recovery_reset_service_test.cpp)
 target_compile_definitions(MultitapHostNativeRecoveryResetServiceTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostNativeRecoveryResetServiceTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostNativeRecoveryResetServiceTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostNativeRecoveryResetServiceTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostNativeDisplayIdentityTest EXCLUDE_FROM_ALL src/native_display_identity_test.cpp)
 target_link_libraries(MultitapHostNativeDisplayIdentityTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
@@ -557,7 +557,7 @@ add_executable(MultitapHostNativeDisplayJournalTest EXCLUDE_FROM_ALL src/native_
 target_compile_definitions(MultitapHostNativeDisplayServiceChangeTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
 add_executable(MultitapHostNativeProfileViewportRecoveryTest EXCLUDE_FROM_ALL src/native_display_service_change_test.cpp)
 target_compile_definitions(MultitapHostNativeProfileViewportRecoveryTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST MULTITAP_PROFILE_VIEWPORT_RECOVERY_ONLY)
-target_link_libraries(MultitapHostNativeProfileViewportRecoveryTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
+target_link_libraries(MultitapHostNativeProfileViewportRecoveryTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
 target_compile_options(MultitapHostNativeProfileViewportRecoveryTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # Display manager v2: pure CCD/SDK/state fixtures, and the native SDK service glue.
 add_executable(MultitapHostDisplayV2Test EXCLUDE_FROM_ALL src/display_v2_test.cpp)
@@ -661,7 +661,7 @@ target_link_libraries(MultitapHostDisplayV2CountTest PRIVATE host_engine winhttp
 target_compile_options(MultitapHostDisplayV2CountTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostDisplayV2ServiceTest EXCLUDE_FROM_ALL src/display_v2_service_test.cpp)
 target_compile_definitions(MultitapHostDisplayV2ServiceTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
-target_link_libraries(MultitapHostDisplayV2ServiceTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostDisplayV2ServiceTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostDisplayV2ServiceTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostBrokerStatusTest EXCLUDE_FROM_ALL src/broker_status_test.cpp)
 target_compile_options(MultitapHostBrokerStatusTest PRIVATE /WX)
@@ -692,7 +692,7 @@ target_compile_options(MultitapHostWakeProbe PRIVATE /W4 /WX /permissive- /EHsc 
 # Idle wakeups (#70): the always-on service threads, measured in this process
 # with QA pipe names, a temporary folder and a substituted clock.
 add_executable(MultitapHostIdleWakeTest EXCLUDE_FROM_ALL src/idle_wake_test.cpp)
-target_link_libraries(MultitapHostIdleWakeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
+target_link_libraries(MultitapHostIdleWakeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32)
 target_compile_options(MultitapHostIdleWakeTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # hostAction 275 (#69): the service run marker, owned worker exits (own child
 # processes) and the record's place in the diagnostics report.
@@ -890,7 +890,7 @@ target_compile_definitions(MultitapHostTool PRIVATE HOST_CONSOLE_ENTRY)
 target_compile_options(MultitapHost PRIVATE /bigobj)
 target_compile_options(MultitapHostTool PRIVATE /bigobj)
 foreach(target MultitapHost MultitapHostTool MultitapHostInputTest MultitapHostServiceTest MultitapHostPendingConnectionTest MultitapHostCredentialBindingTest MultitapHostWindowsAccountRecordTest MultitapHostSettingsRpcTest MultitapHostConsoleTransferTest MultitapHostNativeDisplayContractTest MultitapHostNativeDisplayTopologyTest MultitapHostNativeDisplayServiceChangeTest MultitapHostNativeDisplayJournalTest MultitapHostBrokerStatusTest MultitapHostViewportDiagnosticsTest MultitapHostCatalogMaintenanceTest MultitapHostClipboardTest MultitapHostClipboardPullCancelTest MultitapHostClipboardFilesTest MultitapHostResizeTest)
-  target_link_libraries(${target} PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
+  target_link_libraries(${target} PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
   target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc /utf-8)
 endforeach()
 
@@ -905,7 +905,7 @@ target_compile_options(MultitapClientDriveFilesTest PRIVATE /W4 /WX /permissive-
 # Header-only resize decoder-box candidate/metadata regression; memory only.
 # The fixture invokes no service, driver, capture, encoder, file or network API.
 add_executable(MultitapHostResizeEncoderLimitsTest EXCLUDE_FROM_ALL src/resize_encoder_limits_test.cpp)
-target_link_libraries(MultitapHostResizeEncoderLimitsTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
+target_link_libraries(MultitapHostResizeEncoderLimitsTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
 target_compile_options(MultitapHostResizeEncoderLimitsTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 
 # Autologon hooks: explicit private QA targets, never packaged or ALL targets.
@@ -942,7 +942,7 @@ target_link_libraries(MultitapHostPrerequisitesTest PRIVATE bcrypt ole32 shell32
 # records), and that an update removes none of it. Fakes only: no device,
 # driver store, certificate store, registry value, file or service is touched.
 add_executable(MultitapHostRemovalTest EXCLUDE_FROM_ALL src/host_removal_test.cpp)
-target_link_libraries(MultitapHostRemovalTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
+target_link_libraries(MultitapHostRemovalTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32)
 target_compile_options(MultitapHostRemovalTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 
 # drive.open-v1: fake WinFsp table/pipe, injected shell action; no legacy main.
@@ -990,7 +990,7 @@ add_executable(MultitapHostSigninServiceAuthorityTest EXCLUDE_FROM_ALL
 target_compile_features(MultitapHostSigninServiceAuthorityTest PRIVATE cxx_std_20)
 target_compile_definitions(MultitapHostSigninServiceAuthorityTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
 target_compile_options(MultitapHostSigninServiceAuthorityTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-target_link_libraries(MultitapHostSigninServiceAuthorityTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32 user32)
+target_link_libraries(MultitapHostSigninServiceAuthorityTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32 user32)
 
 # Same orchestration with injected facts only. This definition is target-local:
 # the production entry object in host_engine is always compiled in full.
@@ -1033,7 +1033,7 @@ add_executable(MultitapHostSigninPreparationAuthorityTest EXCLUDE_FROM_ALL src/s
 target_compile_features(MultitapHostSigninPreparationAuthorityTest PRIVATE cxx_std_20)
 target_compile_definitions(MultitapHostSigninPreparationAuthorityTest PRIVATE MULTITAP_NATIVE_DISPLAY_TEST)
 target_compile_options(MultitapHostSigninPreparationAuthorityTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-target_link_libraries(MultitapHostSigninPreparationAuthorityTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32 user32)
+target_link_libraries(MultitapHostSigninPreparationAuthorityTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32 user32)
 
 add_executable(MultitapHostSigninRestorationTest EXCLUDE_FROM_ALL
   src/signin_restoration_test.cpp src/signin_restoration.cpp src/signin_worker_native.cpp)
@@ -1062,7 +1062,7 @@ add_executable(MultitapHostSigninDiagnosticBridgeTest EXCLUDE_FROM_ALL src/signi
 target_compile_features(MultitapHostSigninDiagnosticBridgeTest PRIVATE cxx_std_20)
 target_compile_definitions(MultitapHostSigninDiagnosticBridgeTest PRIVATE MULTITAP_SESSION_STOP_TEST)
 target_compile_options(MultitapHostSigninDiagnosticBridgeTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-target_link_libraries(MultitapHostSigninDiagnosticBridgeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32 user32)
+target_link_libraries(MultitapHostSigninDiagnosticBridgeTest PRIVATE host_engine host_clipboard winhttp crypt32 advapi32 shell32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi cfgmgr32 secur32 user32)
 
 add_executable(MultitapHostSigninDiagnosticHandoffTest EXCLUDE_FROM_ALL src/signin_diagnostic_handoff_test.cpp)
 target_compile_features(MultitapHostSigninDiagnosticHandoffTest PRIVATE cxx_std_20)

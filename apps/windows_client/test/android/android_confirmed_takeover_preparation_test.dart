@@ -418,7 +418,7 @@ void main() {
     },
   );
 
-  // One question (2026-11-11): the launcher cannot know the desktop is in use
+  // One question: the launcher cannot know the desktop is in use
   // before it asks, so its one question is the hand-over question; the
   // preflight follows the answer, and the takeover card follows the preflight.
   testWidgets(

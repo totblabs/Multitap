@@ -149,7 +149,7 @@ void main() {
     c.selectAll(true);
     await c.submitSelected();
     expect(api.calls.map((r) => r.id), ['pve-149', 'pve-170']);
-    // A bulk update ends the desktops' connections now (2026-11-03).
+    // A bulk update ends the desktops' connections now.
     expect(
       api.calls.every((r) => r.version == bulkTarget && r.disconnect),
       isTrue,

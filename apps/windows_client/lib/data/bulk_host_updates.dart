@@ -63,7 +63,7 @@ class BulkHostUpdateRow {
       : null;
   bool get eligible => !attempted && _canRequest;
 
-  /// VMs and approved local PCs alike (2026-11-03); the broker authorizes
+  /// VMs and approved local PCs alike; the broker authorizes
   /// each request by assignment.
   bool get _canRequest =>
       assigned &&
@@ -482,8 +482,8 @@ class BulkHostUpdateController extends ChangeNotifier {
     return !stopped && !_disposed;
   }
 
-  /// Each request ends the desktop's connections now (2026-11-03: a bulk
-  /// update no longer waits for them). Where the broker refuses to end
+  /// Each request ends the desktop's connections now (a bulk update does
+  /// not wait for them). Where the broker refuses to end
   /// another account's connection for an ordinary account, the same request
   /// is sent once more without it and waits for that connection to end.
   Future<void> _submitRow(BulkHostUpdateRow row) async {

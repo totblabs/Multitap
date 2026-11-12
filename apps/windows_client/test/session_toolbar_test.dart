@@ -596,7 +596,7 @@ void main() {
         );
         await tester.pump();
         // At rest: a 74 × 15 tongue hanging from the top edge, centred, with
-        // a dot in the latency colour and no text (v2, 2026-11-10).
+        // a dot in the latency colour and no text.
         expect(find.byKey(_bar), findsNothing);
         expect(find.byKey(_fold), findsNothing);
         final grip = tester.getRect(find.byKey(_tab));

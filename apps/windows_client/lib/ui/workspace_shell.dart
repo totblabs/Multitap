@@ -295,8 +295,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
 
   static const _startTimeout = Duration(minutes: 5);
   // A release published while the client is open shows within minutes, and
-  // at once on coming back to the window or 새로고침 (2026-10-26: 30 minutes
-  // was too slow). Each check reads only the server's small catalog.
+  // at once on coming back to the window or 새로고침 (30 minutes is too
+  // slow). Each check reads only the server's small catalog.
   static const _updateInterval = Duration(minutes: 10);
   static const _updateOnReturn = Duration(minutes: 1);
 
@@ -804,7 +804,6 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       _prefs.modeFor(machine.id);
 
   bool _allMonitors(DesktopMachine machine) =>
-      !machine.signinReady &&
       machine.independentDisplayStreaming &&
       widget.localMonitors == 2 &&
       (widget.onOpenWindow != null || widget.onConnectTracks != null);
@@ -1067,7 +1066,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     if (_confirming || _streamConnectPromptOpen || !mounted) return;
     // Fresh launcher intents ask before a callback, queued connection or native
     // window can start. An occupied stream still needs its separate consent.
-    // One question (2026-11-11: it asked twice): when the Windows screen has
+    // One question, never two: when the Windows screen has
     // to be taken over from RDP, this question is that one, and [connect]
     // hears that it was agreed to.
     final current = widget.machines
@@ -1168,7 +1167,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     confirmLabel: l10n.takeOverConnect,
   );
 
-  /// 'Console 끊고 연결' (2026-11-09): after a confirmation, end the VM's
+  /// 'Console 끊고 연결': after a confirmation, end the VM's
   /// console connections, then connect as soon as the tile is ready (the
   /// console's display reservation clears with it).
   Future<void> _endConsolesAndConnect(DesktopMachine machine) async {
@@ -2138,8 +2137,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
 
   /// The header: 내 데스크톱 with its count, then the 구분 filter (only with
   /// both VMs and local PCs), the status filter, the search, the sort button,
-  /// 미리보기 and 새로고침 — every control one height and the same pill
-  /// (2026-11-03).
+  /// 미리보기 and 새로고침 — every control one height and the same pill.
   ///
   /// Wide windows keep all of it on the title line, the search growing out of
   /// its magnifier (or always open when there is room). Narrow windows and

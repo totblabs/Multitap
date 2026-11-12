@@ -2,8 +2,8 @@
 // drive-v1 method channel "multitap/drive" (docs/drive-redirection.md).
 // pickFolder runs the folder picker on the platform thread; every file
 // operation runs on a small worker pool whose threads impersonate the desktop
-// user's ordinary token if this client is run elevated (it normally is not,
-// since 2026-10-27), so the VM gets the rights of the person at the PC, never
+// user's ordinary token if this client is run elevated (it normally is
+// not), so the VM gets the rights of the person at the PC, never
 // this process's administrator rights.
 // Results are completed on the platform thread (completed_message).
 #include <flutter/encodable_value.h>

@@ -35,6 +35,8 @@ For a physical PC, work in front of that PC.
 Replace the example domain with your real server address.
 For HTTP on an internal network, use `http://<server IP>:18480/get/host`.
 
+Windows may show a **Windows protected your PC** or **Unknown publisher** warning, because the installer has no purchased code signing certificate ([Troubleshooting](09-troubleshooting.md#defender-or-smartscreen-blocks-the-install)).
+
 Host installs like any other Windows program. Later you can repair or remove it from **Apps** in Windows Settings.
 
 ### Finish installation — virtual display driver and WinFsp

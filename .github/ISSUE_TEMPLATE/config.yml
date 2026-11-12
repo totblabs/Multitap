@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea / 질문과 제안
+    url: https://github.com/totblabs/Multitap/discussions
+    about: Ask how to do something or talk an idea over in Discussions. Issues are for bugs and concrete feature requests. / 쓰는 방법을 묻거나 생각을 나눌 때는 Discussions에 남겨 주세요. 이슈는 버그와 구체적인 기능 요청에 씁니다.
+  - name: Guide / 가이드
+    url: https://multitap.me
+    about: Install, setup and troubleshooting, step by step. / 설치, 설정, 문제 해결을 순서대로 안내합니다.
+  - name: Security vulnerability / 보안 취약점
+    url: https://github.com/totblabs/Multitap/security/policy
+    about: Do not open a public issue. Report it privately with "Report a vulnerability" on this page. / 공개 이슈로 올리지 마세요. 이 페이지의 "Report a vulnerability"로 비공개 신고해 주세요.

@@ -27,7 +27,7 @@ const audioStatsFields = <String>{
   'hostAudioDropped', 'hostAudioQueueUs', 'hostAudioQueueMaxUs',
 };
 
-/// audio-path-v1 (2026-11-11): how the Android engine plays the sound, the
+/// audio-path-v1: how the Android engine plays the sound, the
 /// latest reading of the window (fixed numbers and flags, never audio
 /// content). Brokers before these fields drop them; the row stays valid.
 ///  - audioDecoder: 0 none (PCM, or no sound), 1 the platform's software Opus
@@ -139,8 +139,8 @@ int? _count(Object? value) =>
 /// AndroidAudioTrim counts for the whole app (AndroidMedia.kt keeps one). The
 /// sessions of such an engine share [audioCounterBaselines], so a new session
 /// reports what happened since the previous session's last reading instead of
-/// the app's totals again (fleet triage 2026-11-03: the first window of every
-/// phone session re-sent them, 156 of preview.58's 195 underruns).
+/// the app's totals again (otherwise the first window of every phone session
+/// re-sends them).
 abstract interface class SharedAudioCounterMedia {
   Map<String, num> get audioCounterBaselines;
 }
@@ -260,9 +260,9 @@ class AudioStatsTracker {
 
   /// A new stream or engine: the Host members collected so far are dropped.
   /// The native baselines stay. Android's AndroidAudioTrim counts for the whole
-  /// app, across sessions and picture changes, so forgetting them re-reported
-  /// the app's total at every session start and resize (2026-11-03: one phone
-  /// run sent 249 overruns for 31 real ones). An engine that really restarted
+  /// app, across sessions and picture changes, so forgetting them would
+  /// re-report the app's total at every session start and resize (several
+  /// times the real count). An engine that really restarted
   /// reports less than its baseline, which [_delta] already takes as a restart.
   void reset() {
     _capturePackets = _sent = _dropped = _queuePackets = 0;

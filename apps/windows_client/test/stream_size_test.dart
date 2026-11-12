@@ -537,7 +537,7 @@ void main() {
   });
 
   test('Android Fold: connected folded, unfolded, the whole picture fills the screen', () async {
-    // Field data 2026-10-26 (Fold 8): connected folded at 1248x1868, then
+    // A Fold 8: connected folded at 1248x1868, then
     // unfolded to a 2448x1848 output (2.625 device pixels per logical one).
     const fold = DecoderLimits(
       maxWidth: 3840,

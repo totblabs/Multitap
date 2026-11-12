@@ -274,7 +274,7 @@ void main() {
           home: SessionWindow(launch: launch(), api: api, guard: guard),
         ),
       );
-      // Still loading, nothing to end: the close is not asked (2026-10-26).
+      // Still loading, nothing to end: the close is not asked.
       unawaited(guard.request!());
       await frames(t);
       expect(find.byType(AppConfirmDialog), findsNothing);

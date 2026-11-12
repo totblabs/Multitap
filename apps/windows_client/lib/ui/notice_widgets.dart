@@ -530,7 +530,7 @@ class NoticeBell extends StatelessWidget {
 
 /// The list behind the bell: every notice that still shows, newest first.
 /// Where the broker can do it ([NoticeCenter.canRemove]) each row has a small
-/// 지우기 and the header 모두 지우기: after one question (2026-11-11), the
+/// 지우기 and the header 모두 지우기: after one question, the
 /// notice leaves this account's list on every device. With an older broker
 /// neither control is there.
 class NoticeList extends StatelessWidget {

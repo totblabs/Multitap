@@ -234,7 +234,7 @@ class _DrivePanelState extends State<DrivePanel> {
       _fix = null;
     });
     // The read-write consequence is said beside 폴더 추가… before the picker
-    // opens (2026-11-02), so an ordinary folder is shared as picked. Only a
+    // opens, so an ordinary folder is shared as picked. Only a
     // risky one (a drive root, Windows, the whole profile, a network folder)
     // still asks, with what is at stake.
     final failure = await widget.drive.addFolder(

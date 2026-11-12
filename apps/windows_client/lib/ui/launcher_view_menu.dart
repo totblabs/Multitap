@@ -23,8 +23,8 @@ IconData launcherViewIcon(LauncherView view) => switch (view) {
 };
 
 /// Card layout is fixed. Only the existing saved-screen preference is exposed:
-/// 미리보기 is a toggle in the title row's one button style, amber while on
-/// (2026-11-03). [compact] is its icon alone, for a narrow title row.
+/// 미리보기 is a toggle in the title row's one button style, amber while
+/// on. [compact] is its icon alone, for a narrow title row.
 class LauncherViewMenu extends StatelessWidget {
   const LauncherViewMenu({
     super.key,

@@ -11,7 +11,6 @@ import 'host_update.dart';
 import 'desktop_organize.dart';
 import 'thumbnail_privacy.dart';
 import 'pc_power.dart';
-import '../data/signin_stream.dart' show SigninAvailability;
 import '../l10n/l10n.dart';
 
 export 'desktop_use.dart';
@@ -31,10 +30,8 @@ class DesktopMachine {
     required this.status,
     required this.specification,
     required this.accent,
-    this.signinAvailability,
     this.consoleInUse = false,
     this.qemuAgentOff = false,
-    this.consoleRelayProtocol,
     this.consoleBrowserProtocol,
     this.vmAudio = false,
     this.audioState,
@@ -86,24 +83,17 @@ class DesktopMachine {
   final MachineStatus status;
   final String specification;
   final Color accent;
-  final String? consoleRelayProtocol;
   final String? consoleBrowserProtocol;
   bool get browserConsoleSupported =>
       kind == MachineKind.vm &&
       RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$').hasMatch(id) &&
       consoleBrowserProtocol == 'console-browser-v1';
-  bool get hasEmergencyConsole =>
-      emergencyConsoleSupported || browserConsoleSupported;
   final bool vmAudio;
 
   /// The VM's sound card as the broker last read it: absent, present or
   /// pending; null when unknown (no card badge then).
   final String? audioState;
   final bool localPcApproved;
-  bool get emergencyConsoleSupported =>
-      kind == MachineKind.vm &&
-      RegExp(r'^pve-[1-9][0-9]{2,11}$').hasMatch(id) &&
-      consoleRelayProtocol == 'rfb-none-v1';
   final List<RemoteMonitor> monitors;
   final StreamPreparation? streamPreparation;
   final ThumbnailPrivacy? thumbnailPrivacy;
@@ -266,7 +256,7 @@ class DesktopMachine {
   /// 정지 (Proxmox stop, immediate power-off): while the broker says this
   /// account may stop the VM now ([powerCanForceStop]): a running VM that is
   /// idle, or still in this account's own 종료 (a shutdown Windows does not
-  /// finish). A broker before client stop (2026-10-26) never reports it, so
+  /// finish). A broker without client stop never reports it, so
   /// 정지 stays unavailable there.
   bool get canStop =>
       kind == MachineKind.vm &&
@@ -296,8 +286,6 @@ class DesktopMachine {
         : status,
     specification: specification,
     accent: accent,
-    consoleRelayProtocol: consoleRelayProtocol,
-    signinAvailability: signinAvailability,
     consoleInUse: consoleInUse,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
@@ -352,8 +340,6 @@ class DesktopMachine {
     status: status,
     specification: specification,
     accent: accent,
-    consoleRelayProtocol: consoleRelayProtocol,
-    signinAvailability: signinAvailability,
     consoleInUse: consoleInUse,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
@@ -408,8 +394,6 @@ class DesktopMachine {
     status: status,
     specification: specification,
     accent: accent,
-    consoleRelayProtocol: consoleRelayProtocol,
-    signinAvailability: signinAvailability,
     consoleInUse: consoleInUse,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
@@ -464,8 +448,6 @@ class DesktopMachine {
     status: status,
     specification: specification,
     accent: accent,
-    consoleRelayProtocol: consoleRelayProtocol,
-    signinAvailability: signinAvailability,
     consoleInUse: consoleInUse,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
@@ -520,8 +502,6 @@ class DesktopMachine {
     status: status,
     specification: specification,
     accent: accent,
-    consoleRelayProtocol: consoleRelayProtocol,
-    signinAvailability: signinAvailability,
     consoleInUse: consoleInUse,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
@@ -568,26 +548,14 @@ class DesktopMachine {
     pcPower: pcPower,
   );
 
-  final SigninAvailability? signinAvailability;
-
   /// A console connection holds this VM: the tile offers 'Console 끊고 연결'.
   final bool consoleInUse;
 
   /// The VM's Proxmox option for the QEMU guest agent is off (broker
-  /// qemuAgentOff); the tile shows a badge on its picture (2026-11-09).
+  /// qemuAgentOff); the tile shows a badge on its picture.
   final bool qemuAgentOff;
-  bool signinReadyAt(DateTime now) =>
-      signinAvailability?.fresh(now) == true &&
-      hostOnline == true &&
-      (kind != MachineKind.pc || localPcApproved) &&
-      status != MachineStatus.poweredOff &&
-      powerState != 'paused' &&
-      !powerBusy &&
-      !display.busy &&
-      !sessionCleanup.pending;
-  bool get signinReady => signinReadyAt(DateTime.now());
   bool get isReady =>
-      (status == MachineStatus.ready || signinReady) &&
+      status == MachineStatus.ready &&
       !powerBusy &&
       !display.busy &&
       !sessionCleanup.pending;

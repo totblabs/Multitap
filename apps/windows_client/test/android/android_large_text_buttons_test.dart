@@ -1,5 +1,5 @@
-// Inspection 2026-11-12: at 200 % text the buttons inside the session panels
-// broke their words in the middle ("다시 연 / 결", "Pointe / r", "Preci / se",
+// At 200 % text the buttons inside the session panels would
+// break their words in the middle ("다시 연 / 결", "Pointe / r", "Preci / se",
 // "Norm / al"). They follow the device's text size up to 130 %
 // (androidButtonTextScaleCap) and Korean wraps between words only.
 // Production widgets with the app's own font; no session or native device.

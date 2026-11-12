@@ -31,6 +31,8 @@ Once you see the screen, try the features you need one at a time.
 Replace `vdi.example.com` in the example with the real server address from your administrator.
 For an HTTP server, download from `http://<server IP>:18480/get/client`.
 
+Windows may show a **Windows protected your PC** or **Unknown publisher** warning, because the installer has no purchased code signing certificate ([Troubleshooting](09-troubleshooting.md#defender-or-smartscreen-blocks-the-install)).
+
 The app runs without administrator rights.
 Windows asks for administrator approval only when you install, update or install the USB driver.
 Clicking X on the window hides the app in the tray. To close it completely, click **Quit** in the account menu.

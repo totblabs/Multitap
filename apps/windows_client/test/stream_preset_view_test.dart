@@ -159,7 +159,7 @@ void main() {
       tester,
     ) async {
       final results = await open(tester);
-      // No sound switch (2026-11-11): sound is no choice.
+      // No sound switch: sound is no choice.
       expect(find.byKey(const Key('stream-audio')), findsNothing);
       expect(_windowsMode(tester), 'work');
       await tester.tap(find.text('30 fps'));
@@ -242,7 +242,7 @@ void main() {
     }
 
     Future<void> openDialog(WidgetTester tester) async {
-      // ▾ beside the main button holds 화질 옵션, as on Windows (2026-11-03).
+      // ▾ beside the main button holds 화질 옵션, as on Windows.
       await tester.ensureVisible(find.byKey(const Key('stream-modes-pve-149')));
       await tester.tap(find.byKey(const Key('stream-modes-pve-149')));
       await tester.pumpAndSettle();

@@ -93,7 +93,7 @@ void main() {
           }
           if (scale == 1) {
             // The body holds the name row, the CPU and memory strip
-            // (2026-10-26, about 30 px), the status card and the buttons.
+            // (about 30 px), the status card and the buttons.
             expect(
               sizes.first.height,
               lessThanOrEqualTo(sizes.first.width * 3 / 5 + 230),

@@ -626,7 +626,7 @@ void main() {
     },
   );
 
-  // Only the TV chooses a 해상도 (a phone follows its screen, 2026-11-03).
+  // Only the TV chooses a 해상도 (a phone follows its screen).
   for (final spec in [(const Size(960, 540), true, Brightness.dark)]) {
     testWidgets('workspace screen menu fits ${spec.$1} TV=${spec.$2} text150', (
       t,

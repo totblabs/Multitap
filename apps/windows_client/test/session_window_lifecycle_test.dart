@@ -10,7 +10,6 @@ import 'package:multitap_client/data/window_close_guard.dart';
 import 'package:multitap_client/models/session_display_mode.dart';
 import 'package:multitap_client/models/stream_options.dart';
 import 'package:multitap_client/ui/remote_view.dart';
-import 'package:multitap_client/ui/emergency_console_view.dart';
 import 'package:multitap_client/ui/session_window.dart';
 import 'package:multitap_client/ui/workspace_shell.dart';
 
@@ -41,7 +40,6 @@ BrokerDesktop desktop({
   String kind = 'vm',
   bool profileTracks = false,
   bool independentDisplayStreaming = false,
-  String? consoleProtocol,
 }) => BrokerDesktop(
   id: id,
   name: 'TESTER',
@@ -49,7 +47,6 @@ BrokerDesktop desktop({
   localPcApproved: kind == 'pc',
   profileTracks: profileTracks,
   independentDisplayStreaming: independentDisplayStreaming,
-  consoleRelayProtocol: consoleProtocol,
   description: '',
   os: 'Windows',
   status: 'ready',
@@ -183,25 +180,6 @@ class _TrackApi extends _Api implements TrackBrokerApi, ProfileTrackBrokerApi {
   }
 }
 
-class _ConsoleApi extends _Api implements EmergencyConsoleBrokerApi {
-  int nativeGrants = 0;
-  @override
-  Future<BrokerConsoleGrant> createConsole(
-    String token,
-    String desktopId,
-  ) async {
-    nativeGrants++;
-    throw StateError('Detached windows must not acquire native consoles.');
-  }
-
-  @override
-  Future<void> releaseConsole(
-    String token,
-    String desktopId,
-    String id,
-  ) async => throw StateError('No native console lease is owned.');
-}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final messenger =
@@ -251,40 +229,9 @@ void main() {
   }
 
   testWidgets(
-    'legacy console bootstrap gives launcher guidance without acquiring or rendering native console',
+    'a streaming window of a VM asks the launcher for the Console',
     (t) async {
-      final api = _ConsoleApi()
-        ..current = desktop(consoleProtocol: 'rfb-none-v1');
-      final guard = _Guard();
-      final bootstrap = SessionWindowLaunch.fromMap({
-        ...launch().toMap(),
-        'console': true,
-      });
-      await t.pumpWidget(
-        MaterialApp(
-          home: SessionWindow(launch: bootstrap, api: api, guard: guard),
-        ),
-      );
-      await t.pumpAndSettle();
-      expect(find.textContaining('Console은 메인 창에서 열려요.'), findsOneWidget);
-      expect(find.byType(EmergencyConsoleView), findsNothing);
-      expect(find.byType(RemoteView), findsNothing);
-      expect(api.nativeGrants, 0);
-      expect(api.connects, 0);
-      expect(api.mutations, 0);
-      await t.tap(find.text('원격 창 닫기'));
-      await t.pumpAndSettle();
-      expect(guard.closes, 1);
-      await t.pumpWidget(const SizedBox());
-      await t.pump();
-    },
-  );
-
-  testWidgets(
-    'streaming windows expose no native-console fallback even with legacy capability',
-    (t) async {
-      final api = _ConsoleApi()
-        ..current = desktop(consoleProtocol: 'rfb-none-v1');
+      final api = _Api();
       final bootstrap = SessionWindowLaunch.fromMap(launch().toMap());
       await t.pumpWidget(
         MaterialApp(
@@ -293,12 +240,6 @@ void main() {
       );
       await t.pump();
       await t.pump();
-      expect(
-        t.widget<RemoteView>(find.byType(RemoteView)).onEmergencyConsole,
-        isNull,
-      );
-      expect(find.byType(EmergencyConsoleView), findsNothing);
-      expect(api.nativeGrants, 0);
       // The VM's Console is opened by the launcher (WebView), on request.
       expect(
         t.widget<RemoteView>(find.byType(RemoteView)).onOpenConsole,
@@ -472,8 +413,8 @@ void main() {
     },
   );
 
-  // Review 2026-11-12: the window's first card had no stage list and the
-  // connection card that replaced it was taller (the card jumped).
+  // The window's first card has the stage list, so the connection card
+  // that replaces it is no taller (the card does not jump).
   testWidgets(
     'The first card already shows the stage list at its first row',
     (t) async {

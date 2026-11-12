@@ -1,7 +1,7 @@
 import '../l10n/l10n.dart';
 
-/// Whether a remote connection holds the VM now (broker `activeSession`,
-/// 2026-10-26): this account's own, another account's, or, from a broker
+/// Whether a remote connection holds the VM now (broker `activeSession`):
+/// this account's own, another account's, or, from a broker
 /// that reports only "a connection" in its Host update view, [someone].
 /// Display only; the broker decides every connection.
 enum DesktopUse {

@@ -29,8 +29,8 @@
 .server-access-endpoint-fields[hidden]{display:none}
 .server-access-endpoint-fields>:first-child{margin-top:0}
 .server-access-field{display:grid!important;gap:5px;min-width:0;margin:12px 0 0}
-/* A field the page hides stays hidden (the !important grid above would show the command beside '지금 이 주소로 열려 있어요'). */
-.server-access-field[hidden],[data-access-command-same][hidden]{display:none!important}
+/* A field the page hides stays hidden (the !important grid above would show it). */
+.server-access-field[hidden]{display:none!important}
 .panel>.server-access-field{margin:var(--pad)}
 .panel>.server-access-advanced{margin:0 var(--pad)}
 .server-access-field :is(input,select,textarea){width:100%;min-width:0;margin:0}
@@ -87,9 +87,8 @@
 .outside-step p{margin:0;font-size:13px;line-height:1.6;color:var(--ink)}
 .outside-step code{margin-left:2px;white-space:nowrap}
 .outside-step-number{flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-top:2px;border-radius:50%;background:var(--line);color:var(--ink);font-size:11px;font-weight:700}
-/* Docker Compose를 직접 쓰는 경우: the fold's inside gets the panel's padding. */
-.compose-env-body{display:grid;gap:8px;padding:12px var(--pad,16px) 14px}
-.compose-env-body>.server-access-field{margin:0}
-.compose-env-body .server-access-actions{margin:0;justify-content:flex-start}
+/* 공인 IP 따라가기 in the HTTP card of a Docker Compose install. */
+.server-access-follow{margin-top:12px}
+.server-access-follow .field-hint{margin:6px 0 0}
 /* A Korean placeholder inside an example address reads in the text face. */
 .outside-step code .ph{font-family:inherit;font-style:normal;color:var(--muted)}

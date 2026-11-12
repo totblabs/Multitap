@@ -117,7 +117,7 @@ void listing() {
   rig.shared->devices[0].speed = 4; require(rig.captures->List()[0].speed == "high", "SuperSpeed devices are offered as high speed");
   rig.shared->devices[0].speed = 3;
   // A device whose configuration cannot be read is reported as unreadable with its
-  // device descriptor only (2026-11-12: it used to be dropped without a trace).
+  // device descriptor only (never dropped without a trace).
   rig.shared->devices.push_back(stick(L"USB\\VID_1234&PID_0001"));
   { const auto both = rig.captures->List();
     require(both.size() == 2 && !both[0].unreadable && both[1].unreadable && both[1].descriptors.size() == 18, "An unreadable configuration was dropped or offered"); }
@@ -151,7 +151,7 @@ void capturing() {
   require(rig.captures->Capture(id, code) == 0 && code == "usb_capture_failed", "A failing enumeration captured");
 }
 
-// Field 2026-11-02: a stick shared in one remote window failed in a second one with a generic error. Another window may
+// A stick shared in one remote window must not fail in a second one with a generic error. Another window may
 // take a device only once this engine let it go: Holds() lasts until UsbDk's Stop returned, not only while it is listed
 // as captured. UsbDk's "already redirected" start has its own code.
 void heldUntilUsbDkLetsGo() {
@@ -238,7 +238,7 @@ void statuses() {
       kUsbdBufferOverrun == uint32_t(USBD_STATUS_BUFFER_OVERRUN) && kUsbdBabble == uint32_t(USBD_STATUS_BABBLE_DETECTED) && kUsbdCanceled == uint32_t(USBD_STATUS_CANCELED) &&
       kUsbdInternalHc == uint32_t(USBD_STATUS_INTERNAL_HC_ERROR) && kUsbdTimeout == uint32_t(USBD_STATUS_TIMEOUT) && kUsbdNoResponse == uint32_t(USBD_STATUS_DEV_NOT_RESPONDING) &&
       kUsbdDeviceGone == uint32_t(USBD_STATUS_DEVICE_GONE) && kUsbdInvalidParameter == uint32_t(USBD_STATUS_INVALID_PARAMETER), "A USBD constant is not the SDK's value");
-  // Field 2026-11-02 (error 71, usbReq 0x8006): UsbDk completes a STALL on the control pipe as success with
+  // Error 71, usbReq 0x8006: UsbDk completes a STALL on the control pipe as success with
   // INTERNAL_HC_ERROR. A GET_DESCRIPTOR the stick does not support must reach the VM as a stall, not -EPROTO.
   require(MapStatus(0, uint32_t(USBD_STATUS_INTERNAL_HC_ERROR), false, true) == kStall, "UsbDk's control-pipe stall was not a stall");
   require(MapStatus(0, uint32_t(USBD_STATUS_ERROR_BUSY), false, true) == kProtocol, "ERROR_BUSY was taken for a stall");
@@ -310,7 +310,7 @@ void everythingGivenBack() {
   require(shared->stops == 2, "Destroying the captures left a device captured");
 }
 
-// The Windows-side half of the field failure (2026-10-27): a VM whose USBSTOR waited for ever. Every case here is a way a request on the PC
+// The Windows-side half of a VM whose USBSTOR waits for ever. Every case here is a way a request on the PC
 // could be left pending, or answered in a way that makes the VM wait.
 void controlCancelAndTimeout() {
   Rig rig; const auto handle = rig.capture();
@@ -394,7 +394,7 @@ void countersAndReturn() {
   require(rig.captures->WaitReturned(id, true, 300) == 0 && rig.captures->WaitReturned("USB\\VID_9999&PID_9999|X", false, 300) == 0, "An unknowable state was claimed");
 }
 
-// The field summary of 2026-11-02 (stage 9: error 71, usbReq 0x8006, usbStalls 0): an unsupported GET_DESCRIPTOR
+// Stage 9 (error 71, usbReq 0x8006, usbStalls 0): an unsupported GET_DESCRIPTOR
 // that UsbDk reports its way is a stall, and the first real failure keeps its raw USBD status for the diagnostics.
 void fieldStallAndRawStatus() {
   Rig rig; const auto handle = rig.capture();

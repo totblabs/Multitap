@@ -7,7 +7,7 @@ import 'session_panels.dart';
 import 'session_tools.dart';
 import '../l10n/l10n.dart';
 
-/// 연결: what the quality chip opens on the session bar (2026-11-10). The
+/// 연결: what the quality chip opens on the session bar. The
 /// measured round trip as one large number with a plain word (좋음, 보통,
 /// 느림), the other measured values (never invented: '—' where nothing was
 /// measured), 연결 통계 보기, and, while the latency has stayed poor, one

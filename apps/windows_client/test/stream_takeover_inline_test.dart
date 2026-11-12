@@ -54,7 +54,6 @@ class _Broker extends NativePolicyBroker {
     StreamOptions? options,
     InitialViewport? initialViewport,
     int? displayScale,
-    String? signinAvailabilityId,
   }) async {
     calls.add('connect:$desktopId');
     throw BrokerException(
@@ -174,7 +173,6 @@ class _CleanupBroker extends _Broker
     StreamOptions? options,
     InitialViewport? initialViewport,
     int? displayScale,
-    String? signinAvailabilityId,
   }) async {
     calls.add('connect:$id');
     throw const BrokerException('host_unavailable');

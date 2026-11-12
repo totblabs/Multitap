@@ -128,7 +128,7 @@ class SessionIdleControl extends StatelessWidget {
       return Padding(
         key: const Key('session-idle-control'),
         padding: EdgeInsets.symmetric(horizontal: touch ? 12 : 10, vertical: 8),
-        // A plain row of the settings window: no icon (2026-11-11).
+        // A plain row of the settings window: no icon.
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

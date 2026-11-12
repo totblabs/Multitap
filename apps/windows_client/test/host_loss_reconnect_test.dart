@@ -1,6 +1,6 @@
-// A stream the relay ended because it lost the Host's connection (4K video
-// incident, 2026-10-26: host_error, then a reconnect that failed once as
-// display_not_supported while the Host restored its display). Fixtures only:
+// A stream the relay ended because it lost the Host's connection (as with 4K
+// video: host_error, then a reconnect that fails once as
+// display_not_supported while the Host restores its display). Fixtures only:
 // the broker socket, decoder and Host snapshots are fakes.
 import 'dart:async';
 import 'dart:convert';
@@ -35,9 +35,8 @@ DesktopMachine restoring() => DesktopMachine(
 );
 
 /// A stream whose Host went away with the VM running (Windows restarting
-/// from inside), pumped until the window waits for the desktop. Since
-/// 2026-11-10 this is the only way into that wait: the window no longer
-/// restarts a VM itself (the sound-card flow that did was removed).
+/// from inside), pumped until the window waits for the desktop. This is
+/// the only way into that wait: the window never restarts a VM itself.
 Future<
   ({
     List<ViewFixture> fixtures,
@@ -251,7 +250,7 @@ void main() {
     },
   );
 
-  // 2026-11-09 edge-case audit: Windows restarted from inside the VM (Start →
+  // Windows restarted from inside the VM (Start →
   // 다시 시작). The Host goes away while the VM keeps running, for longer than
   // the 30 s a Host restart gets; the window waits like its own restart.
   testWidgets(
@@ -342,7 +341,7 @@ void main() {
     },
   );
 
-  // 2026-11-09 edge-case audit: a stream window whose VM is signed out or
+  // A stream window whose VM is signed out or
   // locked offers the Console (opened by the launcher), and only then.
   for (final (code, offered) in [
     ('no_interactive_session', true),
@@ -381,7 +380,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     });
   }
-  // 2026-11-10: a 로컬 PC has no Console, so its signed-out card does not send
+  // A 로컬 PC has no Console, so its signed-out card does not send
   // the person to one; a VM's card keeps the Console text.
   for (final (kind, text) in [
     (MachineKind.vm, 'Windows가 로그아웃됐거나 잠겨 있어요.\nConsole로 열어 로그인하세요.'),

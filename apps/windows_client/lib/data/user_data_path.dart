@@ -1,7 +1,7 @@
 import 'dart:io';
 
-/// This client runs unelevated (since 2026-10-27; an administrator may still
-/// start it elevated), and its per-user files live in %LOCALAPPDATA%, where any
+/// This client runs unelevated (an administrator may still start it
+/// elevated), and its per-user files live in %LOCALAPPDATA%, where any
 /// program of the same user can put a junction or symbolic link. Before this
 /// app writes or deletes there, every entry from %LOCALAPPDATA% down to [path]
 /// must be missing or a plain folder/file, never a link that would redirect the

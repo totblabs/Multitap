@@ -3,8 +3,8 @@ import 'package:flutter/widgets.dart';
 /// Korean line breaking by words, like CSS `word-break: keep-all`.
 ///
 /// Flutter's line breaker treats every Hangul syllable as a break
-/// opportunity, so "연결" could split as "연│결" (2026-10-26: "3류" line
-/// breaks). A word joiner (U+2060, zero width) between the characters of a
+/// opportunity, so "연결" could split as "연│결". A word joiner (U+2060,
+/// zero width) between the characters of a
 /// word that contains Hangul leaves breaks only at spaces; a word longer than
 /// the whole line still breaks.
 String keepAll(String text) {

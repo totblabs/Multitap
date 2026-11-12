@@ -241,3 +241,98 @@ test('A fresh install opens its first setup from the root address; afterwards th
   assert.equal(page.status, 200);
   assert.match(page.text, /<a class="button secondary site-admin" href="\/admin\/">[\s\S]*?<span>관리자 페이지<\/span><\/a>/);
 });
+
+// A Compose install without an updater keeps its own policy (src/self-access.mjs).
+const place = path => path.replaceAll('\\', '/').replace(/^[A-Za-z]:/, '');
+test('An install with an updater, or with the updater\'s policy file, reads exactly the files it always read and is not self-managed', () => {
+  const saved = normalizeServerAccess({ protocol: 'server-access-v1', primaryOrigin: 'https://saved.example',
+    https: { enabled: true, origin: 'https://saved.example', mode: 'proxy', listenHost: '127.0.0.1', listenPort: 18400 },
+    http: { enabled: false, origin: null, listenHost: '0.0.0.0', listenPort: 18481 }, trustedProxies: ['127.0.0.1'] });
+  const state = JSON.stringify({ schema: 1, protocol: 'server-access-v1', revision: serverAccessHash(saved), config: saved, updatedAt: '2026-11-03T00:00:00.000Z' });
+  const production = { NODE_ENV: 'production', MULTITAP_DATA_DIR: '/var/lib/multitap', MULTITAP_PUBLIC_ORIGIN: 'https://vdi.example.com' };
+  for (const [name, settings, file] of [
+    ['systemd with its updater', { ...production, MULTITAP_DEPLOYMENT_KIND: 'systemd', MULTITAP_UPDATE_SOCKET: '/run/multitap-update/control.sock', MULTITAP_SERVER_ACCESS_FILE: '/var/lib/multitap/server-access.json' }, state],
+    ['Docker with its updater', { ...production, MULTITAP_DEPLOYMENT_KIND: 'docker', MULTITAP_UPDATE_SOCKET: '/run/multitap-docker-update/control.sock', MULTITAP_SERVER_ACCESS_FILE: '/var/lib/multitap/server-access.json' }, state],
+    ['Docker with its updater before the first save', { ...production, MULTITAP_DEPLOYMENT_KIND: 'docker', MULTITAP_UPDATE_SOCKET: '/run/multitap-docker-update/control.sock' }, null],
+    ['Docker whose volume holds the updater\'s policy', { ...production, MULTITAP_DEPLOYMENT_KIND: 'docker' }, state],
+    ['no Docker install', { ...production, MULTITAP_DEPLOYMENT_KIND: 'systemd' }, null],
+  ]) {
+    const reads = [];
+    const c = configuration(settings, { readAccessFile: (path, options) => { reads.push([place(path), options]); return path.endsWith('server-access.json') ? file : 'c'.repeat(64); } });
+    assert.equal(c.selfAccess, null, name);
+    // Root's files in the data folder, with the reader's own (root) owner rule.
+    assert.deepEqual(reads, [['/var/lib/multitap/server-access.json', { production: true }], ['/var/lib/multitap/server-access.identity', { production: true, maximum: 128 }]], name);
+    assert.equal(c.updateSocket, settings.MULTITAP_UPDATE_SOCKET ?? null, name);
+    assert.deepEqual(c.allowedOrigins, [file ? 'https://saved.example' : 'https://vdi.example.com'], name);
+    assert.equal(c.accessInstallationId, 'c'.repeat(64), name);
+    assert.equal(place(c.accessFile), '/var/lib/multitap/server-access.json', name); assert.equal(place(c.accessIdentityFile), '/var/lib/multitap/server-access.identity', name);
+  }
+});
+
+test('A Compose install without an updater reads its own policy from <data>/access as the broker\'s account; it supersedes the .env lines and is brought to the container', () => {
+  const settings = env({ NODE_ENV: 'production', MULTITAP_DATA_DIR: '/var/lib/multitap', MULTITAP_PUBLISHED_PORT: '0.0.0.0:18480', MULTITAP_SERVER_ADDRESS: '192.0.2.10',
+    MULTITAP_PUBLIC_ORIGIN: 'https://vdi.example.com', MULTITAP_HTTP_ORIGIN: 'http://192.0.2.10:18480', MULTITAP_ALLOW_INSECURE_HTTP: '1', MULTITAP_TRUSTED_PROXIES: '172.18.0.1' });
+  const owner = process.getuid?.() ?? 0;
+  const load = (files, extra = {}) => { const reads = []; return { reads, config: configuration({ ...settings, ...extra }, { readAccessFile: (path, options) => { reads.push([place(path), options]); return files[place(path)] ?? null; } }) }; };
+  // Nothing saved: the .env lines, as before.
+  const seeded = load({});
+  assert.deepEqual(seeded.reads, [['/var/lib/multitap/server-access.json', { production: true }], ['/var/lib/multitap/access/policy.json', { production: true, owner, maximum: 32768 }], ['/var/lib/multitap/access/identity', { production: true, owner, maximum: 128 }]]);
+  assert.deepEqual(seeded.config.allowedOrigins, ['https://vdi.example.com', 'http://192.0.2.10:18480']); assert.deepEqual(seeded.config.trustedProxies, ['172.18.0.1']);
+  assert.equal(seeded.config.selfAccess.saved, false); assert.equal(seeded.config.selfAccess.envAddressesIgnored, false); assert.equal(seeded.config.selfAccess.revision, seeded.config.accessRevision);
+  assert.deepEqual(seeded.config.selfAccess.publicIp, { follow: false, origin: null });
+  assert.deepEqual(seeded.config.selfAccess.fixed, { listenHost: '0.0.0.0', listenPort: 18480, httpsMode: 'proxy', certFile: null, keyFile: null, idlePorts: { https: 18443, http: 18481 }, published: { host: '0.0.0.0', port: 18480 }, serverAddress: '192.0.2.10' });
+  assert.equal(place(seeded.config.accessFile), '/var/lib/multitap/access/policy.json');
+
+  // A saved policy: its addresses and proxies, whatever .env says; the listener stays the container's.
+  const policy = normalizeServerAccess({ protocol: 'server-access-v1', primaryOrigin: 'http://192.0.2.10:18480',
+    https: { enabled: false, origin: null, mode: 'direct', listenHost: '127.0.0.1', listenPort: 9443, certFile: '/elsewhere/cert.pem', keyFile: '/elsewhere/key.pem' },
+    http: { enabled: true, origin: 'http://192.0.2.10:18480', extraOrigins: ['http://203.0.113.7:18480'], listenHost: '127.0.0.1', listenPort: 9080 }, trustedProxies: [] });
+  const text = extra => JSON.stringify({ schema: 1, protocol: 'server-access-v1', revision: serverAccessHash(policy), config: policy, updatedAt: '2026-11-03T00:00:00.000Z', ...extra });
+  const files = extra => ({ '/var/lib/multitap/access/policy.json': text(extra), '/var/lib/multitap/access/identity': 'd'.repeat(64) + '\n' });
+  const saved = load(files()).config;
+  assert.deepEqual(saved.allowedOrigins, ['http://192.0.2.10:18480', 'http://203.0.113.7:18480']); assert.deepEqual(saved.trustedProxies, []);
+  assert.deepEqual(saved.accessConfig.http, { enabled: true, origin: 'http://192.0.2.10:18480', extraOrigins: ['http://203.0.113.7:18480'], listenHost: '0.0.0.0', listenPort: 18480 });
+  assert.deepEqual(saved.accessConfig.https, { enabled: false, origin: null, mode: 'proxy', listenHost: '0.0.0.0', listenPort: 18443, certFile: null, keyFile: null });
+  assert.equal(saved.accessRevision, serverAccessHash(saved.accessConfig)); assert.equal(saved.accessInstallationId, 'd'.repeat(64));
+  assert.equal(saved.selfAccess.saved, true); assert.equal(saved.legacyPublicOrigin, null);
+  // The address lines of .env name other addresses than the policy and are not the ones it was saved beside: they are ignored, and the start says so.
+  assert.equal(saved.selfAccess.envAddressesIgnored, true);
+  assert.match(saved.selfAccess.envSeed, /^[a-f0-9]{64}$/); assert.equal(saved.selfAccess.savedEnvSeed, null);
+  // Saved beside these very lines (a fresh install's seed): nothing was edited, nothing is said.
+  const beside = load(files({ envSeed: saved.selfAccess.envSeed })).config;
+  assert.equal(beside.selfAccess.envAddressesIgnored, false); assert.equal(beside.selfAccess.savedEnvSeed, saved.selfAccess.envSeed);
+  assert.deepEqual(beside.allowedOrigins, saved.allowedOrigins); assert.equal(beside.accessRevision, saved.accessRevision, 'the remembered lines are no part of the policy');
+  assert.equal(load(files({ envSeed: saved.selfAccess.envSeed }), { MULTITAP_HTTP_ORIGIN: 'http://192.0.2.99:18480' }).config.selfAccess.envAddressesIgnored, true, 'edited after the save');
+  assert.equal(load(files({ envSeed: saved.selfAccess.envSeed }), { MULTITAP_ALLOW_INSECURE_HTTP: '1', MULTITAP_TRUSTED_PROXIES: '10.0.0.1' }).config.selfAccess.envAddressesIgnored, false, 'other lines are no address lines');
+  for (const envSeed of ['short', 12, 'G'.repeat(64)]) assert.equal(load(files({ envSeed })).config.selfAccess.unreadable, 'server_access_state_invalid');
+  assert.equal(load(files(), { MULTITAP_PUBLIC_ORIGIN: '', MULTITAP_HTTP_ORIGIN: 'http://192.0.2.10:18480,http://203.0.113.7:18480' }).config.selfAccess.envAddressesIgnored, false);
+  assert.equal(load(files(), { MULTITAP_PUBLIC_ORIGIN: '', MULTITAP_HTTP_ORIGIN: '', MULTITAP_ALLOW_INSECURE_HTTP: '0' }).config.selfAccess.envAddressesIgnored, false, 'no address lines: nothing ignored');
+  // Following the public IP: its registered address is the last extra one; the health revision stays the policy's own.
+  const following = load(files({ publicIp: { follow: true, origin: 'http://203.0.113.7:18480' } })).config;
+  assert.deepEqual(following.selfAccess.publicIp, { follow: true, origin: 'http://203.0.113.7:18480' });
+  assert.equal(following.accessRevision, saved.accessRevision); assert.notEqual(following.selfAccess.revision, saved.accessRevision);
+  assert.deepEqual(load(files({ publicIp: { follow: true, origin: 'http://198.51.100.1:18480' } })).config.selfAccess.publicIp, { follow: true, origin: null }, 'an address the policy does not list is not the registered one');
+  for (const publicIp of [true, { follow: 'yes', origin: null }, { follow: true }]) assert.equal(load(files({ publicIp })).config.selfAccess.unreadable, 'server_access_state_invalid');
+  // A saved policy this container cannot use: without its installation ID or with one that is none, damaged,
+  // or HTTP on a container that serves its own TLS. The server starts with no addresses and says why. It never
+  // takes the .env lines in its place (they name two addresses here), and only its own address opens the console.
+  for (const [code, loaded] of [
+    ['server_access_identity_missing', load({ '/var/lib/multitap/access/policy.json': text() })],
+    ['server_access_identity_invalid', load({ ...files(), '/var/lib/multitap/access/identity': 'not an id' })],
+    ['server_access_state_invalid', load({ ...files(), '/var/lib/multitap/access/policy.json': '{' })],
+    ['server_access_state_invalid', load({ ...files(), '/var/lib/multitap/access/policy.json': JSON.stringify({ ...JSON.parse(text()), future: 1 }) })],
+    ['server_access_direct_tls_http_conflict', load(files(), { MULTITAP_TLS_MODE: 'direct', MULTITAP_TLS_CERT_FILE: '/etc/multitap/tls/cert.pem', MULTITAP_TLS_KEY_FILE: '/etc/multitap/tls/key.pem' })],
+  ]) {
+    const c = loaded.config;
+    assert.equal(c.selfAccess.unreadable, code); assert.equal(c.selfAccess.saved, false); assert.equal(c.selfAccess.envAddressesIgnored, false);
+    assert.equal(c.bootstrapOnly, true, code); assert.equal(c.accessConfig, null); assert.deepEqual(c.allowedOrigins, []); assert.equal(c.publicOrigin, null); assert.equal(c.legacyPublicOrigin, null);
+    assert.deepEqual(c.trustedProxies, [], 'nor the proxies of .env'); assert.equal(c.setupOrigin, 'http://192.0.2.10:18480');
+    assert.equal(c.accessInstallationId, code.includes('identity') ? null : 'd'.repeat(64));
+    assert.deepEqual(c.selfAccess.publicIp, { follow: false, origin: null });
+  }
+  // A file the server may not read at all (another owner, a link) still ends the start: nothing can be said about it.
+  assert.throws(() => configuration(settings, { readAccessFile: path => { if (place(path).endsWith('/access/policy.json')) throw Error('server_access_storage_invalid'); return null; } }), /server_access_storage_invalid/);
+  // An install with an updater keeps refusing to start on a damaged policy of its own.
+  assert.throws(() => configuration({ ...settings, MULTITAP_UPDATE_SOCKET: '/run/multitap-docker-update/control.sock', MULTITAP_SERVER_ACCESS_FILE: '/var/lib/multitap/server-access.json', MULTITAP_HTTP_ORIGIN: '', MULTITAP_ALLOW_INSECURE_HTTP: '0' },
+    { readAccessFile: path => place(path).endsWith('server-access.json') ? '{' : 'c'.repeat(64) }), /server_access_state_invalid/);
+});

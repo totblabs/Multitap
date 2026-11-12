@@ -150,10 +150,10 @@ void main() {
     );
   }
 
-  // No frame is drawn while the app is hidden, so closing the screens could
-  // not be confirmed within its 3 s: back in the app, 확인 on the sign-out
-  // screen stayed disabled for good ("연결이 모두 끊겼는지 확인하지 못했어요.
-  // Multitap을 종료한 뒤 다시 여세요.", inspection 2026-11-12).
+  // No frame is drawn while the app is hidden, so closing the screens cannot
+  // be confirmed within its 3 s: back in the app, 확인 on the sign-out
+  // screen must not stay disabled for good ("연결이 모두 끊겼는지 확인하지
+  // 못했어요. Multitap을 종료한 뒤 다시 여세요.").
   testWidgets(
     'Android automatic sign-out while the app is hidden: back in front the '
     'check is made again and 확인 works',

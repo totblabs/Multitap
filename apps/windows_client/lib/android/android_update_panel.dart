@@ -35,7 +35,7 @@ class AndroidUpdatePanel extends StatefulWidget {
   final String server;
 
   /// Assigned desktops whose Host can be updated now (the header badge leads
-  /// here, 2026-11-03), read again whenever [hostUpdatesChanged] fires. Each
+  /// here), read again whenever [hostUpdatesChanged] fires. Each
   /// row closes the panel and opens that desktop's own Host update
   /// ([onHostUpdate] with its id): Android has no bulk Host update.
   final List<DesktopMachine> Function()? hostUpdates;
@@ -281,8 +281,8 @@ class _AndroidUpdatePanelState extends State<AndroidUpdatePanel> {
   ) => Container(
     key: const Key('host-update-offer'),
     padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-    // Host program updates: blue with a server glyph, never the app's amber
-    // (2026-11-09: the two could not be told apart).
+    // Host program updates: blue with a server glyph, never the app's amber,
+    // so the two can be told apart.
     decoration: BoxDecoration(
       color: p.blueSoft,
       borderRadius: BorderRadius.circular(12),
@@ -436,8 +436,8 @@ class _AndroidUpdatePanelState extends State<AndroidUpdatePanel> {
       );
     }
     // A phone on its side (or very large text) has no room for the versions
-    // between a fixed title and three stacked buttons: about 40 px were left,
-    // and at 200 % text 닫기 was cut (inspection, 2026-11-12). There the whole
+    // between a fixed title and three stacked buttons: about 40 px are left,
+    // and at 200 % text 닫기 is cut. There the whole
     // dialog scrolls, so the versions, the notes and every button are reached.
     final media = MediaQuery.of(context);
     final short = media.size.height / media.textScaler.scale(1) < 540;

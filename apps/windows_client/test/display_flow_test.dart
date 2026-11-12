@@ -155,7 +155,7 @@ void main() {
         ..assigned = [desktop()]
         ..delayedTopology = true;
       await login(tester, api);
-      // ⋯ has no virtual-monitor count (2026-10-26): connecting prepares
+      // ⋯ has no virtual-monitor count: connecting prepares
       // it, and the session toolbar asks before changing it
       // (display_remote_test).
       await tester.tap(find.byKey(const Key('desktop-more-qa-vm')));

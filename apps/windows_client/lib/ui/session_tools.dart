@@ -82,8 +82,7 @@ enum SessionTool {
     _ => null,
   };
 
-  /// The entry labelled [label], or null for one outside this vocabulary
-  /// (e.g. the emergency console's own commands).
+  /// The entry labelled [label], or null for one outside this vocabulary.
   static SessionTool? named(String label) {
     for (final tool in values) {
       if (tool.label == label || tool.androidLabel == label) return tool;

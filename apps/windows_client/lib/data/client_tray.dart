@@ -16,7 +16,7 @@ class TrayNotices {
   static String get signInLapsed => l10n.signExpiredClickSignAgain;
 }
 
-/// The client's hand-off to the Windows notification area (2026-10-27).
+/// The client's hand-off to the Windows notification area.
 ///
 /// Closing the main window (X, Alt+F4) rests the client in the tray instead of
 /// ending it; the native side hides the window and tells the app here. The tray

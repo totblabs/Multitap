@@ -121,8 +121,8 @@ class HostUpdateState {
       version != null &&
       latestVersion != null;
 
-  /// The Windows ⋯ menu row, listed only while [offered] (2026-10-26: a
-  /// greyed "최신 버전" row read as a broken button).
+  /// The Windows ⋯ menu row, listed only while [offered] (a greyed
+  /// "최신 버전" row would read as a broken button).
   String get menuLabel => l10n.hostUpdate2('$version', '$latestVersion');
 
   /// The Android launcher's menu line for any Host view: the update when
@@ -157,7 +157,7 @@ class HostUpdateState {
   }
 
   /// How long an update's last report may be old before a missing Host is
-  /// a missing Host again (2026-11-02).
+  /// a missing Host again.
   static const restartBound = Duration(minutes: 5);
 
   /// While this VM's Host update is under way (sent, downloading, verifying,
@@ -220,8 +220,8 @@ class HostUpdateState {
 }
 
 /// The broker's hostMissingAfterUpdate: this desktop's Host went away with
-/// its last update attempt and has stayed away while the desktop runs
-/// (field case 2026-11-03). It names the attempt only, never why the Host is
+/// its last update attempt and has stayed away while the desktop runs.
+/// It names the attempt only, never why the Host is
 /// gone. Null from a broker before it and whenever it is not the case.
 class HostMissingAfterUpdate {
   const HostMissingAfterUpdate({required this.result, this.targetVersion});

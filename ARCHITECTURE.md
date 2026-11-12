@@ -35,8 +35,8 @@ Every connection goes through the broker. Clients and Hosts only connect outward
 One Node.js 24 process (`server/src/index.mjs`, dependency `ws` only) with a SQLite database (`node:sqlite`) in its data directory.
 
 - **Accounts and assignments:** ID/password sign-in with bearer tokens; administrators assign VMs to accounts and grant per-account×VM permissions (clipboard directions and formats, drives, printers, USB devices), all default denied and enforced by the broker and again by the Host.
-- **Proxmox:** one dedicated API identity, created by a short Proxmox Shell script the console prints. Its token is stored encrypted with `vault.key`. The broker synchronises the whole QEMU VM inventory, runs power actions (start, shutdown, reboot, stop) for assigned VMs, adds the VM sound card and opens the Proxmox VNC console.
-- **Hosts:** a Host asks to enrol; an administrator approves it after comparing a verification code shown in Host settings and in the console. Physical Windows PCs ("로컬 PC") enrol the same way; their power actions go through the Host, and the broker wakes them with Wake-on-LAN.
+- **Proxmox:** one dedicated API identity, created by a short Proxmox Shell script the console prints. Its token is stored encrypted with `vault.key`. The broker synchronises the whole QEMU VM inventory, runs power actions (start, shutdown, reboot, stop) for assigned VMs, reads whether a VM has a sound device (the administrator adds one in Proxmox; Multitap does not change VM hardware) and opens the Proxmox VNC console.
+- **Hosts:** a Host asks to enrol; an administrator approves it after comparing a verification code shown in Host settings and in the console. Physical Windows PCs (local PCs; the Korean screens say "로컬 PC") enrol the same way; their power actions go through the Host, and the broker wakes them with Wake-on-LAN.
 - **VM state:** one state machine (`server/src/vm-state.mjs`) turns the broker's power tasks, the Proxmox status, the optional QEMU guest agent and Host channel events into the state a launcher card shows (off, starting, Windows starting, ready, in use, stopping and so on), with a fixed reason code and a revision that only grows. Clients get changes pushed over their live channel and poll gently only while it is down.
 - **Relay:** `relay.mjs` pairs a client session WebSocket (`/api/v1/sessions/:id`) with the Host's outbound channel (`/api/v1/hosts/channel`) and, per session, the Host's WebSockets for clipboard, drives, printing, USB and independent video tracks (`/api/v1/hosts/sessions/:id/...`). It forwards control JSON and binary media, checks authorisation during the session and ends it when an assignment or permission is withdrawn. The UDP relay (`udp-relay.mjs`, a worker thread, on when `MULTITAP_UDP_PORT` is set; `compose.yaml` sets 18481) forwards datagrams between the two legs of a session after a ticket-proven bind.
 - **Web:** the public homepage and download page (`/get/client`, `/get/host`, `/get/android`), the admin console (`server/admin/`) and the browser emergency console (noVNC 1.7.0, `server/admin/console/`).
@@ -56,7 +56,7 @@ The Host installer (`Multitap-Host-<version>-windows-x64.exe`, `apps/windows_hos
 
 Streaming captures only displays that Multitap owns: one virtual output per client monitor (one or two), sized to the client window.
 
-- The native provider uses the libvirtualdisplay control SDK (linked statically, `drivers/display_bridge/`) with the upstream SunshineVirtualDisplayDriver. Its catalog is signed with the upstream project's own release certificate; the Host installer shows that signer and adds it to the machine's Root and TrustedPublisher stores before installing the driver. The older MttVDD driver (SignPath-signed) with its helper (`drivers/virtual_display/`) stays as the legacy provider. Both driver packages ship as the unmodified upstream files.
+- The native provider uses the libvirtualdisplay control SDK (linked statically, `drivers/display_bridge/`) with the upstream SunshineVirtualDisplayDriver. Its catalog is signed with the upstream project's own release certificate; Host settings shows that signer and, after the administrator's consent, adds it to the machine's Root and TrustedPublisher stores before installing the driver. The older MttVDD driver (SignPath-signed) with its helper (`drivers/virtual_display/`) stays as the legacy provider. Both driver packages ship as the unmodified upstream files.
 - Display manager v2 ([docs/display-manager-v2.md](docs/display-manager-v2.md)): before a stream the Host saves the Windows display configuration, makes the owned outputs the active desktop and switches every other display off for the stream (the Proxmox console, a vGPU head, a physical monitor). On stop, failure or after a crash it restores the saved configuration. Leftover state never blocks the service.
 
 ## Multitap streaming
@@ -73,7 +73,7 @@ Static regions can be refreshed losslessly (`tiles-v1`, [docs/lossless-tiles-des
 
 One Flutter code base (`lib/`) for the Windows and Android apps and the Host settings window.
 
-- **Windows:** the C++ runner (`windows/runner/`) holds the native parts: H.264 and Opus decoding, keyboard capture for Windows shortcuts, the clipboard with on-paste file transfer, shared drives, printing (the VM's Multitap printer → PDF → a local printer), USB capture through UsbDk, the UDP media leg and the WebView2 browser console. The client runs unelevated and asks for administrator approval only when an action needs it.
+- **Windows:** the C++ runner (`windows/runner/`) holds the native parts: H.264 and Opus decoding, keyboard capture for Windows shortcuts, the clipboard with on-paste file transfer, shared drives, printing (the VM's Multitap print queue → PDF → a local printer), USB capture through UsbDk, the UDP media leg and the WebView2 browser console. The client runs unelevated and asks for administrator approval only when an action needs it.
 - **Android:** Kotlin code in `android/` (MediaCodec decoding, Opus, UDP, clipboard, shared folders in `AndroidDrive.kt`, printing, TV support) behind the same Flutter UI.
 
 ## Device redirection
@@ -82,7 +82,7 @@ One Flutter code base (`lib/`) for the Windows and Android apps and the Host set
 |---|---|---|
 | Clipboard | text, images, file lists; files are pulled when pasted | same, with virtual files in Explorer |
 | Drives | the client serves chosen folders | WinFsp drive (WebDAV fallback) |
-| Printing | prints the PDF on a local printer | "Multitap 프린터" print queue |
+| Printing | prints the PDF on a local printer | the Multitap print queue, named `Multitap 프린터 (PC)` in Windows (a literal name, the same in both languages) |
 | USB | UsbDk captures the device | usbip-win2 virtual USB controller |
 
 Each channel needs its per-account×VM permission and runs only inside an authorised session.

@@ -14,7 +14,7 @@ const _gib = 1024 * 1024 * 1024;
 const _mib = 1024 * 1024;
 
 /// A meter's colour for its load: its own calm colour, amber from 80 % and
-/// red from 95 % (2026-10-26: never alarming by default).
+/// red from 95 % (never alarming by default).
 Color loadColor(AppPalette p, double? fraction, Color calm) => fraction == null
     ? calm
     : fraction >= .95

@@ -710,24 +710,6 @@ abstract class AppLocalizations {
   /// **'변경'**
   String get change;
 
-  /// No description provided for @textTooLongSendEnter.
-  ///
-  /// In ko, this message translates to:
-  /// **'보낼 글자가 너무 길어요. 나누어 입력해 주세요.'**
-  String get textTooLongSendEnter;
-
-  /// No description provided for @disconnectConsole.
-  ///
-  /// In ko, this message translates to:
-  /// **'콘솔 연결을 끊을까요?'**
-  String get disconnectConsole;
-
-  /// No description provided for @vmsPowerWindowsWorkStay.
-  ///
-  /// In ko, this message translates to:
-  /// **'VM 전원과 Windows 작업은 그대로 유지돼요.'**
-  String get vmsPowerWindowsWorkStay;
-
   /// No description provided for @disconnect.
   ///
   /// In ko, this message translates to:
@@ -740,23 +722,11 @@ abstract class AppLocalizations {
   /// **'키보드'**
   String get keyboard;
 
-  /// No description provided for @consoleKeyboard.
-  ///
-  /// In ko, this message translates to:
-  /// **'콘솔 키보드'**
-  String get consoleKeyboard;
-
   /// No description provided for @screen.
   ///
   /// In ko, this message translates to:
   /// **'화면'**
   String get screen;
-
-  /// No description provided for @fitScreenOriginalSize.
-  ///
-  /// In ko, this message translates to:
-  /// **'화면 맞춤 · 원본 크기'**
-  String get fitScreenOriginalSize;
 
   /// No description provided for @originalSize.
   ///
@@ -764,47 +734,11 @@ abstract class AppLocalizations {
   /// **'원본 크기'**
   String get originalSize;
 
-  /// No description provided for @fitScreen.
-  ///
-  /// In ko, this message translates to:
-  /// **'화면 맞춤'**
-  String get fitScreen;
-
-  /// No description provided for @keyCombos.
-  ///
-  /// In ko, this message translates to:
-  /// **'키 조합'**
-  String get keyCombos;
-
   /// No description provided for @windowsKey.
   ///
   /// In ko, this message translates to:
   /// **'Windows 키'**
   String get windowsKey;
-
-  /// No description provided for @remote.
-  ///
-  /// In ko, this message translates to:
-  /// **'리모컨'**
-  String get remote;
-
-  /// No description provided for @remoteControl.
-  ///
-  /// In ko, this message translates to:
-  /// **'리모컨 조작'**
-  String get remoteControl;
-
-  /// No description provided for @reconnecting.
-  ///
-  /// In ko, this message translates to:
-  /// **'다시 연결하고 있어요'**
-  String get reconnecting;
-
-  /// No description provided for @waitingConsoleScreen.
-  ///
-  /// In ko, this message translates to:
-  /// **'콘솔 화면을 기다리고 있어요'**
-  String get waitingConsoleScreen;
 
   /// No description provided for @reconnect.
   ///
@@ -823,24 +757,6 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'콘솔'**
   String get console;
-
-  /// No description provided for @consoleTools.
-  ///
-  /// In ko, this message translates to:
-  /// **'콘솔 도구'**
-  String get consoleTools;
-
-  /// No description provided for @textType.
-  ///
-  /// In ko, this message translates to:
-  /// **'입력할 내용'**
-  String get textType;
-
-  /// No description provided for @send.
-  ///
-  /// In ko, this message translates to:
-  /// **'보내기'**
-  String get send;
 
   /// No description provided for @noPermissionOpenFolderChoose.
   ///
@@ -5117,84 +5033,6 @@ abstract class AppLocalizations {
   /// **'폴더'**
   String get folder;
 
-  /// No description provided for @youDontHaveConsolePermission.
-  ///
-  /// In ko, this message translates to:
-  /// **'이 데스크톱의 Console 권한이 없어요. 관리자에게 요청하세요.'**
-  String get youDontHaveConsolePermission;
-
-  /// No description provided for @signHasExpiredSignAgain2.
-  ///
-  /// In ko, this message translates to:
-  /// **'로그인이 만료됐어요. 다시 로그인하세요.'**
-  String get signHasExpiredSignAgain2;
-
-  /// No description provided for @desktopIsntSoConsoleCant.
-  ///
-  /// In ko, this message translates to:
-  /// **'데스크톱이 켜져 있지 않아 Console을 열 수 없어요. 켠 뒤 다시 연결하세요.'**
-  String get desktopIsntSoConsoleCant;
-
-  /// No description provided for @couldntGetConsoleConnectionDetails.
-  ///
-  /// In ko, this message translates to:
-  /// **'Proxmox에서 Console 연결 정보를 받지 못했어요. 관리자에게 알려 주세요.'**
-  String get couldntGetConsoleConnectionDetails;
-
-  /// No description provided for @desktopDetailsHaveChangedClose.
-  ///
-  /// In ko, this message translates to:
-  /// **'데스크톱 정보가 바뀌었어요. Console을 닫고 목록을 새로고침하세요.'**
-  String get desktopDetailsHaveChangedClose;
-
-  /// No description provided for @serverDoesntSupportConsole.
-  ///
-  /// In ko, this message translates to:
-  /// **'이 서버는 Console을 지원하지 않아요.'**
-  String get serverDoesntSupportConsole;
-
-  /// No description provided for @serverCouldntVerifyProxmoxCertificate.
-  ///
-  /// In ko, this message translates to:
-  /// **'서버가 Proxmox 인증서를 확인하지 못했어요. 관리자에게 알려 주세요.'**
-  String get serverCouldntVerifyProxmoxCertificate;
-
-  /// No description provided for @serverCouldntVerifyDesktopsProxmox.
-  ///
-  /// In ko, this message translates to:
-  /// **'서버가 이 데스크톱의 Proxmox VM 정보를 확인하지 못했어요. 관리자에게 알려 주세요.'**
-  String get serverCouldntVerifyDesktopsProxmox;
-
-  /// No description provided for @consoleIsntAvailableRightNow.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console을 지금 쓸 수 없어요. 잠시 후 다시 연결하세요.'**
-  String get consoleIsntAvailableRightNow;
-
-  /// No description provided for @couldntVerifyConsoleConnectionLet.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console 연결을 확인하지 못했어요. 관리자에게 알려 주세요.'**
-  String get couldntVerifyConsoleConnectionLet;
-
-  /// No description provided for @didntReceiveConsoleScreenReconnect.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console 화면을 받지 못했어요. 다시 연결하세요.'**
-  String get didntReceiveConsoleScreenReconnect;
-
-  /// No description provided for @didntReceiveConsoleScreenReconnect2.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console 화면을 받지 못했어요.\n다시 연결하세요.'**
-  String get didntReceiveConsoleScreenReconnect2;
-
-  /// No description provided for @consoleDisconnectedReconnect.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console 연결이 끊겼어요. 다시 연결하세요.'**
-  String get consoleDisconnectedReconnect;
-
   /// No description provided for @mediaFoundationDeviceNotVerified.
   ///
   /// In ko, this message translates to:
@@ -6920,24 +6758,6 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'Host 화면 기다리는 중'**
   String get waitingHostScreen;
-
-  /// No description provided for @preparingSwitchWindowsDisplay.
-  ///
-  /// In ko, this message translates to:
-  /// **'Windows 화면 전환을 준비하는 중'**
-  String get preparingSwitchWindowsDisplay;
-
-  /// No description provided for @preparingWindowsSignScreen.
-  ///
-  /// In ko, this message translates to:
-  /// **'Windows 로그인 화면을 준비하는 중'**
-  String get preparingWindowsSignScreen;
-
-  /// No description provided for @preparingWindowsDesktop.
-  ///
-  /// In ko, this message translates to:
-  /// **'바탕화면을 준비하는 중'**
-  String get preparingWindowsDesktop;
 
   /// No description provided for @virtualDisplayTookTooLong.
   ///
@@ -9954,18 +9774,6 @@ abstract class AppLocalizations {
   /// **'Windows 로그인'**
   String get windowsSign2;
 
-  /// No description provided for @youCanConnectSignScreen.
-  ///
-  /// In ko, this message translates to:
-  /// **'로그인 화면에 연결할 수 있어요'**
-  String get youCanConnectSignScreen;
-
-  /// No description provided for @typeWindowsPasswordRemoteScreen.
-  ///
-  /// In ko, this message translates to:
-  /// **'원격 화면에서 Windows 비밀번호를 직접 입력하세요.'**
-  String get typeWindowsPasswordRemoteScreen;
-
   /// No description provided for @takeOverWindowsScreenConnect.
   ///
   /// In ko, this message translates to:
@@ -10882,59 +10690,11 @@ abstract class AppLocalizations {
   /// **'열기'**
   String get open;
 
-  /// No description provided for @disconnectConsole2.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console 연결을 끊을까요?'**
-  String get disconnectConsole2;
-
-  /// No description provided for @onlyConsoleConnectionEndsDesktop.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console 연결만 끊어요.\n데스크톱과 실행 중인 작업은 그대로 유지돼요.'**
-  String get onlyConsoleConnectionEndsDesktop;
-
-  /// No description provided for @waitingConsoleScreenMayNot.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console 화면을 기다리고 있어요. 데스크톱 화면이 꺼져 있으면 보이지 않을 수 있어요.'**
-  String get waitingConsoleScreenMayNot;
-
   /// No description provided for @closeRemoteWindow.
   ///
   /// In ko, this message translates to:
   /// **'원격 창 닫기'**
   String get closeRemoteWindow;
-
-  /// No description provided for @fitWindow.
-  ///
-  /// In ko, this message translates to:
-  /// **'화면에 맞춤'**
-  String get fitWindow;
-
-  /// No description provided for @sendCtrlAltDelete.
-  ///
-  /// In ko, this message translates to:
-  /// **'Ctrl+Alt+Delete 보내기'**
-  String get sendCtrlAltDelete;
-
-  /// No description provided for @aboutConsole.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console 안내'**
-  String get aboutConsole;
-
-  /// No description provided for @couldNotConnectKeyboardInput.
-  ///
-  /// In ko, this message translates to:
-  /// **'\n키보드 입력을 연결하지 못했어요.\nConsole 화면을 눌러 다시 시도하세요.'**
-  String get couldNotConnectKeyboardInput;
-
-  /// No description provided for @emergencyProxmoxConsoleScreenOff.
-  ///
-  /// In ko, this message translates to:
-  /// **'비상용 Proxmox Console이에요.\n꺼진 화면은 안 보일 수 있어요.\n화면·전원·장치 설정은 자동으로 바꾸지 않아요.{n}'**
-  String emergencyProxmoxConsoleScreenOff(Object n);
 
   /// No description provided for @encoderApplied.
   ///
@@ -15391,6 +15151,18 @@ abstract class AppLocalizations {
   /// **'서버 응답 상태'**
   String get serverResponseStatus;
 
+  /// No description provided for @serverAddressSave.
+  ///
+  /// In ko, this message translates to:
+  /// **'서버 주소 저장'**
+  String get serverAddressSave;
+
+  /// No description provided for @systemErrorCode.
+  ///
+  /// In ko, this message translates to:
+  /// **'시스템 오류 코드'**
+  String get systemErrorCode;
+
   /// No description provided for @hostSettingsAction.
   ///
   /// In ko, this message translates to:
@@ -17436,12 +17208,6 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'데스크톱 연결 정보를 확인하고 있어요.'**
   String get checkingDesktopConnectionInfo;
-
-  /// No description provided for @consoleOpensMainWindow.
-  ///
-  /// In ko, this message translates to:
-  /// **'Console은 메인 창에서 열려요.'**
-  String get consoleOpensMainWindow;
 
   /// No description provided for @product.
   ///

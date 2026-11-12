@@ -148,7 +148,7 @@ List<UiFinding> auditTargets(WidgetTester t, {double minimum = 48}) {
       // A sideways row scrolled so that a segment is only partly in view
       // (cut under the row's own inset, not at the list's edge): narrow but
       // full height is the scrolled-away part, not a small target. English
-      // labels shift where the filter row rests (2026-11-11).
+      // labels shift where the filter row rests.
       final scroll = current.getSemanticsData();
       if ((scroll.hasAction(ui.SemanticsAction.scrollLeft) ||
               scroll.hasAction(ui.SemanticsAction.scrollRight)) &&

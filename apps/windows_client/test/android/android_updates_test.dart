@@ -898,7 +898,7 @@ void main() {
   testWidgets(
     'an app newer than the server is not called 최신, and older notes name their version',
     (tester) async {
-      // Review 2026-10-28 #11: preview.4 installed, the server at preview.3.
+      // preview.4 installed, the server at preview.3.
       await signedIn(tester, [apk('0.1.0-preview.3', 'arm64-v8a')]);
       await tester.tap(find.byKey(const Key('android-update-check')));
       await tester.pump(const Duration(milliseconds: 300));

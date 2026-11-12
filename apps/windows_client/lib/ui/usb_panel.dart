@@ -229,7 +229,7 @@ class _UsbPanelState extends State<UsbPanel> {
     );
   }
 
-  /// Taking a device away from a VM asks once first (2026-11-02): that VM may
+  /// Taking a device away from a VM asks once first: that VM may
   /// be writing to it. Used by 연결 끊기 and, in its own words ([move]), by
   /// 이 창으로 옮기기.
   Future<bool> _confirmDisconnect(UsbEntry entry, {bool move = false}) async =>
@@ -691,7 +691,7 @@ class _DeviceRow extends StatelessWidget {
         entry.state == UsbEntryState.shared ||
         entry.state == UsbEntryState.returning ||
         entry.state == UsbEntryState.connecting;
-    // Another remote window of this client holds it (2026-11-02): said by
+    // Another remote window of this client holds it: said by
     // name, and it can be moved to this window. Not for a device whose
     // return to the PC is in doubt: that row offers PC로 되돌리기, as its
     // text says.

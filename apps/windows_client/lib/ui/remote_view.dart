@@ -188,7 +188,6 @@ class RemoteView extends StatefulWidget {
     this.onCheckTakeover,
     this.onWaitHostReady,
     this.onPrepareConsole,
-    this.onEmergencyConsole,
     this.onOpenConsole,
     this.onTakeover,
     this.onConfirmTakeover,
@@ -241,7 +240,7 @@ class RemoteView extends StatefulWidget {
   final String? takeoverServer;
 
   /// This PC's local memory (session windows only): an earlier client's
-  /// "마우스 가두기" choice is dropped from it, never read (2026-11-03).
+  /// "마우스 가두기" choice is dropped from it, never read.
   final LauncherMemory? pointerMemory;
   final Future<RemoteSession> Function() load;
   final Future<RemoteSession> Function(StreamOptions options)? onReconnect;
@@ -255,7 +254,6 @@ class RemoteView extends StatefulWidget {
   /// stream ended (null: the broker does not offer it).
   final Future<bool?> Function()? onWaitHostReady;
   final Future<DesktopMachine> Function()? onPrepareConsole;
-  final Future<void> Function()? onEmergencyConsole;
 
   /// Asks the launcher to open this VM's Console WebView (never an in-window
   /// console): offered on the end card where it helps.
@@ -432,8 +430,8 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
   /// A press that began on the remote picture is still held (any button).
   /// Flutter keeps routing its moves and release to the picture wherever the
   /// pointer goes, so the toolbar must not take hover or hits meanwhile: a
-  /// drag across it reached the toolbar's hover, which released remote input
-  /// and dropped the drag (2026-10-26). Ends only on up or cancel.
+  /// drag across it would reach the toolbar's hover, which releases remote
+  /// input and drops the drag. Ends only on up or cancel.
   final _pictureHeld = ValueNotifier<bool>(false);
   int? _heldPointer;
 
@@ -761,8 +759,8 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     _focusLosses,
   );
 
-  /// "마우스 가두기" is gone (2026-11-03): 마우스 잠금 is the one lock. An
-  /// earlier client's saved choice is dropped, never read.
+  /// There is no "마우스 가두기": 마우스 잠금 is the one lock. An earlier
+  /// client's saved choice is dropped, never read.
   Future<void> _forgetPointerConfinement() async {
     try {
       await widget.pointerMemory?.forgetPointerConfinement();
@@ -1346,7 +1344,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
       return;
     }
     // Nothing live to end (failed, ended or still connecting): close at once
-    // (2026-10-26: "원격 창 닫기" on an ended connection asked again).
+    // ("원격 창 닫기" on an ended connection does not ask again).
     if (!_live) return _closeView();
     _confirmingClose = true;
     _release();
@@ -1903,7 +1901,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
       ? SessionDisplayMode.fullscreen
       : SessionDisplayMode.windowed;
 
-  /// The bar's three groups (2026-11-10): 화면 (the screen mode and 배율 in
+  /// The bar's three groups: 화면 (the screen mode and 배율 in
   /// one panel; its icon is the current mode), 폴더·USB (a tab each; only
   /// the sides this connection has) and 설정 (화질·소리, 마우스 잠금, 바
   /// 열어 두기, 사용안내). Each drops a panel from its button; the narrow
@@ -2090,8 +2088,8 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
       ? driveMessage(_machine.driveUnavailable)
       : null;
 
-  /// The Host offers USB but this assignment does not allow it (2026-11-02:
-  /// shown with the reason, not hidden).
+  /// The Host offers USB but this assignment does not allow it (shown with
+  /// the reason, not hidden).
   String? get _usbUnavailableReason =>
       _session?.usb == null && _connected && _session!.connection.usbDenied
       ? adminPermissionNeeded
@@ -2124,7 +2122,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
   /// The current streaming choices in a few words, for the 설정 panel.
   String get _qualitySummary {
     final session = _session;
-    final options = session == null || session.connection.signin != null
+    final options = session == null
         ? _lastOptions
         : session.connection.options;
     final preset = StreamPreset.of(options, _machine.maxBitrate);
@@ -2276,13 +2274,10 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     return false;
   }
 
-  /// The options this connection asked for (the last applied ones after a
-  /// sign-in connection).
+  /// The options this connection asked for.
   StreamOptions get _currentOptions {
     final session = _session;
-    return session == null || session.connection.signin != null
-        ? _lastOptions
-        : session.connection.options;
+    return session == null ? _lastOptions : session.connection.options;
   }
 
   bool _connectionOpen = false;
@@ -2504,9 +2499,8 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
 
   /// A desktop restart under this window: until [_plannedRestartUntil] the
   /// ended stream waits for the desktop and reconnects instead of failing.
-  /// (The window no longer asks for one itself: the sound-card flow that
-  /// did was removed 2026-11-10. The Host going away with the desktop
-  /// running starts it now, see [_hostAwayRestart].)
+  /// (The window never asks for one itself. The Host going away with the
+  /// desktop running starts it, see [_hostAwayRestart].)
   DateTime? _plannedRestartUntil;
   RemoteSession? _plannedRestartFrom;
   static const plannedRestartWait = Duration(minutes: 3);
@@ -2517,7 +2511,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
   /// (Windows restarting from inside), not from this window's own restart.
   bool _hostAwayRestart = false;
 
-  /// A Host update ended the stream (host_update, 2026-11-03): while this
+  /// A Host update ended the stream (host_update): while this
   /// timer runs the view waits for the update and the Host, then reconnects
   /// by itself, as after a restart. Past it, the manual text.
   Timer? _hostUpdateTimer;
@@ -2582,7 +2576,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
 
   /// Devices shared in a session this window replaced (reconnect, new screen
   /// mode): offered again in the next session, and said in one line either
-  /// way, never dropped silently (2026-11-02).
+  /// way, never dropped silently.
   List<String> _usbResume = const [];
   void _watchUsb() {
     final usb = _session?.usb;
@@ -2724,7 +2718,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
           bool current() =>
               mounted && !_closingWindow && attempt == _connectionAttempt;
           final previous = _session;
-          if (previous != null && previous.connection.signin == null) {
+          if (previous != null) {
             _lastOptions = previous.connection.options;
           }
           previous?.removeListener(_changed);
@@ -2981,9 +2975,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     _settingsOpen = true;
     _holdPointer();
     try {
-      final initial = previous?.connection.signin != null
-          ? _lastOptions
-          : previous?.connection.options ?? _lastOptions;
+      final initial = previous?.connection.options ?? _lastOptions;
       // The no-sound-device line only when the Host said so.
       final missingAudio = previous?.remoteAudioMissing == true;
       final track = _popups.tracker();
@@ -3179,8 +3171,8 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
 
   ConnectionWaitStep get _observedWaitStep {
     // Waiting for the Host's update only while there is no connection: once
-    // the new connection is made the list goes down its stages (it stood on
-    // this row until the picture came; inspection, 2026-11-12).
+    // the new connection is made the list goes down its stages (it must not
+    // stand on this row until the picture comes).
     if (_hostUpdating && (_session == null || _session!.closed)) {
       return ConnectionWaitStep.hostUpdate;
     }
@@ -3319,7 +3311,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     return () => unawaited(_takeover(shown));
   }
 
-  /// The card is the one question (2026-11-11: it asked twice): it names the
+  /// The card is the one question, never a second one after it: it names the
   /// accounts and start times of the exact broker offer, and its button
   /// accepts that offer, [shown]. Accepting never permits an unbound legacy
   /// release; the broker still checks expiry and occupancy CAS.
@@ -3818,10 +3810,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
         _waitStep = ConnectionWaitStep.relay;
         // Every new connection starts with 마우스 잠금 off.
         _gameMouse = false;
-        final options = session.connection.options;
-        // Sign-in has deliberately restricted wire options. Keep the user's
-        // actual choices for the separately admitted ordinary connection.
-        if (session.connection.signin == null) _lastOptions = options;
+        _lastOptions = session.connection.options;
       });
       _unbindPointerOrdering = session.bindPointerOrdering(
         beforeKey: _pointerMoves.flush,
@@ -4044,7 +4033,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     }
     _hostLossReconnectAt = now;
     // A broker update: the wait below says the server is restarting until a
-    // new stream starts (restart recovery, 2026-11-03).
+    // new stream starts (restart recovery).
     if (session.diagnosticCode == 'server_stopping') _serverRestart.begin();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _closingWindow || !identical(session, _session)) return;
@@ -4109,52 +4098,6 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     });
   }
 
-  RemoteSession? _signinPromotionSource;
-  int? _signinPromotionRevision;
-  void _watchSigninPromotion() {
-    final source = _session, refresh = widget.onRefreshDesktop;
-    if (source == null ||
-        !source.signinDesktopReady ||
-        refresh == null ||
-        widget.onReconnect == null ||
-        _reconnecting ||
-        _closingWindow ||
-        identical(source, _signinPromotionSource) &&
-            source.signinRevision == _signinPromotionRevision) {
-      return;
-    }
-    final revision = source.signinRevision, intent = _connectionIntent;
-    _signinPromotionSource = source;
-    _signinPromotionRevision = revision;
-    bool current() =>
-        mounted &&
-        !_closingWindow &&
-        !_reconnecting &&
-        identical(source, _session) &&
-        source.signinDesktopReady &&
-        source.signinRevision == revision &&
-        _connectionIntent == intent &&
-        widget.machine.id == _machine.id;
-    // Continue the already confirmed intent in this same window. A fresh
-    // ordinary grant restores normal audio/cursor/device permissions; no
-    // unwrapped packet can weaken or promote the scoped sign-in session.
-    unawaited(() async {
-      try {
-        final fresh = await waitForOrdinarySigninDesktop(
-          refresh: refresh,
-          current: current,
-          desktopId: _machine.id,
-        );
-        if (fresh == null || !current()) return;
-        _machine = fresh;
-        await _load(reconnect: true);
-      } catch (_) {
-        // Keep the acknowledged desktop visible if an observational read
-        // fails. Do not replay a connect mutation or retire another owner.
-      }
-    }());
-  }
-
   void _changed() {
     _syncPointerScope();
     _syncRelativeMouse();
@@ -4165,7 +4108,6 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     _watchInitialPreparation();
     _watchDisplayChange();
     _watchHostLoss();
-    _watchSigninPromotion();
     // Say once why there is no sound instead of a silent "waiting" status.
     final session = _session;
     final entry = _initialViewportEntry;
@@ -4349,8 +4291,8 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
       final minimized = metrics?.$1.isEmpty ?? false;
       // Minimized, the window reports an empty view; restored, it comes back
       // with the size and scale its layout was verified at. Neither changes a
-      // monitor: re-reading then put "모니터 구성이 변경됐어요 … 다시
-      // 선택하세요" over a live stream (2026-11-02).
+      // monitor: re-reading then would put "모니터 구성이 변경됐어요 … 다시
+      // 선택하세요" over a live stream.
       final restored =
           metrics != null &&
           _localLayoutVerified &&

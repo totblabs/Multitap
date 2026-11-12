@@ -105,7 +105,7 @@ Future<void> openBulk(
 }
 
 /// Selects every available row and presses the button. The note above it
-/// says what it does, so no second question opens (2026-11-03).
+/// says what it does, so no second question opens.
 Future<void> confirmBulk(WidgetTester tester) async {
   await tester.ensureVisible(find.byKey(const Key('bulk-host-select-all')));
   await tester.tap(find.byKey(const Key('bulk-host-select-all')));

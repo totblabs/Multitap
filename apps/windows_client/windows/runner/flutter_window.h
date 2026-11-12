@@ -19,7 +19,6 @@
 #include "udp_media_channel.h"
 #include "render_environment.h"
 #include "remote_input.h"
-#include "console_input_ownership.h"
 #include "window_presentation.h"
 #include "window_close_guard.h"
 #include "main_window_close.h"
@@ -78,7 +77,7 @@ class FlutterWindow : public Win32Window, private multitap::tray::Delegate {
   HWINEVENTHOOK cloak_hook_ = nullptr;
   bool media_hidden_ = false, updating_visibility_ = false;
   void ReleaseForegroundOwnership();
-  // The notification-area icon of the main client window (2026-10-27): X rests
+  // The notification-area icon of the main client window: X rests
   // the window in the tray; 완전 종료 (tray or account menu) is the way out.
   void ConfigureTray();
   void HideToTray();
@@ -157,10 +156,6 @@ class FlutterWindow : public Win32Window, private multitap::tray::Delegate {
   std::unique_ptr<multitap::UdpMediaChannel> udp_media_;
   std::unique_ptr<multitap::StreamSizeQueryChannel> stream_size_queries_;
   std::unique_ptr<multitap::RemoteInput> remote_input_;
-  multitap::ConsoleInputOwnership console_input_owner_;
-  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> console_input_channel_;
-  void ConfigureConsoleInput();
-  void RetireConsoleInput();
   // cursor-v1: the host's separated cursor as this window's real cursor.
   std::unique_ptr<multitap::CursorPresenter> cursor_presenter_;
   void ResetRemoteInput();

@@ -256,8 +256,8 @@ class AppStatusLine extends StatelessWidget {
 /// The dialog button bar: equal-width buttons in one row, main action last
 /// (right). When the widest label would not fit on one line at that width,
 /// the buttons stack full width with the main action on top. The choice is
-/// measured from the buttons themselves (2026-11-03: a 400 px dialog in a
-/// wide window put "추가하고 다시 시작" on two lines), so it holds for any
+/// measured from the buttons themselves (measured from the window, a 400 px
+/// dialog in a wide window puts "추가하고 다시 시작" on two lines), so it holds for any
 /// dialog width, window width and text size, and it reports its intrinsic
 /// height (the sign-in card measures it).
 class AppDialogActions extends MultiChildRenderObjectWidget {
@@ -412,7 +412,7 @@ class _RenderButtonBar extends RenderBox
       defaultPaint(context, offset);
 }
 
-/// The product dialog after the 2026-10-25 connect question: the tile
+/// The product dialog, in the connect question's design: the tile
 /// surface, 18 px corners, a hairline edge, a round tinted icon beside a short
 /// title and subtitle, the body, and equal-width buttons. The body scrolls
 /// between a fixed header and fixed buttons, so actions stay reachable in
@@ -804,8 +804,8 @@ Future<bool> showAppNotice(
 /// toolbar, the window X or a loading window).
 ///
 /// [usbShared]: devices of this PC the VM has now; closing hands them back.
-/// [foldersShared]: folders of this PC mapped as VM drives (2026-11-09: a VM
-/// program saving there loses its work when the drive goes).
+/// [foldersShared]: folders of this PC mapped as VM drives (a VM program
+/// saving there loses its work when the drive goes).
 /// [printsWaiting]: documents the VM printed that were not printed or saved
 /// here yet; closing discards them.
 Future<bool> confirmDisconnect(

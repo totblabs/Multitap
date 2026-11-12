@@ -58,7 +58,7 @@ void main() {
       ),
     ]);
     expect(
-      // Signed out: the Proxmox console, not an in-stream sign-in (2026-11-09).
+      // Signed out: the Proxmox console, not an in-stream sign-in.
       find.text('Console에서 로그인하세요. 다시 시작하면 자동으로 로그인돼요.'),
       findsOneWidget,
     );

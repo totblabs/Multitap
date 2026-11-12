@@ -191,8 +191,8 @@ class SessionFailure {
       reason as String,
       BrokerException(reason).message,
     ),
-    // The broker's checks of the desktop's VM before a stream (2026-11-12):
-    // these used to arrive as virtual_display_required.
+    // The broker's checks of the desktop's VM before a stream, each with its
+    // own code rather than the general virtual_display_required.
     'host_machine_mismatch' => SessionFailure(
       'host_machine_mismatch',
       l10n.hostDoesntMatchRegisteredVm,

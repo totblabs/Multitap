@@ -399,7 +399,7 @@ inline bool LaunchVerifiedProductUpdate(const ProductUpdateSpec& spec,
   // Signed by the project's release key (the window answers signature_invalid
   // before this point; this is the last gate before anything is staged).
   if(!ValidProductUpdate(spec) || !ProductUpdateSignatureValid(spec)) { if(failure) *failure = "installer_start_failed"; return false; }
-  // Without administrator rights (the client since 2026-10-27) the download is
+  // Without administrator rights (the client) the download is
   // verified and the installed, administrator-protected client EXE is started
   // through UAC; that elevated instance runs this very function again and
   // stages into the administrator-only folder below. Host settings are elevated

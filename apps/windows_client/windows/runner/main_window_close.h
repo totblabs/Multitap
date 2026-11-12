@@ -7,8 +7,8 @@
 
 namespace multitap::close {
 
-// What the client's main window does when it is asked to close (2026-10-27,
-// "closing should go to the tray"). Two different requests reach it:
+// What the client's main window does when it is asked to close (closing
+// goes to the tray). Two different requests reach it:
 //  - kUserClose: the user's X, Alt+F4, the system menu or the taskbar menu.
 //    Windows sends WM_SYSCOMMAND/SC_CLOSE for these. The window rests in the
 //    notification area instead of ending the program.

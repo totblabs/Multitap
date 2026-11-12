@@ -11,8 +11,8 @@ String get streamTakeoverUnavailableMessage =>
 /// What the "다른 곳에서 연결 중이에요" card says about each connection its
 /// button would end: the account and, where the broker attests it, when that
 /// connection began (local time). The card is the only question before the
-/// takeover, so these lines are what the person agrees to (2026-11-09: a
-/// desktop another account uses is taken over only after a confirmation).
+/// takeover, so these lines are what the person agrees to (a desktop
+/// another account uses is taken over only after a confirmation).
 /// A start time the broker does not attest is left out, never invented.
 List<String> streamTakeoverSessionLines(StreamTakeoverOffer offer) {
   String two(int value) => value.toString().padLeft(2, '0');

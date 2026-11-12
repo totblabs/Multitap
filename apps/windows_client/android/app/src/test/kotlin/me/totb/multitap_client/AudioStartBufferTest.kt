@@ -10,7 +10,7 @@ import org.junit.Test
 // queued must always get that level, and the cap must keep its headroom above the
 // target as the target grows after underruns.
 class AudioStartBufferTest {
-    // AndroidMedia's values (2026-11-11).
+    // AndroidMedia's values.
     private val capacity = 48L * 200
     private val cap = 48L * 80
     private val target = 48L * 40

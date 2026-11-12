@@ -4,33 +4,6 @@ import 'broker_api.dart';
 import '../models/desktop_machine.dart';
 import '../models/stream_preparation.dart';
 
-/// After a scoped login view actually decoded the user's desktop, wait for
-/// ordinary readiness before retiring it. No output or connection mutation
-/// runs here; the existing reconnect path then owns exact teardown/admission.
-Future<DesktopMachine?> waitForOrdinarySigninDesktop({
-  required Future<DesktopMachine> Function() refresh,
-  required bool Function() current,
-  required String desktopId,
-  Future<void> Function(Duration)? wait,
-  int attempts = 20,
-}) async {
-  if (attempts < 1 || attempts > 40) throw ArgumentError.value(attempts);
-  final pause = wait ?? Future<void>.delayed;
-  for (var attempt = 0; attempt < attempts; attempt++) {
-    if (!current()) return null;
-    final fresh = await refresh();
-    if (!current()) return null;
-    if (fresh.id != desktopId) throw const BrokerException('invalid_response');
-    if (fresh.isReady &&
-        !fresh.signinReady &&
-        fresh.interactiveSession != false) {
-      return fresh;
-    }
-    if (attempt + 1 < attempts) await pause(const Duration(milliseconds: 500));
-  }
-  return null;
-}
-
 /// How often a broker that is restarting is asked again (gateway answers, a
 /// refused or reset port) while a stream recovers.
 const restartPollInterval = Duration(milliseconds: 250);
@@ -72,20 +45,20 @@ bool streamPreparationTransient(StreamPreparation? value) =>
 /// post-transport recovery opts into [retryGatewayErrors]; it retries read-only
 /// gateway failures within this same deadline, never a connection mutation.
 ///
-/// [restarting]: the user restarted the VM from this window (the sound card,
-/// 2026-11-02). Its power task, a stopped moment, the Host's absence and the
+/// [restarting]: the user restarted the VM from this window (the sound
+/// card). Its power task, a stopped moment, the Host's absence and the
 /// time before Windows signs in are waited through too, within [maxWait].
 ///
-/// Restart recovery (2026-11-03): a broker update ends every stream as
+/// Restart recovery: a broker update ends every stream as
 /// server_stopping. While the broker itself is away, a refused or reset
 /// connection is retried like a gateway answer, every [restartPollInterval]
-/// (it used to fall out of this wait into a 1-2-4-8 s backoff). While its Host
+/// (inside this wait, not in a 1-2-4-8 s backoff). While its Host
 /// is away, [waitHost] (host-ready-wait-v1) is answered by the broker the
 /// moment the Host reported, instead of reading the whole list every 500 ms;
 /// it returns null where the broker does not offer it, and the list is read
 /// every 500 ms as before.
 ///
-/// [hostUpdating]: a Host update ended the stream (host_update, 2026-11-03).
+/// [hostUpdating]: a Host update ended the stream (host_update).
 /// While the broker reports that update under way, the list is read every
 /// [hostUpdatePollInterval]; the Host's own restart is then waited through
 /// like any Host return. A Host that stays away after the update
@@ -94,7 +67,7 @@ bool streamPreparationTransient(StreamPreparation? value) =>
 ///
 /// [hostAwayWait]: Windows restarted from inside the VM (Start → 다시 시작,
 /// an update, a crash) takes longer than the 30 s a Host restart gets
-/// (2026-11-09 edge-case audit: the window gave up while Windows was still
+/// (within those the window would give up while Windows is still
 /// starting). While recovering, the first read that finds the Host away with
 /// the VM still running extends this wait to [hostAwayWait] from then and
 /// waits like [restarting] (power task, Windows sign-in); [onHostAway] is
@@ -137,7 +110,6 @@ Future<DesktopMachine> waitForStreamDisplayControl(
       !value.powerBusy;
 
   bool settled(DesktopMachine value) =>
-      (!independentTracks && value.signinReady) ||
       (!independentTracks || value.independentDisplayStreaming) &&
           !(initialPreparation &&
               (value.streamPreparation == StreamPreparation.maintenance ||
@@ -148,7 +120,6 @@ Future<DesktopMachine> waitForStreamDisplayControl(
               : value.status == MachineStatus.ready);
 
   bool restartPending(DesktopMachine value) =>
-      !value.signinReady &&
       !value.sessionCleanup.pending &&
       (restarting
           ? (value.hostOnline != true ||
@@ -383,13 +354,6 @@ Future<DesktopMachine> prepareStreamDisplayCount(
   }
   if (machine.sessionCleanup.pending) {
     throw const BrokerException('session_cleanup_pending', 409);
-  }
-  if (machine.signinReady) {
-    if (count != 1) throw const BrokerException('track_streaming_unavailable');
-    // The service's scoped preparation owns the first sign-in output. The
-    // ordinary display-configure RPC requires an unlocked user and must not
-    // run before this explicit sign-in connection.
-    return machine;
   }
   if (streamDisplayCountReady(machine, count)) return machine;
   // An offline Host says nothing about display support; report it as such.

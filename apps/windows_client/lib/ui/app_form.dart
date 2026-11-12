@@ -4,7 +4,7 @@ import 'app_dialog.dart';
 import 'app_theme.dart';
 import 'korean_text.dart';
 
-/// The form parts every dialog and panel shares (2026-11-10 design audit):
+/// The form parts every dialog and panel shares:
 /// one field, one select and one fold, so the label position, the arrow and
 /// the "more" mark are the same on every screen.
 

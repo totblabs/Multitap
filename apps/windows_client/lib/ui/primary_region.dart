@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 /// Keeps a window's dialogs, menus and panels on one part of it.
 ///
 /// In 모든 모니터 사용 one remote window spans two local monitors, and every
-/// centred popup (a dialog, the disconnect question, a menu) landed on the
-/// seam between them (2026-10-26). The remote view publishes the primary
+/// centred popup (a dialog, the disconnect question, a menu) would land on
+/// the seam between them. The remote view publishes the primary
 /// monitor's part of the window in [region]; every route of this app then
 /// sees the rest of the window as display features, the way a foldable's
 /// hinge is described, so Flutter's dialogs and popup menus (which lay out

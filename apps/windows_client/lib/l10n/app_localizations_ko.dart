@@ -352,52 +352,19 @@ class AppLocalizationsKo extends AppLocalizations {
   String get change => '변경';
 
   @override
-  String get textTooLongSendEnter => '보낼 글자가 너무 길어요. 나누어 입력해 주세요.';
-
-  @override
-  String get disconnectConsole => '콘솔 연결을 끊을까요?';
-
-  @override
-  String get vmsPowerWindowsWorkStay => 'VM 전원과 Windows 작업은 그대로 유지돼요.';
-
-  @override
   String get disconnect => '연결 끊기';
 
   @override
   String get keyboard => '키보드';
 
   @override
-  String get consoleKeyboard => '콘솔 키보드';
-
-  @override
   String get screen => '화면';
-
-  @override
-  String get fitScreenOriginalSize => '화면 맞춤 · 원본 크기';
 
   @override
   String get originalSize => '원본 크기';
 
   @override
-  String get fitScreen => '화면 맞춤';
-
-  @override
-  String get keyCombos => '키 조합';
-
-  @override
   String get windowsKey => 'Windows 키';
-
-  @override
-  String get remote => '리모컨';
-
-  @override
-  String get remoteControl => '리모컨 조작';
-
-  @override
-  String get reconnecting => '다시 연결하고 있어요';
-
-  @override
-  String get waitingConsoleScreen => '콘솔 화면을 기다리고 있어요';
 
   @override
   String get reconnect => '다시 연결';
@@ -407,15 +374,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get console => '콘솔';
-
-  @override
-  String get consoleTools => '콘솔 도구';
-
-  @override
-  String get textType => '입력할 내용';
-
-  @override
-  String get send => '보내기';
 
   @override
   String get noPermissionOpenFolderChoose => '이 폴더를 열 권한이 없어요. 폴더를 다시 골라 주세요.';
@@ -2929,55 +2887,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get folder => '폴더';
 
   @override
-  String get youDontHaveConsolePermission =>
-      '이 데스크톱의 Console 권한이 없어요. 관리자에게 요청하세요.';
-
-  @override
-  String get signHasExpiredSignAgain2 => '로그인이 만료됐어요. 다시 로그인하세요.';
-
-  @override
-  String get desktopIsntSoConsoleCant =>
-      '데스크톱이 켜져 있지 않아 Console을 열 수 없어요. 켠 뒤 다시 연결하세요.';
-
-  @override
-  String get couldntGetConsoleConnectionDetails =>
-      'Proxmox에서 Console 연결 정보를 받지 못했어요. 관리자에게 알려 주세요.';
-
-  @override
-  String get desktopDetailsHaveChangedClose =>
-      '데스크톱 정보가 바뀌었어요. Console을 닫고 목록을 새로고침하세요.';
-
-  @override
-  String get serverDoesntSupportConsole => '이 서버는 Console을 지원하지 않아요.';
-
-  @override
-  String get serverCouldntVerifyProxmoxCertificate =>
-      '서버가 Proxmox 인증서를 확인하지 못했어요. 관리자에게 알려 주세요.';
-
-  @override
-  String get serverCouldntVerifyDesktopsProxmox =>
-      '서버가 이 데스크톱의 Proxmox VM 정보를 확인하지 못했어요. 관리자에게 알려 주세요.';
-
-  @override
-  String get consoleIsntAvailableRightNow =>
-      'Console을 지금 쓸 수 없어요. 잠시 후 다시 연결하세요.';
-
-  @override
-  String get couldntVerifyConsoleConnectionLet =>
-      'Console 연결을 확인하지 못했어요. 관리자에게 알려 주세요.';
-
-  @override
-  String get didntReceiveConsoleScreenReconnect =>
-      'Console 화면을 받지 못했어요. 다시 연결하세요.';
-
-  @override
-  String get didntReceiveConsoleScreenReconnect2 =>
-      'Console 화면을 받지 못했어요.\n다시 연결하세요.';
-
-  @override
-  String get consoleDisconnectedReconnect => 'Console 연결이 끊겼어요. 다시 연결하세요.';
-
-  @override
   String get mediaFoundationDeviceNotVerified => 'Media Foundation · 장치 미확인';
 
   @override
@@ -4010,15 +3919,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get waitingHostScreen => 'Host 화면 기다리는 중';
-
-  @override
-  String get preparingSwitchWindowsDisplay => 'Windows 화면 전환을 준비하는 중';
-
-  @override
-  String get preparingWindowsSignScreen => 'Windows 로그인 화면을 준비하는 중';
-
-  @override
-  String get preparingWindowsDesktop => '바탕화면을 준비하는 중';
 
   @override
   String get virtualDisplayTookTooLong => '가상 화면 준비 시간이 초과됐어요. 다시 연결해 주세요.';
@@ -5788,13 +5688,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get windowsSign2 => 'Windows 로그인';
 
   @override
-  String get youCanConnectSignScreen => '로그인 화면에 연결할 수 있어요';
-
-  @override
-  String get typeWindowsPasswordRemoteScreen =>
-      '원격 화면에서 Windows 비밀번호를 직접 입력하세요.';
-
-  @override
   String get takeOverWindowsScreenConnect => 'Windows 화면을 넘겨받아 연결';
 
   @override
@@ -6333,36 +6226,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get open => '열기';
 
   @override
-  String get disconnectConsole2 => 'Console 연결을 끊을까요?';
-
-  @override
-  String get onlyConsoleConnectionEndsDesktop =>
-      'Console 연결만 끊어요.\n데스크톱과 실행 중인 작업은 그대로 유지돼요.';
-
-  @override
-  String get waitingConsoleScreenMayNot =>
-      'Console 화면을 기다리고 있어요. 데스크톱 화면이 꺼져 있으면 보이지 않을 수 있어요.';
-
-  @override
   String get closeRemoteWindow => '원격 창 닫기';
-
-  @override
-  String get fitWindow => '화면에 맞춤';
-
-  @override
-  String get sendCtrlAltDelete => 'Ctrl+Alt+Delete 보내기';
-
-  @override
-  String get aboutConsole => 'Console 안내';
-
-  @override
-  String get couldNotConnectKeyboardInput =>
-      '\n키보드 입력을 연결하지 못했어요.\nConsole 화면을 눌러 다시 시도하세요.';
-
-  @override
-  String emergencyProxmoxConsoleScreenOff(Object n) {
-    return '비상용 Proxmox Console이에요.\n꺼진 화면은 안 보일 수 있어요.\n화면·전원·장치 설정은 자동으로 바꾸지 않아요.$n';
-  }
 
   @override
   String get encoderApplied => '적용했어요';
@@ -8912,6 +8776,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get serverResponseStatus => '서버 응답 상태';
 
   @override
+  String get serverAddressSave => '서버 주소 저장';
+
+  @override
+  String get systemErrorCode => '시스템 오류 코드';
+
+  @override
   String get hostSettingsAction => 'Host 설정 작업';
 
   @override
@@ -10064,9 +9934,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get checkingDesktopConnectionInfo => '데스크톱 연결 정보를 확인하고 있어요.';
-
-  @override
-  String get consoleOpensMainWindow => 'Console은 메인 창에서 열려요.';
 
   @override
   String get product => '제품';

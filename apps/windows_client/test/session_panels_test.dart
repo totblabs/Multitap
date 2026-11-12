@@ -1,4 +1,4 @@
-// The session bar's panels on their own (2026-11-10, session bar v2): 화면,
+// The session bar's panels on their own: 화면,
 // 폴더·USB, 설정 and the quality chip's 연결. Widgets with memory fakes only:
 // no socket, file system, USB backend, Windows DPI or window is touched.
 // How RemoteView opens them is in session_toolbar_items_test.
@@ -1497,9 +1497,9 @@ void main() {
       }
     });
   });
-  // Review 2026-11-12 (en-dark-800x2 sheets 08-10): English labels at 200 %
-  // text were split or cut: "Window/ed", "All monitor", "Scre", "Rece",
-  // "Resolut", "Shared… 2", "USB de… 1".
+  // English labels at 200 % text must not be split or cut ("Window/ed",
+  // "All monitor", "Scre", "Rece",
+  // "Resolut", "Shared… 2", "USB de… 1").
   group('English at large text', () {
     Future<void> show(WidgetTester tester, Widget panel, double width) async {
       AppLanguageController.instance.debugReset(AppLanguage.en);
@@ -1612,8 +1612,8 @@ void main() {
     });
   });
 
-  // Review 2026-11-12: the open panel kept the ended channel's object and
-  // stayed "disconnected" after the session had swapped in a new one.
+  // The open panel must not keep the ended channel's object and stay
+  // "disconnected" after the session has swapped in a new one.
   group('폴더·USB follows the session (SessionShareFollower)', () {
     testWidgets('a channel the session replaced is the one shown', (
       tester,

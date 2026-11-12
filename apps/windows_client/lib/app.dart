@@ -115,21 +115,38 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
       : null;
   bool _previewOpen = false;
   late Uri? _origin = widget.serverOrigin;
-  late BrokerApi? _api =
-      widget.api ??
-      (_origin == null
-          ? null
-          : HttpBrokerApi(
-              origin: _origin!,
-              enableDiagnostics: true,
-              requestTextInput: true,
-              requestDisplayScaleControl: true,
-              requestPrint: true,
-              requestUdpMedia: true,
-              requestAudioOpus: true,
-              requestPcLoginReplacement: true,
-              requestStreamTakeoverContext: true,
-            ));
+
+  /// The API of [_origin], made when it is first needed (a sign-in).
+  /// [_madeApi] is the one that exists, and closing looks only there: an API
+  /// cannot be made for an HTTP address whose approval is gone, and saving
+  /// another address removes the previous one's approval.
+  BrokerApi? _madeApi;
+  bool _apiMade = false;
+  BrokerApi? get _api {
+    if (!_apiMade) {
+      final origin = _origin;
+      _madeApi = widget.api ?? (origin == null ? null : _newApi(origin));
+      _apiMade = true;
+    }
+    return _madeApi;
+  }
+
+  set _api(BrokerApi? value) {
+    _madeApi = value;
+    _apiMade = true;
+  }
+
+  static HttpBrokerApi _newApi(Uri origin) => HttpBrokerApi(
+    origin: origin,
+    enableDiagnostics: true,
+    requestTextInput: true,
+    requestDisplayScaleControl: true,
+    requestPrint: true,
+    requestUdpMedia: true,
+    requestAudioOpus: true,
+    requestPcLoginReplacement: true,
+    requestStreamTakeoverContext: true,
+  );
   BrokerSession? _session;
   late final _mfa = MfaAccountHost(clock: widget.clock);
   late final _sessionAccess = SessionActivity(clock: widget.clock);
@@ -711,35 +728,41 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
       throw StateError('Sign out before changing server.');
     }
     _mfa.retire();
-    await widget.onServerChanged?.call(origin);
-    if (!mounted) return;
+    // An address this app cannot use is refused here, before it is written.
+    // Once the settings hold the new address, the app takes it: what follows
+    // the write only assigns and closes.
+    final next = _newApi(origin);
+    try {
+      await widget.onServerChanged?.call(origin);
+    } catch (_) {
+      next.close();
+      rethrow;
+    }
+    if (!mounted) {
+      next.close();
+      return;
+    }
     UpdateNotices.instance.configure(
       server: origin.toString(),
       currentVersion: clientProductVersion,
     );
-    _api?.close();
+    // Only an API that exists is closed: the previous address may have lost
+    // its HTTP approval to this save, and none can be made for it now.
+    final previous = _madeApi;
     setState(() {
       _origin = origin;
-      _api = HttpBrokerApi(
-        origin: origin,
-        enableDiagnostics: true,
-        requestTextInput: true,
-        requestDisplayScaleControl: true,
-        requestPrint: true,
-        requestUdpMedia: true,
-        requestAudioOpus: true,
-        requestPcLoginReplacement: true,
-        requestStreamTakeoverContext: true,
-      );
+      _api = next;
       _error = null;
     });
+    previous?.close();
   }
 
   @override
   void dispose() {
     _mfa.dispose();
     _sessionAccess.dispose();
-    final closingApi = _api;
+    // The API that exists; leaving the app makes none.
+    final closingApi = _madeApi;
     unawaited(
       const ConsoleBrowser.windows()
           .closeAll(api: closingApi)
@@ -910,7 +933,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
         terminal: (code) => _retireAuthentication(session, code),
       );
       // A stream window of this sign-in asks for its VM's Console (Windows
-      // signed out or locked, 2026-11-09 edge-case audit).
+      // signed out or locked).
       SessionWindows.bindConsoleRequests(_consoleFromSessionWindow);
       _authenticationBound = SessionWindows.bindAuthentication(
         owner,
@@ -1603,7 +1626,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     await _api!.changePassword(session.token, current, password, confirmation);
     if (!mounted || _session != session) return;
     // The sign-in ends here: its idle sign-out must not fire on the sign-in
-    // screen afterwards (inspection, 2026-11-12).
+    // screen afterwards.
     _sessionAccess.stop();
     _retireWindows();
     _stopDesktopUpdates();

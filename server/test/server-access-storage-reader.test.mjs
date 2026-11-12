@@ -81,3 +81,31 @@ test('missing is optional only before observation; malformed UTF8 and unsafe rea
     for (const maximum of [0, -1, 1.5, Infinity, 1000000000]) assert.throws(() => readProtectedAccessFile(f.path, { maximum, production: false }), /server_access_storage_invalid/);
   });
 });
+
+test('a production file belongs to root, or to the named owner for the files a self-managed Docker install keeps itself', async t => {
+  const f = await fixture(t);
+  const lstat = fs.lstatSync, fstat = fs.fstatSync, platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  let uid = 1000;
+  // The file's owner is projected (a test cannot chown), with the modes Windows lacks; the rule runs as on Linux.
+  const project = value => {
+    const result = Object.create(value), big = typeof value.mode === 'bigint';
+    Object.defineProperty(result, 'mode', { value: big ? value.mode & ~0o022n : value.mode & ~0o022 });
+    Object.defineProperty(result, 'uid', { value: big ? BigInt(uid) : uid });
+    return result;
+  };
+  t.mock.method(fs, 'lstatSync', (...args) => project(lstat(...args)));
+  t.mock.method(fs, 'fstatSync', (...args) => project(fstat(...args)));
+  Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => readProtectedAccessFile(f.path), /server_access_storage_invalid/, 'the broker\'s own file is not the updater\'s');
+    assert.throws(() => readProtectedAccessFile(f.path, { production: true, owner: 0 }), /server_access_storage_invalid/);
+    assert.equal(readProtectedAccessFile(f.path, { owner: 1000 }), 'original-protected-bytes');
+    assert.throws(() => readProtectedAccessFile(f.path, { owner: 1001 }), /server_access_storage_invalid/);
+    assert.equal(readProtectedAccessFile(f.path, { production: false }), 'original-protected-bytes');
+    uid = 0;
+    assert.equal(readProtectedAccessFile(f.path), 'original-protected-bytes');
+    assert.throws(() => readProtectedAccessFile(f.path, { owner: 1000 }), /server_access_storage_invalid/, 'nor is root\'s file the broker\'s');
+    for (const owner of [-1, 1.5, '0', null, Infinity]) assert.throws(() => readProtectedAccessFile(f.path, { owner }), /server_access_storage_invalid/, String(owner));
+  } finally { Object.defineProperty(process, 'platform', platform); t.mock.restoreAll(); syncBuiltinESMExports(); }
+});

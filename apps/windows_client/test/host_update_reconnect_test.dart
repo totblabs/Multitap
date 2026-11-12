@@ -1,4 +1,4 @@
-// A Host update ended the stream (host_update, 2026-11-03): the remote window
+// A Host update ended the stream (host_update): the remote window
 // waits for the update and its Host, then reconnects by itself, like after
 // the sound-card restart. Fake time, sockets, media and broker answers; no
 // real broker, Host or update.

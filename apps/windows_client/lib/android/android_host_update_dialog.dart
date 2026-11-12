@@ -86,7 +86,7 @@ class AndroidHostUpdateDialog extends StatefulWidget {
   final String machine, currentVersion, targetVersion;
   final bool sessionActive;
 
-  /// A local PC's Host (2026-11-03: the texts name it PC, not VM).
+  /// A local PC's Host: the texts name it PC, not VM.
   final bool pc;
   final bool Function() isCurrent;
   final Future<ProductRelease?> Function()? loadRelease;

@@ -13,8 +13,6 @@ import 'session_access.dart';
 export 'session_access.dart';
 import 'stream_takeover.dart';
 export 'stream_takeover.dart';
-import 'signin_stream.dart';
-export 'signin_stream.dart';
 
 import 'clipboard_policy.dart';
 import 'track_stream.dart';
@@ -108,8 +106,8 @@ class BrokerException implements Exception {
 
   /// This PC has no working network path right now (no DNS answer, a timeout,
   /// another socket failure): Wi-Fi switching, a dropped line, just woken from
-  /// sleep. A connection being recovered waits it out (2026-11-09 audit: the
-  /// Windows client gave up at once where Android waited).
+  /// sleep. A connection being recovered waits it out, on Windows as on
+  /// Android.
   bool get networkUnavailable =>
       code == 'network_error' &&
       (reason == 'dns' || reason == 'timeout' || reason == 'network');
@@ -288,7 +286,7 @@ String get signedOutLocalPcMessage =>
 String get serverRestartingMessage => l10n.serverIsntRespondingMomentRetrying;
 
 /// A broker update restarts the server: for a few seconds its proxy answers
-/// 502-504 (field diagnostics 2026-11-02) or its port refuses. List reads and
+/// 502-504 or its port refuses. List reads and
 /// connects wait through it with a short backoff, for up to [window].
 class ServerRestartWait {
   ServerRestartWait({DateTime Function()? clock})
@@ -565,11 +563,9 @@ class BrokerDesktop {
     required this.os,
     required this.status,
     required this.canConnect,
-    this.signinAvailability,
     this.consoleInUse = false,
     this.qemuAgentOff = false,
     bool? canStream,
-    this.consoleRelayProtocol,
     this.consoleBrowserProtocol,
     this.consoleWebViewProtocol,
     this.localPcApproved = false,
@@ -635,7 +631,6 @@ class BrokerDesktop {
   /// Tags, pool, favourite and last use (absent from a broker before desktop
   /// organising).
   final DesktopOrganize organize;
-  final SigninAvailability? signinAvailability;
 
   /// A console connection holds this VM.
   final bool consoleInUse;
@@ -646,7 +641,6 @@ class BrokerDesktop {
   final PcPowerState pcPower;
 
   /// Broker-owned capability, independent of Host/virtual display readiness.
-  final String? consoleRelayProtocol;
   final String? consoleBrowserProtocol;
   final String? consoleWebViewProtocol;
   bool get consoleWebViewSupported =>
@@ -776,10 +770,6 @@ class BrokerDesktop {
   /// The VM's sound card as the broker last read it (`audio.state` of the
   /// list item: absent, present or pending); null when unknown or not sent.
   final String? audioState;
-  bool get emergencyConsoleSupported =>
-      kind == 'vm' &&
-      RegExp(r'^pve-[1-9][0-9]{2,11}$').hasMatch(id) &&
-      consoleRelayProtocol == 'rfb-none-v1';
   final BrokerPowerSnapshot power;
   final BrokerPowerTask? powerTask;
 
@@ -812,12 +802,8 @@ class BrokerDesktop {
     os: data['os'] as String,
     status: data['status'] as String,
     canConnect: data['canConnect'] as bool,
-    signinAvailability: SigninAvailability.tryParse(data['signinAvailability']),
     consoleInUse: data['consoleInUse'] == true,
     qemuAgentOff: data['qemuAgentOff'] == true,
-    consoleRelayProtocol: data['consoleRelayProtocol'] == 'rfb-none-v1'
-        ? 'rfb-none-v1'
-        : null,
     consoleBrowserProtocol:
         data['consoleBrowserProtocol'] == 'console-browser-v1'
         ? 'console-browser-v1'
@@ -1114,7 +1100,6 @@ class BrokerConnection {
     this.cursorCompose = false,
     this.sessionResume = false,
     this.resumeGraceMs = 15000,
-    this.signin,
   });
   factory BrokerConnection.fromJson(
     Map<String, dynamic> data,
@@ -1147,7 +1132,6 @@ class BrokerConnection {
     bool requestedCursorEcho = false,
     bool requestedCursorCompose = false,
     bool requestedSessionResume = false,
-    bool requestedSignin = false,
     Future<void> Function(String sessionId)? cancel,
   }) {
     final sessionId = data['sessionId'] as String;
@@ -1464,27 +1448,13 @@ class BrokerConnection {
     } on FormatException {
       throw const BrokerException('invalid_response');
     }
-    final SigninBinding? signin;
-    try {
-      if (data['signin'] != null) {
-        if (!requestedSignin ||
-            !epochMedia ||
-            trackMedia ||
-            options.monitor != '0' ||
-            data['udpDirectProtocol'] != null) {
-          throw const FormatException();
-        }
-        signin = SigninBinding.parse(data['signin']);
-      } else {
-        if (requestedSignin) throw const FormatException();
-        signin = null;
-      }
-    } on FormatException {
+    // A sign-in phase binding was never asked for: an answer that carries one
+    // is not this client's connection.
+    if (data['signin'] != null) {
       throw const BrokerException('invalid_response');
     }
     return BrokerConnection(
       sessionId: sessionId,
-      signin: signin,
       webSocketUrl: uri,
       mode: mode,
       clipboardWebSocketUrl: clipboard,
@@ -1561,7 +1531,6 @@ class BrokerConnection {
     );
   }
   final String sessionId;
-  final SigninBinding? signin;
   final Uri webSocketUrl;
   final String mode;
   final StreamOptions options;
@@ -1780,7 +1749,7 @@ abstract interface class ProfileTrackBrokerApi {
   });
 }
 
-/// host-ready-wait-v1 (restart recovery, 2026-11-03): after a broker restart
+/// host-ready-wait-v1 (restart recovery): after a broker restart
 /// every stream ended as server_stopping and waits for its desktop's Host to
 /// return. GET /api/v1/desktops/:id/host-ready answers the moment the Host has
 /// reported to the new broker (true), or after the broker's hold (about 5 s)
@@ -1836,18 +1805,6 @@ abstract interface class InitialViewportBrokerApi {
   );
 }
 
-/// Optional explicit path only. Ordinary callers/fakes never opt into a secure
-/// desktop phase, and no launcher entry is enabled by implementing this API.
-abstract interface class SigninStreamBrokerApi {
-  Future<BrokerConnection> connectSignin(
-    String token,
-    String desktopId, {
-    required String availabilityId,
-    StreamOptions? options,
-    InitialViewport? initialViewport,
-  });
-}
-
 /// Records a power action this client refused before sending it (VM state,
 /// display change in progress), so the diagnostics show why nothing reached
 /// the broker.
@@ -1875,77 +1832,6 @@ abstract interface class SessionRenewalBrokerApi {
     required bool ok,
     String? code,
   });
-}
-
-class BrokerConsoleGrant {
-  static final _ticket = RegExp(r'^[A-Za-z0-9_-]{1,512}$');
-  const BrokerConsoleGrant({
-    required this.id,
-    required this.ticket,
-    required this.relay,
-    required this.expiresAt,
-  });
-  final String id, ticket;
-  final Uri relay;
-  final DateTime expiresAt;
-  static final _uuid = RegExp(
-    r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$',
-  );
-  // Apply the transport boundary to direct grants as well as parsed replies.
-  // No Bearer-bearing request may start before this exact origin/path check.
-  bool validFor(Uri origin) =>
-      _uuid.hasMatch(id) &&
-      _ticket.hasMatch(ticket) &&
-      expiresAt.isUtc &&
-      expiresAt.isAfter(DateTime.now()) &&
-      brokerOriginAllowed(origin) &&
-      origin.host.isNotEmpty &&
-      origin.userInfo.isEmpty &&
-      !origin.hasQuery &&
-      !origin.hasFragment &&
-      ['', '/'].contains(origin.path) &&
-      brokerRelayMatches(relay, origin) &&
-      relay.userInfo.isEmpty &&
-      !relay.hasQuery &&
-      !relay.hasFragment &&
-      relay.path == '/relay/console/$id';
-
-  factory BrokerConsoleGrant.fromJson(Map<String, dynamic> value, Uri origin) {
-    final id = value['id'],
-        ticket = value['ticket'],
-        route = value['relayPath'];
-    final expiry = value['expiresAt'];
-    if (id is! String ||
-        !_uuid.hasMatch(id) ||
-        ticket is! String ||
-        !_ticket.hasMatch(ticket) ||
-        route != '/relay/console/$id' ||
-        expiry is! String) {
-      throw const BrokerException('invalid_response');
-    }
-    final expiresAt = DateTime.tryParse(expiry);
-    if (expiresAt == null || !expiresAt.isUtc) {
-      throw const BrokerException('invalid_response');
-    }
-    final grant = BrokerConsoleGrant(
-      id: id,
-      ticket: ticket,
-      relay: origin.replace(
-        scheme: brokerRelayScheme(origin),
-        path: route as String,
-      ),
-      expiresAt: expiresAt,
-    );
-    if (!grant.validFor(origin)) {
-      throw const BrokerException('invalid_response');
-    }
-    return grant;
-  }
-}
-
-abstract interface class EmergencyConsoleBrokerApi {
-  Future<BrokerConsoleGrant> createConsole(String token, String desktopId);
-  Future<void> releaseConsole(String token, String desktopId, String id);
 }
 
 class BrokerConsoleWebViewGrant {
@@ -2053,7 +1939,6 @@ class HttpBrokerApi
         SessionActivityBrokerApi,
         MfaBrokerApi,
         MfaAccountBrokerApi,
-        EmergencyConsoleBrokerApi,
         ConsoleWebViewBrokerApi,
         ConsoleTakeoverBrokerApi,
         SessionRenewalBrokerApi,
@@ -2066,7 +1951,6 @@ class HttpBrokerApi
         ConfirmedTakeoverBrokerApi,
         StreamTakeoverPreflightBrokerApi,
         InitialViewportBrokerApi,
-        SigninStreamBrokerApi,
         DisplayScaleBrokerApi,
         PowerDiagnosticsBrokerApi,
         DesktopPreviewBrokerApi,
@@ -2130,27 +2014,6 @@ class HttpBrokerApi
   late final Object? _transportToken;
   bool _transportReady = false;
   @override
-  Future<BrokerConsoleGrant> createConsole(
-    String token,
-    String desktopId,
-  ) async {
-    if (!RegExp(r'^pve-[0-9]{1,12}$').hasMatch(desktopId)) {
-      throw const BrokerException('desktop_not_found', 404);
-    }
-    final value = await _request(
-      '/api/v1/desktops/$desktopId/console-sessions',
-      method: 'POST',
-      token: token,
-      data: <String, Object?>{},
-    );
-    final grant = value['consoleSession'];
-    if (grant is! Map<String, dynamic>) {
-      throw const BrokerException('invalid_response');
-    }
-    return BrokerConsoleGrant.fromJson(grant, origin);
-  }
-
-  @override
   Future<BrokerConsoleWebViewGrant> createConsoleWebView(
     String token,
     String desktopId,
@@ -2197,22 +2060,6 @@ class HttpBrokerApi
       token: token,
       data: <String, Object?>{'ownerId': ?ownerId},
     );
-  }
-
-  @override
-  Future<void> releaseConsole(String token, String desktopId, String id) async {
-    if (!RegExp(r'^pve-[0-9]{1,12}$').hasMatch(desktopId) ||
-        !BrokerConsoleGrant._uuid.hasMatch(id)) {
-      throw const BrokerException('invalid_response');
-    }
-    final value = await _request(
-      '/api/v1/desktops/$desktopId/console-sessions/$id',
-      method: 'DELETE',
-      token: token,
-    );
-    if (value['released'] != true || value['id'] != id) {
-      throw const BrokerException('invalid_response');
-    }
   }
 
   final HttpClient _http;
@@ -2606,7 +2453,6 @@ class HttpBrokerApi
   // The token whose last inventory the per-desktop capability sets below
   // were read from.
   String? _inventoryToken;
-  Map<String, SigninAvailability> _signinOffers = {};
   // bitrate-adaptive-v1 ceilings from the last inventory of this token. A
   // desktop absent here is treated as a released peer (fixed 4-20 Mbps).
   Map<String, int> _bitrateCeilings = {};
@@ -2864,10 +2710,6 @@ class HttpBrokerApi
       request.headers.set(brokerWireHeader, brokerWireVersion);
       // The server's few human sentences come in the app's language.
       request.headers.set(HttpHeaders.acceptLanguageHeader, acceptLanguage);
-      if (path == '/api/v1/desktops' ||
-          RegExp(r'^/api/v1/desktops/[A-Za-z0-9_-]{1,80}$').hasMatch(path)) {
-        request.headers.set('X-Multitap-Signin-Protocol', signinStreamProtocol);
-      }
       if (path == '/api/v1/auth/login') {
         request.headers.set('X-Multitap-Auth-Protocol', 'mfa-v1');
         if (requestPcLoginReplacement &&
@@ -3847,13 +3689,6 @@ class HttpBrokerApi
         .toList();
     if (sequence == _inventorySequence) {
       _inventoryToken = token;
-      _signinOffers = {
-        for (final desktop in desktops)
-          if (!desktop.canStream &&
-              desktop.hostConnected == true &&
-              desktop.signinAvailability?.fresh(DateTime.now()) == true)
-            desktop.id: desktop.signinAvailability!,
-      };
       _bitrateCeilings = {
         for (final desktop in desktops)
           if (desktop.maxBitrate != null) desktop.id: desktop.maxBitrate!,
@@ -4040,19 +3875,9 @@ class HttpBrokerApi
     StreamOptions? options,
     InitialViewport? initialViewport,
     int? displayScale,
-    String? signinAvailabilityId,
   }) async {
-    final offered = _inventoryToken == token ? _signinOffers[desktopId] : null;
-    signinAvailabilityId ??= offered?.fresh(DateTime.now()) == true
-        ? offered!.id
-        : null;
-    final signinRequested = signinAvailabilityId != null;
-    if (signinRequested) displayScale = null;
     // Streaming is the only mode.
     if (mode != 'stream' ||
-        (signinRequested &&
-            (!RegExp(r'^[a-f0-9]{32}$').hasMatch(signinAvailabilityId) ||
-                (options ?? const StreamOptions()).monitor != '0')) ||
         (displayScale != null && !validDisplayScale(displayScale)) ||
         (initialViewport != null &&
             ((options ?? const StreamOptions()).monitor != '0' ||
@@ -4109,35 +3934,16 @@ class HttpBrokerApi
         ? value.withCodecCeiling()
         : value;
     // Send only what this desktop's broker and host accept (bitrate-adaptive-v1).
-    final preference = options ?? const StreamOptions();
-    final preferred = signinRequested
-        ? StreamOptions(
-            maxWidth: preference.maxWidth,
-            maxHeight: preference.maxHeight,
-            fps: preference.fps,
-            bitrate: preference.bitrate,
-            audio: false,
-            monitor: preference.monitor,
-            bitrateMode: StreamBitrateMode.fixed,
-          )
-        : preference;
+    final preferred = options ?? const StreamOptions();
     var requested = boxed(
       preferred.negotiated(_bitrateCeiling(token, desktopId)),
     );
     // Optional measurement: requested only where the inventory advertised it.
-    var latency =
-        !signinRequested &&
-        mode == 'stream' &&
-        _inputLatencyAdvertised(token, desktopId);
+    var latency = mode == 'stream' && _inputLatencyAdvertised(token, desktopId);
     var observe =
-        !signinRequested &&
-        mode == 'stream' &&
-        _observabilityRequested(token, desktopId);
+        mode == 'stream' && _observabilityRequested(token, desktopId);
     // cursor-v1 likewise, for this ordinary (non-track) stream request only.
-    var cursor =
-        !signinRequested &&
-        mode == 'stream' &&
-        _cursorAdvertised(token, desktopId);
+    var cursor = mode == 'stream' && _cursorAdvertised(token, desktopId);
     // text-input-v1 likewise, only for a client that sends committed text.
     var text =
         mode == 'stream' &&
@@ -4146,60 +3952,41 @@ class HttpBrokerApi
     // Negotiate the runtime grant separately from an optional initial value.
     // A marker-only Windows request preserves the current scale on connect.
     var scaleControl =
-        !signinRequested &&
         mode == 'stream' &&
         (requestDisplayScaleControl || displayScale != null) &&
         _displayScaleAdvertised(token, desktopId);
     var scale = scaleControl ? displayScale : null;
     // touch-input-v1 likewise, only for a client that sends touch contacts.
     var touch =
-        !signinRequested &&
         mode == 'stream' &&
         requestTouchInput &&
         _touchInputAdvertised(token, desktopId);
     // caret-v1 likewise, only for a client that follows the text caret.
     var caret =
-        !signinRequested &&
         mode == 'stream' &&
         requestCaret &&
         _caretAdvertised(token, desktopId);
     // print-v1 likewise, only for a client that prints what the VM sends.
     var print =
-        !signinRequested &&
         mode == 'stream' &&
         requestPrint &&
         _printAdvertised(token, desktopId);
     // drive-v1 likewise, only for a client that shares local folders.
-    var drive =
-        !signinRequested &&
-        mode == 'stream' &&
-        _driveRequested(token, desktopId);
+    var drive = mode == 'stream' && _driveRequested(token, desktopId);
     // driveFs (the "fs" revision) rides along only where the Host shows it.
-    var driveFs =
-        !signinRequested &&
-        mode == 'stream' &&
-        _driveFsAdvertised(token, desktopId);
+    var driveFs = mode == 'stream' && _driveFsAdvertised(token, desktopId);
     // usb-v1 likewise, only for a client that can lend this PC's USB devices.
     var usb =
-        !signinRequested &&
         mode == 'stream' &&
         requestUsb &&
         _usbAdvertised(token, desktopId);
     // udp-media-v1 likewise, only for a client that runs the UDP probe.
-    final udp =
-        !signinRequested &&
-        mode == 'stream' &&
-        _udpMediaRequested(token, desktopId);
+    final udp = mode == 'stream' && _udpMediaRequested(token, desktopId);
     // audio-opus-v1 likewise, only for a client whose runner decodes Opus.
-    var opus =
-        !signinRequested &&
-        mode == 'stream' &&
-        _audioOpusRequested(token, desktopId);
+    var opus = mode == 'stream' && _audioOpusRequested(token, desktopId);
     // relative-mouse-v1 likewise, only for a client that captures the mouse.
     var relativeMouse =
-        !signinRequested &&
-        mode == 'stream' &&
-        _relativeMouseRequested(token, desktopId);
+        mode == 'stream' && _relativeMouseRequested(token, desktopId);
     // cursor-echo-v1 likewise, only with cursor-v1 and relative-mouse-v1 (the
     // echo serves the captured 게임 마우스).
     var cursorEcho =
@@ -4209,15 +3996,9 @@ class HttpBrokerApi
         cursor && relativeMouse && _cursorComposeAdvertised(token, desktopId);
     // session-resume-v1 likewise, only for a client that resumes its socket.
     var resume =
-        !signinRequested &&
-        mode == 'stream' &&
-        _sessionResumeRequested(token, desktopId);
+        mode == 'stream' && _sessionResumeRequested(token, desktopId);
     final input = <String, Object?>{
       'mode': mode,
-      if (signinRequested) ...{
-        'signinProtocol': signinStreamProtocol,
-        'signinAvailabilityId': signinAvailabilityId,
-      },
       if (mode == 'stream') 'resizeProtocol': 'epoch-v1',
       if (mode == 'stream') 'clipboardProtocol': 'clipboard-sync-v1',
       if (latency) 'inputLatencyProtocol': inputLatencyProtocol,
@@ -4233,7 +4014,7 @@ class HttpBrokerApi
       if (drive && driveFs) 'driveFs': true,
       if (usb) 'usbProtocol': usbProtocol,
       if (udp) 'udpMediaProtocol': udpMediaProtocol,
-      if (!signinRequested && udp && _udpDirectDesktops.contains(desktopId))
+      if (udp && _udpDirectDesktops.contains(desktopId))
         'udpDirectProtocol': udpDirectProtocol,
       if (opus) 'audioCodecProtocol': audioOpusProtocol,
       if (relativeMouse) 'relativeMouseProtocol': relativeMouseProtocol,
@@ -4287,15 +4068,11 @@ class HttpBrokerApi
           requestedCursorEcho: cursorEcho,
           requestedCursorCompose: cursorCompose,
           requestedSessionResume: resume,
-          requestedSignin: signinRequested,
         );
     Map<String, dynamic> data;
     try {
       data = await request();
     } on BrokerException catch (error) {
-      // A sign-in refusal cannot fall back to an ordinary/unwrapped session or
-      // replay a POST with weaker negotiation. The explicit new path is one shot.
-      if (signinRequested) rethrow;
       // Released brokers validate this field before reserving a session.
       // Their exact refusal of a marker-only request can retry once without
       // that marker, preserving the viewport and every unrelated option.
@@ -4400,21 +4177,6 @@ class HttpBrokerApi
     }
     return build(data);
   }
-
-  @override
-  Future<BrokerConnection> connectSignin(
-    String token,
-    String desktopId, {
-    required String availabilityId,
-    StreamOptions? options,
-    InitialViewport? initialViewport,
-  }) => connect(
-    token,
-    desktopId,
-    options: options,
-    initialViewport: initialViewport,
-    signinAvailabilityId: availabilityId,
-  );
 
   @override
   Future<BrokerConnection> connectScaled(

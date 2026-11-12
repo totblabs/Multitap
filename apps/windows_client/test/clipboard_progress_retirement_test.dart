@@ -105,7 +105,7 @@ void main() {
     }
   });
 
-  // 2026-11-09: newer copies keep the offer a paste is reading (the unread "next" leaves instead), so the paste
+  // Newer copies keep the offer a paste is reading (the unread "next" leaves instead), so the paste
   // finishes; progress then moves to the newest copy's own paste.
   test('offer-cache eviction cannot replace active progress with a newer copy', () async {
     final copy = _Transfer();

@@ -362,7 +362,7 @@ void main() {
         offset += bytes.length;
       }
       expect(builder.toBytes(), data);
-      // One platform read per block of 22 chunks (2026-11-03), not one per chunk: 46 chunks are three reads.
+      // One platform read per block of 22 chunks, not one per chunk: 46 chunks are three reads.
       expect(bridge.reads, 3);
       final end = sentOf('clipboard.item.end').single;
       expect(end, {'type': 'clipboard.item.end', 'requestId': 'pullh-1', 'index': 1, 'sha256': bridge.served});
@@ -742,7 +742,7 @@ void main() {
       expect(sentOf('clipboard.pull'), isEmpty);
     });
 
-    // 2026-11-09 edge-case audit (RDP keeps a paste's clipboard data locked): newer copies no longer end a
+    // As RDP keeps a paste's clipboard data locked: newer copies do not end a
     // paste under way; the oldest offer no paste is reading leaves instead, and the pull goes on.
     test('two newer copies keep the offer a paste is still pulling from: its data goes on arriving, the channel stays up', () async {
       await connect();

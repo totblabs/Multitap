@@ -1,6 +1,6 @@
-// A Host update restarts the Host service on purpose (user screenshot,
-// 2026-11-02: "Host 연결이 끊겼어요" + 새로고침 during a bulk update read as
-// a fault). Readiness only; no broker, Host or VM.
+// A Host update restarts the Host service on purpose ("Host 연결이
+// 끊겼어요" + 새로고침 during a bulk update would read as a fault).
+// Readiness only; no broker, Host or VM.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/models/desktop_machine.dart';

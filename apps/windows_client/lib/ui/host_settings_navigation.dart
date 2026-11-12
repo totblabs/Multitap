@@ -117,7 +117,7 @@ class HostSettingsNavigation extends StatelessWidget {
   static List<String> get titles => [l10n.overview, l10n.serverConnection, l10n.virtualDisplay2, '', l10n.diagnosticReport, l10n.windowsSign2, l10n.devices];
   static List<String> get shortTitles => [l10n.overview, l10n.server, l10n.screen, '', l10n.diagnostics, l10n.sign, l10n.devices];
 
-  /// The setup flow (2026-11-03): the overview, then the server, the Windows
+  /// The setup flow: the overview, then the server, the Windows
   /// sign-in the virtual screen needs, the screen itself and the optional
   /// devices. Diagnostics is support, listed apart at the bottom.
   static const order = [0, 1, 5, 2, 6];

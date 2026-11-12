@@ -16,8 +16,7 @@ import '../data/drive_session.dart';
 import '../data/relative_mouse.dart';
 import '../data/remote_session.dart';
 import '../data/session_failure.dart';
-import '../data/stream_display_entry.dart'
-    show restartPollInterval, waitForOrdinarySigninDesktop;
+import '../data/stream_display_entry.dart' show restartPollInterval;
 import '../data/stream_size.dart'
     show DecoderLimits, EncodeLimit, nativeDecoderLimits;
 import '../data/stream_stats_report.dart' show StreamStatsSink;
@@ -26,7 +25,6 @@ import '../data/track_stream.dart' show StreamTrack;
 import '../data/touch_input.dart';
 import '../data/usb_game_mouse.dart';
 import '../models/stream_options.dart';
-import '../models/desktop_machine.dart' show DesktopMachine;
 import '../ui/app_dialog.dart';
 import '../ui/connection_wait_status.dart';
 import '../ui/drive_panel.dart' show driveEndedMessage;
@@ -140,8 +138,6 @@ class AndroidRemoteView extends StatefulWidget {
     this.awaitHostUpdate,
     this.awaitHostReturn,
     this.onAuthenticationEnded,
-    this.refreshSigninDesktop,
-    this.signinPromotionAuthorized,
     this.onBrokerNotices,
   });
 
@@ -151,10 +147,6 @@ class AndroidRemoteView extends StatefulWidget {
   final String name, token;
   final String? desktopId, server;
   final ValueChanged<String>? onAuthenticationEnded;
-
-  /// Fresh assigned inventory only; no display or connection mutation.
-  final Future<DesktopMachine> Function()? refreshSigninDesktop;
-  final bool Function()? signinPromotionAuthorized;
   final bool dualOutputs;
 
   /// The first connection's request; 설정 in the session menu replaces it
@@ -231,8 +223,8 @@ class AndroidRemoteView extends StatefulWidget {
 
   /// After the Host went away (host_disconnected): waits within [limit] for
   /// it to stream again, and past it up to [hostAwayWait] once the Host is
-  /// seen away with the VM running (Windows restarting inside the VM,
-  /// 2026-11-09 edge-case audit); then [onHostAway] is called once.
+  /// seen away with the VM running (Windows restarting inside the VM); then
+  /// [onHostAway] is called once.
   /// Null: the reconnect back-off alone waits (90 s).
   final Future<void> Function(
     bool Function() current,
@@ -665,7 +657,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     });
   }
 
-  /// The card is the one question (2026-11-11: it asked twice): it names the
+  /// The card is the one question, never a second one after it: it names the
   /// accounts and start times of the exact broker offer, and its button
   /// accepts that offer, [shown]. The broker still checks expiry and
   /// occupancy; nothing here releases a connection without that offer.
@@ -1046,64 +1038,6 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     }
   }
 
-  RemoteSession? _signinPromotionSource;
-  int? _signinPromotionRevision;
-  void _watchSigninPromotion() {
-    final source = _session, refresh = widget.refreshSigninDesktop;
-    if (source == null ||
-        !source.signinDesktopReady ||
-        refresh == null ||
-        _loading ||
-        _closing ||
-        _allowPop ||
-        !_inFront ||
-        (identical(source, _signinPromotionSource) &&
-            source.signinRevision == _signinPromotionRevision)) {
-      return;
-    }
-    final revision = source.signinRevision, generation = _generation;
-    final token = widget.token,
-        desktop = widget.desktopId,
-        server = widget.server;
-    final authorized = widget.signinPromotionAuthorized;
-    final deadline = DateTime.now().add(const Duration(seconds: 10));
-    _signinPromotionSource = source;
-    _signinPromotionRevision = revision;
-    bool current() =>
-        mounted &&
-        !_loading &&
-        !_closing &&
-        !_allowPop &&
-        _inFront &&
-        identical(source, _session) &&
-        source.signinDesktopReady &&
-        source.signinRevision == revision &&
-        generation == _generation &&
-        widget.token == token &&
-        widget.desktopId == desktop &&
-        widget.server == server &&
-        identical(widget.refreshSigninDesktop, refresh) &&
-        identical(widget.signinPromotionAuthorized, authorized) &&
-        (authorized?.call() ?? true) &&
-        DateTime.now().isBefore(deadline);
-    unawaited(() async {
-      try {
-        if (desktop == null || !current()) return;
-        final fresh = await waitForOrdinarySigninDesktop(
-          refresh: () => refresh().timeout(deadline.difference(DateTime.now())),
-          current: current,
-          desktopId: desktop,
-        );
-        if (fresh == null || !current()) return;
-        // _options remains the original user intent. Sign-in's audio/device
-        // mask belongs only to its grant, never to the next ordinary request.
-        await _connect();
-      } catch (_) {
-        // Keep this decoded desktop; no uncertain POST is retried here.
-      }
-    }());
-  }
-
   void _changed() {
     final authentication = _session?.diagnosticCode;
     if (const {
@@ -1115,7 +1049,6 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
       return;
     }
     if (!mounted) return;
-    _watchSigninPromotion();
     final session = _session;
     if (session?.resizing == true && _pen.active) {
       _penPointerEpoch++;
@@ -1195,8 +1128,8 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   /// once per wait for the network. The engine repeats `available` while
   /// another network than the marked one stays the default (each change of
   /// its capabilities), and a Host that refused (409 while it restarts) is
-  /// not helped by a network: those waits keep their back-off (field
-  /// 2026-11-02: three connects within 2 s while a Host restarted).
+  /// not helped by a network: those waits keep their back-off (otherwise
+  /// three connects could follow within 2 s while a Host restarts).
   void _networkChanged(String event) {
     if (!mounted || _allowPop) return;
     final session = _session;
@@ -1236,7 +1169,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   /// How long this wait has lasted: from the connection the user asked for,
   /// or from the moment a running connection dropped, through every
   /// automatic retry. The list's own clock restarts with each attempt, so
-  /// the time fell back to 00:00 at every retry (inspection, 2026-11-12).
+  /// with it the time would fall back to 00:00 at every retry.
   final _waitClock = Stopwatch();
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
@@ -1247,7 +1180,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   /// available network may still cut it short once (see [_networkChanged]).
   bool _offlineWait = false, _earlyRetry = false;
 
-  /// Restart recovery (host-ready-wait-v1, 2026-11-03): while the broker
+  /// Restart recovery (host-ready-wait-v1): while the broker
   /// restarts each try first waits on it and on the Host
   /// ([AndroidRemoteView.awaitBrokerRestart], at most [restartWaitLimit]),
   /// until one such wait fails; then the back-off alone decides.
@@ -2791,7 +2724,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
 
   /// Said once per view when the Host reports no playback device: long
   /// enough to read, and no action (the administrator adds the device in
-  /// Proxmox, 2026-11-10).
+  /// Proxmox).
   bool _audioMissingShown = false;
   void _watchAudioDevice(RemoteSession? session) {
     if (_audioMissingShown ||
@@ -2809,7 +2742,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     );
   }
 
-  /// Clipboard sharing is automatic and silent, as on Windows (2026-11-03): a
+  /// Clipboard sharing is automatic and silent, as on Windows: a
   /// VM copy lands on this device, a copy made here goes to the VM when the
   /// session is in front. What surfaces is what the PC says too: a paste in
   /// the VM that could not be applied, and sharing that stopped (once).
@@ -2840,9 +2773,9 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
 
   /// A desktop restart under this view (as on Windows): while
   /// [_plannedRestartTimer] runs, the ended stream waits for the desktop and
-  /// reconnects instead of failing. The view no longer asks for one itself
-  /// (the sound-card flow that did was removed 2026-11-10); the Host going
-  /// away with the desktop running starts it ([_hostAwayRestart]).
+  /// reconnects instead of failing. The view never asks for one itself; the
+  /// Host going away with the desktop running starts it
+  /// ([_hostAwayRestart]).
   Timer? _plannedRestartTimer;
   RemoteSession? _plannedRestartFrom;
   static const plannedRestartWait = Duration(minutes: 3);
@@ -2880,8 +2813,8 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     });
   }
 
-  /// A Host update ended the stream (host_update, 2026-11-03, as on
-  /// Windows): while [_hostUpdateTimer] runs the view waits for the update
+  /// A Host update ended the stream (host_update, as on Windows): while
+  /// [_hostUpdateTimer] runs the view waits for the update
   /// and the Host, and reconnects by itself; past it, the manual text.
   Timer? _hostUpdateTimer;
   DateTime? _hostUpdateUntil;
@@ -3363,7 +3296,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   }
 
   /// The session menu's 화면 panel. Windows' 화면 holds window modes a phone
-  /// does not have; here only what a touch screen needs (2026-11-03): the
+  /// does not have; here only what a touch screen needs: the
   /// whole picture again and 화면 이동. Pinch still zooms the local picture.
   /// Explicit zoom buttons remain on TV, where there is no pinch gesture. The size
   /// uses a bounded aspect-preserving size and turns with the device.
@@ -3551,7 +3484,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
 
   /// 입력 방식, from a long press on the cluster's 입력 방식 button (a tap
   /// switches it): the two ways a finger works, and in pointer mode its
-  /// 포인터 속도 (2026-11-03: out of 화면, shown only where it applies).
+  /// 포인터 속도 (not in 화면; shown only where it applies).
   Widget _inputPanel() => AndroidToolbarPanel(
     key: const Key('android-input-panel'),
     title: l10n.inputMode,
@@ -4864,7 +4797,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
                 );
                 const diameter = AndroidMoveHandle.diameter;
                 // The floating cluster: 키보드, 입력 방식 and 도구 in a row
-                // (2026-11-02: always one tap away). It needs room for that
+                // (always one tap away). It needs room for that
                 // row one way or the other; the dock opens anyway.
                 const clusterLength = 3 * androidBubbleSize;
                 final controlsFit =

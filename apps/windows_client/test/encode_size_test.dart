@@ -118,10 +118,10 @@ void main() {
   });
 
   testWidgets(
-    // 2026-11-02 (tuning backlog #1, "the picture pauses or blacks out while
-    // the window is resized or maximised"): while the size is followed, the
-    // old picture fills the window, scaled, instead of sitting 1:1 in black
-    // (it was never stretched since 2026-10-26); the new size is 1:1 again.
+    // The picture must not pause or black out while the window is resized or
+    // maximised: while the size is followed, the old picture fills the
+    // window, scaled, instead of sitting 1:1 in black; the new size is 1:1
+    // again.
     'While the remote size changes the old picture fills the window until the new one is decoded',
     (tester) async {
       tester.view.devicePixelRatio = 1;

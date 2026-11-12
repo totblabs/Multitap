@@ -127,8 +127,8 @@ Rect androidBubbleRect(Rect area, AndroidBubbleEdge edge, double along) =>
 /// in the hinge). Everything is in the coordinates of [size]. With
 /// [bottom] the band is the bottom edge's instead (the tool dock).
 /// A phone on its side (shorter than 500 dp): the 화면 panel lays its groups
-/// out in two columns without a title row, so it fits the height (backlog
-/// 2026-11-02: it scrolled in its card).
+/// out in two columns without a title row, so it fits the height instead of
+/// scrolling in its card.
 bool androidPanelBeside(Size size) =>
     size.width > size.height && size.height < 500;
 
@@ -581,8 +581,7 @@ class AndroidSessionBarState extends State<AndroidSessionBar> {
     final latency = _hasLatency ? widget.latencyMs : null;
     final word = SessionChrome.latencyWord(latency);
     final entries = SessionTool.ordered(widget.actions, (m) => m.label);
-    // Commands outside the vocabulary (the console's own) keep their
-    // place without a caption.
+    // Commands outside the vocabulary keep their place without a caption.
     int groupOf(SessionToolbarMenu menu) {
       final tool = SessionTool.named(menu.label);
       return tool == null
@@ -1151,8 +1150,8 @@ class _AndroidPanelBack extends InheritedWidget {
 
 /// The amber button group and the buttons inside a session panel follow the
 /// device's text size up to 130 %. They are fixed targets beside the picture:
-/// at 200 % their words broke in the middle ("포인 / 터", "다시 연 / 결",
-/// "Pointe / r") and the group lost its icons (inspection, 2026-11-12).
+/// at 200 % their words break in the middle ("포인 / 터", "다시 연 / 결",
+/// "Pointe / r") and the group loses its icons.
 /// Titles, captions, notes and menu rows keep the device's full size.
 const androidButtonTextScaleCap = 1.3;
 
@@ -1813,44 +1812,6 @@ class _Cell extends StatelessWidget {
   }
 }
 
-/// A 48 dp round amber button floating over the remote picture (e.g. the
-/// emergency console's keyboard).
-class AndroidFloatingButton extends StatelessWidget {
-  const AndroidFloatingButton({
-    super.key,
-    required this.icon,
-    required this.onPressed,
-  });
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  static const diameter = 48.0;
-
-  @override
-  Widget build(BuildContext context) {
-    final chrome = SessionChrome.of(context);
-    return SizedBox.square(
-      dimension: diameter,
-      child: Material(
-        color: _amber.withValues(alpha: .92),
-        shape: const CircleBorder(),
-        elevation: 4,
-        shadowColor: chrome.shadow,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          highlightColor: chrome.pressed,
-          onTap: () {
-            unawaited(HapticFeedback.selectionClick());
-            onPressed();
-          },
-          child: Icon(icon, size: 22, color: _amberInk),
-        ),
-      ),
-    );
-  }
-}
-
 /// A round handle that moves the visible part of a zoomed picture: dragging
 /// it pans, nothing is sent. TalkBack gets four "보기" actions.
 class AndroidMoveHandle extends StatelessWidget {
@@ -1891,45 +1852,6 @@ class AndroidMoveHandle extends StatelessWidget {
             size: 22,
             color: _amberInk,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A keyboard toggle floating over the emergency console's picture. Its
-/// view owns keyboard visibility, so this 48 dp control never moves focus
-/// or opens an input connection itself.
-class AndroidKeyboardButton extends StatelessWidget {
-  const AndroidKeyboardButton({
-    super.key,
-    required this.keyboardOpen,
-    required this.onPressed,
-  });
-
-  final bool keyboardOpen;
-  final VoidCallback onPressed;
-
-  static const diameter = AndroidFloatingButton.diameter;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = keyboardOpen ? l10n.closeKeyboard : l10n.openKeyboard;
-    return Semantics(
-      label: label,
-      button: true,
-      enabled: true,
-      toggled: keyboardOpen,
-      onTap: onPressed,
-      excludeSemantics: true,
-      child: Tooltip(
-        message: label,
-        excludeFromSemantics: true,
-        child: AndroidFloatingButton(
-          icon: keyboardOpen
-              ? Icons.keyboard_hide_rounded
-              : Icons.keyboard_rounded,
-          onPressed: onPressed,
         ),
       ),
     );

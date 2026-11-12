@@ -420,7 +420,7 @@ void main() {
     expect(find.text('설정'), findsWidgets);
     expect(_key('account-language'), findsOneWidget);
     expect(_key('language-auto'), findsOneWidget);
-    // A plain heading and plain rows (2026-11-11): no gear in a circle by
+    // A plain heading and plain rows: no gear in a circle by
     // the title, no icon before 언어 or any other row. The close × is the
     // only icon left in the window.
     final dialog = _key('app-settings-dialog');

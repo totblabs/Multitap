@@ -7,15 +7,15 @@ import android.media.AudioManager
 import android.os.Handler
 
 /**
- * Audio focus of a stream's VM sound (2026-11-10). Before this the track never asked for focus: a phone call, a
- * voice call app or another player's sound mixed with the VM's at full volume.
+ * Audio focus of a stream's VM sound. Without it a phone call, a voice call app or another player's sound
+ * mixes with the VM's at full volume.
  *
- * Now a stream with audio holds AUDIOFOCUS_GAIN like a video player (another player pauses). The stream never
+ * A stream with audio holds AUDIOFOCUS_GAIN like a video player (another player pauses). The stream never
  * stops for focus; only the track's volume follows it:
  *  - a transient loss (a call rings, a voice call app, an exclusive prompt) mutes it until focus returns;
  *  - ducking is left to the platform (willPauseWhenDucked false: Android lowers the track itself);
  *  - a permanent loss (the user started another player) mutes it, and the app asks again when it is shown;
- *  - a refused request keeps the sound as it was before this change (never silent for a refusal alone).
+ *  - a refused request leaves the sound playing without focus (never silent for a refusal alone).
  * A session restart (a resize, a reconnect) releases and takes the track again within moments; focus is given up
  * only [RELEASE_DELAY_MS] after the last track went, so another player does not resume for a moment in between.
  */

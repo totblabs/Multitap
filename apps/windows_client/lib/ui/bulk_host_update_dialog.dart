@@ -158,7 +158,7 @@ class _BulkHostUpdateDialogState extends State<BulkHostUpdateDialog> {
   }
 
   /// The notice above the button says what it does (connections end), so it
-  /// acts at once (2026-11-03: no second question). The controller and each
+  /// acts at once (no second question). The controller and each
   /// broker request recheck assignment and catalog.
   void _submit() {
     final controller = _controller;
@@ -318,7 +318,7 @@ class _BulkHostUpdateDialogState extends State<BulkHostUpdateDialog> {
           ],
         ],
         // Right above the button, and always in view: what it does to open
-        // connections (2026-11-03: bulk disconnects instead of waiting).
+        // connections (a bulk update disconnects instead of waiting).
         footer: controller == null
             ? null
             : Container(

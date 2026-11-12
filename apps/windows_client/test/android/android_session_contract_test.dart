@@ -372,11 +372,9 @@ void main() {
   test(
     'regression: a new Android session does not report the app audio totals again',
     () async {
-      // Fleet triage 2026-11-03: the first streamStats window of every phone
-      // session re-sent the app's totals (preview.58: 156 of 195 underruns,
-      // 88 of 116 overruns; preview.59: 32 of 48 underruns), because each
-      // session started a tracker without baselines while AndroidAudioTrim
-      // keeps counting for the whole app.
+      // The first streamStats window of a phone session must not re-send the
+      // app's totals: a session that starts a tracker without baselines
+      // would, because AndroidAudioTrim keeps counting for the whole app.
       final native = AndroidNativeFake()..install();
       Map<String, Object> counters(int underruns) => {
         'audioEnabled': true,

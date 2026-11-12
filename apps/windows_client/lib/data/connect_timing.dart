@@ -1,4 +1,4 @@
-/// connect-timing-v1 (tuning backlog #2, 2026-11-02): where one connection's
+/// connect-timing-v1: where one connection's
 /// time from 스트리밍 연결 to its first decoded picture goes. Fixed millisecond
 /// stages only, added to the connection's first streamReady record; nothing
 /// decides on them.

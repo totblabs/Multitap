@@ -106,7 +106,7 @@ Future<WorkspaceShell> _login(
 }
 
 Future<BulkHostUpdateDialog> _openFromHeader(WidgetTester t) async {
-  // Host updates have their own header button (2026-11-09), never the app panel.
+  // Host updates have their own header button, never the app panel.
   await t.tap(find.byKey(const Key('open-host-updates')));
   await t.pumpAndSettle();
   expect(find.byType(ProductUpdateDialog), findsNothing);

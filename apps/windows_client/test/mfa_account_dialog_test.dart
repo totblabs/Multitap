@@ -48,7 +48,7 @@ void main() {
     reply.complete(mfaChange()); await tester.pumpAndSettle();
     await _mount(tester, MfaCompletedRecoveryDialog(inbox: f.inbox, onFinished: () => closes++)); await tester.pumpAndSettle();
     expect(find.byKey(const Key('mfa-completed-codes')), findsOneWidget);
-    // Review 2026-11-12: setting it up counted 1/3 and 2/3 and had no 3/3.
+    // Setting it up counts 1/3, 2/3 and this 3/3.
     expect(find.text('3/3 · 복구 코드 보관'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.byKey(const Key('mfa-completed-done'))).onPressed, isNull);
     await tester.ensureVisible(find.byKey(const Key('mfa-completed-saved')));

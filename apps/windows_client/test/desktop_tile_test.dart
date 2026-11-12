@@ -309,12 +309,12 @@ void main() {
       expect(r.checks[1].action, ReadinessAction.reboot);
       expect(r.checks[2].state, CheckState.unknown);
       expect(r.checks[3].state, CheckState.unknown);
-      // A reboot is not the generic fix (2026-10-27): the main button refreshes.
+      // A reboot is not the generic fix: the main button refreshes.
       expect(r.primary, ReadinessAction.refresh);
     });
 
-    // Review 2026-11-12: the verdict said "Host 업데이트 중" / "Windows 시작 중"
-    // while the Host row warned "응답하지 않아요" and offered 다시 시작.
+    // The verdict says "Host 업데이트 중" / "Windows 시작 중": the Host row
+    // must not warn "응답하지 않아요" and offer 다시 시작 meanwhile.
     test('while Windows starts or the Host updates, the Host row waits without 다시 시작', () {
       for (final (state, detail) in [
         ('windows_starting', 'Windows를 시작하고 있어요'),
@@ -362,7 +362,7 @@ void main() {
     });
 
     test('a console holding the VM offers Console 끊고 연결, not a display wait', () {
-      // 2026-11-09: the tile said '가상 모니터를 구성하고 있어요' with no way in.
+      // Not '가상 모니터를 구성하고 있어요' with no way in.
       final r = DesktopReadiness.of(
         vm(
           'a',
@@ -388,7 +388,7 @@ void main() {
           r.primary,
           prep == StreamPreparation.restart
               ? ReadinessAction.reboot
-              // Signed out or locked: the Proxmox console (2026-11-09).
+              // Signed out or locked: the Proxmox console.
               : prep == StreamPreparation.login ||
                     prep == StreamPreparation.locked
               ? ReadinessAction.console
@@ -453,8 +453,7 @@ void main() {
       await t.pumpAndSettle();
       expect(find.byKey(const Key('connect-confirm-dialog')), findsNothing);
       expect(f.opened.map((o) => '$o'), ['pve-149:windowed']);
-      // A click elsewhere on a tile (picture, name, status) does nothing
-      // (2026-10-26: any click connected).
+      // A click elsewhere on a tile (picture, name, status) does nothing.
       for (final spot in [
         find.byKey(const Key('tile-pve-150')),
         find.byKey(const Key('desktop-name-pve-150')),
@@ -514,7 +513,7 @@ void main() {
       expect(find.text('스트리밍 설정…'), findsOneWidget);
       await t.sendKeyEvent(LogicalKeyboardKey.escape);
       await t.pumpAndSettle();
-      // ⏻: 종료, 다시 시작 and 정지, outside ⋯ (2026-10-26).
+      // ⏻: 종료, 다시 시작 and 정지, outside ⋯.
       await t.tap(find.byKey(const Key('desktop-power-pve-149')));
       await t.pumpAndSettle();
       for (final key in [
@@ -529,9 +528,9 @@ void main() {
       }
       await t.sendKeyEvent(LogicalKeyboardKey.escape);
       await t.pumpAndSettle();
-      // ⋯: the checklist; no power. No virtual-monitor count either
-      // (2026-10-26): connecting prepares it, and the session toolbar keeps
-      // its own control.
+      // ⋯: the checklist; no power. No virtual-monitor count either:
+      // connecting prepares it, and the session toolbar keeps its own
+      // control.
       await t.tap(find.byKey(const Key('desktop-more-pve-149')));
       await t.pumpAndSettle();
       expect(find.byKey(const Key('details-pve-149')), findsOneWidget);
@@ -706,7 +705,7 @@ void main() {
   testWidgets(
     'Boot steps after the Host connected are progress, not warnings: a spinner label on the disabled main button, no warning texts',
     (t) async {
-      // windows_login now offers Console at once (2026-11-09).
+      // windows_login offers Console at once.
       for (final (reason, prep, label) in [
         ('display_preparing', StreamPreparation.display, '화면 준비 중'),
         ('session_preparing', StreamPreparation.session, '연결 준비 중'),
@@ -1054,7 +1053,7 @@ void main() {
       expect(t.takeException(), isNull);
     },
   );
-  // 2026-11-09: a VM whose Proxmox QEMU guest agent option is off says so in
+  // A VM whose Proxmox QEMU guest agent option is off says so in
   // the picture's bottom-right corner; other VMs carry no such badge.
   testWidgets('QEMU Agent off badge sits bottom-right on that VM only', (t) async {
     await _show(t, [vm('pve-1', qemuAgentOff: true), vm('pve-2', name: 'OTHER')]);

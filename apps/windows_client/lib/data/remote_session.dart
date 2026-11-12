@@ -160,7 +160,6 @@ class NativeRemoteMedia
     this.audioEnabled = true,
     this.losslessTiles = false,
     this.hardwareDecode = true,
-    this.thumbnailAllowed = true,
     this.textInputAllowed = false,
   });
   final bool audioEnabled;
@@ -168,10 +167,6 @@ class NativeRemoteMedia
   /// Immutable ordinary-session grant. Missing/false keeps native capture's
   /// released key-only shape, including Android and independent outputs.
   final bool textInputAllowed;
-
-  /// False is an irreversible native-window privacy latch, not a per-decoder
-  /// hint. Ordinary media omit the field and retain their existing behavior.
-  final bool thumbnailAllowed;
 
   /// audio-opus-v1: the runner decodes the audio packets as Opus; the released
   /// PCM start arguments otherwise.
@@ -349,37 +344,11 @@ class NativeRemoteMedia
     try {
       final response = await _channel.invokeMethod<Object?>(method, {
         'lease': lease,
-        if (!thumbnailAllowed) 'thumbnailAllowed': false,
         ...arguments,
       });
       final decoded = decode(response);
       if (_activeLease != lease || generation != _generation) {
         throw PlatformException(code: 'session_replaced');
-      }
-      if (!thumbnailAllowed) {
-        // Older runners can ignore an unknown start argument. A durable revoke
-        // plus the new lease-bound latch acknowledgement is mandatory; an
-        // echoed argument or a texture ID alone never proves this barrier.
-        await _revokeThumbnailLease(lease);
-        if (_activeLease != lease || generation != _generation) {
-          throw PlatformException(code: 'session_replaced');
-        }
-        final bool? locked;
-        try {
-          locked = await _channel
-              .invokeMethod<bool>('thumbnailPrivacyLocked', {'lease': lease})
-              .timeout(const Duration(seconds: 2));
-        } on MissingPluginException {
-          throw PlatformException(code: 'thumbnail_privacy_unknown');
-        } on TimeoutException {
-          throw PlatformException(code: 'thumbnail_privacy_unknown');
-        }
-        if (_activeLease != lease || generation != _generation) {
-          throw PlatformException(code: 'session_replaced');
-        }
-        if (locked != true) {
-          throw PlatformException(code: 'thumbnail_privacy_unknown');
-        }
       }
       return decoded;
     } catch (_) {
@@ -705,46 +674,14 @@ class RemoteSession extends ChangeNotifier {
              losslessTiles: true,
              hardwareDecode:
                  connection.hardwareDecode ?? DecodeSettings.hardwareDecode,
-             thumbnailAllowed: connection.signin == null,
              textInputAllowed:
-                 connection.textInput &&
-                 connection.trackPlan == null &&
-                 connection.signin == null,
+                 connection.textInput && connection.trackPlan == null,
            ),
        _dialer = dialer ?? _dial,
        _resumeDialer = resumeDialer ?? _dialResume,
        _clock = clock ?? (Stopwatch()..start()),
-       _observabilityEnabled = observe ?? StreamObservability.enabled {
-    if (connection.signin != null &&
-        (!connection.epochMedia ||
-            connection.trackPlan != null ||
-            connection.options.monitor != '0')) {
-      throw const FormatException('Unsupported sign-in stream output.');
-    }
-    if (connection.signin != null &&
-        _media is NativeRemoteMedia &&
-        (_media).thumbnailAllowed) {
-      throw const FormatException('Native sign-in privacy latch is required.');
-    }
-  }
+       _observabilityEnabled = observe ?? StreamObservability.enabled;
   final BrokerConnection connection;
-  late final SigninStreamState? _signin = connection.signin == null
-      ? null
-      : SigninStreamState(
-          sessionId: connection.sessionId,
-          initial: connection.signin!,
-        );
-  bool _signinPrivacyReady = false;
-  SigninRedirectOwner? _signinRedirectOwner;
-  bool get _userPhase => _signin == null || _signin.redirectsAllowed;
-  SigninPhase? get signinPhase => _signin?.binding.phase;
-  int? get signinRevision => _signin?.revision;
-  bool get signinDesktopReady =>
-      _signin != null &&
-      _signin.active &&
-      _signin.binding.phase == SigninPhase.desktop &&
-      frameReady &&
-      !_closed;
   final StreamAdmissionQuery? capacity;
   late DecoderLimits? _activeDecoderLimits = connection.streamSize;
   bool _capacityPending = false;
@@ -1139,9 +1076,7 @@ class RemoteSession extends ChangeNotifier {
   int? _initialFrameDeadlineUs;
   int? _initialPreparationDeadlineUs;
   bool get frameReady =>
-      !_closed &&
-      (_signin == null || _signin.active) &&
-      (_tracks == null ? !_initialFramePending : _tracks.ready);
+      !_closed && (_tracks == null ? !_initialFramePending : _tracks.ready);
   final _inputObservation = SessionInputObservation();
 
   /// A tip must not interrupt a remotely held key or mouse button.
@@ -1348,7 +1283,6 @@ class RemoteSession extends ChangeNotifier {
       _resize != null || _outputChange != null || _capacityPending;
   bool get canResizeTracks => connection.profileTracks && _tracks != null;
   bool get canResizeViewport =>
-      _userPhase &&
       connection.epochMedia &&
       connection.viewportProvisioning &&
       (connection.initialViewport == null || frameReady) &&
@@ -1459,8 +1393,7 @@ class RemoteSession extends ChangeNotifier {
 
   /// relative-mouse-v1 was granted. Without cursor-v1 nothing says when the
   /// remote cursor is hidden, so nothing can start capture.
-  bool get relativeMouse =>
-      _userPhase && connection.relativeMouse && cursorSeparated;
+  bool get relativeMouse => connection.relativeMouse && cursorSeparated;
 
   /// cursor-echo-v1 was granted (with cursor-v1 and relative-mouse-v1, one
   /// output): [echoCursor] asks the Host for the VM's real cursor position as
@@ -1609,7 +1542,6 @@ class RemoteSession extends ChangeNotifier {
   /// the streamed output to [displayScaleWanted] (independent outputs: of
   /// every owned output, only with display-scale-outputs-v1).
   bool get displayScaleSupported =>
-      _userPhase &&
       (connection.displayScaleControl || connection.displayScale != null) &&
       (_tracks == null || connection.displayScaleOutputs);
 
@@ -1810,8 +1742,7 @@ class RemoteSession extends ChangeNotifier {
     }
     final revision = _cursorStateRevision;
     final mediaRevision = _mediaRevision, mediaEpoch = _epoch;
-    final topology = _tracks?.topology, phaseRevision = _signin?.revision;
-    final userPhase = _userPhase;
+    final topology = _tracks?.topology;
     bool current({bool retry = false}) =>
         !_closed &&
         _closing == null &&
@@ -1820,11 +1751,8 @@ class RemoteSession extends ChangeNotifier {
         mediaRevision == _mediaRevision &&
         mediaEpoch == _epoch &&
         topology == _tracks?.topology &&
-        phaseRevision == _signin?.revision &&
-        userPhase == _userPhase &&
         (!retry ||
-            (userPhase &&
-                !resizing &&
+            (!resizing &&
                 !_trackDecoderStarting &&
                 (_tracks != null || !_awaitingKeyFrame) &&
                 !cursorSettling));
@@ -1995,7 +1923,6 @@ class RemoteSession extends ChangeNotifier {
   Future<bool> _replacePrint() async {
     final previous = printer, url = connection.printWebSocketUrl;
     if (_closed ||
-        !_userPhase ||
         previous == null ||
         !previous.closed ||
         url == null) {
@@ -2016,7 +1943,6 @@ class RemoteSession extends ChangeNotifier {
   Future<bool> _replaceDrive() async {
     final previous = drive, factory = driveFactory;
     if (_closed ||
-        !_userPhase ||
         previous == null ||
         !previous.closed ||
         factory == null) {
@@ -2035,7 +1961,6 @@ class RemoteSession extends ChangeNotifier {
   Future<bool> _replaceUsb() async {
     final previous = usb, factory = usbFactory;
     if (_closed ||
-        !_userPhase ||
         previous == null ||
         !previous.closed ||
         factory == null) {
@@ -2049,7 +1974,7 @@ class RemoteSession extends ChangeNotifier {
     } on TimeoutException {
       return false;
     }
-    if (_closed || !_userPhase || !identical(usb, previous)) return true;
+    if (_closed || !identical(usb, previous)) return true;
     previous.removeListener(_usbChanged);
     previous.recovering = false;
     // The devices that were connected then, if they are still plugged in.
@@ -2127,11 +2052,8 @@ class RemoteSession extends ChangeNotifier {
   RemoteInputGate? _ownedInputGate;
   RemoteInputGate get _inputGate => _ownedInputGate ??= _makeInputGate();
   RemoteInputGate _makeInputGate() {
-    // The closure belongs to the observed phase, not whatever phase happens to
-    // be current when a delayed clipboard preparation finally completes.
-    final phaseOwner = _signin?.inputOwner;
     return RemoteInputGate(
-      send: (event) => _sendInput(event, owner: phaseOwner),
+      send: _sendInput,
       pasteEnabled: () =>
           !_closed &&
           !resizing &&
@@ -2150,11 +2072,6 @@ class RemoteSession extends ChangeNotifier {
         if (us > _gateWaitMaxUs) _gateWaitMaxUs = us;
       },
     );
-  }
-
-  void _retirePhaseInputGate() {
-    _ownedInputGate?.reset();
-    _ownedInputGate = null;
   }
 
   void _clipboardChanged() {
@@ -2209,8 +2126,7 @@ class RemoteSession extends ChangeNotifier {
           notifyListeners();
         } else {
           if (event['event'] == 'text' &&
-              (connection.signin != null ||
-                  !textInput ||
+              (!textInput ||
                   !validTextInputMessage(event) ||
                   !captured ||
                   _closed ||
@@ -2232,9 +2148,7 @@ class RemoteSession extends ChangeNotifier {
         }
       }, onError: (_) => _fail(l10n.couldntPrepareKeyboardInputSo));
       _lastMediaUs = _lastArrivalUs = _clock.elapsedMicroseconds;
-      if (connection.initialViewport != null ||
-          connection.profileTracks ||
-          _signin != null) {
+      if (connection.initialViewport != null || connection.profileTracks) {
         _initialPreparationDeadlineUs = _lastMediaUs + 90000000;
       }
       _lastVideoUs = _lastDecodedUs = _lastMediaUs;
@@ -2324,11 +2238,6 @@ class RemoteSession extends ChangeNotifier {
               (!cursorRecord && message[0] != 1 && message[0] != 2)) {
             throw const FormatException();
           }
-          if (_signin != null &&
-              !_signin.active &&
-              (!_signin.infoAccepted || !_signinPrivacyReady)) {
-            continue;
-          }
           if (connection.epochMedia &&
               ((_resize != null && !_resize!.decoderStarted) ||
                   wireEpoch < _epoch)) {
@@ -2373,19 +2282,13 @@ class RemoteSession extends ChangeNotifier {
           }
           if (adaptiveBitrate) _noteArrival(message, wireEpoch, arrivedUs);
           if (message[0] == 1) _noteVideoArrival(arrivedUs);
-          final firstSigninIdr =
-              _signin != null &&
-              !_signin.active &&
-              signinIdrPacket(message, wireEpoch);
           if (_awaitingKeyFrame) {
             if (message[0] == 2) {
               receivedBytes += message.length;
               _lastMediaUs = _clock.elapsedMicroseconds;
               continue;
             }
-            if (message[0] != 1 ||
-                (message[1] & 1) == 0 ||
-                (_signin != null && !_signin.active && !firstSigninIdr)) {
+            if (message[0] != 1 || (message[1] & 1) == 0) {
               continue;
             }
             _awaitingKeyFrame = false;
@@ -2425,9 +2328,6 @@ class RemoteSession extends ChangeNotifier {
             latency.pushed(pts, _clock.elapsedMicroseconds);
           } else {
             await _pushMedia(() => _media.push(packet));
-          }
-          if (firstSigninIdr) {
-            _signin.acceptedIdr(wireEpoch);
           }
           if (_composeHeld != null && packet[0] == 1) {
             _composeVideo(_packetPts(packet));
@@ -2693,148 +2593,7 @@ class RemoteSession extends ChangeNotifier {
     }
   }
 
-  Future<void> _retireSigninRedirects() async {
-    _signinRedirectOwner = null;
-    _clipboardReconnectTimer?.cancel();
-    _clipboardReconnectTimer = null;
-    final oldClipboard = clipboard,
-        oldDrive = drive,
-        oldUsb = usb,
-        oldPrint = printer;
-    oldClipboard?.removeListener(_clipboardChanged);
-    oldDrive?.removeListener(_driveChanged);
-    oldUsb?.removeListener(_usbChanged);
-    oldPrint?.removeListener(_printerChanged);
-    _printRedial.reset();
-    _driveRedial.reset();
-    _usbRedial.reset();
-    clipboard = null;
-    drive = null;
-    usb = null;
-    printer = null;
-    // A timeout is uncertainty, not permission to overlap a new owner.
-    await Future.wait([
-      if (oldClipboard != null)
-        oldClipboard.close().timeout(const Duration(seconds: 6)),
-      if (oldDrive != null)
-        oldDrive.close().timeout(const Duration(seconds: 6)),
-      if (oldUsb != null) oldUsb.close().timeout(const Duration(seconds: 6)),
-      if (oldPrint != null)
-        oldPrint.close().timeout(const Duration(seconds: 6)),
-    ]);
-  }
-
-  Future<void> _signinPrepare(Map<String, dynamic> event) async {
-    final phase = _signin!;
-    if (!phase.prepare(event, _clock.elapsedMicroseconds)) return;
-    final revision = phase.revision;
-    _mediaRevision++;
-    _captureRevision++;
-    _signinPrivacyReady = false;
-    _initialFramePending = true;
-    _initialFrameDeadlineUs = null;
-    _initialPreparationDeadlineUs = phase.preparationDeadlineUs;
-    _retirePhaseInputGate();
-    _discardPointerInput?.call();
-    captured = false;
-    _caretWatching = false;
-    caretUpdates.value = null;
-    final resize = _resize;
-    _resize = null;
-    if (resize != null && !resize.done.isCompleted) resize.done.complete(false);
-    _viewportFrameTimer?.cancel();
-    _releaseHeldPicture(now: true);
-    _endComposeHold();
-    _closeUdp();
-    textureId = null; // Never hold the unlocked desktop over a locked screen.
-    status = l10n.preparingSwitchWindowsDisplay;
-    notifyListeners();
-    if (_media is! RemoteThumbnailPrivacy) {
-      throw PlatformException(code: 'thumbnail_privacy_unknown');
-    }
-    await Future.wait([
-      _retireSigninRedirects(),
-      _media.capture(false).timeout(const Duration(seconds: 2)),
-      (_media as RemoteThumbnailPrivacy).clearThumbnail().timeout(
-        const Duration(seconds: 2),
-      ),
-    ]);
-    if (_closed || phase.closed || revision != phase.revision) return;
-    _inputObservation.observe({'type': 'input.reset'});
-    await _media.stop().timeout(const Duration(seconds: 2));
-  }
-
-  Future<void> _signinInfo(Map<String, dynamic> event) async {
-    final phase = _signin!,
-        frame = phase.acceptInfo(event, _clock.elapsedMicroseconds);
-    if (frame == null) return;
-    final revision = phase.revision;
-    if (frame.resize) {
-      if ((clipboard != null ||
-              drive != null ||
-              usb != null ||
-              printer != null) &&
-          !phase.retainsRedirects(_signinRedirectOwner)) {
-        throw const FormatException('Retired desktop channel owner.');
-      }
-      _mediaRevision++;
-      _captureRevision++;
-      _retirePhaseInputGate();
-      _discardPointerInput?.call();
-      captured = false;
-      _caretWatching = false;
-      caretUpdates.value = null;
-      _inputObservation.observe({'type': 'input.reset'});
-      await _media.capture(false).timeout(const Duration(seconds: 2));
-      if (_closed || phase.closed || revision != phase.revision) return;
-    }
-    _epoch = frame.binding.mediaScope.epoch;
-    _initialFramePending = true;
-    _signinPrivacyReady = false;
-    var decoderStarted = false;
-    await _control(
-      frame.info,
-      phaseInfo: true,
-      onPhaseDecoderStarted: () => decoderStarted = true,
-    );
-    if (_closed || phase.closed || revision != phase.revision) return;
-    if (!decoderStarted) {
-      throw const FormatException('Uncorrelated sign-in decoder metadata.');
-    }
-    if (_media is! RemoteThumbnailPrivacy) {
-      throw PlatformException(code: 'thumbnail_privacy_unknown');
-    }
-    // A fresh decoder owns a fresh native thumbnail lease. Retire that target
-    // before the reader can accept even its first sign-in pixel packet.
-    await (_media as RemoteThumbnailPrivacy).clearThumbnail().timeout(
-      const Duration(seconds: 2),
-    );
-    if (_closed || phase.closed || revision != phase.revision) return;
-    _signinPrivacyReady = true;
-    status = phase.binding.phase == SigninPhase.signin
-        ? l10n.preparingWindowsSignScreen
-        : l10n.preparingWindowsDesktop;
-    notifyListeners();
-  }
-
-  Future<void> _control(
-    Map<String, dynamic> event, {
-    bool phaseInfo = false,
-    void Function()? onPhaseDecoderStarted,
-  }) async {
-    if (_signin != null && !phaseInfo) {
-      if (event['type'] == 'stream.phase.prepare') {
-        await _signinPrepare(event);
-        return;
-      }
-      if (event['type'] == 'stream.phase.info') {
-        await _signinInfo(event);
-        return;
-      }
-      if (event['type'] == 'stream.info') {
-        throw const FormatException('Unwrapped sign-in metadata.');
-      }
-    }
+  Future<void> _control(Map<String, dynamic> event) async {
     if (_observabilityEnabled &&
         connection.observability &&
         !resizing &&
@@ -2998,8 +2757,7 @@ class RemoteSession extends ChangeNotifier {
         }
         final pending = _resize;
         if (infoEpoch == _epoch) _udp?.stream(_epoch);
-        if (!phaseInfo &&
-            streamSize &&
+        if (streamSize &&
             pending == null &&
             textureId != null &&
             infoEpoch == _epoch &&
@@ -3010,11 +2768,10 @@ class RemoteSession extends ChangeNotifier {
         }
         if (connection.epochMedia &&
             (infoEpoch < _epoch ||
-                (!phaseInfo && textureId != null && infoEpoch == _epoch))) {
+                (textureId != null && infoEpoch == _epoch))) {
           return;
         }
-        if (!phaseInfo &&
-            pending == null &&
+        if (pending == null &&
             textureId == null &&
             connection.initialViewport != null &&
             !connection.initialViewport!.matchesInfo(
@@ -3058,11 +2815,8 @@ class RemoteSession extends ChangeNotifier {
               event['fpsTarget'] != connection.options.fps) {
             throw const FormatException('Resize geometry mismatch.');
           }
-        } else if ((!phaseInfo && textureId != null) ||
-            infoEpoch !=
-                (phaseInfo
-                    ? _signin!.binding.mediaScope.epoch
-                    : (connection.initialViewport != null ? 1 : _epoch))) {
+        } else if (textureId != null ||
+            infoEpoch != (connection.initialViewport != null ? 1 : _epoch)) {
           throw const FormatException('Unexpected stream initialization.');
         }
         final nextLimits = pending?.decoderLimits ?? _activeDecoderLimits;
@@ -3143,7 +2897,6 @@ class RemoteSession extends ChangeNotifier {
         connectTiming.mark('decoder', _clock.elapsedMicroseconds);
         _initialPreparationDeadlineUs = null;
         _epoch = infoEpoch;
-        if (phaseInfo) onPhaseDecoderStarted?.call();
         _awaitingKeyFrame = true;
         _lastFrames = 0;
         _lastMediaUs = _clock.elapsedMicroseconds;
@@ -3352,7 +3105,7 @@ class RemoteSession extends ChangeNotifier {
         );
         endedByHostLoss = failure.code == 'host_disconnected';
         canRetry = failure.canRetry;
-        // Who took it, when the server says (2026-11-09 edge-case audit).
+        // Who took it, when the server says.
         status = failure.code == 'taken_over'
             ? takenOverMessage(event['detail'], event['by'])
             : failure.message;
@@ -3464,9 +3217,6 @@ class RemoteSession extends ChangeNotifier {
   }
 
   UdpMedia? _inputLeg(Map<String, dynamic> event) {
-    if (_signin != null) {
-      return null; // No unstamped/direct input in this contract.
-    }
     if (_tracks == null) return _udp;
     final id = event['track'];
     if (id is String) return _udpTracks[id];
@@ -3757,7 +3507,6 @@ class RemoteSession extends ChangeNotifier {
       if (textureId != null) {
         final stats = await _media.stats().timeout(const Duration(seconds: 3));
         if (_closed ||
-            (_signin != null && !_signin.active && !_signinPrivacyReady) ||
             !_androidObservation.current(observationEpoch) ||
             (_resize != null && !_resize!.decoderStarted) ||
             _tracks?.preparing == true ||
@@ -3839,12 +3588,6 @@ class RemoteSession extends ChangeNotifier {
             !_awaitingKeyFrame &&
             stats['decodedFrames'] is int &&
             frames > 0) {
-          if (_signin != null) {
-            final acknowledgement = _signin.decoded();
-            if (acknowledgement == null) return;
-            _send(acknowledgement);
-            _retirePhaseInputGate();
-          }
           _initialFramePending = false;
           _initialFrameDeadlineUs = null;
           if (_resize == null) {
@@ -4307,31 +4050,11 @@ class RemoteSession extends ChangeNotifier {
     _feedbackSinceUs = now;
   }
 
-  void _send(Map<String, dynamic> event, {SigninInputOwner? inputOwner}) {
+  void _send(Map<String, dynamic> event) {
     // A socket being replaced (session-resume-v1) takes nothing more.
     if (!_closed && _socket != null && !_resumingTransport) {
       try {
         final observed = event;
-        if (_signin != null) {
-          if (['input', 'input.reset', 'input.fence'].contains(event['type'])) {
-            final wrapped = _signin.wrapInput(
-              event,
-              inputOwner ?? _signin.inputOwner,
-            );
-            if (wrapped == null) return;
-            event = wrapped;
-          }
-          if (!_userPhase &&
-              !{
-                'input.phase',
-                'stream.phase.decoded',
-                'ping',
-                'session.stop',
-                'stream.feedback',
-              }.contains(event['type'])) {
-            return;
-          }
-        }
         final inputLeg = _inputLeg(event);
         final inputEpoch = _tracks == null
             ? _epoch
@@ -4367,7 +4090,7 @@ class RemoteSession extends ChangeNotifier {
     }
   }
 
-  void _sendInput(Map<String, dynamic> event, {SigninInputOwner? owner}) {
+  void _sendInput(Map<String, dynamic> event) {
     if (event['type'] == 'input' && !SessionHumanSource.inputAllowed) return;
     // Recheck at send time too: clipboard preparation can defer a packet.
     if (event['event'] == 'text' &&
@@ -4379,7 +4102,6 @@ class RemoteSession extends ChangeNotifier {
             !_inputReady)) {
       return;
     }
-    if (_signin != null && !_signin.owns(owner)) return;
     final message = _tracks == null ? event : _tracks.input(event);
     if (message == null) return;
     // A sampled event is the same message with one sequence number; it is sent
@@ -4387,16 +4109,13 @@ class RemoteSession extends ChangeNotifier {
     final sample = _closed || _socket == null
         ? null
         : _latency?.sample(message, _clock.elapsedMicroseconds);
-    _send(
-      sample == null ? message : {...message, 'sample': sample},
-      inputOwner: owner,
-    );
+    _send(sample == null ? message : {...message, 'sample': sample});
   }
 
   // print-v1 starts with the first picture, like the clipboard channel.
   void _startPrint() {
     final url = connection.printWebSocketUrl;
-    if (!_userPhase || url == null || printer != null || _closed) return;
+    if (url == null || printer != null || _closed) return;
     printer = _printSession(url, null)..addListener(_printerChanged);
     unawaited(printer!.start());
   }
@@ -4406,7 +4125,6 @@ class RemoteSession extends ChangeNotifier {
   void _startDrive() {
     final factory = driveFactory;
     if (factory == null ||
-        !_userPhase ||
         connection.driveWebSocketUrl == null ||
         drive != null ||
         _closed) {
@@ -4421,7 +4139,6 @@ class RemoteSession extends ChangeNotifier {
   void _startUsb() {
     final factory = usbFactory;
     if (factory == null ||
-        !_userPhase ||
         connection.usbWebSocketUrl == null ||
         usb != null ||
         _closed) {
@@ -4432,8 +4149,6 @@ class RemoteSession extends ChangeNotifier {
   }
 
   void _startClipboard() {
-    if (!_userPhase) return;
-    _signinRedirectOwner ??= _signin?.redirectOwner;
     _startPrint();
     _startDrive();
     _startUsb();
@@ -4461,7 +4176,6 @@ class RemoteSession extends ChangeNotifier {
 
   void _scheduleClipboardReconnect(ClipboardSession previous) {
     if (_closed ||
-        !_userPhase ||
         !frameReady ||
         resizing ||
         !identical(clipboard, previous) ||
@@ -4519,7 +4233,6 @@ class RemoteSession extends ChangeNotifier {
 
   Future<void> _replaceClipboard(ClipboardSession previous) async {
     if (_closed ||
-        !_userPhase ||
         !frameReady ||
         resizing ||
         !identical(clipboard, previous) ||
@@ -4533,7 +4246,6 @@ class RemoteSession extends ChangeNotifier {
       // its outstanding Windows work cannot be made safe by a new handshake.
       await previous.close().timeout(const Duration(seconds: 6));
       if (_closed ||
-          !_userPhase ||
           !frameReady ||
           resizing ||
           !identical(clipboard, previous) ||
@@ -4581,7 +4293,6 @@ class RemoteSession extends ChangeNotifier {
     bool Function()? isCurrent,
     void Function()? onDispatched,
   }) async {
-    final phaseOwner = _signin?.inputOwner;
     if (isCurrent?.call() == false ||
         _clipboardTransferBlocked ||
         _closed ||
@@ -4602,7 +4313,6 @@ class RemoteSession extends ChangeNotifier {
     final beganUs = _clock.elapsedMicroseconds;
     await capture(false);
     if (isCurrent?.call() == false ||
-        (_signin != null && !_signin.owns(phaseOwner)) ||
         _clipboardTransferBlocked ||
         _closed ||
         resizing) {
@@ -4624,7 +4334,6 @@ class RemoteSession extends ChangeNotifier {
         notifyListeners();
       }
       if (isCurrent?.call() == false ||
-          (_signin != null && !_signin.owns(phaseOwner)) ||
           _clipboardTransferBlocked ||
           _closed ||
           resizing ||
@@ -4755,7 +4464,6 @@ class RemoteSession extends ChangeNotifier {
 
   /// User-invoked toolbar shortcuts are scoped to this already authorized session.
   Future<bool> shortcut(String command) async {
-    final phaseOwner = _signin?.inputOwner;
     final keys = switch (command) {
       'windows' => const [0x5B],
       'altTab' => const [0xA4, 0x09],
@@ -4772,12 +4480,10 @@ class RemoteSession extends ChangeNotifier {
       return false;
     }
     await capture(false);
-    if (_clipboardTransferBlocked ||
-        _closed ||
-        (_signin != null && !_signin.owns(phaseOwner))) {
+    if (_clipboardTransferBlocked || _closed) {
       return false;
     }
-    _send({'type': 'input.reset'}, inputOwner: phaseOwner);
+    _send({'type': 'input.reset'});
     for (final down in [true, false]) {
       for (final key in down ? keys : keys.reversed) {
         _sendInput({
@@ -4787,10 +4493,10 @@ class RemoteSession extends ChangeNotifier {
           'scan': 0,
           'down': down,
           'extended': key == 0x5B,
-        }, owner: phaseOwner);
+        });
       }
     }
-    _send({'type': 'input.reset'}, inputOwner: phaseOwner);
+    _send({'type': 'input.reset'});
     return !_closed;
   }
 
@@ -4887,7 +4593,6 @@ class RemoteSession extends ChangeNotifier {
     _send({'type': 'input.reset'});
     if (notifyHost) _send({'type': 'session.stop'});
     _closed = true;
-    _signin?.close();
     _mediaRevision++;
     _captureRevision++;
     final pending = _resize;

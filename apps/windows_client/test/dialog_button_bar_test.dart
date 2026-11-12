@@ -1,7 +1,6 @@
 // The shared dialog button bar (AppDialogActions) and the dialogs built on
-// it never wrap or cut a button label (2026-11-03: a dialog showed
-// "추가하고 다시 / 시작" on two lines in a wide window; that sound-card
-// dialog itself was removed 2026-11-10). Every case
+// it never wrap or cut a button label (such as "추가하고 다시 / 시작" on
+// two lines in a wide window). Every case
 // runs at 360/800/1280/1920 px, text 100/150/200 %, dark and light, with the
 // bundled Pretendard so label widths are the real ones. Widgets only.
 import 'dart:async';
@@ -169,7 +168,7 @@ void main() {
       'a label that would wrap stacks the buttons full width, main action on top, at its intrinsic height',
       (t) async {
         await _loadFonts(t);
-        // 2026-11-03's case: three buttons in a 356 px content width.
+        // Three buttons in a 356 px content width.
         await t.pumpWidget(bar(356, ['닫기', '추가만 하기', '추가하고 다시 시작']));
         final close = t.getRect(find.byKey(const Key('bar-0')));
         final add = t.getRect(find.byKey(const Key('bar-1')));

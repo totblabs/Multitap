@@ -18,6 +18,10 @@ In the development repository, export the release commit to an empty folder and 
 
 In the public working folder, keep only `.git`, replace the contents with the exported files, commit and push. Public commits are always made with the project's public identity: `ToTB` and the GitHub noreply address of the `totblabs` account (`241687781+totblabs@users.noreply.github.com`, the numeric ID is in that account's email settings).
 
+When the release carries pull requests from this repository, add one more `-m` to the commit with a `Co-authored-by: Name <address>` line for each contributor (the address of their pull request's commits), as [CONTRIBUTING.md](../CONTRIBUTING.md) promises.
+
+The public working folder's Git must not convert line endings (`git -C <public working folder> config core.autocrlf false`): the commit has to hold the exported bytes, and some files are CRLF on purpose.
+
 ```powershell
 robocopy <exported folder> <public working folder> /MIR /XD .git
 git -C <public working folder> add -A
@@ -41,7 +45,7 @@ curl.exe -fsSo catalog.json https://<that broker>/api/v1/downloads
 node tools/release/github-release-bundle.mjs stage catalog.json <client version> <Host version> <Android version> <new folder> <installer folder>...
 ```
 
-On GitHub, create a release for tag `vX.Y.Z`, attach all 11 files from the new folder and publish it.
+On GitHub, create a release for tag `vX.Y.Z`, attach the 11 files from the new folder, write the notes (below) and publish it. A finished release shows 14 files: these 11, the two the workflow adds in step 4 and the update feed from step 5.
 
 | Attachment | Contents |
 | --- | --- |
@@ -51,6 +55,27 @@ On GitHub, create a release for tag `vX.Y.Z`, attach all 11 files from the new f
 | `Multitap-<Android>-android-arm64-v8a.apk`, `.apk.verification.json` | Android and its verification receipt |
 | `Multitap-<Android>-android-armeabi-v7a.apk`, `.apk.verification.json` | 〃 |
 | `Multitap-<Android>-android-x86_64.apk`, `.apk.verification.json` | 〃 |
+
+#### Release notes
+
+Write the notes in English first, then Korean, from this release's section of `CHANGELOG.md` and `CHANGELOG.ko.md`. Say only what changes for the people who install and use it, and name each contributor whose pull request the release carries. Start with this table, because the file list alone does not say which of the 14 files a person needs:
+
+```markdown
+## Which file do I need?
+
+| You want | Download |
+| --- | --- |
+| The app for a Windows PC | `Multitap-X.Y.Z-windows-x64.exe` |
+| The app for an Android phone or tablet | `Multitap-X.Y.Z-android-arm64-v8a.apk` (most phones). `armeabi-v7a` is for older 32-bit devices, `x86_64` for emulators and x86 devices |
+| The Host, for each Windows desktop | `Multitap-Host-X.Y.Z-windows-x64.exe` |
+| The server | Nothing from this page. Install it with the one-line command in the README, and update it with `sudo multitap update` |
+
+The `.json` files and the `.tar.gz` are for the updater and the server image. You do not need them.
+
+A server you already run offers the same apps and Host on its own download page (`/download`).
+```
+
+Use each product's own version in the file names when they differ from the release's.
 
 ### 4. Watch the workflow
 

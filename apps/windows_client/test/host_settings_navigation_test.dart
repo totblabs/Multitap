@@ -328,7 +328,7 @@ void main() {
           findsOneWidget,
         );
         // A dot and its word at the right only where the area needs
-        // something; a fine area says nothing more (2026-11-11).
+        // something; a fine area says nothing more.
         final fine = row.state == HostSetupState.complete;
         if (!fine) flagged++;
         expect(
@@ -398,7 +398,7 @@ void main() {
         };
       await show(tester, api);
       // A page that is fine shows only its title; one that needs the user
-      // carries ONE amber status (2026-11-11: no "● 정상" pills).
+      // carries ONE amber status (no "● 정상" pills).
       for (final (page, words) in [
         (1, null),
         // Auto-login off is a setup step.

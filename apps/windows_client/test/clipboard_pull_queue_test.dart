@@ -22,7 +22,7 @@ class _QueueClipboard extends onpaste.OnPasteClipboard
   int pullDepth = 1;
 }
 
-// The relay's pull queue (pull-queue-4-v1, 2026-11-02): a paste reads files one after another and each pull was a round trip, one at
+// The relay's pull queue (pull-queue-4-v1): a paste reads files one after another and without it each pull is a round trip, one at
 // a time. With the queue the session sends up to four pulls at once (the offering side serves them in order), and serves the Host's
 // queued pulls in order instead of refusing all but one.
 void main() {

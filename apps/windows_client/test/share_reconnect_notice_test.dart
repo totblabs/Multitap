@@ -1,6 +1,6 @@
-// Review 2026-11-12: after a client-side reconnect (다시 연결, a new quality,
-// another screen mode) the USB devices came back with a line, while the
-// shared folders were gone without a word. A new session never shares a
+// After a client-side reconnect (다시 연결, a new quality, another screen
+// mode) the USB devices come back with a line, and the shared folders must
+// not be gone without a word. A new session never shares a
 // folder by itself, so the window says once that their sharing ended; and two
 // "ended" notices at the same moment are shown together, not only the last.
 // RemoteView with memory sessions (as usb_reconnect_test); no file system,

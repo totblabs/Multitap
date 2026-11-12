@@ -300,41 +300,87 @@ test('NAT help uses actual Docker host port and labels preflight target as unapp
   assert.equal(Object.hasOwn(f.writes[0].body.config, 'dockerPorts'), false);
 });
 
-test('A Docker Compose install writes its .env lines instead of an apply it cannot do', async t => {
-  const compose = extra => ({ protocol: 'server-access-v1', revision: 'bootstrap', applied: null, pending: null, supported: false,
-    errorCode: 'server_access_unavailable', managementOrigin: 'http://192.0.2.10:18480', deploymentKind: 'docker', ...extra });
-  const f = fixture(t, { snapshot: compose() });
-  const env = () => f.find('[data-access-env]').textContent;
-  // The first setup's own address is the HTTP suggestion.
-  assert.equal(env(), 'MULTITAP_PUBLIC_ORIGIN=\nMULTITAP_HTTP_ORIGIN=http://192.0.2.10:18480\nMULTITAP_ALLOW_INSECURE_HTTP=1\nMULTITAP_PUBLISH_PORT=0.0.0.0:18480');
-  // The same change as one command for a server installed with install.sh (multitap address).
-  const command = () => f.find('[data-access-command]').textContent;
-  assert.equal(command(), 'multitap address http://192.0.2.10:18480');
-  assert.equal(f.find('[data-access-http-warning]').hidden, false);
-  assert.match(f.find('[data-access-http-warning]').textContent, /암호화되지 않아요/);
-  assert.equal(f.find('[data-access-test]'), null); assert.equal(f.find('[data-access-save]'), null);
-  f.change('compose.https', 'https://vdi.example.com');
-  assert.match(env(), /^MULTITAP_PUBLIC_ORIGIN=https:\/\/vdi\.example\.com\nMULTITAP_HTTP_ORIGIN=http:\/\/192\.0\.2\.10:18480\n/);
-  assert.equal(command(), 'multitap address https://vdi.example.com http://192.0.2.10:18480');
-  assert.equal(f.find('[data-access-proxy-hint]').hidden, false);
-  f.change('compose.http', '');
-  assert.equal(env(), 'MULTITAP_PUBLIC_ORIGIN=https://vdi.example.com\nMULTITAP_HTTP_ORIGIN=\nMULTITAP_ALLOW_INSECURE_HTTP=0');
-  assert.equal(f.find('[data-access-http-warning]').hidden, true);
-  // A bare name gets https://; a path is still refused.
-  f.change('compose.https', 'vdi.example.com');
-  assert.equal(env(), 'MULTITAP_PUBLIC_ORIGIN=https://vdi.example.com\nMULTITAP_HTTP_ORIGIN=\nMULTITAP_ALLOW_INSECURE_HTTP=0');
-  f.change('compose.https', 'vdi.example.com/admin');
-  assert.equal(env(), ''); assert.match(f.find('[data-access-env-error]').textContent, /HTTPS 주소를 확인하세요/);
-  f.find('[data-access-env-copy]').click(); await flush();
-  assert.match(f.find('[data-access-copy-status]').textContent, /Ctrl\+C/);
-  assert.equal(f.writes.length, 0, 'nothing is sent to the server');
+// A Docker Compose install without an updater applies a save itself
+// (src/self-access.mjs): what its status carries beside the usual fields.
+const dockerFixed = (extra = {}) => ({ listenHost: '0.0.0.0', listenPort: 18480, httpsMode: 'proxy', certFile: null, keyFile: null, idlePorts: { https: 18443, http: 18481 },
+  publishedPort: 18480, publishedHost: '0.0.0.0', serverAddress: '192.0.2.10', ...extra });
+const dockerPolicy = (http = {}, https = {}) => ({ protocol: 'server-access-v1', primaryOrigin: 'http://192.0.2.10:18480',
+  https: { enabled: false, origin: null, mode: 'proxy', listenHost: '0.0.0.0', listenPort: 18443, certFile: null, keyFile: null, ...https },
+  http: { enabled: true, origin: 'http://192.0.2.10:18480', listenHost: '0.0.0.0', listenPort: 18480, ...http }, trustedProxies: ['127.0.0.1', '::1'] });
+const docker = (extra = {}) => ({ protocol: 'server-access-v1', revision: rev, applied: dockerPolicy(), pending: null, state: 'idle', managed: true, supported: true, deploymentKind: 'docker', selfManaged: true,
+  managementOrigin: 'http://192.0.2.10:18480', fixed: dockerFixed(), publicIp: { offered: true, follow: false, origin: null }, udpPort: 18481,
+  dockerPorts: ['https', 'http'].map(scheme => ({ hostPort: 18480, containerPort: 18480, protocol: 'tcp', scheme })), ...extra });
 
-  // An install already on both addresses keeps its proxy line.
-  const applied = config(); applied.primaryOrigin = 'https://vdi.example.com'; applied.https.origin = 'https://vdi.example.com';
-  applied.http.enabled = true; applied.http.origin = 'http://192.0.2.10:18480'; applied.trustedProxies = ['172.18.0.1'];
-  f.state.ui = {}; f.setSnapshot(compose({ revision: rev, applied, managementOrigin: 'https://vdi.example.com' }));
-  assert.equal(env(), 'MULTITAP_PUBLIC_ORIGIN=https://vdi.example.com\nMULTITAP_HTTP_ORIGIN=http://192.0.2.10:18480\nMULTITAP_ALLOW_INSECURE_HTTP=1\nMULTITAP_PUBLISH_PORT=0.0.0.0:18480\nMULTITAP_TRUSTED_PROXIES=172.18.0.1');
-  assert.equal(f.find('[data-access-proxy-hint]').hidden, true);
+test('A Docker Compose install edits its addresses on the page; the first setup suggests its own address and saves it as it is', async t => {
+  const f = fixture(t, { snapshot: docker({ applied: null }) });
+  // The same editor as an install with an updater, with test and save; no command to copy.
+  assert.ok(f.find('[data-access-test]')); assert.ok(f.find('[data-access-save]'));
+  assert.equal(f.find('[data-access-env]'), null); assert.equal(f.find('[data-access-command]'), null);
+  assert.equal(f.document.body.textContent.includes('multitap address'), false);
+  // What the container fixes is not a field.
+  for (const name of ['http.listenHost', 'http.listenPort', 'https.listenHost', 'https.listenPort', 'https.mode', 'https.certFile']) assert.equal(f.find('[name="' + name + '"]'), null, name);
+  assert.equal(f.find('[name="http.enabled"]').checked, true); assert.ok(!f.find('[name="https.enabled"]').checked);
+  assert.equal(f.find('[name="http.origin"]').value, 'http://192.0.2.10:18480');
+  assert.equal(f.find('[data-access-fixed="http"]').textContent, 'Docker가 여는 포트 · TCP 18480\n서버 IP로 만든 주소에는 이 포트를 쓰세요.');
+  assert.equal(f.find('[data-access-fixed="https"]'), null);
+  f.find('[data-access-test]').click(); await flush();
+  assert.deepEqual(f.writes[0].body.config, { protocol: 'server-access-v1', primaryOrigin: 'http://192.0.2.10:18480',
+    https: { enabled: false, origin: null, listenHost: '0.0.0.0', listenPort: 18443, mode: 'proxy', certFile: null, keyFile: null },
+    http: { enabled: true, origin: 'http://192.0.2.10:18480', listenHost: '0.0.0.0', listenPort: 18480 }, trustedProxies: [] });
+  // The suggestion was not typed, and it can still be saved.
+  assert.equal(f.find('[data-access-save]').disabled, false);
+  f.find('[data-access-save]').click(); await f.dialogs[0].action(); await flush();
+  assert.deepEqual(f.writes[1], { path: '/server-access/save', method: 'POST', body: { config: f.writes[0].body.config, testId: 'fixture-test', baseRevision: rev, confirm: true } });
+  f.setSnapshot(docker({ revision: nextRev, applied: dockerPolicy({}, {}), state: 'applied', operationId: 'fixture-operation' }));
+  assert.match(f.find('[data-access-draft-status]').textContent, /적용된 것을 확인/);
+  assert.equal(f.find('[data-access-save]').disabled, true);
+});
+
+test('A Docker Compose install keeps the container\'s listener in every change; its own TLS offers no HTTP and a loopback-only port says so', async t => {
+  const f = fixture(t, { snapshot: docker() });
+  assert.equal(f.find('[data-access-save]').disabled, true, 'the applied policy is no edit');
+  assert.equal(f.find('[data-access-draft-status]').textContent, '');
+  f.change('https.enabled', true); f.change('https.origin', 'https://vdi.example.com');
+  assert.equal(f.find('[data-access-fixed="https"]').textContent, '프록시가 보낼 곳 · 서버의 TCP 18480 포트\n같은 서버의 프록시라면 아래 ‘신뢰할 프록시 IP’에 Docker 게이트웨이 IP를 넣으세요.');
+  // An address with another external port (a router maps it) leaves the listener alone.
+  f.find('[data-access-extra-add="http"]').click(); f.change('http.extra.0', 'http://203.0.113.7:8080');
+  f.find('[data-access-test]').click(); await flush();
+  assert.deepEqual(f.writes[0].body.config.https, { enabled: true, origin: 'https://vdi.example.com', listenHost: '0.0.0.0', listenPort: 18480, mode: 'proxy', certFile: null, keyFile: null });
+  assert.deepEqual(f.writes[0].body.config.http, { enabled: true, origin: 'http://192.0.2.10:18480', extraOrigins: ['http://203.0.113.7:8080'], listenHost: '0.0.0.0', listenPort: 18480 });
+  // The real Docker port in the port-forwarding help.
+  f.change('assist.targetIp', '192.0.2.10');
+  assert.match(f.find('[data-access-forward-rows]').textContent, /TCP 8080192\.0\.2\.10:18480/);
+
+  // compose.direct-https.yaml: the broker's own TLS, with the certificate the container mounts.
+  const direct = dockerPolicy({ enabled: false, origin: null, listenPort: 18481 }, { enabled: true, origin: 'https://vdi.example.com', mode: 'direct', listenPort: 18480, certFile: '/etc/multitap/tls/cert.pem', keyFile: '/etc/multitap/tls/key.pem' });
+  direct.primaryOrigin = 'https://vdi.example.com';
+  f.state.ui = {}; f.setSnapshot(docker({ applied: direct, managementOrigin: 'https://vdi.example.com', fixed: dockerFixed({ httpsMode: 'direct', certFile: '/etc/multitap/tls/cert.pem', keyFile: '/etc/multitap/tls/key.pem' }), publicIp: { offered: false, follow: false, origin: null } }));
+  assert.equal(f.find('[name="http.enabled"]').disabled, true); assert.equal(f.find('[name="https.enabled"]').disabled, true);
+  assert.equal(f.find('[data-access-fixed="http"]').textContent, '서버가 직접 HTTPS를 받는 설치에서는 HTTP 주소를 함께 쓸 수 없어요.');
+  assert.match(f.find('[data-access-fixed="https"]').textContent, /서버가 직접 HTTPS를 받아요/);
+  f.change('https.origin', 'https://desk.example.com'); f.change('primaryOrigin', 'https://desk.example.com');
+  f.find('[data-access-test]').click(); await flush();
+  assert.deepEqual(f.writes[1].body.config.https, { enabled: true, origin: 'https://desk.example.com', listenHost: '0.0.0.0', listenPort: 18480, mode: 'direct', certFile: '/etc/multitap/tls/cert.pem', keyFile: '/etc/multitap/tls/key.pem' });
+
+  // Published on loopback only (an HTTPS proxy on the same machine): HTTP is for the server's shell, and nothing follows the public IP.
+  const secure = dockerPolicy({ enabled: false, origin: null, listenPort: 18481 }, { enabled: true, origin: 'https://vdi.example.com', listenPort: 18480 });
+  secure.primaryOrigin = 'https://vdi.example.com';
+  f.state.ui = {}; f.setSnapshot(docker({ applied: secure, managementOrigin: 'https://vdi.example.com', fixed: dockerFixed({ publishedHost: '127.0.0.1' }), publicIp: { offered: false, follow: false, origin: null } }));
+  f.change('http.enabled', true);
+  assert.equal(f.find('[data-access-fixed="http"]').textContent, 'Docker 포트가 서버 안에서만 열려 있어요.\nHTTP 주소는 서버에서 multitap address로 정하세요.');
+  assert.equal(f.find('[data-access-follow]'), null);
+  assert.equal(f.find('[name="http.followPublicIp"]'), null);
+});
+
+test('the answers only a Docker Compose install gives say what to do', async t => {
+  for (const [code, text] of [
+    ['server_access_published_port_conflict', /Docker가 여는 포트를 써야 해요/], ['server_access_published_loopback_conflict', /서버 안에서만 열려 있어요/],
+    ['server_access_direct_tls_http_conflict', /HTTP 주소를 함께 쓸 수 없어요/], ['server_access_public_ip_conflict', /공인 IP 따라가기를 켤 수 없어요/]]) {
+    const f = fixture(t, { snapshot: docker(), handler: () => { const error = Error(code); error.code = code; throw error; } });
+    f.find('[data-access-extra-add="http"]').click(); f.change('http.extra.0', 'http://192.0.2.10:8080');
+    f.find('[data-access-test]').click(); await flush();
+    assert.match(f.find('.server-access-error').textContent, text, code);
+  }
 });
 
 test('HTTP listener follows its external address, shares the HTTPS proxy listener and keeps a typed value', t => {
@@ -564,31 +610,62 @@ test('a rollback because the new address was unreachable says to check it and th
   assert.equal(f.find('[data-access-draft-status]').textContent, '새 주소로 서버에 닿지 못해 이전 설정으로 돌아갔어요.\n주소와 공유기 포트포워딩을 확인하세요.');
 });
 
-test('Docker Compose: the command shows only when it would change the addresses in use', t => {
-  const applied = config(); applied.http = { enabled: true, origin: 'http://192.0.2.10:18480', listenHost: '0.0.0.0', listenPort: 18480 };
-  const compose = extra => ({ protocol: 'server-access-v1', revision: 'bootstrap', applied: null, pending: null, supported: false,
-    errorCode: 'server_access_unavailable', managementOrigin: 'http://192.0.2.10:18480', deploymentKind: 'docker', ...extra });
-  const f = fixture(t, { snapshot: compose() });
-  f.state.ui = {}; f.setSnapshot(compose({ revision: rev, applied }));
-  assert.equal(f.find('[data-access-command-block]').hidden, true, 'nothing to run for the addresses in use');
-  assert.equal(f.find('[data-access-command-same]').hidden, false);
-  assert.match(f.find('[data-access-command-same]').textContent, /지금 이 주소로 열려 있어요/);
-  f.change('compose.http', 'http://192.0.2.10:18480,http://203.0.113.7:18480');
-  assert.equal(f.find('[data-access-command-block]').hidden, false);
-  assert.equal(f.find('[data-access-command-same]').hidden, true);
-  assert.match(f.find('[data-access-command]').textContent, /^multitap address .*http:\/\/192\.0\.2\.10:18480 http:\/\/203\.0\.113\.7:18480$/);
-  assert.equal(f.writes.length, 0);
+test('following the public IP is a switch in the HTTP card of a Docker Compose install; the address it registered has its own line', async t => {
+  const followed = 'http://203.0.113.7:18480';
+  const f = fixture(t, { snapshot: docker({ applied: dockerPolicy({ extraOrigins: [followed], followPublicIp: true }), publicIp: { offered: true, follow: true, origin: followed } }) });
+  assert.equal(f.find('[name="http.followPublicIp"]').checked, true);
+  assert.equal(f.find('[data-access-followed]').textContent, '지금 등록된 주소 · ' + followed);
+  assert.equal(f.find('[name="http.extra.0"]'), null, 'the registered address is no editable row');
+  assert.equal(f.find('[data-access-follow-router]').textContent, '공유기 포트 포워딩 · TCP 18480, UDP 18481 → 이 서버\n포워딩하지 않으면 밖에서는 들어오지 않아요.');
+  assert.match(f.find('[data-access-endpoint="http"]').textContent, /로그인 정보와 화면이 암호화되지 않아요/);
+  assert.equal([...f.find('[name="primaryOrigin"]').options].some(option => option.value === followed), false, 'never the primary address');
+  assert.equal(f.find('[data-access-save]').disabled, true, 'the applied policy is no edit');
+  // It takes one of the extra places: two more rows, then the button stops.
+  f.find('[data-access-extra-add="http"]').click(); f.find('[data-access-extra-add="http"]').click();
+  assert.equal(f.find('[data-access-extra-add="http"]').disabled, true);
+  f.find('[data-access-extra-remove="http.1"]').click(); f.change('http.extra.0', 'http://vdi.example.com:18480');
+  f.find('[data-access-test]').click(); await flush();
+  assert.deepEqual(f.writes[0].body.config.http, { enabled: true, origin: 'http://192.0.2.10:18480', extraOrigins: ['http://vdi.example.com:18480', followed], followPublicIp: true, listenHost: '0.0.0.0', listenPort: 18480 });
+  // Turned off, the address stays as an ordinary one the administrator can delete.
+  f.change('http.followPublicIp', false);
+  assert.equal(f.find('[data-access-followed]'), null); assert.equal(f.find('[data-access-follow-router]'), null);
+  assert.equal(f.find('[name="http.extra.1"]').value, followed);
+  f.find('[data-access-test]').click(); await flush();
+  assert.deepEqual(f.writes[1].body.config.http, { enabled: true, origin: 'http://192.0.2.10:18480', extraOrigins: ['http://vdi.example.com:18480', followed], listenHost: '0.0.0.0', listenPort: 18480 });
+
+  // Turned on where nothing is registered yet: only the switch travels; the server looks the address up.
+  f.state.ui = {}; f.setSnapshot(docker({ udpPort: null }));
+  assert.ok(!f.find('[name="http.followPublicIp"]').checked);
+  assert.equal(f.find('[data-access-follow-router]'), null);
+  f.change('http.followPublicIp', true);
+  assert.equal(f.find('[data-access-followed]').textContent, '아직 등록된 주소가 없어요. 저장하면 바로 확인해요.');
+  assert.equal(f.find('[data-access-follow-router]').textContent, '공유기 포트 포워딩 · TCP 18480 → 이 서버\n포워딩하지 않으면 밖에서는 들어오지 않아요.');
+  f.find('[data-access-test]').click(); await flush();
+  assert.deepEqual(f.writes[2].body.config.http, { enabled: true, origin: 'http://192.0.2.10:18480', followPublicIp: true, listenHost: '0.0.0.0', listenPort: 18480 });
+  assert.equal(f.find('[data-access-save]').disabled, false);
+  // No room left for the address: said where the switch is.
+  f.state.ui = {}; f.setSnapshot(docker({ applied: dockerPolicy({ followPublicIp: true }), publicIp: { offered: true, follow: true, origin: null, errorCode: 'server_access_http_addresses_full' } }));
+  assert.match(f.find('[data-access-follow-full]').textContent, /HTTP 주소가 가득 차서 공인 IP를 등록하지 못했어요/);
+  assert.equal(f.find('[data-access-follow-conflict]'), null);
+  f.state.ui = {}; f.setSnapshot(docker({ applied: dockerPolicy({ followPublicIp: true }), publicIp: { offered: true, follow: true, origin: null, errorCode: 'server_access_public_ip_conflict' } }));
+  assert.match(f.find('[data-access-follow-conflict]').textContent, /다른 HTTP 주소가 하나 있어야 하고/);
+  // The help points at the switch, not at a command.
+  assert.match(steps(f)[1].join('\n'), /‘공인 IP 따라가기’를 켜면/); assert.doesNotMatch(steps(f)[1].join('\n'), /multitap|쉼표/);
 });
-test('Docker Compose takes comma-separated and bare HTTP addresses and shows the outside help', t => {
-  const f = fixture(t, { snapshot: { protocol: 'server-access-v1', revision: 'bootstrap', applied: null, pending: null, supported: false, errorCode: 'server_access_unavailable',
-    managementOrigin: 'http://192.0.2.10:18480', deploymentKind: 'docker', udpPort: 18481 } });
-  const env = () => f.find('[data-access-env]').textContent;
-  f.change('compose.http', '192.0.2.10:18480, 203.0.113.7:18480');
-  assert.equal(env(), 'MULTITAP_PUBLIC_ORIGIN=\nMULTITAP_HTTP_ORIGIN=http://192.0.2.10:18480,http://203.0.113.7:18480\nMULTITAP_ALLOW_INSECURE_HTTP=1\nMULTITAP_PUBLISH_PORT=0.0.0.0:18480');
-  assert.match(steps(f)[1].join('\n'), /쉼표/); assert.match(steps(f)[2].join('\n'), /UDP 18481/);
-  f.change('compose.http', 'http://192.0.2.10:18480,192.0.2.10:18480');
-  assert.equal(env(), ''); assert.match(f.find('[data-access-env-error]').textContent, /겹치지 않게 4개까지/);
-  assert.equal(f.writes.length, 0);
+test('an install with an updater has no public IP switch and keeps its listener fields', async t => {
+  const f = fixture(t);
+  f.change('http.enabled', true); f.change('http.origin', 'http://broker.fixture:18490');
+  assert.equal(f.find('[name="http.followPublicIp"]'), null); assert.equal(f.find('[data-access-follow]'), null);
+  assert.equal(f.find('[data-access-fixed="http"]'), null); assert.equal(f.find('[data-access-fixed="https"]'), null);
+  for (const name of ['http.listenHost', 'http.listenPort', 'https.listenHost', 'https.listenPort', 'https.mode']) assert.ok(f.find('[name="' + name + '"]'), name);
+  assert.equal(f.find('[name="http.listenPort"]').value, '18490', 'the listener still follows the address');
+  f.change('primaryOrigin', 'http://broker.fixture:18490');
+  f.find('[data-access-test]').click(); await flush();
+  assert.equal(Object.hasOwn(f.writes[0].body.config.http, 'followPublicIp'), false);
+  assert.deepEqual(Object.keys(f.writes[0].body.config.http).sort(), ['enabled', 'listenHost', 'listenPort', 'origin']);
+  // A Docker install whose settings an updater applies is the same page (its status carries no `fixed`).
+  f.state.ui = {}; f.setSnapshot(response({ deploymentKind: 'docker', managed: true, supported: true, dockerPorts: [{ hostPort: 18480, containerPort: 18400, protocol: 'tcp', scheme: 'https' }] }));
+  assert.ok(f.find('[name="https.listenPort"]')); assert.equal(f.find('[name="http.followPublicIp"]'), null);
 });
 
 // What the real server and updater send, not a shape only a test knows.
@@ -662,4 +739,79 @@ test('집 밖에서 접속하려면 holds only its steps after an edit (no "null
   f.change('http.enabled', true); f.change('http.origin', 'http://192.0.2.10:18480');
   assert.equal([...f.find('[data-access-outside-steps]').childNodes].every(node => node.nodeType === 1), true);
   assert.doesNotMatch(f.find('[data-access-outside-steps]').textContent, /null/);
+});
+test('a Docker Compose install shows, read-only, whether the screen goes over UDP and where apps and Hosts send', t => {
+  const derived = { running: true, port: 18481, derivedPort: 28481, media: 'on', relays: { host: [], client: [] }, hostRoute: null };
+  const applied = dockerPolicy({ extraOrigins: ['http://203.0.113.7:8080', 'http://[2001:db8::10]:18480'] }, { enabled: true, origin: 'https://vdi.example.com', listenPort: 18480 });
+  const f = fixture(t, { snapshot: docker({ applied, udpMedia: derived }) });
+  const panel = () => f.find('.server-access-udp'), state = () => f.find('[data-access-udp]');
+  assert.equal(panel().querySelector('h2').textContent, 'UDP 화면 전송');
+  assert.equal(state().getAttribute('data-access-udp'), 'derived');
+  assert.equal(state().textContent, '쓰고 있어요.\n앱과 Host는 자기가 접속한 주소의 UDP 28481 포트로 보내요.');
+  // One endpoint per address in use, on the published UDP port; an IPv6 address has none.
+  assert.equal(f.find('[data-access-udp-endpoints]').textContent, '보내는 곳 · vdi.example.com:28481, 192.0.2.10:28481, 203.0.113.7:28481');
+  assert.equal(f.find('[data-access-udp-router]').textContent, '공유기 포트 포워딩 · UDP 28481 → 이 서버\n안 하면 밖에서는 화면이 TCP로 가요.');
+  assert.equal(panel().querySelector('input,textarea,select,button'), null, 'nothing to edit');
+  // The router note of 공인 IP 따라가기 names the same published port.
+  f.change('http.followPublicIp', true);
+  assert.match(f.find('[data-access-follow-router]').textContent, /TCP 18480, UDP 28481 → 이 서버/);
+
+  const lists = { host: [{ host: '192.0.2.10', port: 18481 }, { host: 'vdi.example.com', port: 18481 }], client: [{ host: 'vdi.example.com', port: 18481 }] };
+  for (const [udpMedia, kind, text] of [
+    // MULTITAP_UDP_MEDIA decides while it is set.
+    [{ ...derived, media: 'desktops' }, 'derived', '서버 .env의 MULTITAP_UDP_MEDIA에 정한 데스크톱만 UDP로 보내요.'],
+    [{ ...derived, media: 'off' }, 'derived-off', '꺼 두었어요. 화면은 TCP로 가요.\n서버 .env의 MULTITAP_UDP_MEDIA가 off예요.'],
+    // Relay lists from .env.
+    [{ ...derived, derivedPort: null, relays: lists }, 'configured', '쓰고 있어요.\n서버의 .env에 정한 주소로 보내요.'],
+    [{ ...derived, derivedPort: null, relays: lists, media: 'off' }, 'configured', '주소는 정해져 있지만 화면은 UDP로 보내지 않아요.\n서버 .env의 MULTITAP_UDP_MEDIA를 확인하세요.'],
+    // Nothing to send to: no published UDP port told, one list only, the relay not running, or no relay at all.
+    [{ ...derived, derivedPort: null }, 'off', '쓰지 않아요. 화면은 TCP로 가요.\n서버의 Docker 설정에서 UDP 포트를 확인하세요.'],
+    [{ ...derived, derivedPort: null, relays: { ...lists, client: [] } }, 'off', null], [{ ...derived, running: false }, 'off', null], [null, 'off', null], [undefined, 'off', null],
+  ]) {
+    f.state.ui = {}; f.setSnapshot(docker({ applied, udpMedia }));
+    assert.equal(state().getAttribute('data-access-udp'), kind.replace('-off', ''), JSON.stringify(udpMedia));
+    if (text) assert.equal(state().textContent, text);
+    assert.equal(!!f.find('[data-access-udp-router]'), kind === 'derived');
+    // Turned off, nothing is sent anywhere: no endpoint and no port to forward.
+    if (kind === 'derived-off') assert.equal(f.find('[data-access-udp-endpoints]'), null);
+    if (kind === 'configured') assert.equal(f.find('[data-access-udp-endpoints]').textContent, 'Host가 보내는 곳 · 192.0.2.10:18481, vdi.example.com:18481\n앱이 보내는 곳 · vdi.example.com:18481');
+    if (kind === 'off') assert.equal(f.find('[data-access-udp-endpoints]'), null);
+  }
+  // An install with an updater keeps its page: no such panel, whatever the server reports.
+  f.state.ui = {}; f.setSnapshot(response({ udpMedia: { ...derived, derivedPort: null, relays: lists } }));
+  assert.equal(panel(), null);
+});
+
+test('프록시가 이 서버에 있어요 names the container\'s gateway as a trusted proxy only when it is pressed', async t => {
+  const f = fixture(t, { snapshot: docker({ gateway: '172.18.0.1' }) });
+  const button = () => f.find('[data-access-proxy-here]'), field = () => f.find('[name="trustedProxies"]');
+  assert.equal(button().textContent, '프록시가 이 서버에 있어요'); assert.equal(button().disabled, false);
+  assert.match(button().closest('div').textContent, /이 서버의 프록시가 들어오는 주소\(172\.18\.0\.1\)를 목록에 넣어요/);
+  assert.equal(field().value, '127.0.0.1\n::1', 'nothing is added unasked');
+  assert.equal(f.find('[data-access-save]').disabled, true);
+  // The HTTPS card points at the button instead of naming an address to look up.
+  f.change('https.enabled', true); f.change('https.origin', 'https://vdi.example.com');
+  assert.match(f.find('[data-access-fixed="https"]').textContent, /아래 ‘신뢰할 프록시 IP’에서 ‘프록시가 이 서버에 있어요’를 누르세요/);
+  button().click();
+  assert.equal(field().value, '127.0.0.1\n::1\n172.18.0.1');
+  assert.equal(button().disabled, true, 'once'); assert.equal(button().title, '이미 목록에 있어요.');
+  f.find('[data-access-test]').click(); await flush();
+  assert.deepEqual(f.writes[0].body.config.trustedProxies, ['127.0.0.1', '::1', '172.18.0.1']);
+  // Typed by hand first: the button has nothing to add.
+  f.state.ui = {}; f.setSnapshot(docker({ gateway: '172.18.0.1', applied: { ...dockerPolicy(), trustedProxies: ['172.18.0.1'] } }));
+  assert.equal(button().disabled, true);
+  // Not offered where the server could not read a gateway, where what it reports is no address, or on an install with an updater.
+  for (const snapshot of [docker(), docker({ gateway: null }), docker({ gateway: '172.18.0.0/16' }), response({ gateway: '172.18.0.1' })]) {
+    f.state.ui = {}; f.setSnapshot(snapshot);
+    assert.equal(button(), null); assert.ok(field(), 'the field itself is always there');
+  }
+});
+
+test('a server that started without its saved policy says so on the page, where the addresses are set again', t => {
+  const f = fixture(t, { snapshot: docker({ applied: null, policyUnreadable: 'server_access_state_invalid' }) });
+  assert.equal(f.find('[data-access-unreadable]').textContent, '저장된 접속 설정을 읽지 못해, 서버가 관리자 페이지만 연 채로 켜졌어요.\n주소를 다시 정해 저장하세요. 앱과 Host는 그 뒤에 다시 연결돼요.');
+  assert.equal(f.find('[data-access-unreadable]').getAttribute('role'), 'alert');
+  assert.equal(f.find('[name="http.origin"]').value, 'http://192.0.2.10:18480', 'the address the console is open at is the suggestion');
+  assert.ok(f.find('[data-access-test]')); assert.ok(f.find('[data-access-save]'));
+  for (const snapshot of [docker(), docker({ applied: null }), docker({ policyUnreadable: '' }), response()]) { f.state.ui = {}; f.setSnapshot(snapshot); assert.equal(f.find('[data-access-unreadable]'), null); }
 });

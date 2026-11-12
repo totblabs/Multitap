@@ -304,7 +304,7 @@ void main() {
         ),
       ]);
       expect(_in('card-a', find.text('다른 사용자가 사용 중이에요')), findsOneWidget);
-      // The Windows tile (Android since 2026-11-03): the use in the status
+      // The Windows tile (on Android too): the use in the status
       // card with its sign, the CPU and memory strip kept.
       expect(find.byKey(const Key('desktop-in-use-a')), findsOneWidget);
       expect(find.byKey(const Key('resources-a')), findsOneWidget);

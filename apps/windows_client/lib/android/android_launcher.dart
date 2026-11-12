@@ -274,11 +274,11 @@ class AndroidWorkspaceHeader extends StatelessWidget {
   final SessionActivity? sessionAccess;
   final String account, server;
 
-  /// How many assigned desktops' Hosts can be updated now (2026-11-03: the
-  /// header badges them too, not only each desktop's ⋯).
+  /// How many assigned desktops' Hosts can be updated now (the header badges
+  /// them too, not only each desktop's ⋯).
   final int hostUpdates;
 
-  /// A short landscape phone (backlog 2026-11-02: the header and filters took
+  /// A short landscape phone (a header and filters of their own would take
   /// half the height): the launcher's filters and tools in this one row,
   /// which is then 52 dp tall with icon-only update and account buttons.
   final Widget? middle;
@@ -639,7 +639,7 @@ class AndroidSignInView extends StatelessWidget {
     // HTTP server: 비밀번호 기억 is off and disabled, with one plain line.
     final passwordMemory = !configured || passwordMemoryAllowed(origin);
     final television = AndroidTvScope.of(context);
-    // The same card as the Windows sign-in (2026-11-10 audit): the server as
+    // The same card as the Windows sign-in: the server as
     // one line at its head, two fields with their name inside, the switch,
     // the button. Only the heights are a finger's (48 dp).
     InputDecoration field(String hint, IconData icon) =>
@@ -1009,9 +1009,9 @@ class AndroidSignInView extends StatelessWidget {
                 builder: (context, constraints) {
                   final scale = MediaQuery.textScalerOf(context).scale(1);
                   // The layout follows the screen, not the keyboard: on a
-                  // Fold's inner screen (≈932×704 dp) the open keyboard made
-                  // the form "short landscape", rebuilt the fields, dropped
-                  // their focus and closed the keyboard again (2026-10-26).
+                  // Fold's inner screen (≈932×704 dp) the open keyboard would
+                  // make the form "short landscape", rebuild the fields, drop
+                  // their focus and close the keyboard again.
                   // (The Scaffold removes the inset from the body's
                   // MediaQuery, so it is read from the view.)
                   final view = View.of(context);

@@ -503,8 +503,8 @@ class UdpReceiverTest {
         }
     }
 
-    // The Host's 271 cause 3 (the phone, 2026-11-02: FEEDBACK heard, nothing made whole
-    // for 1 s) watched from this side: when it happens, and which wait it was.
+    // The Host's 271 cause 3 (FEEDBACK heard, nothing made whole for 1 s)
+    // watched from this side: when it happens, and which wait it was.
     @Test fun stallWatch() {
         fun stall(cause: Int, onUdp: Boolean = true, setup: (Client) -> Unit): Client {
             val c = Client()

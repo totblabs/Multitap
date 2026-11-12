@@ -261,7 +261,7 @@ void main() {
     await open(t, api);
     await t.tap(find.byKey(const Key('host-nav-6')));
     await t.pumpAndSettle();
-    // 2026-11-11: no "● 준비됨" badge followed by "준비됐어요." and a
+    // No "● 준비됨" badge followed by "준비됐어요." and a
     // "~할 수 있어요" sentence. One line per feature.
     for (final (id, name, state, fact) in [
       ('drives', '공유 폴더', '설정 필요', 'WinFsp 없음, 4 GB 넘는 파일 불가'),

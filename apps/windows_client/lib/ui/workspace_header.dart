@@ -116,8 +116,7 @@ abstract final class HeaderControl {
 
   /// Host updates (the VMs' and PCs' Host program), never this app's: blue
   /// with a server glyph, so it is not taken for the amber app update
-  /// (2026-11-09: the two looked the same and the user could not tell which
-  /// one an update was for).
+  /// (alike, the user cannot tell which one an update is for).
   static ButtonStyle hostNotice(AppPalette p) => notice(p).copyWith(
     foregroundColor: WidgetStatePropertyAll(p.blue),
     iconColor: WidgetStatePropertyAll(p.blue),
@@ -133,7 +132,7 @@ abstract final class HeaderControl {
   );
 }
 
-/// The launcher's top bar (2026-10-26 rework): the brand on the left; on the
+/// The launcher's top bar: the brand on the left; on the
 /// right only what people need often or must notice — the client update
 /// control and the account menu. The log viewer and the theme/scene choice
 /// live in the account menu. The row follows the page column, so the brand
@@ -174,8 +173,8 @@ class WorkspaceHeader extends StatelessWidget {
   /// A newer client version on this server, or null.
   final String? update;
 
-  /// How many assigned desktops' Hosts can be updated now (2026-11-03: the
-  /// header badges them too, not only each desktop's ⋯).
+  /// How many assigned desktops' Hosts can be updated now (the header badges
+  /// them too, not only each desktop's ⋯).
   final int hostUpdates;
 
   /// Opens the app (client) update panel (null in the design demo).
@@ -218,7 +217,7 @@ class WorkspaceHeader extends StatelessWidget {
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     // The version lives in the account menu's first row and
-                    // its "클라이언트 정보" (2026-10-26: shown twice before).
+                    // its "클라이언트 정보", not here as well.
                     child: Brand(onDark: p.dark),
                   ),
                 ),
@@ -288,8 +287,7 @@ class WorkspaceHeader extends StatelessWidget {
 }
 
 /// The Host program of assigned VMs/PCs: blue, a server glyph, its own label
-/// ("Host 업데이트 N대"). Never shares the amber app-update button
-/// (2026-11-09).
+/// ("Host 업데이트 N대"). Never shares the amber app-update button.
 class _HostUpdateButton extends StatelessWidget {
   const _HostUpdateButton({
     required this.hostUpdates,
@@ -382,8 +380,7 @@ class _UpdateButton extends StatelessWidget {
     }
     if (label == null) return button;
     // The dot is ringed in the header colour so it reads as a badge cut into
-    // the button's corner (2026-10-26: a dot drawn over the icon was hard to
-    // see).
+    // the button's corner (a dot drawn over the icon is hard to see).
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -467,7 +464,7 @@ class _AccountMenu extends StatelessWidget {
         ),
       ],
       // The only way out that does not leave Multitap in the tray: the
-      // window's X hides it there (2026-10-27).
+      // window's X hides it there.
       exit: exit == null
           ? null
           : AccountMenuEntry(

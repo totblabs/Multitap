@@ -47,6 +47,11 @@ enum LogEvent {
 
   /// Local Android print stages only; no document metadata or content.
   print,
+
+  /// A tested server address that could not be saved (local log only; never
+  /// sent): where it stopped and the kind of failure, see
+  /// server_save_log.dart. Never the address or the exception's text.
+  serverSave,
 }
 
 /// A product version as one log number (1.2.3 -> 1002003): log values are
@@ -118,7 +123,7 @@ const logFields = <String>{
   'restored',
   // usb-v1 records (counts only): devices shared, requests served, KiB moved.
   'usbDevices',
-  // usb-v1 stage 15 (2026-11-12): what one listing saw (counts only): devices
+  // usb-v1 stage 15: what one listing saw (counts only): devices
   // UsbDk listed, left out as this PC's own, refused by the policy, and whose
   // descriptors could not be read.
   'usbFound',
@@ -128,7 +133,7 @@ const logFields = <String>{
   'usbUrbs',
   'usbKib',
   'usbClass',
-  // usb-v1 (2026-10-27): requests the VM's device stalled / that failed / timed
+  // usb-v1: requests the VM's device stalled / that failed / timed
   // out / ran longer than 5 s, the class of the first non-OK request
   // (bmRequestType<<8 | bRequest, or 0x10000 | type<<8 | endpoint), and whether
   // Windows took the device back after it was given back (0 unknown, 1 yes, 2 no).
@@ -138,18 +143,21 @@ const logFields = <String>{
   'usbSlow',
   'usbReq',
   'usbBack',
-  // usb-v1 (2026-11-02): the raw Windows USBD_STATUS of that first request.
+  // usb-v1: the raw Windows USBD_STATUS of that first request.
   'usbUsbd',
-  // viewportResult (2026-11-02, tuning backlog #1), milliseconds: this
+  // viewportResult, milliseconds: this
   // client's decoder check before the request, request -> the relay's
   // acknowledgement, request -> the new size's stream.info, its decoder start
   // and decoder start -> the first new picture; then the Host's stages from
   // that stream.info (resize_stages.hpp). elapsedMs is request -> picture.
   ...viewportStageFields,
-  // streamReady (2026-11-03): the stream's audio format (1 PCM, 2 Opus) and,
+  // streamReady: the stream's audio format (1 PCM, 2 Opus) and,
   // on Windows, whether its decoder started before stream.info.
   'audioFormat',
   'decoderPrestarted',
+  // serverSave: the operating system's error number of a settings file that
+  // could not be written (5 is access denied on Windows).
+  'osError',
 };
 
 /// viewportResult stage fields (see logFields).

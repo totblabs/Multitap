@@ -65,7 +65,27 @@ export function validResponse(raw) {
   return value?.protocol === protocol && (revision(value.revision) || value.revision === 'bootstrap' && value.applied === null) && (value.applied === null || configShape(value.applied)) &&
     (value.pending === null || value.pending && configShape(value.pending.config) && typeof value.pending.state === 'string');
 }
-function draftOf(config, listener) {
+// A Docker Compose install applies a save itself (src/self-access.mjs): the
+// listener, the TLS mode, the certificate paths and the published port belong
+// to the container. The page shows them and edits the addresses, the trusted
+// proxies and whether the public IP is followed.
+function fixedOf(snapshot) {
+  const value = snapshot?.fixed, port = number => Number.isInteger(number) && number >= 1 && number <= 65535;
+  return value && typeof value === 'object' && bounded(value.listenHost, 255) && !!value.listenHost && port(value.listenPort) && ['proxy', 'direct'].includes(value.httpsMode) &&
+    port(value.idlePorts?.https) && port(value.idlePorts?.http) ? value : null;
+}
+const loopbackOnly = fixed => ['127.0.0.1', '::1'].includes(fixed?.publishedHost);
+// Where the public IP can be followed: HTTP for the network on a known published port.
+const followOffered = (snapshot, fixed) => !!fixed && snapshot?.publicIp?.offered === true && Number.isInteger(fixed.publishedPort);
+const draftFor = snapshot => draftOf(snapshot.applied, { listener: snapshot.bootstrapListener, fixed: fixedOf(snapshot), managementOrigin: snapshot.managementOrigin, publicIp: snapshot.publicIp });
+function draftOf(config, { listener = null, fixed = null, managementOrigin = null, publicIp = null } = {}) {
+  if (!config && fixed) {
+    // The first setup's own address is the HTTP suggestion.
+    const here = fixed.httpsMode === 'proxy' && !loopbackOnly(fixed) ? origin(managementOrigin ?? '', 'http')?.origin ?? '' : '';
+    const listenHost = fixed.listenHost, listenPort = String(fixed.listenPort);
+    return { primaryOrigin: here, fixed, https: { enabled: !here, origin: '', extraOrigins: [], mode: fixed.httpsMode, listenHost, listenPort, certFile: '', keyFile: '' },
+      http: { enabled: !!here, origin: here, extraOrigins: [], listenHost, listenPort, follow: false, followed: '' }, trustedProxies: '' };
+  }
   if (!config) {
     // What the server reports of the listener this request came in on (src/http.mjs serverInfo.listener):
     // { address, port }. An IPv4 address seen through a dual-stack socket comes as ::ffff:a.b.c.d.
@@ -75,29 +95,38 @@ function draftOf(config, listener) {
     return { primaryOrigin: '', https: { enabled: true, origin: '', extraOrigins: [], mode: 'proxy', listenHost, listenPort, certFile: '', keyFile: '' },
       http: { enabled: false, origin: '', extraOrigins: [], listenHost, listenPort }, trustedProxies: '' };
   }
-  return { primaryOrigin: config.primaryOrigin, https: {
+  // The address registered from the public IP has its own line, not an editable row.
+  const follow = !!fixed && config.http.followPublicIp === true, extras = [...config.http.extraOrigins ?? []];
+  const followed = follow && typeof publicIp?.origin === 'string' && extras.at(-1) === publicIp.origin ? extras.pop() : '';
+  return { primaryOrigin: config.primaryOrigin, fixed, https: {
     enabled: config.https.enabled, origin: config.https.origin ?? '', extraOrigins: [...config.https.extraOrigins ?? []], mode: config.https.mode,
     listenHost: config.https.listenHost, listenPort: String(config.https.listenPort),
     certFile: config.https.certFile ?? '', keyFile: config.https.keyFile ?? '',
-  }, http: { enabled: config.http.enabled, origin: config.http.origin ?? '', extraOrigins: [...config.http.extraOrigins ?? []],
-    listenHost: config.http.listenHost, listenPort: String(config.http.listenPort) },
+  }, http: { enabled: config.http.enabled, origin: config.http.origin ?? '', extraOrigins: extras,
+    listenHost: config.http.listenHost, listenPort: String(config.http.listenPort), follow, followed },
   trustedProxies: config.trustedProxies.join('\n') };
 }
 // Only these canonical fields cross the API. NAT help inputs stay local.
 export function draftConfig(draft) {
-  const primaryText = draft.primaryOrigin.trim();
+  const primaryText = draft.primaryOrigin.trim(), fixed = draft.fixed ?? null;
   const primary = (origin(primaryText, 'https') ?? origin(primaryText, 'http'))?.origin ?? primaryText;
+  const following = !!fixed && draft.http.enabled && draft.http.follow === true;
   const endpoint = kind => {
     const value = draft[kind], list = [canonical(value.origin, kind), ...(value.extraOrigins ?? []).map(item => canonical(item, kind)).filter(Boolean)];
     // The chosen 기본 서버 주소 leads its card's list: the policy's main address.
     const at = list.indexOf(primary); if (at > 0) list.unshift(...list.splice(at, 1));
-    return { enabled: value.enabled, origin: value.enabled ? list[0] : null, ...(value.enabled && list.length > 1 ? { extraOrigins: list.slice(1) } : {}),
-      listenHost: value.listenHost.trim(), listenPort: /^\d+$/.test(value.listenPort) ? Number(value.listenPort) : null };
+    // The address registered from the public IP stays the last one.
+    if (kind === 'http' && following && value.followed) list.push(value.followed);
+    // A container's listener is not the page's: an enabled address uses it, a disabled one keeps its idle port.
+    const listen = fixed ? { listenHost: fixed.listenHost, listenPort: value.enabled ? fixed.listenPort : fixed.idlePorts[kind] }
+      : { listenHost: value.listenHost.trim(), listenPort: /^\d+$/.test(value.listenPort) ? Number(value.listenPort) : null };
+    return { enabled: value.enabled, origin: value.enabled ? list[0] : null, ...(value.enabled && list.length > 1 ? { extraOrigins: list.slice(1) } : {}), ...listen };
   };
-  return { protocol, primaryOrigin: primary, https: { ...endpoint('https'), mode: draft.https.mode,
-    certFile: draft.https.enabled && draft.https.mode === 'direct' ? draft.https.certFile.trim() || null : null,
-    keyFile: draft.https.enabled && draft.https.mode === 'direct' ? draft.https.keyFile.trim() || null : null },
-  http: endpoint('http'), trustedProxies: draft.trustedProxies.split(/\r?\n/).map(ip => ip.trim()).filter(Boolean) };
+  const direct = (fixed ? fixed.httpsMode : draft.https.mode) === 'direct';
+  return { protocol, primaryOrigin: primary, https: { ...endpoint('https'), mode: fixed ? fixed.httpsMode : draft.https.mode,
+    certFile: fixed ? (direct ? fixed.certFile ?? null : null) : draft.https.enabled && direct ? draft.https.certFile.trim() || null : null,
+    keyFile: fixed ? (direct ? fixed.keyFile ?? null : null) : draft.https.enabled && direct ? draft.https.keyFile.trim() || null : null },
+  http: { ...endpoint('http'), ...(following ? { followPublicIp: true } : {}) }, trustedProxies: draft.trustedProxies.split(/\r?\n/).map(ip => ip.trim()).filter(Boolean) };
 }
 function validation(config) {
   const errors = [];
@@ -120,7 +149,7 @@ function validation(config) {
 // the administrator typed in this edit is left alone.
 export function followListener(draft) {
   const http = draft.http, url = origin(withScheme(http.origin, 'http'), 'http');
-  if (http.listenEdited || !url) return false;
+  if (draft.fixed || http.listenEdited || !url) return false;
   http.listenPort = url.port || '80'; http.directHost ??= http.listenHost;
   http.listenHost = draft.https.enabled && draft.https.mode === 'proxy' && draft.https.listenPort === http.listenPort ? draft.https.listenHost : http.directHost;
   return true;
@@ -158,6 +187,11 @@ const errorText = (error, config = null) => ({
   server_access_management_origin_changed: t('server-access.21'),
   server_access_cancel_too_late: t('server-access.22'),
   server_access_cancel_unavailable: t('server-access.23'),
+  // A Docker Compose install (src/self-access.mjs).
+  server_access_published_port_conflict: t('server-access.publishedPortError'),
+  server_access_published_loopback_conflict: t('server-access.fixedHttpLoopback'),
+  server_access_direct_tls_http_conflict: t('server-access.fixedHttpDirect'),
+  server_access_public_ip_conflict: t('server-access.followError'),
 }[error?.code] ?? error?.message ?? t('server-access.24'));
 
 // What a saved change is waiting for, in plain words. Only the server's own
@@ -187,9 +221,11 @@ function stateFor(ctx, snapshot) {
   let model = ctx.state.ui.serverAccess;
   if (!model || model.owner !== ctx.state.user) {
     model = { owner: ctx.state.user, baseRevision: snapshot.revision, applied: clone(snapshot.applied),
-      draft: draftOf(snapshot.applied, snapshot.bootstrapListener), edits: 0, dirty: false, conflict: false, receipt: null,
+      draft: draftFor(snapshot), edits: 0, dirty: false, conflict: false, receipt: null,
       lastTest: null, testing: false, saving: false, cancelling: false, operation: null, error: '', validation: [],
       assist: { targetIp: '', proxyPort: '' }, expiryTimer: null };
+    // A first setup that already names its own address can be saved as it is.
+    model.prefilled = snapshot.applied === null && !!model.draft.primaryOrigin;
     ctx.state.ui.serverAccess = model;
   }
   const appliedChanged = snapshot.revision !== model.baseRevision;
@@ -198,12 +234,12 @@ function stateFor(ctx, snapshot) {
   // 127.0.0.1, lower-case IPv6: update/server-access-policy.mjs), so the applied settings are taken as they are.
   if (matchingOperation && snapshot.state === 'applied' && !snapshot.pending && model.operation.state !== 'applied' && (appliedChanged || !model.dirty)) {
     model.operation = { ...model.operation, state: 'applied' };
-    model.draft = draftOf(snapshot.applied); model.dirty = false; model.conflict = false;
+    model.draft = draftFor(snapshot); model.dirty = false; model.conflict = false;
   }
   if (appliedChanged) {
     clearTimeout(model.expiryTimer); model.receipt = null;
     if (model.dirty && model.operation?.state !== 'applied') model.conflict = true;
-    else { model.draft = draftOf(snapshot.applied, snapshot.bootstrapListener); model.baseRevision = snapshot.revision; model.applied = clone(snapshot.applied); model.lastTest = null; }
+    else { model.draft = draftFor(snapshot); model.baseRevision = snapshot.revision; model.applied = clone(snapshot.applied); model.lastTest = null; model.prefilled = false; }
   }
   if (matchingOperation && snapshot.state === 'failed_rolled_back') model.operation = { ...model.operation, state: 'failed_rolled_back', errorCode: snapshot.errorCode };
   // Cancelled or timed out: the operation is over and the form opens again
@@ -215,6 +251,7 @@ function stateFor(ctx, snapshot) {
   return model;
 }
 const current = (ctx, model) => ctx.state.user === model.owner && ctx.state.ui.serverAccess === model;
+const unsaved = model => model.dirty || model.prefilled === true;
 const locked = (model, snapshot) => snapshot.applySupported === false || model.saving || pendingStates.has(model.operation?.state) || !!snapshot.pending && snapshot.pending.state !== 'failed_rolled_back';
 function invalidate(model) {
   model.edits++; model.dirty = !same(draftConfig(model.draft), model.applied); model.receipt = null; model.lastTest = null;
@@ -252,14 +289,14 @@ async function testDraft(ctx, model, snapshot) {
   finally { if (current(ctx, model)) { model.testing = false; ctx.render(); } }
 }
 function saveDraft(ctx, model, snapshot) {
-  if (!current(ctx, model) || !model.dirty || locked(model, snapshot) || !testCurrent(ctx, model, snapshot)) return;
+  if (!current(ctx, model) || !unsaved(model) || locked(model, snapshot) || !testCurrent(ctx, model, snapshot)) return;
   const edits = model.edits, config = draftConfig(model.draft), receipt = model.receipt;
   const description = saveDescription(config, snapshot);
   // 먼저 알리기 (js/notices.js): a save ends every connection.
   const announce = announceFirst(ctx, { audience: everyoneAudience(ctx), text: announcements.serverAccess });
   ctx.modal(t('server-access.39'), announce ? [{ node: announce.node }] : [], (announce ? announce.wrap : run => run)(async () => {
     const latest = normalized(ctx.value('serverAccess'));
-    if (!current(ctx, model) || !model.dirty || model.edits !== edits || !validResponse(latest) || !testCurrent(ctx, model, latest) || locked(model, latest)) throw Error(t('server-access.40'));
+    if (!current(ctx, model) || !unsaved(model) || model.edits !== edits || !validResponse(latest) || !testCurrent(ctx, model, latest) || locked(model, latest)) throw Error(t('server-access.40'));
     model.saving = true; model.error = ''; model.receipt = null; clearTimeout(model.expiryTimer); ctx.render();
     try {
       const result = await ctx.api('/server-access/save', 'POST', { config, testId: receipt.testId, baseRevision: receipt.revision, confirm: true });
@@ -269,7 +306,7 @@ function saveDraft(ctx, model, snapshot) {
       model.operation = { operationId: result.operationId, state: result.state === 'applied' ? 'applying' : result.state, errorCode: result.errorCode,
         primaryOrigin: config.primaryOrigin, origins: ['https', 'http'].filter(kind => config[kind].enabled).flatMap(kind => listOf(config[kind])) };
       // The edits are with the server now: leaving the page no longer asks about unsaved changes (app.js).
-      model.receipt = null; model.dirty = false; clearTimeout(model.expiryTimer);
+      model.receipt = null; model.dirty = false; model.prefilled = false; clearTimeout(model.expiryTimer);
       void ctx.load('serverAccess', { force: true });
     } catch (error) { if (current(ctx, model)) model.error = errorText(error, config); throw error; }
     finally { if (current(ctx, model)) { model.saving = false; ctx.render(); } }
@@ -356,7 +393,7 @@ function outsideSteps({ httpPort = null, udpPort = null, compose = false } = {})
       step(2, t('server-access.74'), 'https://vdi.example.com')),
     way(t('server-access.75'), t('server-access.76'),
       step(1, t('server-access.77', { tcp })),
-      step(2, (compose ? t('server-access.78') : t('server-access.79')), ['http://', el('span', { class: 'ph' }, t('server-access.80')), ':' + port]),
+      step(2, (compose ? t('server-access.outsidePublicIpDocker') : t('server-access.79')), ['http://', el('span', { class: 'ph' }, t('server-access.80')), ':' + port]),
       step(3, t('server-access.81'), ['http://', el('span', { class: 'ph' }, t('common.60')), '.iptime.org:' + port])),
     // Both ways: the media path comes to the server itself, past any TCP proxy.
     udpPort ? el('li', { class: 'outside-way outside-common' }, el('strong', {}, t('server-access.82'), t('server-access.83')),
@@ -372,26 +409,73 @@ function outsideHelp(ports) {
     el('p', { class: 'server-access-warning' }, t('server-access.87')));
 }
 const mediaPort = snapshot => Number.isInteger(snapshot.udpPort) && snapshot.udpPort >= 1 && snapshot.udpPort <= 65535 ? snapshot.udpPort : null;
+const portNumber = value => Number.isInteger(value) && value >= 1 && value <= 65535 ? value : null;
+// The UDP port a router forwards: the one Docker publishes where the server says it, else the relay's own.
+const forwardedUdpPort = snapshot => portNumber(snapshot.udpMedia?.derivedPort) ?? mediaPort(snapshot);
+// The address a reverse proxy on the Docker host arrives from, where the server could read it (src/self-access.mjs).
+const gatewayOf = snapshot => fixedOf(snapshot) && typeof snapshot.gateway === 'string' && exactIp(snapshot.gateway) ? snapshot.gateway : null;
+// UDP media of a Docker Compose install, as the server runs it (src/udp-relay.mjs describe()). Read-only:
+// with no relay list in .env each app and Host is given the address it connects to, on the published UDP port.
+function udpPanel(snapshot) {
+  const udp = snapshot.udpMedia, running = udp?.running === true, derivedPort = running ? portNumber(udp.derivedPort) : null;
+  const rows = list => Array.isArray(list) ? list.filter(row => row && bounded(row.host, 253) && row.host && portNumber(row.port)).map(row => row.host + ':' + row.port) : [];
+  const host = running ? rows(udp.relays?.host) : [], client = running ? rows(udp.relays?.client) : [];
+  const configured = !derivedPort && host.length > 0 && client.length > 0, used = !!derivedPort || configured;
+  // Off by MULTITAP_UDP_MEDIA: with derived endpoints that is the explicit `off`; with lists from .env it may also be unset.
+  const off = used && udp.media !== 'on' && udp.media !== 'desktops';
+  const text = !used ? t('server-access.udpOff') : udp.media === 'on' ? (derivedPort ? t('server-access.udpDerived', { port: derivedPort }) : t('server-access.udpConfigured'))
+    : udp.media === 'desktops' ? t('server-access.udpDesktops') : derivedPort ? t('server-access.udpMediaOff') : t('server-access.udpProbe');
+  // One endpoint per address in use; an IPv6 address has none (the relay is IPv4).
+  const names = snapshot.applied ? [...new Set(['https', 'http'].filter(kind => snapshot.applied[kind].enabled).flatMap(kind => listOf(snapshot.applied[kind]))
+    .map(value => (origin(value, 'https') ?? origin(value, 'http'))?.hostname).filter(name => name && !name.startsWith('[')))] : [];
+  const endpoints = derivedPort && off ? null : derivedPort ? (names.length ? t('server-access.udpEndpoints', { list: names.map(name => name + ':' + derivedPort).join(', ') }) : null)
+    : configured ? t('server-access.udpEndpointsBoth', { host: host.join(', '), client: client.join(', ') }) : null;
+  return panel({ title: t('server-access.udpTitle'), className: 'server-access-udp' },
+    el('p', { role: 'status', 'data-access-udp': used ? (derivedPort ? 'derived' : 'configured') : 'off' }, text),
+    endpoints ? el('p', { class: 'field-hint', 'data-access-udp-endpoints': '' }, endpoints) : null,
+    derivedPort && !off ? el('p', { class: 'field-hint', 'data-access-udp-router': '' }, t('server-access.udpRouter', { port: derivedPort })) : null);
+}
 function endpointCard(ctx, model, snapshot, kind, edit, redraw, disabled, { editExtra, settle }) {
   const draft = model.draft[kind], secure = kind === 'https', placeholder = secure ? t('server-access.88') : t('server-access.89');
   draft.extraOrigins ??= [];
+  // A Docker Compose install: what the container fixes is said in a line, not edited.
+  const fixed = model.draft.fixed ?? null, direct = fixed?.httpsMode === 'direct', published = Number.isInteger(fixed?.publishedPort) ? fixed.publishedPort : null;
+  const fixedText = !fixed ? null
+    : secure ? (!draft.enabled ? null : direct ? t('server-access.fixedDirect') : (published ? t('server-access.fixedProxyPort', { port: published }) + '\n' : '') + (gatewayOf(snapshot) ? t('server-access.fixedProxyTrustHere') : t('server-access.fixedProxyTrust')))
+    : direct ? t('server-access.fixedHttpDirect') : !draft.enabled ? null : loopbackOnly(fixed) ? t('server-access.fixedHttpLoopback') : published ? t('server-access.fixedHttpPort', { port: published }) : null;
+  // The address registered from the public IP takes one of the extra places.
+  const rows = maxExtra - (!secure && draft.followed ? 1 : 0), udpPort = forwardedUdpPort(snapshot);
+  const follow = !secure && draft.enabled && followOffered(snapshot, fixed) ? el('div', { class: 'server-access-follow', 'data-access-follow': '' },
+    el('label', { class: 'server-access-switch' }, el('input', { type: 'checkbox', role: 'switch', name: 'http.followPublicIp', checked: draft.follow === true, disabled, 'aria-label': t('server-access.followPublicIp'), 'data-focus': 'access-http-follow',
+      onchange: event => {
+        // Turned off, the registered address stays as an ordinary one.
+        if (!event.target.checked && draft.followed) { draft.extraOrigins.push(draft.followed); draft.followed = ''; }
+        edit('http', 'follow', event.target.checked); redraw();
+      } }), el('span', {}, t('server-access.followPublicIp'))),
+    el('p', { class: 'field-hint' }, t('server-access.followHint')),
+    draft.follow ? el('p', { class: 'field-hint', 'data-access-followed': '' }, draft.followed ? t('server-access.followRegistered', { origin: draft.followed }) : t('server-access.followPending')) : null,
+    draft.follow ? el('p', { class: 'field-hint', 'data-access-follow-router': '' }, udpPort ? t('server-access.followRouter', { port: published, udpPort }) : t('server-access.followRouterTcp', { port: published })) : null,
+    // Why the last round registered nothing.
+    draft.follow && snapshot.publicIp?.errorCode === 'server_access_http_addresses_full' ? el('p', { class: 'server-access-warning', 'data-access-follow-full': '' }, t('server-access.followFull')) : null,
+    draft.follow && snapshot.publicIp?.errorCode === 'server_access_public_ip_conflict' ? el('p', { class: 'server-access-warning', 'data-access-follow-conflict': '' }, t('server-access.followError')) : null) : null;
   const extraRow = (value, index) => el('div', { class: 'server-access-extra', 'data-access-extra': kind + '.' + index },
     addressField(t('server-access.90') + (index + 1), kind + '.extra.' + index, value, text => editExtra(kind, index, text),
       { disabled, type: 'url', placeholder, settle: input => settle(kind, index, input) }),
     el('small', { class: 'field-hint', 'data-access-external': kind + '.' + index }, t('server-access.91') + portOf(value, kind)),
     button(t('common.147'), () => { if (disabled || !current(ctx, model)) return; model.draft[kind].extraOrigins.splice(index, 1); invalidate(model); redraw(); },
       'quiet', 'trash', { disabled, 'aria-label': t('server-access.92', { value: index + 1 }), 'data-access-extra-remove': kind + '.' + index }));
-  const add = () => { const list = model.draft[kind].extraOrigins; if (disabled || !current(ctx, model) || list.length >= maxExtra) return; list.push(''); redraw(); };
+  const add = () => { const list = model.draft[kind].extraOrigins; if (disabled || !current(ctx, model) || list.length >= rows) return; list.push(''); redraw(); };
   const endpoint = el('fieldset', { class: 'server-access-endpoint-fields', disabled },
     draft.enabled ? addressField(t('server-access.93'), kind + '.origin', draft.origin, value => edit(kind, 'origin', value),
       { disabled, type: 'url', placeholder, hint: t('server-access.94'), settle: input => settle(kind, null, input) }) : null,
     draft.enabled ? el('p', { class: 'field-hint', 'data-access-external': kind }, t('server-access.91') + portOf(draft.origin, kind)) : null,
     draft.enabled ? draft.extraOrigins.map(extraRow) : null,
     draft.enabled ? el('div', { class: 'server-access-extra-add' },
-      disable(button(t('server-access.95'), add, 'quiet', 'plus', { 'data-access-extra-add': kind }), disabled ? t('server-access.96') : draft.extraOrigins.length >= maxExtra ? t('server-access.97', { value: maxExtra + 1 }) : null),
+      disable(button(t('server-access.95'), add, 'quiet', 'plus', { 'data-access-extra-add': kind }), disabled ? t('server-access.96') : draft.extraOrigins.length >= rows ? t('server-access.97', { value: maxExtra + 1 }) : null),
       el('small', { class: 'field-hint' }, secure ? t('server-access.98') : t('server-access.99'))) : null,
     secure || !draft.enabled ? null : el('p', { class: 'server-access-warning' }, t('server-access.100')),
-    el('details', { class: 'server-access-advanced', 'data-keep-open': 'access-' + kind },
+    follow,
+    fixed ? (fixedText ? el('p', { class: 'field-hint', 'data-access-fixed': kind }, fixedText) : null) : el('details', { class: 'server-access-advanced', 'data-keep-open': 'access-' + kind },
       el('summary', {}, !draft.enabled ? t('server-access.101') : secure ? t('server-access.102') : t('server-access.103')),
       secure ? el('label', { class: 'server-access-field' }, el('span', {}, t('server-access.104')),
         el('select', { name: 'https.mode', 'data-focus': 'access-https-mode', disabled,
@@ -410,96 +494,10 @@ function endpointCard(ctx, model, snapshot, kind, edit, redraw, disabled, { edit
     el('div', { class: 'server-access-endpoint-head' }, el('div', { class: 'server-access-endpoint-title' },
       el('h2', {}, kind.toUpperCase() + t('server-access.113')), el('span', { class: 'plain-tag' }, t('server-access.tag', { tag: secure ? t('server-access.71') : t('server-access.114') }))),
       el('label', { class: 'server-access-switch' }, el('input', { type: 'checkbox', role: 'switch', name: kind + '.enabled',
-        checked: draft.enabled, disabled, 'aria-label': t('server-access.115', { toUpperCase: kind.toUpperCase() }), 'data-focus': 'access-' + kind + '-enabled',
+        // The broker's own TLS serves HTTPS and nothing else.
+        checked: draft.enabled, disabled: disabled || (direct && (secure ? draft.enabled : !draft.enabled)), 'aria-label': t('server-access.115', { toUpperCase: kind.toUpperCase() }), 'data-focus': 'access-' + kind + '-enabled',
         onchange: event => { edit(kind, 'enabled', event.target.checked); redraw(); } }),
       el('span', { 'aria-hidden': 'true' }, draft.enabled ? t('server-access.116') : t('server-access.117')))), endpoint);
-}
-
-// Docker Compose has no root updater to apply a policy: the page writes the
-// .env lines and the operator runs `docker compose up -d` (docs/docker-deployment.md).
-const loopbackProxies = list => list.length === 2 && list.includes('127.0.0.1') && list.includes('::1');
-// MULTITAP_HTTP_ORIGIN takes a comma-separated list (config.mjs).
-export function composeLines({ https, http }, applied = null) {
-  const secureText = withScheme(https, 'https'), plainTexts = String(http ?? '').split(',').map(item => withScheme(item, 'http')).filter(Boolean), errors = [];
-  const secure = secureText ? origin(secureText, 'https') : null, plain = plainTexts.map(item => origin(item, 'http'));
-  if (secureText && !secure) errors.push(t('server-access.118'));
-  if (plain.some(url => !url)) errors.push(t('server-access.119'));
-  else if (plain.length > maxExtra + 1 || new Set(plain.map(url => url.origin)).size !== plain.length) errors.push(t('server-access.120', { value: maxExtra + 1 }));
-  if (!secureText && !plainTexts.length) errors.push(t('server-access.121'));
-  if (errors.length) return { lines: [], errors, command: '' };
-  // The same change as one command for an install made with install.sh (deploy/docker/multitap).
-  const command = 'multitap address ' + [secure?.origin, ...plain.map(url => url.origin)].filter(Boolean).join(' ');
-  const lines = ['MULTITAP_PUBLIC_ORIGIN=' + (secure?.origin ?? ''), 'MULTITAP_HTTP_ORIGIN=' + plain.map(url => url.origin).join(','), 'MULTITAP_ALLOW_INSECURE_HTTP=' + (plain.length ? '1' : '0')];
-  // HTTP clients reach the published port directly: the first address's port
-  // on every IPv4 interface. Docker's IPv6 proxy hop would arrive from the
-  // network gateway, the address a same-host HTTPS proxy is trusted as.
-  if (plain.length) lines.push('MULTITAP_PUBLISH_PORT=0.0.0.0:' + (plain[0].port || '80'));
-  const proxies = applied?.trustedProxies ?? [];
-  if (secure && proxies.length && !loopbackProxies(proxies)) lines.push('MULTITAP_TRUSTED_PROXIES=' + proxies.join(','));
-  return { lines, errors, command };
-}
-function composeView(ctx, snapshot) {
-  let model = ctx.state.ui.serverAccessCompose;
-  if (!model || model.owner !== ctx.state.user || model.revision !== snapshot.revision) {
-    const applied = snapshot.applied, management = origin(snapshot.managementOrigin ?? '', 'http');
-    model = { owner: ctx.state.user, revision: snapshot.revision, https: applied?.https.enabled ? applied.https.origin : '',
-      http: applied?.http.enabled ? listOf(applied.http).join(',') : applied?.https.enabled || !management ? '' : management.origin, note: '' };
-    ctx.state.ui.serverAccessCompose = model;
-  }
-  const output = el('textarea', { name: 'composeEnv', rows: 5, readonly: true, spellcheck: 'false', 'data-access-env': '' });
-  const commandOutput = el('code', { class: 'access-command', 'data-access-command': '' });
-  // The command only when it would change something, not for the addresses already in use.
-  const appliedCommand = snapshot.applied ? composeLines({ https: snapshot.applied.https.enabled ? snapshot.applied.https.origin : '', http: snapshot.applied.http.enabled ? listOf(snapshot.applied.http).join(',') : '' }, snapshot.applied).command : null;
-  const sameNote = el('p', { class: 'field-hint', role: 'status', 'data-access-command-same': '' }, t('server-access.122'));
-  const errors = el('p', { class: 'is-error', role: 'alert', 'data-access-env-error': '' });
-  const warning = el('p', { class: 'server-access-warning', 'data-access-http-warning': '' }, t('server-access.100'));
-  const proxyHint = el('p', { class: 'field-hint', 'data-access-proxy-hint': '' }, t('server-access.123'));
-  const note = el('p', { class: 'field-hint', role: 'status', 'data-access-copy-status': '' }, model.note);
-  const update = () => {
-    const result = composeLines(model, snapshot.applied);
-    output.textContent = result.lines.join('\n');
-    commandOutput.textContent = result.command;
-    const same = !!result.command && result.command === appliedCommand;
-    commandBlock.hidden = same || !result.command; sameNote.hidden = !same;
-    errors.textContent = result.errors.join('\n'); errors.hidden = !result.errors.length;
-    warning.hidden = !model.http.trim();
-    proxyHint.hidden = !model.https.trim() || result.lines.some(line => line.startsWith('MULTITAP_TRUSTED_PROXIES='));
-    help?.querySelector('[data-access-outside-steps]')?.replaceChildren(...outsideSteps(helpPorts()));
-  };
-  const field = (label, key, placeholder, hint = null) => addressField(label, 'compose.' + key, model[key],
-    value => { model[key] = value; model.note = ''; note.textContent = ''; update(); }, { type: 'url', placeholder, hint });
-  const copyOf = (source, select) => async () => {
-    try {
-      // HTTP pages are no secure context: select the text for a manual copy.
-      if (!globalThis.isSecureContext || typeof globalThis.navigator?.clipboard?.writeText !== 'function') throw Error();
-      await globalThis.navigator.clipboard.writeText(source.textContent); model.note = t('server-access.124');
-    } catch { select(); model.note = t('server-access.125'); }
-    note.textContent = model.note;
-  };
-  const copy = copyOf(output, () => { output.focus?.(); output.select?.(); });
-  const copyCommand = copyOf(commandOutput, () => { const range = globalThis.document.createRange?.(); const selection = globalThis.getSelection?.(); if (range && selection) { range.selectNodeContents(commandOutput); selection.removeAllRanges(); selection.addRange(range); } });
-  const commandBlock = el('div', { class: 'server-access-field', 'data-access-command-block': '' }, el('span', {}, t('server-access.126')), el('div', { class: 'shell-command' }, commandOutput, button(t('server-access.127'), copyCommand, 'quiet', 'clipboard', { 'data-access-command-copy': '' })));
-  const current = snapshot.applied ? ['https', 'http'].map(kind => [kind.toUpperCase(), snapshot.applied[kind].enabled ? listOf(snapshot.applied[kind]).join('\n') : t('server-access.128')])
-    : [[t('server-access.129'), t('server-access.130')]];
-  const helpPorts = () => { const url = origin(withScheme(String(model.http ?? '').split(',')[0], 'http'), 'http'); return { httpPort: url ? url.port || '80' : null, udpPort: mediaPort(snapshot), compose: true }; };
-  const help = outsideHelp(helpPorts());
-  const view = panel({ title: t('server-access.131'), className: 'server-access-compose', actions: [el('code', { class: 'mono-chip' }, '.env')] },
-    facts([...current, [t('server-access.132'), snapshot.managementOrigin || t('common.17')]]),
-    el('p', { class: 'field-hint' }, t('server-access.133')),
-    field(t('server-access.134'), 'https', 'https://vdi.example.com'),
-    field(t('server-access.135'), 'http', 'http://192.168.0.10:18480', t('server-access.136')),
-    warning, errors,
-    commandBlock, sameNote,
-    note,
-    el('details', { class: 'disclosure', 'data-keep-open': 'compose-env' }, el('summary', {}, t('server-access.137')),
-      el('div', { class: 'compose-env-body' },
-        el('p', { class: 'field-hint' }, t('server-access.138')),
-        el('label', { class: 'server-access-field' }, el('span', {}, t('server-access.139')), output),
-        proxyHint,
-        el('div', { class: 'actions server-access-actions' }, button(t('common.27'), copy, 'secondary', 'clipboard', { 'data-access-env-copy': '' })))),
-    el('p', { class: 'field-hint' }, t('server-access.140')));
-  update();
-  return [view, help];
 }
 
 export function render(ctx) {
@@ -510,7 +508,6 @@ export function render(ctx) {
     resource?.error ? el('p', { class: 'is-error', role: 'alert' }, resource.error) : loadingState(t('server-access.143')),
     button(t('server-access.144'), () => ctx.load('serverAccess', { force: true }), 'secondary', 'refresh'))];
   ctx.state.ui ??= {};
-  if (snapshot.applySupported === false && snapshot.deploymentKind === 'docker' && snapshot.state !== 'recovery_required') return [header, ...composeView(ctx, snapshot)];
   const model = stateFor(ctx, snapshot), disabled = locked(model, snapshot);
   const portMetadata = () => ({ dockerPorts: snapshot.dockerPorts,
     plannedDockerPorts: snapshot.plannedDockerPorts?.length ? snapshot.plannedDockerPorts : model.lastTest?.plannedDockerPorts });
@@ -541,7 +538,7 @@ export function render(ctx) {
   };
   const helpPorts = () => {
     const url = model.draft.http.enabled ? origin(withScheme(model.draft.http.origin, 'http'), 'http') : null;
-    return { httpPort: url ? url.port || '80' : null, udpPort: mediaPort(snapshot) };
+    return { httpPort: url ? url.port || '80' : null, udpPort: forwardedUdpPort(snapshot), compose: !!model.draft.fixed };
   };
   const changedView = () => {
     // Address typing keeps its focus/caret, while the separate origin picker
@@ -619,12 +616,20 @@ export function render(ctx) {
     el('select', { name: 'primaryOrigin', 'data-focus': 'access-primary-origin', disabled,
       onchange: event => { model.draft.primaryOrigin = event.target.value; invalidate(model); repaint(); } },
       primaryOptions()));
+  const gateway = gatewayOf(snapshot), proxyList = () => model.draft.trustedProxies.split(/\r?\n/).map(ip => ip.trim()).filter(Boolean);
   const proxies = el('details', { class: 'server-access-advanced', 'data-keep-open': 'access-proxies' },
     el('summary', {}, t('server-access.180')),
     el('label', { class: 'server-access-field' }, el('span', {}, t('server-access.181')),
       el('textarea', { name: 'trustedProxies', rows: 3, maxlength: 8192, disabled, 'data-focus': 'access-trusted-proxies', spellcheck: 'false',
         oninput: event => { if (!disabled) { model.draft.trustedProxies = event.target.value; invalidate(model); changedView(); } } }, model.draft.trustedProxies)),
-    el('p', { class: 'field-hint' }, t('server-access.182')));
+    el('p', { class: 'field-hint' }, t('server-access.182')),
+    // A proxy on the Docker host arrives from the container's gateway: one click names it; it is never added unasked.
+    gateway ? el('div', { class: 'server-access-extra-add' },
+      disable(button(t('server-access.proxyHere'), () => {
+        if (disabled || !current(ctx, model) || proxyList().includes(gateway)) return;
+        model.draft.trustedProxies = [...proxyList(), gateway].join('\n'); invalidate(model); repaint();
+      }, 'quiet', 'plus', { 'data-access-proxy-here': '' }), disabled ? t('server-access.96') : proxyList().includes(gateway) ? t('server-access.proxyHereListed') : null),
+      el('small', { class: 'field-hint' }, t('server-access.proxyHereHint', { ip: gateway }))) : null);
   const operation = el('p', { class: 'server-access-operation', role: 'status', 'data-access-draft-status': '' }, statusText(model, snapshot));
   const waiting = !recovering && (snapshot.pending?.state ?? model.operation?.state ?? snapshot.state) === 'waiting_idle';
   // While it waits the page says for what and until when, and offers 취소.
@@ -640,6 +645,8 @@ export function render(ctx) {
       blockers.length ? disable(button(model.cancelling ? t('server-access.190') : t('common.135'), () => cancelPending(ctx, model, pendingOperation), 'secondary', null, { 'data-access-cancel': '' }), model.cancelling ? t('server-access.191') : null) : null) : null,
     endpointCard(ctx, model, snapshot, 'https', edit, repaint, disabled, { editExtra, settle }), endpointCard(ctx, model, snapshot, 'http', edit, repaint, disabled, { editExtra, settle }), primary,
     el('p', { class: 'server-access-warning', role: 'status', 'data-access-console-outside': '', hidden: !consoleOutside() }, consoleOutside()), proxies,
+    // The server started without its saved policy (src/config.mjs): why this page is empty, and what to do.
+    typeof snapshot.policyUnreadable === 'string' && snapshot.policyUnreadable ? el('p', { class: 'server-access-warning', role: 'alert', 'data-access-unreadable': '' }, t('server-access.policyUnreadable')) : null,
     moved ? el('p', { class: 'server-access-warning', role: 'status', 'data-access-moved': '' }, t('server-access.movedF2'), ' ',
       el('a', { href: model.operation.primaryOrigin + '/admin/', rel: 'noopener' }, model.operation.primaryOrigin)) : null,
     model.conflict ? el('p', { class: 'server-access-warning', role: 'alert' }, t('server-access.192')) : null,
@@ -651,7 +658,7 @@ export function render(ctx) {
     el('div', { class: 'actions server-access-actions' },
       disable(button(t('server-access.196'), reset, 'quiet', 'refresh'), reloadDisabled ? t('server-access.197') : null),
       disable(button(model.testing ? t('server-access.161') : t('server-access.198'), () => testDraft(ctx, model, snapshot), 'secondary', 'check', { 'data-access-test': '' }), disabled || stale || model.conflict || model.testing ? t('server-access.96') : null),
-      disable(button(t('server-access.42'), () => saveDraft(ctx, model, snapshot), 'primary', null, { 'data-access-save': '' }), disabled || stale || !model.dirty || !testCurrent(ctx, model, snapshot) ? t('server-access.199') : null)));
+      disable(button(t('server-access.42'), () => saveDraft(ctx, model, snapshot), 'primary', null, { 'data-access-save': '' }), disabled || stale || !unsaved(model) || !testCurrent(ctx, model, snapshot) ? t('server-access.199') : null)));
   const assistEdit = (key, value) => { model.assist[key] = value; const table = root.querySelector('[data-access-forward-rows]'); if (table) table.replaceChildren(...forwardRows()); };
   const forwardRows = () => forwardingRows(draftConfig(model.draft), model.assist, portMetadata()).map(row => el('tr', {}, el('th', { scope: 'row' }, row.kind), el('td', {}, 'TCP ' + row.external), el('td', {}, row.destination), el('td', {}, row.proxy ? t('server-access.200') : row.mapping || t('server-access.201'))));
   const forwarding = el('details', { class: 'server-access-forward panel', 'data-keep-open': 'access-forwarding' },
@@ -660,6 +667,6 @@ export function render(ctx) {
       model.draft.https.enabled && model.draft.https.mode === 'proxy' ? addressField(t('server-access.205'), 'assist.proxyPort', model.assist.proxyPort, value => assistEdit('proxyPort', value), { type: 'number', max: 5 }) : null),
     el('div', { class: 'server-access-table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, [t('server-access.206'), t('server-access.207'), t('server-access.208'), t('server-access.listenColumnF2')].map(text => el('th', { scope: 'col' }, text)))), el('tbody', { 'data-access-forward-rows': '' }, forwardRows()))),
     config.https.enabled && config.https.mode === 'proxy' ? el('p', { class: 'field-hint', 'data-access-upstream': '' }, upstreamText()) : null);
-  root.append(el('div', { class: 'server-access-layout' }, form, el('aside', { class: 'server-access-side' }, currentInfo, testPanel)), outsideHelp(helpPorts()), forwarding);
+  root.append(el('div', { class: 'server-access-layout' }, form, el('aside', { class: 'server-access-side' }, currentInfo, testPanel, model.draft.fixed ? udpPanel(snapshot) : null)), outsideHelp(helpPorts()), forwarding);
   return [header, root];
 }

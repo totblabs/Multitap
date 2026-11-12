@@ -16,8 +16,8 @@ class VmResources {
   final double? cpuUsagePercent;
   final int? vcpus, memoryUsedBytes, memoryTotalBytes;
 
-  /// Seconds since Proxmox started the VM, only while it runs (broker
-  /// 2026-10-26; a released broker never sends it). A PC's: since Windows
+  /// Seconds since Proxmox started the VM, only while it runs (a broker
+  /// without it never sends it). A PC's: since Windows
   /// last started or woke (host-resources-v2).
   final int? uptimeSeconds;
   final DateTime? checkedAt, receivedAt;

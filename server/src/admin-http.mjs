@@ -34,7 +34,7 @@ function expectedAccountId(input) {
   return value;
 }
 
-export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests, notices = null, resources = null, login, mfaRoutes = null, passwordJob, body, backup = null, stream = () => { throw new HttpError(503, 'backup_unavailable'); }, publicOrigin, setupScriptSha256 = () => null, cookieScope = null, legacyCookieOrigin = null, accessRuntime = null, hostRemovalActivity = null, serverInfo, serverUpdate, initialSetup, certificates = null, agentAccess = { denied: () => false, reset: () => {} }, audioInventory = null, consoleAccess = { state: () => null, record: () => {} }, relocation = null }) {
+export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests, notices = null, resources = null, login, mfaRoutes = null, passwordJob, body, backup = null, stream = () => { throw new HttpError(503, 'backup_unavailable'); }, publicOrigin, setupScriptSha256 = () => null, cookieScope = null, legacyCookieOrigin = null, accessRuntime = null, hostRemovalActivity = null, serverInfo, serverUpdate, restartServer = null, initialSetup, certificates = null, agentAccess = { denied: () => false, reset: () => {} }, audioInventory = null, consoleAccess = { state: () => null, record: () => {} }, relocation = null }) {
   // The public installation scheme owns cookie policy, never the backend hop.
   const secureCookie = publicOrigin === undefined || new URL(publicOrigin).protocol === 'https:';
   const legacyCookieName = secureCookie ? '__Secure-multitap-admin' : 'multitap-admin-http';
@@ -241,7 +241,7 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
         let result;
         if (path === '/api/v1/admin/server-access') {
           if (req.method !== 'GET') throw new HttpError(405, 'method_not_allowed');
-          result = await accessRuntime.status({ ...context, listener: serverInfo.listener, deploymentKind: serverInfo.deployment?.kind, udpPort: serverInfo.udpPort ?? null });
+          result = await accessRuntime.status({ ...context, listener: serverInfo.listener, deploymentKind: serverInfo.deployment?.kind, udpPort: serverInfo.udpPort ?? null, udpMedia: relay?.udp?.describe?.() ?? null });
           // How many people a save would cut off right now (counts only).
           if (relay?.sessions) result = { ...result, connections: connectionCounts(relay) };
         } else if (path.endsWith('/cancel')) {
@@ -282,6 +282,22 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
         if(apply)accessRuntime?.assertAdmission();
         const result=apply?await serverUpdate.apply({releaseId:input.releaseId,fromVersion:input.fromVersion}):await serverUpdate.check();
         store.audit(apply?'server_update_requested':'server_update_checked',actor,apply?input.releaseId:'');send(202,result);return true;
+      }
+      // 서버 다시 시작: only where ending this process starts it again (index.mjs
+      // gives `restartServer` on a self-managed Docker install). Not while a
+      // change of the access settings or a restore holds the fence.
+      if (path === '/api/v1/admin/server-restart') {
+        if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
+        if (typeof restartServer !== 'function') throw new HttpError(503, 'server_restart_unavailable');
+        const input = await body(req, 1024); fields(input, ['confirm']);
+        if (input.confirm !== true) throw new HttpError(400, 'server_restart_confirmation_required');
+        currentAdmin();
+        accessRuntime?.assertAdmission();
+        store.audit('server_restart_requested', actor, '');
+        send(202, { accepted: true, startedAt: serverInfo.startedAt });
+        // After this answer is on its way.
+        setImmediate(() => restartServer());
+        return true;
       }
       if (path === '/api/v1/admin/inventory' && req.method === 'GET') {
         const inventory = store.inventory();

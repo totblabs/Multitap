@@ -205,6 +205,16 @@ String _asciiBrokerLabel(String label) {
   return result;
 }
 
+/// A refused HTTP address with its fixed reason. The message is what the
+/// person reads; [code] is what a log may keep.
+class BrokerTransportRefusal extends FormatException {
+  BrokerTransportRefusal(this.code, String message) : super(message);
+
+  /// 'http_approval_missing': the address has no HTTP approval in this run.
+  /// 'http_unverified': its approval has no passed connection test.
+  final String code;
+}
+
 class HttpTransportApproval {
   HttpTransportApproval._(this.origin, this._token, this._lease);
   final Uri origin;
@@ -227,7 +237,10 @@ class BrokerTransport {
     if (normalized.scheme == 'https') return null;
     final value = _tokens[normalized.origin];
     if (value == null) {
-      throw FormatException(l10n.agreeHttpServerAddressFirst);
+      throw BrokerTransportRefusal(
+        'http_approval_missing',
+        l10n.agreeHttpServerAddressFirst,
+      );
     }
     return value;
   }
@@ -346,7 +359,10 @@ Map<String, Object> encodeBrokerTransportSettings(Uri origin) {
   final valid = normalizeBrokerOrigin(origin.toString());
   BrokerTransport.token(valid);
   if (!BrokerTransport.verified(valid)) {
-    throw FormatException(l10n.testConnectionCurrentHttpAddress);
+    throw BrokerTransportRefusal(
+      'http_unverified',
+      l10n.testConnectionCurrentHttpAddress,
+    );
   }
   return {
     'version': 2,

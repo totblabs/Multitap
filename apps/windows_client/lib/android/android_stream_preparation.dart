@@ -432,27 +432,6 @@ class AndroidStreamPreparation {
       );
     }
     await checkTakeover(token, desktopId);
-    final signin = desktop.signinAvailability;
-    if (!desktop.canStream &&
-        desktop.hostConnected == true &&
-        !desktop.powerBusy &&
-        !desktop.display.busy &&
-        !desktop.sessionCleanup.pending &&
-        signin?.fresh(now()) == true) {
-      final broker = api;
-      if (options.monitor != '0' || broker is! SigninStreamBrokerApi) {
-        throw const BrokerException('signin_stream_unavailable', 409);
-      }
-      return _reserve(
-        () => (broker as SigninStreamBrokerApi).connectSignin(
-          token,
-          desktopId,
-          availabilityId: signin!.id,
-          options: options,
-        ),
-        now().add(timeout),
-      );
-    }
     if (options.monitor == 'all') {
       final broker = api;
       if (!desktop.profileTracks || broker is! ProfileTrackBrokerApi) {
@@ -554,7 +533,7 @@ class AndroidStreamPreparation {
         : null;
     // The encoder box stays this session's ceiling for every later resize
     // (stream.resize carries only the size). A Fold connected folded must
-    // still get its whole unfolded picture (2026-10-26: unfolded it received
+    // still get its whole unfolded picture (otherwise, unfolded, it receives
     // 1248×942 of a 2448×1848 output, drawn 1:1 in a quarter of the screen).
     // Where the Host keeps the box apart from the first viewport, ask for the
     // codec ceiling, as the Windows client does.

@@ -51,7 +51,7 @@ String streamModeLabel(SessionDisplayMode mode) => switch (mode) {
 
 /// The body below a tile picture, sized from the text scale so every tile
 /// keeps the same height whatever its state: the name row, the CPU and
-/// memory strip (2026-10-26), the status card and the buttons. By [touch]
+/// memory strip, the status card and the buttons. By [touch]
 /// (Android) ⏻, ⋯ and the buttons are 48 dp.
 double tileBodyHeight(TextScaler scaler, {bool touch = false}) {
   double line(double size, double height) => scaler.scale(size) * height;
@@ -77,9 +77,9 @@ double tileBodyHeight(TextScaler scaler, {bool touch = false}) {
 /// Space above and below the CPU and memory strip.
 const _resourceGap = (top: 6.0, bottom: 12.0);
 
-/// The launcher's tile grid, one rule on Windows and Android (2026-10-28:
-/// one card design with automatic responsive columns; 2026-11-03: Android
-/// renders the same tile): as many columns of at least 288 (growing with
+/// The launcher's tile grid, one rule on Windows and Android (one card
+/// design with automatic responsive columns; Android renders the same
+/// tile): as many columns of at least 288 (growing with
 /// the text, at most 3) as fit [width], [desktopTileGap] apart, and one
 /// size for every tile: the picture, 5:3 of the tile but at most 40 % of
 /// the [viewport]'s height (a fifth under 500: a phone on its side keeps the
@@ -95,9 +95,9 @@ const _resourceGap = (top: 6.0, bottom: 12.0);
   final minimum = 288.0 * scaler.scale(1).clamp(1.0, 1.6);
   final columns = ((width + gap) / (minimum + gap)).floor().clamp(1, 3);
   final tile = (width - (columns - 1) * gap) / columns;
-  // At most 40 % of the window's height (2026-11-03: one column at 150 %
-  // text in an 800 x 600 window drew a 444 px picture and pushed the main
-  // button off screen).
+  // At most 40 % of the window's height (without the limit, one column at
+  // 150 % text in an 800 x 600 window draws a 444 px picture and pushes the
+  // main button off screen).
   final picture = !previews
       ? 0.0
       : math.min(
@@ -123,8 +123,8 @@ Color _phaseDot(AppPalette p, TilePhase phase) => switch (phase) {
 };
 
 /// One assigned desktop as a large tile. Only the main button and the ▶ on
-/// the picture connect (2026-10-26: a click anywhere on the tile connected);
-/// no key on the focused tile does (2026-11-10). ▾ chooses how to
+/// the picture connect (a click elsewhere on the tile does not); no key on
+/// the focused tile does. ▾ chooses how to
 /// connect, ⏻ holds the power actions, ⋯ manages the VM, and a right click
 /// shows the connection and management parts.
 ///
@@ -513,8 +513,8 @@ class DesktopNameRow extends StatelessWidget {
                 ),
               );
               // The name comes first: when it and the OS label do not both
-              // fit, the OS label gives way (2026-11-03: a long name and its
-              // OS were both cut, "회계팀 업무용 Windows… Windows 11 …").
+              // fit, the OS label gives way (otherwise a long name and its
+              // OS are both cut, "회계팀 업무용 Windows… Windows 11 …").
               double natural(String text, TextStyle style) {
                 final painter = TextPainter(
                   text: TextSpan(
@@ -1067,7 +1067,7 @@ class _ActionRow extends StatelessWidget {
         ),
       );
     }
-    // One footer for every state (2026-10-27): the main button keeps its size,
+    // One footer for every state: the main button keeps its size,
     // place and amber style; only its label, icon and action follow the state.
     // ▾ (the other-connection menu) rides beside it where the console can be
     // reached.
@@ -1122,7 +1122,7 @@ class _ActionRow extends StatelessWidget {
           ? r.headline
           : mode == null
           ? l10n.streamingConnection
-          // 2026-11-10: the tip names what the button does, not the key.
+          // The tip names what the button does, not the key.
           : l10n.streamingConnection2(streamModeLabel(mode));
     }
     final more =
@@ -1309,7 +1309,7 @@ class DesktopThumbnailView extends StatelessWidget {
           note: progress == null ? null : l10n.connectsByStreamingAsSoon,
         );
       // The sign only: the status card right below says the same headline
-      // (2026-11-03: the sentence was shown twice on one card).
+      // (the sentence would otherwise show twice on one card).
       case TilePhase.attention:
         overlay = const _ThumbMessage(
           icon: Icon(
@@ -1335,7 +1335,7 @@ class DesktopThumbnailView extends StatelessWidget {
     final soundBadge = audio == 'absent' || audio == 'pending';
     // Reserve the actual sound label plus its icon, padding and an 8px gap.
     // A fixed reservation used to cut the caption even when both would fit.
-    // The VM's Proxmox QEMU guest agent option is off (2026-11-09): a badge
+    // The VM's Proxmox QEMU guest agent option is off: a badge
     // in the picture's bottom-right corner, above the sound badge when that
     // one is there.
     final agentBadge = machine.qemuAgentOff && !preview;
@@ -1350,7 +1350,7 @@ class DesktopThumbnailView extends StatelessWidget {
         ? 60.0 + _ImageChip.labelWidth(context, agentLabel)
         : 12.0;
     // Not a live view: an old picture, or any desktop that is not running
-    // and ready, reads as a stored snapshot (2026-10-26: an old frame made
+    // and ready, reads as a stored snapshot (an undimmed old frame makes
     // the app look frozen). The ▶ overlay stays undimmed above it.
     final snapshot =
         picture != null &&
@@ -1543,8 +1543,8 @@ Widget _uptimeTooltip(Duration? uptime, Widget chip, {bool pc = false}) =>
 
 /// The power sign on a switched-off tile. Where this user may switch the
 /// desktop on it is also a button for 켜기 and fills amber under the pointer,
-/// as ▶ does on a running tile (2026-11-10: it looked like a button and did
-/// not answer the pointer). The main button below is the keyboard route, so
+/// as ▶ does on a running tile (it looks like a button, so it answers the
+/// pointer). The main button below is the keyboard route, so
 /// this one takes no focus.
 class _PowerOnButton extends StatefulWidget {
   const _PowerOnButton({required this.id, required this.onTap});
@@ -1665,7 +1665,7 @@ class _ThumbMessage extends StatelessWidget {
 
 /// 소리 없음 (no sound device) or 다시 시작 필요 (one was added in Proxmox and
 /// is not applied yet) on the picture, in the chip style with a warning
-/// colour. An indicator only (2026-11-10): Multitap adds no sound device, so
+/// colour. An indicator only: Multitap adds no sound device, so
 /// it opens nothing; its tooltip says what the state means.
 class _SoundBadge extends StatelessWidget {
   const _SoundBadge({super.key, required this.pending});
@@ -1763,7 +1763,7 @@ class _ImageChip extends StatelessWidget {
         );
 
   Widget _chip(BuildContext context, {bool compact = false}) => Container(
-    // Grows with the text (it clipped at 150 % on Windows, 2026-11-03).
+    // Grows with the text (a fixed height clips at 150 % on Windows).
     height: math.max(
       26.0,
       MediaQuery.textScalerOf(context).scale(12) * 1.4 + 8,

@@ -655,7 +655,7 @@ void main() {
         try {
           await tester.tap(find.byKey(handle));
           await tester.pump(Duration.zero);
-          // 바 열어 두기 is a switch of the bar's 설정 panel (2026-11-10): it
+          // 바 열어 두기 is a switch of the bar's 설정 panel: it
           // applies in place and the panel stays, so it is closed here. No
           // time passes, so the panel goes at once. Its row hands its key to
           // its InkWell too: the first match is the row.

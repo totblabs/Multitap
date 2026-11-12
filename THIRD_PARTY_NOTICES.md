@@ -4,7 +4,7 @@ Multitap is licensed under the GNU Affero General Public License version 3 only 
 
 The Host statically links x264 (GPL-2.0-or-later, used under GPL-3.0) and uses WinFsp under GPL-3.0 with its FLOSS exception. The Host program is AGPL-3.0 code linked with GPL-3.0 code, which section 13 of both licences permits. Host packages carry `COPYING.*` and `THIRD-PARTY-NOTICES.txt` files and a source archive (`host-native-corresponding-source-<version>.zip`) with the native build's source snapshot and the pinned x264, libopus and libvirtualdisplay sources.
 
-The apps also show these notices under 정보·라이선스, read from `apps/windows_client/assets/licenses/`: `native_notices.json` (Windows client), `host_native_notices.json` (Host settings) and `android_native_notices.json` (Android, which carries none of the Windows-only parts: UsbDk, the Visual C++ runtime, usb.ids, libopus, WebView2), together with Flutter's generated package notices.
+The apps also show these notices under **About and licenses** (정보·라이선스 on the Korean screens), read from `apps/windows_client/assets/licenses/`: `native_notices.json` (Windows client), `host_native_notices.json` (Host settings) and `android_native_notices.json` (Android, which carries none of the Windows-only parts: UsbDk, the Visual C++ runtime, usb.ids, libopus, WebView2), together with Flutter's generated package notices.
 
 ## Bundled or linked in released packages
 

@@ -100,8 +100,8 @@ void RemoteAudio::AppendStats(flutter::EncodableMap& stats) {
 namespace {
 // Windows' default playback device changed (headphones plugged in, a Bluetooth
 // headset connected, the user picked another output): the render thread
-// reopens on the new default (2026-11-09 audit: sound stopped for the rest of
-// the session). Registered for the thread's lifetime only; no reference count.
+// reopens on the new default (otherwise sound stops for the rest of the
+// session). Registered for the thread's lifetime only; no reference count.
 class DefaultOutputWatch final : public IMMNotificationClient {
  public:
   std::atomic<bool> changed{false};

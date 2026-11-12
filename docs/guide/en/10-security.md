@@ -23,7 +23,8 @@ The name in the address must match the certificate.
 
 **HTTP does not encrypt sign-in or WebSocket traffic.**
 Passwords, the screen and key presses can be exposed on the network.
-Use HTTP on a trusted internal network. If you reach it from outside over HTTP through router port forwarding, all of this crosses the internet as it is. If you use it from outside often, use a domain and HTTPS.
+Use HTTP on a trusted internal network. Reaching it from outside over HTTP through router port forwarding works too, but all of this then crosses the internet as it is. From outside, a domain with HTTPS is recommended.
+When the install command asks about HTTP from outside, Enter means **no**.
 
 Agreeing to the app's HTTP warning does not add encryption.
 Check that the server address, the port and the operator's settings are right.
@@ -75,7 +76,7 @@ Having a desktop assigned does not allow every power action and device sharing.
 ### What is recorded
 
 The server records who signed in when and which desktop they connected to for how long, and shows it in **Monitoring** in the admin console.
-The records include the IP address the connection came from and are kept for 2 years. Deleting an account also deletes its records.
+The records include the IP address the connection came from and are kept for 2 years. Deleting an account also deletes its sign-in and connection history.
 **Connection time** is the time spent connected, not the time spent working.
 
 If people share the same Windows account on the same desktop, they share that account's files and programs.
@@ -123,24 +124,21 @@ The file alone shows only when it was made and the server version, but a weak pa
 **Do not write how to reproduce a vulnerability, or any secret, in a public issue.**
 Read the [security policy](../../../SECURITY.md) first for what to report and how reports are handled.
 
-If private reporting is turned on in the official GitHub repository, you can report this way:
+Report privately in the official GitHub repository:
 
-1. Open **Security → Advisories** in the repository.
+1. Open the **Security** tab of the [repository](https://github.com/totblabs/Multitap/security).
 2. Click **Report a vulnerability**.
 3. Write the affected component and version.
 4. Write the permissions needed, the steps to reproduce and the expected impact.
 5. Hide real addresses, passwords and tokens, then submit.
 
-If you do not see the button, check the repository's latest security policy.
-If it gives no guidance, open a public issue that only asks for private reporting to be turned on, with no vulnerability details.
+Only the repository maintainers can see the report. You need to be signed in to GitHub ([GitHub documentation](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/report-privately)).
 This project does not offer a separate reporting email.
-
-The button appears only when the repository has turned the feature on ([GitHub documentation](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/report-privately)).
 Security fixes target the latest public version, and no response time is guaranteed.
 
 ## What the Host does to Windows
 
-- The virtual display driver is the original signed by Sunshine, used as is. At install, it asks for your consent and adds that one signing certificate (code signing only) to the Windows trust stores. It adds no other certificate.
+- The virtual display driver is the original signed by Sunshine, used as is. When the install is finished in Host settings, it asks for your consent and adds that one signing certificate (code signing only) to the Windows trust stores. It adds no other certificate.
 - It does not change Windows security settings such as test mode or Defender exclusions. It does not change UAC settings either.
 - Input to security prompts and administrator windows is passed by the Host service only in your own stream of your own session that is not locked.
 - The Windows password saved on the Host stays in that Windows and is not sent to the Multitap server.

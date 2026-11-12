@@ -1,4 +1,4 @@
-#include "settings_ui.hpp"
+#include "host_service_status.hpp"
 #include <iostream>
 #include "tray.hpp"
 #include "settings_rpc.hpp"
@@ -60,7 +60,6 @@ int run(int argc,wchar_t** argv){
     if(argc==3&&(std::wstring(argv[1])==L"--encode-selftest"||std::wstring(argv[1])==L"--capture-selftest")){int count=encodeSelfTest(argv[2],std::wstring(argv[1])==L"--capture-selftest");std::cout<<"Encoded "<<count<<" actual software H264 frames.\n";return 0;}
     if(argc==2&&(std::wstring(argv[1])==L"--tray"||std::wstring(argv[1])==L"--tray-selftest")){HostTray tray;return tray.run(std::wstring(argv[1])==L"--tray-selftest");}
     Runtime runtime;
-    if((argc==3||argc==4)&&std::wstring(argv[1])==L"--settings-selftest"){const double scale=argc==4?_wtof(argv[3]):0;if(scale<0||scale>2.5)throw std::runtime_error("Invalid QA layout scale");SettingsUi ui;const int result=ui.run(argv[2],scale);std::cout<<"{\"kind\":\"real-settings-window\",\"testPassedThenEditInvalidated\":"<<(result==0?"true":"false")<<",\"layoutScale\":"<<scale<<",\"registrationAttempted\":false}\n";return result;}
     if(argc==2&&std::wstring(argv[1])==L"--enroll-stdin"){requireAdmin();std::string bytes((std::istreambuf_iterator<char>(std::cin)),{});const auto request=JsonParser::parse(bytes);SecureZeroMemory(bytes.data(),bytes.size());const auto origin=wide(request.get("serverOrigin").string());const auto consent=wide(request.get("httpConsentOrigin").string());testBroker(origin,consent);std::string code=request.get("code").string();auto value=enroll(origin,code,consent);SecureZeroMemory(code.data(),code.size());savePublicEnrollment(value);reloadHostService();std::cout<<"Enrolled VM; machine credential protected for the Windows host service.\n";return 0;}
     if(argc==2&&std::wstring(argv[1])==L"--diagnostics"){const auto settings=readPublicConfig();const auto display=virtualDisplayStatus();std::cout<<"{\"version\":\"" MULTITAP_HOST_VERSION_UTF8 "\",\"machineRegistrationConfigured\":"<<(!settings.get("desktopId").string().empty()?"true":"false")<<",\"service\":"<<jsonQuote(utf8(serviceLabel(readHostServiceSnapshot(),ui_text::Language::korean)))<<",\"interactiveSession\":"<<(sessionUnlocked(interactiveSession())?"true":"false")<<",\"virtualDisplayReady\":"<<(display.ready()?"true":"false")<<"}\n";return 0;}
     if(argc==3&&std::wstring(argv[1])==L"--test-server"){std::cout<<"Compatible Multitap broker "<<testBroker(argv[2])<<"; TLS verified.\n";return 0;}

@@ -1,6 +1,6 @@
 // The Android launcher on the Windows client's tile design, and the console
-// hand-over after RDP (2026-10-27: an RDP session made the tile say "다시
-// 시작" instead of offering 스트리밍 연결 through the hand-over).
+// hand-over after RDP (after an RDP session the tile must not say "다시
+// 시작" but offer 스트리밍 연결 through the hand-over).
 import '../helpers/stream_connect_consent.dart'
     show acceptStreamConnect, expectAndroidHandOverQuestion;
 import 'package:flutter/material.dart';
@@ -150,7 +150,7 @@ void main() {
     // What the Android app did before: no hand-over, so a restart.
     final before = DesktopReadiness.of(machine);
     expect(before.canStream, isFalse);
-    // Not a reboot (2026-10-27): a restart is offered only when Windows
+    // Not a reboot: a restart is offered only when Windows
     // really asks for one.
     expect(before.primary, ReadinessAction.refresh);
     final now = DesktopReadiness.of(machine, consoleRecovery: true);
@@ -175,7 +175,7 @@ void main() {
     expect(find.text('다시 시작'), findsNothing);
     await _tapVisible(tester, mainButton('pve-149'));
     await tester.pumpAndSettle();
-    // One question (2026-11-11): the hand-over question is the launcher's.
+    // One question: the hand-over question is the launcher's.
     await expectAndroidHandOverQuestion(tester, 'pve-149');
     expect(find.byType(AppConfirmDialog), findsOneWidget);
     expect(
@@ -313,8 +313,7 @@ void main() {
     },
   );
 
-  // One question (2026-11-11: connecting asked "연결할까요?" and then the
-  // hand-over question).
+  // One question (not "연결할까요?" and then the hand-over question).
   testWidgets(
     'a ready desktop keeps the plain connect question and no hand-over question',
     (tester) async {
@@ -533,7 +532,7 @@ void main() {
     expect(find.text('비밀번호 변경'), findsNothing);
     expect(find.byKey(const Key('sign-out')), findsOneWidget);
     expect(find.text('정보·라이선스'), findsOneWidget);
-    // 비밀번호 변경 is in 설정, the header's own ⚙ (2026-11-11), as on the PC.
+    // 비밀번호 변경 is in 설정, the header's own ⚙, as on the PC.
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('sign-out')), findsNothing);

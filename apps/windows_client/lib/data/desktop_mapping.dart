@@ -17,7 +17,6 @@ DesktopMachine machineFromBroker(
   return DesktopMachine(
     id: desktop.id,
     name: desktop.name,
-    signinAvailability: desktop.canStream ? null : desktop.signinAvailability,
     consoleInUse: desktop.consoleInUse,
     qemuAgentOff: desktop.kind == 'vm' && desktop.qemuAgentOff,
     description: desktop.description,
@@ -34,9 +33,6 @@ DesktopMachine machineFromBroker(
     // reads as a fault; the tile shows its kind instead.
     specification: desktop.os.trim() == '미확인' ? '' : desktop.os,
     accent: const Color(0xFF5579B8),
-    consoleRelayProtocol: desktop.emergencyConsoleSupported
-        ? desktop.consoleRelayProtocol
-        : null,
     consoleBrowserProtocol: desktop.browserConsoleSupported
         ? desktop.consoleBrowserProtocol
         : null,

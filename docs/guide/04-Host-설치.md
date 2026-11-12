@@ -35,6 +35,8 @@ VM이라면 Proxmox에서 해당 VM의 **Console**을 열어 Windows에 로그�
 예시 도메인을 실제 서버 주소로 바꾸세요.
 내부망 HTTP라면 `http://서버IP:18480/get/host`를 사용하세요.
 
+Windows가 **Windows의 PC 보호**나 **알 수 없는 게시자** 경고를 보일 수 있습니다. 설치 파일에 구매한 코드 서명 인증서가 없기 때문입니다([문제 해결](09-문제-해결.md#defendersmartscreen이-설치를-막음)).
+
 Host는 일반 Windows 프로그램처럼 설치됩니다. 나중에 Windows 설정의 **앱**에서 복구하거나 제거할 수 있습니다.
 
 ### 설치 마무리 — 가상 화면 드라이버와 WinFsp

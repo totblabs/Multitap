@@ -1,6 +1,6 @@
-// The broker's hostMissingAfterUpdate on the launcher card (field case
-// 2026-11-03: a Host update ended install_failed, the Host never came back
-// and the card only said offline). Widget/model checks only: no broker, Host
+// The broker's hostMissingAfterUpdate on the launcher card (a Host update
+// ends install_failed, the Host never comes back, and the card must say
+// more than offline). Widget/model checks only: no broker, Host
 // or VM is contacted. Every machine comes through the list JSON path.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

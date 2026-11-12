@@ -241,7 +241,7 @@ void main() {
             isTrue,
           );
           if (sample.memoryUsedBytes != null) {
-            // The tile's units (GB as Windows shows GiB, 2026-10-26).
+            // The tile's units (GB as Windows shows GiB).
             expect(find.text('9.0 GB / 8 GB'), findsOneWidget);
             expect(bars.last.value, 1);
           }

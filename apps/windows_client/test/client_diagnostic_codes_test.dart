@@ -18,7 +18,7 @@ void main() {
   });
 
   test('A Host end records the relay detail; released relays send only the reason', () {
-    // 4K video incident (2026-10-26): every host_error looked the same.
+    // Without the detail every host_error looks the same (as with 4K video).
     final failure = SessionFailure.ended('host_error');
     expect(failure.code, 'host_disconnected');
     expect(relayEndCode('host_error', failure.code, 'host_frame_invalid'), 'host_frame_invalid');

@@ -38,7 +38,7 @@ Map<String, Object?> layout(int count) => {
 };
 
 /// The session toolbar rests as a handle; a click opens it. 화면 then drops
-/// its panel, where the screen modes are tiles (2026-11-10).
+/// its panel, where the screen modes are tiles.
 Future<void> openScreenMenu(WidgetTester t) async {
   if (find.byKey(const Key('session-command-bar')).evaluate().isEmpty) {
     await t.tap(find.byKey(const Key('expand-session-toolbar')));

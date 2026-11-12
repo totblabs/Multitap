@@ -178,7 +178,7 @@ void main() {
       expect(connection.audioOpus, isFalse);
     });
 
-    // Android decodes Opus too (AndroidOpusDecoder.kt), 2026-11-03.
+    // Android decodes Opus too (AndroidOpusDecoder.kt).
     test('Android asks where offered and takes the grant', () async {
       final (body, connection) = await connect(
         _advertised,
@@ -201,7 +201,7 @@ void main() {
       expect(connection.audioOpus, isFalse);
     });
 
-    // audio-path-v1 (2026-11-11): a phone whose Opus decoders all failed stayed
+    // audio-path-v1: a phone whose Opus decoders all fail must not stay
     // silent on every connection. Once the engine says so, PCM is asked for.
     test('Android asks for PCM once no Opus decoder of the device plays', () async {
       addTearDown(() => AndroidRemoteMedia.opusDecodable = true);

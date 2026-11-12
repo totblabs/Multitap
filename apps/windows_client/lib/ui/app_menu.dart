@@ -38,7 +38,7 @@ abstract final class AppMenu {
 
   /// [MenuAnchor.onOpen]/[MenuAnchor.onClose] bookkeeping: a dialog or any
   /// other route closes every open menu instead of opening over it
-  /// (2026-10-26: a connect question stood over an open ⋯ menu).
+  /// (a connect question must not stand over an open ⋯ menu).
   static void opened(MenuController menu) => _open.add(menu);
   static void closed(MenuController menu) => _open.remove(menu);
   static bool get anyOpen => _open.isNotEmpty;

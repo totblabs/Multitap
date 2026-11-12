@@ -144,9 +144,9 @@ internal data class PcmShape(val channels: Int, val float: Boolean)
 /**
  * audio-opus-v1 on the media worker: one stream's Opus decoder [C], made off
  * the worker. Listing the platform's decoders and creating, configuring and
- * starting one took the start answer from ~70 ms (PCM) to 190-270 ms
- * (2026-11-03, the first session of an app run) when it ran on the worker
- * before the start answered and before the video decoder was made. Now the
+ * starting one takes the start answer from ~70 ms (PCM) to 190-270 ms
+ * (the first session of an app run) when it runs on the worker
+ * before the start answers and before the video decoder is made. So the
  * worker only asks for one ([Codecs.open]) and goes on; the video never waits.
  *
  * Packets that come before the decoder is there are admitted to [stream] in
@@ -264,8 +264,8 @@ internal class AndroidOpusPipe<C : Any>(
      * [attempt]'s output cannot become the track's 48 kHz s16 stereo
      * (AndroidOpus.outputShape): that decoder is passed over from now on and
      * the next packet asks for the next one in trial order. Only when none is
-     * left does the stream go without sound (no noise is ever played). Before
-     * 2026-11-11 the first such decoder ended the sound for the whole stream.
+     * left does the stream go without sound (no noise is ever played); the
+     * first such decoder does not end the sound for the whole stream.
      */
     fun unusable(attempt: Attempt<C>) {
         if (attempt !== current) return

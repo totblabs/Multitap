@@ -289,6 +289,7 @@ export function everyoneAudience(ctx) {
 const short = name => { const text = String(name ?? '').trim(); return length(text) > 28 ? [...text].slice(0, 27).join('') + '…' : text; };
 export const announcements = {
   serverUpdate: { title: t('notices.92'), body: when => t('notices.93', { when }), then: t('notices.92') },
+  serverRestart: { title: t('notices.serverRestart'), body: when => t('notices.93', { when }), then: t('notices.serverRestart') },
   serverAccess: { title: t('notices.94'), body: when => t('notices.95', { when }), then: t('notices.96') },
   restore: { title: t('notices.97'), body: when => t('notices.98', { when }), then: t('notices.99') },
   hostUpdate: { title: t('notices.100'), body: when => t('notices.101', { when }), then: t('notices.102') },

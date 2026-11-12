@@ -1,5 +1,5 @@
-// Backlog 2026-11-02: the server dialog's HTTPS/HTTP choice wrapped unevenly
-// at some widths and text sizes. Widget layout only.
+// The server dialog's HTTPS/HTTP choice must not wrap unevenly at any width
+// or text size. Widget layout only.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/ui/app_theme.dart';

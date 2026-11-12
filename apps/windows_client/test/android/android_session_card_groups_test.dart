@@ -1,5 +1,5 @@
-// The Android session menu card's groups (regrouped 2026-11-10; the PC's bar
-// as rows 2026-11-11): 연결 품질 first, a caption (화면 · 설정) only over a
+// The Android session menu card's groups (the PC's bar as rows): 연결
+// 품질 first, a caption (화면 · 설정) only over a
 // group that has rows of its own, 마우스 잠금 as a switch row, and the
 // emergency console's own commands without a caption. The bar alone with
 // fake commands; no session, device or host.
@@ -71,8 +71,8 @@ List<SessionToolbarMenu> _real(_Host host) => [
     ),
 ];
 
-/// The flat list a host may still give (AndroidRemoteView's until
-/// 2026-11-11): 화면, 배율 (where the Host sets it), 화질, 마우스
+/// The flat list a host may still give: 화면, 배율 (where the Host sets
+/// it), 화질, 마우스
 /// 잠금 (where granted; [mouse]: one is connected, [locked]: it is on) and
 /// 사용안내. The panel rows hand over to the host (`onPressedAt`).
 List<SessionToolbarMenu> _phone(

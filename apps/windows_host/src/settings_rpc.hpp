@@ -1,5 +1,5 @@
 #pragma once
-#include "settings_ui.hpp"
+#include "host_service_status.hpp"
 #include "pending_connection.hpp"
 #include "windows_account_record.hpp"
 #include "broker_status.hpp"

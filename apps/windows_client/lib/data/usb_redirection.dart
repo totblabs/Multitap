@@ -660,7 +660,7 @@ String usbMessage(String? code) => switch (code) {
   'usb_limit_reached' => l10n.youCanConnectUpDevices(usbMaxDevices),
   'usb_attach_failed' || 'usb_setup_failed' => l10n.desktopDidntReceiveDevice,
   // Another program's USB virtual controller (e.g. usbip-win2) on the remote
-  // computer, which may be a PC, not a VM (a test PC, 2026-11-02).
+  // computer, which may be a PC, not a VM.
   'usb_vhci_unavailable' =>
     l10n.anotherUsbVirtualDeviceProgram,
   'usb_driver_missing' => l10n.desktopsHostHasNoUsb,
@@ -699,7 +699,7 @@ String usbMessage(String? code) => switch (code) {
 };
 
 /// The administrator console's names for the per-VM device permissions, in
-/// its 장치 공유 group (2026-11-02).
+/// its 장치 공유 group.
 Map<String, String> get deviceSharingLabels => {
   'drives': l10n.sharedFolder,
   'usbDevices': 'USB',
@@ -1244,7 +1244,7 @@ class UsbSession extends ChangeNotifier {
     );
   }
 
-  /// 이 창으로 옮기기 (2026-11-02): the remote window of this client that holds
+  /// 이 창으로 옮기기: the remote window of this client that holds
   /// [entry] gives it back through its own session (its VM is told), Windows
   /// takes it back, and only then is it offered here as usual. The wait is
   /// bounded by [moveWait]; a fixed code says what did not happen.
@@ -1967,7 +1967,7 @@ class UsbSession extends ChangeNotifier {
     await finishing;
   }
 
-  // --- after a stream reconnect (2026-11-02) ------------------------------------
+  // --- after a stream reconnect ---------------------------------------------------
 
   /// The devices that were shared when this channel ended: the window offers
   /// them again in the session that replaces this one.

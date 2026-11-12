@@ -284,3 +284,37 @@ test('Docker deliberately copies only the prepared bundle and seeds before accou
   assert.ok(entrypoint.indexOf('download-bundle.mjs seed')<entrypoint.indexOf('bootstrap.mjs keep'));
   assert.doesNotMatch(entrypoint,/vdi\.totb\.me|rm -|chown/);
 });
+
+test('a volume put back from a copy keeps its release dates: whole-second or other file times are no conflict, a date or notes the catalog states still are',async t=>{
+  const {utimes,stat}=await import('node:fs/promises');
+  const f=await fixture(t,[entry(),entry('host'),...android()]);await prepare(f);
+  assert.deepEqual((await seedDownloadBundle(f.bundle,f.target)).history,{recorded:3,unchanged:0,conflicts:0});
+  const names=['client-0.9.1.json','host-0.9.1.json','android-client-0.9.1.json'],records=async()=>Promise.all(names.map(name=>readFile(join(f.target,'release-notes',name),'utf8')));
+  const before=await records();
+  for(const text of before)assert.match(JSON.parse(text).releasedAt,/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+  // What plain tar restores: every installer's time cut to a whole second. Where that happens to be the
+  // recorded instant already, another second stands for it (a copy made later).
+  for(const e of f.entries){
+    const path=join(f.target,e.filename),seconds=Math.floor((await stat(path)).mtimeMs/1000);
+    await utimes(path,seconds,seconds);
+    if(before.some(text=>JSON.parse(text).releasedAt===new Date(seconds*1000).toISOString()))await utimes(path,seconds-1,seconds-1);
+  }
+  for(let start=0;start<2;start++)assert.deepEqual((await seedDownloadBundle(f.bundle,f.target)).history,{recorded:0,unchanged:3,conflicts:0},'start '+(start+1));
+  assert.deepEqual(await records(),before,'the dates recorded at publication stay');
+  // A record that has no date yet takes the file's time, once.
+  const undated=join(f.target,'release-notes','host-0.9.1.json');await rm(undated);
+  await writeFile(undated,JSON.stringify({product:'host',version:'0.9.1'})+'\n');
+  const filled=await seedDownloadBundle(f.bundle,f.target);
+  assert.equal(filled.history.conflicts,0);assert.equal(filled.history.recorded,1);
+  const hostFile=f.entries.find(e=>e.product==='host').filename;
+  assert.equal(JSON.parse(await readFile(undated,'utf8')).releasedAt,new Date(Math.floor((await stat(join(f.target,hostFile))).mtimeMs)).toISOString());
+  assert.deepEqual((await seedDownloadBundle(f.bundle,f.target)).history,{recorded:0,unchanged:3,conflicts:0});
+  // A real conflict: the catalog itself states another date, or other notes, than the record holds.
+  const catalog=join(f.target,'releases.json'),entries=JSON.parse(await readFile(catalog,'utf8'));
+  await writeFile(catalog,JSON.stringify(entries.map(e=>e.product==='client'?{...e,releasedAt:'2020-01-01T00:00:00.000Z'}:e.product==='host'?{...e,changelog:'다른 내용'}:e),null,4)+'\n');
+  const client=join(f.target,'release-notes','client-0.9.1.json'),kept=await readFile(client,'utf8');
+  await writeFile(undated,JSON.stringify({product:'host',version:'0.9.1',changelog:'원래 내용'})+'\n');
+  const conflicting=await seedDownloadBundle(f.bundle,f.target);
+  assert.equal(conflicting.history.conflicts,2);assert.equal(conflicting.history.unchanged,1);
+  assert.equal(await readFile(client,'utf8'),kept,'and the record is kept as it is');
+});

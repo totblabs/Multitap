@@ -1,5 +1,5 @@
-// Design polish wave 2 (2026-11-10 audit): what the shared form parts and
-// the reworked surfaces promise. Widgets only; nothing outside the test
+// Design polish wave 2: what the shared form parts and their surfaces
+// promise. Widgets only; nothing outside the test
 // process is touched.
 //
 //   F-23 one field and one select: the label above, 42 px (48 for a finger),
@@ -167,8 +167,7 @@ void main() {
           compact: true,
         ),
       );
-      // A state, not the words of the 다시 연결 button beside it (review
-      // 2026-11-12).
+      // A state, not the words of the 다시 연결 button beside it.
       expect(find.text('다시 연결 중'), findsOneWidget);
       expect(find.text('다시 연결'), findsNothing);
       expect(find.text('연결 요청'), findsNothing);
@@ -301,6 +300,10 @@ void main() {
       await signIn(tester);
       expect(find.text('서버 설정 필요'), findsOneWidget);
       expect(find.text('서버 변경'), findsNothing);
+      // The address form starts open; closed, the button names the way back.
+      expect(find.byKey(const Key('login-server-form')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('cancel-server-settings')));
+      await tester.pumpAndSettle();
       expect(find.text('서버 설정하고 시작'), findsOneWidget);
     });
 

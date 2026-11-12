@@ -11,8 +11,8 @@ import 'package:multitap_client/ui/app_dialog.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 
 void main() {
-  // 2026-11-12 release blocker: the broker's VM checks before a stream used to
-  // arrive as virtual_display_required ("가상 화면이 준비되지 않았어요").
+  // The broker's VM checks before a stream have their own codes, not the
+  // general virtual_display_required ("가상 화면이 준비되지 않았어요").
   test('A stream refused by the VM checks says why, with its own code', () {
     final generic = SessionFailure.ended('unspecified_reason').message;
     final virtualDisplay =
@@ -63,7 +63,7 @@ void main() {
     );
   });
 
-  // 2026-11-09 edge-case audit: a takeover end says who took the VM.
+  // A takeover end says who took the VM.
   test('A takeover end says who, and falls back on an older server', () {
     expect(
       takenOverMessage('same_account', null),
@@ -122,7 +122,7 @@ void main() {
     }
   });
 
-  // 2026-11-09 edge-case audit: closing also ends mapped folders and drops
+  // Closing also ends mapped folders and drops
   // documents not printed or saved yet; the question says so.
   testWidgets('Closing with shared folders or waiting prints says so', (t) async {
     late BuildContext host;

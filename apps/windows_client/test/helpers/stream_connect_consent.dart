@@ -22,7 +22,7 @@ Future<void> acceptStreamConnect(WidgetTester tester, String desktopId) async {
 }
 
 /// The Windows launcher's one question for a desktop whose Windows screen is
-/// held by RDP (2026-11-11: it asked twice): the takeover question stands in
+/// held by RDP (one question, not two): the takeover question stands in
 /// for the plain connect question. The question stays open for the caller.
 Future<void> expectWindowsHandoverQuestion(WidgetTester tester) async {
   await tester.pump();

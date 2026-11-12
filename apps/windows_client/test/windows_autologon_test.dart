@@ -102,7 +102,7 @@ class _Host implements HostSettingsApi {
       });
       expect(fields['confirmed'], isTrue);
       expect(fields['password'], 'synthetic-password');
-      // Saving the account comes first, with the same account (2026-10-29).
+      // Saving the account comes first, with the same account.
       expect(
         base.requests
             .where((v) => v['action'] == 'saveRdpCredentials')
@@ -332,8 +332,7 @@ void main() {
         find.byKey(const Key('host-windows-autologon-toggle')),
         findsNothing,
       );
-      // Nothing here is described as off by default (login-screen streaming
-      // is ON by default since 2026-11-09).
+      // Nothing here is described as off by default.
       expect(find.textContaining('기본 꺼짐'), findsNothing);
       expect(find.textContaining('원할 때만'), findsNothing);
       expect(find.text('꺼짐 · 계정을 저장하면 켜져요'), findsOneWidget);
@@ -354,7 +353,7 @@ void main() {
         isEmpty,
       );
       expect(
-        // Signed out or locked: Console or a restart (2026-11-09); no switch.
+        // Signed out or locked: Console or a restart; no switch.
         find.textContaining(
           'Windows에서 로그아웃되거나 잠기면 Console(로컬 PC는 본체 화면)에서 로그인하세요.',
         ),

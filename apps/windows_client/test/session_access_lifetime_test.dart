@@ -161,7 +161,7 @@ void main() {
       expect(find.text('console-video'), findsOneWidget);
       final activityCount = broker.activities;
       await clock.advance(t, const Duration(seconds: 21));
-      // The notice now counts the seconds left (review 2026-11-12).
+      // The notice counts the seconds left.
       expect(find.byKey(const Key('idle-warning')), findsOneWidget);
       expect(find.textContaining('초 뒤 로그아웃돼요. 연결도 모두 끊겨요.'), findsOneWidget);
       await clock.advance(t, const Duration(seconds: 10));
@@ -208,8 +208,8 @@ void main() {
       await clock.advance(t, const Duration(seconds: 21));
       await t.pump();
       expect(find.text('계속 사용'), findsOneWidget);
-      // Review 2026-11-12: it was a full-width strip over the header without
-      // the time left. A compact notice under the header that counts down.
+      // Not a full-width strip over the header without the time left: a
+      // compact notice under the header that counts down.
       final notice = t.getRect(find.byKey(const Key('idle-warning')));
       final window = t.getRect(find.byType(MaterialApp));
       expect(notice.top, greaterThanOrEqualTo(64), reason: 'under the header');
