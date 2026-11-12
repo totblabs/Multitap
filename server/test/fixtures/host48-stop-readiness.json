@@ -1,0 +1,129 @@
+{
+  "source": "Bounded actual VM149 public relay stop observation; fixed non-secret fields only",
+  "hostVersion": "0.2.48",
+  "sourceReceiptSha256": "a02d5b4a1e65e11cc2b481de9e08d3140cde4e54609c3dad23473003aa082193",
+  "sourceProgramSha256": "3a9be72f60118696f6fe2da2bab2f882702e915fe56d70f6425990d2c945e6a0",
+  "samples": [
+    {
+      "elapsedMs": 5,
+      "cleanupPending": true,
+      "display": {
+        "supported": false,
+        "activeCount": 1,
+        "checkedAt": "2026-10-25T03:16:44.005Z",
+        "stale": true,
+        "busy": false
+      },
+      "capabilities": {
+        "service": true,
+        "interactiveSession": true,
+        "streaming": true,
+        "virtualDisplayReady": true,
+        "virtualMonitorControl": false,
+        "viewportFailureReason": "",
+        "monitors": [
+          {
+            "id": "0",
+            "width": 1580,
+            "height": 952,
+            "primary": true
+          }
+        ]
+      }
+    },
+    {
+      "elapsedMs": 260,
+      "cleanupPending": true,
+      "display": {
+        "supported": false,
+        "activeCount": 1,
+        "checkedAt": "2026-10-25T03:16:44.005Z",
+        "stale": true,
+        "busy": false
+      },
+      "capabilities": {
+        "service": true,
+        "interactiveSession": true,
+        "streaming": true,
+        "virtualDisplayReady": true,
+        "virtualMonitorControl": false,
+        "viewportFailureReason": "",
+        "monitors": [
+          {
+            "id": "0",
+            "width": 1580,
+            "height": 952,
+            "primary": true
+          }
+        ]
+      }
+    },
+    {
+      "elapsedMs": 514,
+      "cleanupPending": false,
+      "display": {
+        "supported": false,
+        "activeCount": null,
+        "checkedAt": "2026-10-25T03:16:44.467Z",
+        "stale": true,
+        "busy": false
+      },
+      "capabilities": {
+        "service": true,
+        "interactiveSession": true,
+        "streaming": false,
+        "virtualDisplayReady": false,
+        "virtualMonitorControl": false,
+        "viewportFailureReason": "owned_virtual_display_not_ready",
+        "monitors": []
+      }
+    },
+    {
+      "elapsedMs": 768,
+      "cleanupPending": false,
+      "display": {
+        "supported": false,
+        "activeCount": null,
+        "checkedAt": "2026-10-25T03:16:44.467Z",
+        "stale": true,
+        "busy": false
+      },
+      "capabilities": {
+        "service": true,
+        "interactiveSession": true,
+        "streaming": false,
+        "virtualDisplayReady": false,
+        "virtualMonitorControl": false,
+        "viewportFailureReason": "owned_virtual_display_not_ready",
+        "monitors": []
+      }
+    },
+    {
+      "elapsedMs": 1021,
+      "cleanupPending": false,
+      "display": {
+        "supported": true,
+        "activeCount": 1,
+        "checkedAt": "2026-10-25T03:16:45.028Z",
+        "stale": false,
+        "busy": false
+      },
+      "capabilities": {
+        "service": true,
+        "interactiveSession": true,
+        "streaming": true,
+        "virtualDisplayReady": true,
+        "virtualMonitorControl": true,
+        "viewportFailureReason": "",
+        "monitors": [
+          {
+            "id": "0",
+            "width": 1580,
+            "height": 952,
+            "primary": false
+          }
+        ]
+      }
+    }
+  ]
+}

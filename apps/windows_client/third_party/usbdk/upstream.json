@@ -1,0 +1,24 @@
+{
+  "name": "UsbDk",
+  "purpose": "Takes a USB device away from its own Windows driver on the client PC while the VM uses it (usb-v1, docs/usb-redirection.md)",
+  "license": "Apache-2.0",
+  "licenseUrl": "https://github.com/daynix/UsbDk/blob/master/LICENSE",
+  "upstream": "https://github.com/daynix/UsbDk",
+  "release": "1.0.22",
+  "publishedBy": "Red Hat, Inc. / Daynix Computing (2020-03-17)",
+  "source": "https://github.com/daynix/UsbDk/releases/tag/v1.00-22",
+  "file": { "name": "UsbDk_1.0.22_x64.msi", "url": "https://github.com/daynix/UsbDk/releases/download/v1.00-22/UsbDk_1.0.22_x64.msi", "sha256": "91f6f695e1e13c656024e6d3b55620bf08d8835ef05ee0496935ba6bb62466a5", "size": 6348800 },
+  "signature": {
+    "checked": "2026-10-26",
+    "how": "Get-AuthenticodeSignature on a downloaded copy; the MSI was not run",
+    "signer": "Red Hat, Inc.",
+    "signerThumbprint": "F01DAC89598C52D94FE8CA91187E1853947D115A",
+    "issuer": "Symantec Class 3 SHA256 Code Signing CA - G2",
+    "status": "Valid (the certificate expired 2022-01-26; the Symantec timestamp keeps the signature valid)"
+  },
+  "notes": [
+    "The MSI is not stored in this repository. tools/fetch-usb-drivers.ps1 -UsbDk downloads it into .tools/usb-drivers/usbdk-1.0.22 and checks the SHA-256; the client build (windows/CMakeLists.txt) copies it to usbdk/ beside the client when present.",
+    "The client never runs it on its own: the USB panel asks, then verifies size, SHA-256 and the Red Hat, Inc. signature and runs msiexec /i /qn /norestart (usb_capture.cpp InstallUsbDk).",
+    "UsbDk 1.0.22 is the last release (2020). Memory Integrity (HVCI) compatibility was not verified; it is a filter driver on every USB hub of the PC while installed."
+  ]
+}

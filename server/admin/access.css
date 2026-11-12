@@ -1,0 +1,20 @@
+/* 사용자 (js/users.js): the accounts as a board; one account in its window.
+   Tokens and shared parts: console.css. */
+/* The board: 번호 | 아이디 | 메모 | 데스크톱 | 상태 | 관리. The memo takes the rest. */
+.account-table th.col-num{width:56px}
+.account-table th.col-id{width:24%}
+.account-table th.col-count{width:96px}
+.account-table th.col-state{width:104px}
+.account-table th.col-manage{width:84px}
+.account-table td.col-num,.account-table td.col-memo{color:var(--muted)}
+.account-table tr.is-on>td{background:var(--row-on)}
+.account-list-caption span{color:var(--ink);font-weight:700}
+/* The window: the role beside the name in its title bar. */
+.account-head h2{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;overflow-wrap:anywhere}
+.account-table td small.account-role{display:inline;margin-left:8px;color:var(--muted);font-size:12px;font-weight:400}
+@media(max-width:1000px){
+  .account-table th.col-id{width:34%}
+}
+/* English words are longer than the Korean ones the columns were sized for. */
+html:not([lang^="ko"]) .account-table th.col-state{width:120px}
+html:not([lang^="ko"]) .account-table th.col-manage{width:96px}

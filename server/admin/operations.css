@@ -1,0 +1,108 @@
+@charset "UTF-8";
+/* 홈 (js/overview.js): the numbers as a row of boxed tiles, then what to do
+   now as a boxed list, who is connected as a small board, and one line about
+   the server. Tokens and shared parts: console.css. */
+/* The numbers: four boxes in a row; each opens its page. */
+.stat-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.stat-tile{display:flex;flex-direction:column;gap:2px;min-width:0;padding:14px 16px 12px;border:1px solid var(--line);border-top:2px solid var(--rule);background:var(--surface);color:var(--ink);text-decoration:none}
+.stat-tile:hover{background:var(--row-hover)}
+.stat-tile:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.stat-tile strong{font-size:24px;font-weight:700;line-height:1.2;letter-spacing:-.02em}
+.stat-tile strong small{color:var(--muted);font-size:14px;font-weight:500}
+.stat-tile span{color:var(--ink-2);font-size:13px}
+.live-table th.col-since{width:20%}
+.live-table th.col-who{width:28%}
+/* 지금 할 일: a row per thing with its buttons on the right; the state is a
+   small dot before the title (no bar). A group opens to the desktops it is about. */
+.todo-list{display:block}
+.todo-item{display:flex;align-items:center;gap:12px;min-width:0;min-height:48px;padding:8px var(--pad);border-bottom:1px solid var(--line-soft);list-style:none}
+.todo-dot{flex:none;width:7px;height:7px;margin-right:-4px;border-radius:50%;background:var(--amber)}
+.todo-dot.is-bad{background:var(--red)}
+.todo-dot.is-none{background:none}
+summary.todo-item{background:var(--surface-2);cursor:pointer}summary.todo-item::-webkit-details-marker{display:none}
+.todo-icon{display:none}
+.todo-text{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 10px;flex:1;min-width:0}
+.todo-text strong{color:var(--ink);font-size:13px;font-weight:700}
+.todo-text small{color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.todo-actions{display:flex;flex-wrap:wrap;gap:6px;flex:none}
+/* The same two places on every row of a group, so the buttons read as columns. */
+.todo-actions.is-pair{display:grid;grid-template-columns:repeat(2,minmax(104px,auto))}.todo-actions.is-pair>*{width:100%}.todo-slot{display:block}
+.todo-actions :is(button,.button),.todo-more .button{min-height:var(--h-sm);padding:0 10px;font-size:12.5px;font-weight:500}
+.todo-chevron{width:14px;height:14px;flex:none;color:var(--muted)}.todo-group[open] .todo-chevron{transform:rotate(90deg)}
+.todo-rows{padding:0}
+.todo-row{display:flex;align-items:center;gap:12px;min-height:var(--h-row);padding:6px var(--pad) 6px 32px;border-bottom:1px solid var(--line-soft)}
+.todo-row .todo-text strong{font-weight:600}
+.todo-code strong{margin-left:4px;color:var(--ink);letter-spacing:.04em}
+.todo-more{margin:0;padding:8px var(--pad) 8px 32px;border-bottom:1px solid var(--line-soft);color:var(--muted);font-size:12.5px}
+.todo-calm{display:flex;align-items:center;gap:10px;padding:14px var(--pad)}
+.todo-calm .todo-text strong{color:var(--muted);font-weight:500}
+.panel>.todo-calm{margin:0}
+.todo-panel>.todo-list:last-child>:last-child,.todo-later>.todo-list>:last-child{border-bottom:0}
+/* 자원 (js/resources.js): the server and its container or service are in
+   resources.css; here the running desktops as a board, the sums per node
+   under a grey heading row. A value at 90 % or more is in the warning
+   colour, and so is its thin bar. */
+.res-meter{display:inline-flex;flex-direction:column;gap:3px;min-width:0;width:100%;max-width:200px;vertical-align:middle}
+.res-value{font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.res-bar{display:block;width:100%;height:4px}
+.res-track{fill:var(--line-soft)}
+.res-fill{fill:var(--faint)}
+.res-fill.is-warn{fill:var(--fill-warn)}
+.res-table td:not(.is-name),.res-nodes td:not(.is-name){font-variant-numeric:tabular-nums}
+.res-table td.col-memory,.res-nodes td.col-memory{text-align:left}
+.res-table th.col-name{width:34%}.res-table th.col-cpu{width:14%}.res-table th.col-memory{width:34%}.res-table th.col-up{width:18%}
+.res-nodes th.col-node{width:34%}.res-nodes th.col-count{width:14%}.res-nodes th.col-vcpu{width:18%}.res-nodes th.col-memory{width:34%}.res-sub{color:var(--muted);font-size:12px;font-weight:500}
+.res-table td.col-memory .res-meter,.res-nodes td.col-memory .res-meter{max-width:none}
+.resource-panel .is-warn{color:var(--warn)}
+.resource-panel>.res-empty,.resource-panel>.res-more{margin:0}
+.res-empty,.res-more{padding:12px var(--pad);color:var(--muted);font-size:13px}
+.res-more{padding:8px var(--pad);border-bottom:1px solid var(--line-soft);font-size:12.5px}
+/* 시작하기: the five steps as joined cells, the current one marked. */
+.first-steps{display:flex;margin:0;padding:0;border:1px solid var(--line);background:var(--surface);list-style:none;overflow-x:auto;scrollbar-width:none}
+.first-steps li{display:flex;align-items:center;gap:8px;flex:1 0 auto;min-height:44px;padding:0 16px;border-right:1px solid var(--line);color:var(--muted);font-size:13px;white-space:nowrap}
+.first-steps li:last-child{border-right:0}
+.first-steps i{display:grid;place-items:center;width:20px;height:20px;border:1px solid var(--line-2);border-radius:50%;color:var(--muted);font:600 11.5px var(--mono);font-style:normal}
+.first-steps i .icon{width:12px;height:12px}
+.first-steps .is-done{color:var(--ink-2)}.first-steps .is-done i{border-color:var(--green-line);background:var(--green-soft);color:var(--green)}
+.first-steps .is-now{background:var(--row-on);box-shadow:inset 0 3px var(--amber);color:var(--ink);font-weight:700}.first-steps .is-now i{border-color:var(--main);background:var(--main);color:var(--on-main)}
+@media(max-width:900px){
+  .stat-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:720px){
+  .stat-tiles{gap:8px}
+  .stat-tile{padding:10px 12px}
+  .stat-tile strong{font-size:20px}
+  .todo-item,.todo-row{flex-wrap:wrap}
+  .todo-row,.todo-more{padding-left:19px}
+  .todo-row .todo-text,.todo-item .todo-text{flex-basis:calc(100% - 30px)}
+  /* 지금 접속 중 on a phone: who and the state, then where and how long. */
+  .live-table tr>td:is(.col-desktop,.col-since){display:block;grid-row:2;padding:0 12px 9px;color:var(--muted);font-size:12.5px}
+  .live-table tr>td.col-desktop{grid-column:1;text-align:left}
+  .live-table tr>td.col-since{grid-column:2;text-align:right}
+  .live-table tr>td.is-name{padding-bottom:1px}
+  /* 자원 on a phone: a desktop is its name and
+     memory, then CPU and how long it has run; a node is its name and memory,
+     then the desktops and vCPU. */
+  :is(.res-table,.res-nodes) tr>td.is-state{width:150px;padding:8px 12px 2px 0}
+  :is(.res-table,.res-nodes) tr>td.is-name{padding-bottom:1px}
+  .res-table tr>td:is(.col-cpu,.col-up),.res-nodes tr>td:is(.col-count,.col-vcpu){display:block;grid-row:2;padding:0 12px 9px;color:var(--muted);font-size:12.5px;text-align:left}
+  .res-table tr>td.col-cpu,.res-nodes tr>td.col-count{grid-column:1}
+  .res-table tr>td.col-up,.res-nodes tr>td.col-vcpu{grid-column:2;padding-left:0}
+  .res-table tr>td.col-cpu::before{content:'CPU '}
+  .res-table tr>td.col-up::before{content:'켜진 지 '}
+  .res-nodes tr>td.col-count::before{content:'켜진 데스크톱 '}
+  .first-steps{display:block}
+  .first-steps li{border-right:0;border-bottom:1px solid var(--line-soft)}
+  .first-steps li:last-child{border-bottom:0}
+}
+/* 시작하기: every step opens its explanation (overview.js firstRun). */
+.first-steps li{cursor:pointer}
+.first-steps li:hover{background:var(--row-hover,var(--row-on))}
+.first-steps li:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
+.first-steps li.is-shown:not(.is-now){box-shadow:inset 0 3px var(--line-2);color:var(--ink)}
+.first-step-wait{margin:0;padding:8px var(--pad,16px) 12px}
+/* English (docs/i18n.md): the phone layout's own labels. */
+@media(max-width:720px){
+  html:not([lang^="ko"]) .res-table tr>td.col-up::before{content:'Up '}
+  html:not([lang^="ko"]) .res-nodes tr>td.col-count::before{content:'Running desktops '}
+}

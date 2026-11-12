@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 한국어 (원문). English: values/strings.xml. -->
+<resources>
+    <string name="clipboard_check_failed">클립보드 데이터를 확인하지 못했어요.</string>
+    <string name="storage_save_failed">설정을 안전하게 저장하지 못했어요.</string>
+    <string name="storage_internal">내부 저장공간</string>
+    <string name="storage_external">SD 카드·USB 저장장치</string>
+    <string name="storage_device">저장장치</string>
+    <string name="notices_channel">공지</string>
+    <string name="notices_channel_description">관리자가 보낸 공지를 알려요.</string>
+    <string name="session_channel">원격 연결 유지</string>
+    <string name="session_channel_description">연결 중임을 알리고, 알림에서 연결을 끊을 수 있어요.</string>
+    <string name="session_disconnecting">Multitap · 연결 끊는 중</string>
+    <string name="session_running">Multitap 실행 중</string>
+    <string name="session_disconnect_failed">연결을 끊지 못했어요. 앱을 열어 다시 끊으세요.</string>
+    <string name="session_tap_to_return">누르면 원격 화면으로 돌아가요.</string>
+    <string name="session_action_open">앱으로 돌아가기</string>
+    <string name="session_action_disconnect">연결 끊기</string>
+    <string name="tv_only">TV에서만 사용할 수 있어요.</string>
+    <string name="tv_input_busy">다른 입력을 먼저 마쳐 주세요.</string>
+    <string name="tv_input_invalid">입력 설정을 확인해 주세요.</string>
+    <string name="tv_next">다음</string>
+    <string name="tv_go">확인</string>
+    <string name="tv_done">완료</string>
+    <string name="cancel">취소</string>
+    <string name="close">닫기</string>
+    <string name="console_connecting">Console에 연결하고 있어요.</string>
+    <string name="console_webview_update">Android System WebView를 업데이트한 뒤 다시 연결하세요.</string>
+    <string name="console_no_download">Console에서는 파일을 내려받을 수 없어요.</string>
+    <string name="console_address_refused">허용되지 않은 Console 주소예요.</string>
+    <string name="console_disconnected">Console 연결이 끊겼어요. 닫고 다시 연결하세요.</string>
+    <string name="console_certificate">서버 인증서를 확인하지 못했어요.</string>
+    <string name="console_auth_failed">Console 인증을 완료하지 못했어요.</string>
+    <string name="console_frozen">Console 화면이 멈췄어요. 닫고 다시 연결하세요.</string>
+    <string name="console_time_up">Console 연결 시간이 끝났어요. 닫고 다시 연결하세요.</string>
+    <string name="console_auth_not_saved">Console 인증을 저장하지 못했어요.</string>
+    <string name="console_connect_failed">Console에 연결하지 못했어요. 닫고 다시 연결하세요.</string>
+    <string name="console_close_title">Console을 닫을까요?</string>
+    <string name="console_close_message">데스크톱과 실행 중인 작업은 그대로 유지돼요.</string>
+</resources>

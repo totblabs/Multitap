@@ -1,0 +1,9 @@
+@charset "UTF-8";
+/* Top bar update indicator: a bordered amber button on the dark bar with a
+   dot on its icon. Narrow top bars show the icon only; its tooltip and
+   aria-label carry the version. */
+#console .update-indicator{gap:6px;min-height:var(--h-sm);padding:0 8px;border-color:rgba(245,166,35,.55);background:transparent;color:var(--amber);font-size:12px;font-weight:600}
+#console .update-indicator:hover:not(:disabled){border-color:var(--amber);background:rgba(245,166,35,.12)}
+.update-indicator [data-icon]{position:relative;display:inline-flex}
+.update-indicator [data-icon]::after{content:'';position:absolute;top:-2px;right:-3px;width:6px;height:6px;border-radius:50%;background:var(--amber)}
+@media(max-width:1250px){#console .update-indicator{width:var(--h-sm);padding:0}.update-indicator-label{display:none}}

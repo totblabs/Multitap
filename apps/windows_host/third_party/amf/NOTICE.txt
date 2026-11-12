@@ -1,0 +1,19 @@
+Multitap AMD AMF H.264 header provenance
+
+Only unmodified public interface headers and their quoted-include dependencies
+are copied from GPUOpen-LibrariesAndSDKs/AMF tagv1.4.30, commit
+ a118570647cfa579af8875c3955a314c3ddd7058 (2023-07-06).
+
+The original MIT copyright/permission/disclaimer and standards notices remain in
+every upstream header and LICENSE.txt. LICENSE.txt also contains the upstream
+repository's FFmpeg notice; no FFmpeg code/library, AMF SDK sample implementation,
+AMF runtime DLL, driver or GPU binary is included in this header-only directory.
+The Multitap backend implementation is separate from these upstream declarations.
+
+At runtime the backend attempts only the AMD driver's installed System32
+amfrt64.dll. Presence, vendor inventory or successful initialization does not prove
+hardware output. The selected adapter's actual capabilities, negotiated settings
+and each output are independently checked; CPU fallback remains available.
+
+No SER8 APU model, device-specific support, performance or real GPU acceptance
+is inferred from the user's machine description. Build/device testing is separate.

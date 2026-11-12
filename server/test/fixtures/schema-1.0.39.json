@@ -1,0 +1,191 @@
+{
+ "note": "sqlite_master of a new database made by server 1.0.39 (commit 3d80fec, store.mjs), for migration tests. Generated, not edited.",
+ "userVersion": 19,
+ "objects": [
+  {
+   "type": "index",
+   "name": "audit_events_created",
+   "sql": "CREATE INDEX audit_events_created ON audit_events(created_at)"
+  },
+  {
+   "type": "index",
+   "name": "client_diagnostics_evidence",
+   "sql": "CREATE INDEX client_diagnostics_evidence ON client_diagnostics(evidence)"
+  },
+  {
+   "type": "index",
+   "name": "client_diagnostics_received",
+   "sql": "CREATE INDEX client_diagnostics_received ON client_diagnostics(received_at)"
+  },
+  {
+   "type": "index",
+   "name": "client_diagnostics_user_evidence",
+   "sql": "CREATE INDEX client_diagnostics_user_evidence ON client_diagnostics(user_id,evidence)"
+  },
+  {
+   "type": "index",
+   "name": "host_diagnostic_events_received",
+   "sql": "CREATE INDEX host_diagnostic_events_received ON host_diagnostic_events(received_at)"
+  },
+  {
+   "type": "index",
+   "name": "host_requests_expiry",
+   "sql": "CREATE INDEX host_requests_expiry ON host_requests(expires_at)"
+  },
+  {
+   "type": "index",
+   "name": "host_requests_machine",
+   "sql": "CREATE INDEX host_requests_machine ON host_requests(machine_uuid,status)"
+  },
+  {
+   "type": "index",
+   "name": "power_tasks_active_vm",
+   "sql": "CREATE UNIQUE INDEX power_tasks_active_vm ON power_tasks(desktop_id) WHERE active=1"
+  },
+  {
+   "type": "index",
+   "name": "power_tasks_owner",
+   "sql": "CREATE INDEX power_tasks_owner ON power_tasks(user_id,desktop_id,submitted_at)"
+  },
+  {
+   "type": "index",
+   "name": "session_end_reasons_account",
+   "sql": "CREATE INDEX session_end_reasons_account ON session_end_reasons(user_id,ended_at)"
+  },
+  {
+   "type": "index",
+   "name": "session_end_reasons_retention",
+   "sql": "CREATE INDEX session_end_reasons_retention ON session_end_reasons(retain_until)"
+  },
+  {
+   "type": "index",
+   "name": "sessions_expiry",
+   "sql": "CREATE INDEX sessions_expiry ON sessions(expires_at)"
+  },
+  {
+   "type": "index",
+   "name": "sessions_replaced",
+   "sql": "CREATE INDEX sessions_replaced ON sessions(replaced_at) WHERE replaced_at IS NOT NULL"
+  },
+  {
+   "type": "index",
+   "name": "sessions_user",
+   "sql": "CREATE INDEX sessions_user ON sessions(user_id)"
+  },
+  {
+   "type": "index",
+   "name": "sessions_windows_owner",
+   "sql": "CREATE UNIQUE INDEX sessions_windows_owner ON sessions(user_id) WHERE issuer='windows-pc-v1' AND replaced_at IS NULL"
+  },
+  {
+   "type": "index",
+   "name": "users_single_primary_admin",
+   "sql": "CREATE UNIQUE INDEX users_single_primary_admin ON users(is_primary_admin) WHERE is_primary_admin=1"
+  },
+  {
+   "type": "table",
+   "name": "account_mfa",
+   "sql": "CREATE TABLE account_mfa (\n  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,\n  generation INTEGER NOT NULL DEFAULT 1 CHECK(generation>=1),\n  enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),\n  factor_ciphertext TEXT,\n  last_accepted_step INTEGER NOT NULL DEFAULT -1 CHECK(last_accepted_step>=-1),\n  changed_at INTEGER NOT NULL CHECK(changed_at>=0),\n  CHECK((enabled=0 AND factor_ciphertext IS NULL) OR\n        (enabled=1 AND factor_ciphertext IS NOT NULL))\n)"
+  },
+  {
+   "type": "table",
+   "name": "assignments",
+   "sql": "CREATE TABLE assignments (\n        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n        desktop_id TEXT NOT NULL REFERENCES desktops(id) ON DELETE CASCADE, clipboard_permissions INTEGER NOT NULL DEFAULT 0 CHECK(clipboard_permissions BETWEEN 0 AND 15), rdp_redirections INTEGER NOT NULL DEFAULT 0 CHECK(rdp_redirections BETWEEN 0 AND 127), favorite INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0,1)), last_used_at INTEGER, sound_card_add INTEGER NOT NULL DEFAULT 0 CHECK(sound_card_add IN (0,1)),\n        PRIMARY KEY(user_id, desktop_id)\n      )"
+  },
+  {
+   "type": "table",
+   "name": "audit_events",
+   "sql": "CREATE TABLE audit_events (\n        id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL, event TEXT NOT NULL,\n        actor TEXT NOT NULL, subject TEXT NOT NULL\n      )"
+  },
+  {
+   "type": "table",
+   "name": "client_diagnostics",
+   "sql": "CREATE TABLE client_diagnostics (\n          id INTEGER PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n          received_at INTEGER NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL,\n          report TEXT NOT NULL CHECK(length(report)<=16384), evidence INTEGER, UNIQUE(user_id,run_id,sequence)\n        )"
+  },
+  {
+   "type": "table",
+   "name": "desktops",
+   "sql": "CREATE TABLE desktops (\n        id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('pc','vm')),\n        description TEXT NOT NULL, os TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,\n        created_at INTEGER NOT NULL\n      , pve_vmid INTEGER, pve_available INTEGER NOT NULL DEFAULT 1 CHECK(pve_available IN (0,1)), pve_node TEXT, pve_power_status TEXT NOT NULL DEFAULT 'unknown', pve_seen_at INTEGER, pve_os_type TEXT, pve_os_family TEXT NOT NULL DEFAULT 'unknown', pve_os_source TEXT NOT NULL DEFAULT 'unknown', pve_power_checked_at INTEGER, pve_power_error TEXT, pve_machine_uuid TEXT, pve_machine_checked_at INTEGER, pve_tags TEXT NOT NULL DEFAULT '[]', pve_pool TEXT)"
+  },
+  {
+   "type": "table",
+   "name": "host_diagnostic_events",
+   "sql": "CREATE TABLE host_diagnostic_events (\n      id INTEGER PRIMARY KEY, host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,\n      received_at INTEGER NOT NULL, version TEXT NOT NULL, row TEXT NOT NULL CHECK(length(row)<=2048),\n      UNIQUE(host_id,row))"
+  },
+  {
+   "type": "table",
+   "name": "host_diagnostics",
+   "sql": "CREATE TABLE host_diagnostics (\n          host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,\n          received_at INTEGER NOT NULL, report TEXT NOT NULL CHECK(length(report)<=6144)\n        )"
+  },
+  {
+   "type": "table",
+   "name": "host_enrollments",
+   "sql": "CREATE TABLE host_enrollments (\n          code_hash TEXT PRIMARY KEY, desktop_id TEXT NOT NULL UNIQUE REFERENCES desktops(id) ON DELETE CASCADE,\n          machine_uuid TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL\n        )"
+  },
+  {
+   "type": "table",
+   "name": "host_requests",
+   "sql": "CREATE TABLE host_requests (\n            id TEXT PRIMARY KEY, key_hash TEXT NOT NULL UNIQUE,\n            hostname TEXT NOT NULL, machine_uuid TEXT NOT NULL, version TEXT NOT NULL,\n            status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired')),\n            created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decided_at INTEGER,\n            desktop_id TEXT REFERENCES desktops(id) ON DELETE SET NULL,\n            host_id TEXT, credentials_sealed TEXT, decision_actor TEXT,\n            replace_existing INTEGER NOT NULL DEFAULT 0 CHECK(replace_existing IN (0,1))\n          )"
+  },
+  {
+   "type": "table",
+   "name": "hosts",
+   "sql": "CREATE TABLE hosts (\n          id TEXT PRIMARY KEY, desktop_id TEXT NOT NULL UNIQUE REFERENCES desktops(id) ON DELETE CASCADE,\n          token_hash TEXT NOT NULL UNIQUE, hostname TEXT NOT NULL, machine_uuid TEXT NOT NULL, version TEXT NOT NULL,\n          created_at INTEGER NOT NULL, last_seen_at INTEGER, revoked INTEGER NOT NULL DEFAULT 0\n        )"
+  },
+  {
+   "type": "table",
+   "name": "local_pc_approvals",
+   "sql": "CREATE TABLE local_pc_approvals (\n      desktop_id TEXT PRIMARY KEY REFERENCES desktops(id) ON DELETE CASCADE,\n      host_id TEXT NOT NULL UNIQUE, machine_uuid TEXT NOT NULL UNIQUE,\n      approved_at INTEGER NOT NULL, actor TEXT NOT NULL)"
+  },
+  {
+   "type": "table",
+   "name": "mfa_failure_budgets",
+   "sql": "CREATE TABLE mfa_failure_budgets (\n  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,\n  window_started_at INTEGER NOT NULL CHECK(window_started_at>=0),\n  failures INTEGER NOT NULL DEFAULT 0 CHECK(failures BETWEEN 0 AND 5),\n  blocked_until INTEGER NOT NULL DEFAULT 0 CHECK(blocked_until>=0),\n  last_observed_at INTEGER NOT NULL CHECK(last_observed_at>=0)\n)"
+  },
+  {
+   "type": "table",
+   "name": "mfa_recovery_codes",
+   "sql": "CREATE TABLE mfa_recovery_codes (\n  user_id TEXT NOT NULL REFERENCES account_mfa(user_id) ON DELETE CASCADE,\n  generation INTEGER NOT NULL CHECK(generation>=1),\n  code_hash TEXT NOT NULL CHECK(length(code_hash)=64),\n  consumed_at INTEGER CHECK(consumed_at IS NULL OR consumed_at>=0),\n  PRIMARY KEY(user_id,generation,code_hash)\n)"
+  },
+  {
+   "type": "table",
+   "name": "pc_wake",
+   "sql": "CREATE TABLE pc_wake (\n      desktop_id TEXT PRIMARY KEY REFERENCES desktops(id) ON DELETE CASCADE,\n      host_id TEXT NOT NULL, adapters TEXT NOT NULL, reported_at INTEGER NOT NULL)"
+  },
+  {
+   "type": "table",
+   "name": "power_tasks",
+   "sql": "CREATE TABLE \"power_tasks\" (\n          id TEXT PRIMARY KEY, desktop_id TEXT NOT NULL REFERENCES desktops(id) ON DELETE CASCADE,\n          user_id TEXT NOT NULL,\n          action TEXT NOT NULL CHECK(action IN ('start','shutdown','reboot','stop')),\n          status TEXT NOT NULL CHECK(status IN ('submitted','running','stopped','unknown','superseded')),\n          active INTEGER NOT NULL DEFAULT 1, submitted_at INTEGER NOT NULL, checked_at INTEGER,\n          guard_until INTEGER NOT NULL, config_stamp TEXT NOT NULL, pve_node TEXT, pve_task TEXT, exit_status TEXT\n        )"
+  },
+  {
+   "type": "table",
+   "name": "session_activity",
+   "sql": "CREATE TABLE session_activity (\n  token_hash TEXT PRIMARY KEY REFERENCES sessions(token_hash) ON DELETE CASCADE,\n  tracking_started_at INTEGER NOT NULL CHECK(tracking_started_at>=0),\n  idle_enabled INTEGER NOT NULL DEFAULT 1 CHECK(idle_enabled IN (0,1)),\n  last_input_at INTEGER CHECK(last_input_at IS NULL OR last_input_at>=tracking_started_at)\n)"
+  },
+  {
+   "type": "table",
+   "name": "session_end_reasons",
+   "sql": "CREATE TABLE session_end_reasons (\n  token_hash TEXT PRIMARY KEY,\n  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n  reason TEXT NOT NULL CHECK(reason IN ('pc_login_replaced','session_idle_timeout')),\n  ended_at INTEGER NOT NULL CHECK(ended_at>=0),\n  retain_until INTEGER NOT NULL CHECK(retain_until>ended_at)\n)"
+  },
+  {
+   "type": "table",
+   "name": "sessions",
+   "sql": "CREATE TABLE sessions (\n        token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n        created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL\n      , purpose TEXT NOT NULL DEFAULT 'client', issuer TEXT NOT NULL DEFAULT 'legacy' CHECK(issuer IN ('legacy','windows-pc-v1','browser-console','admin')), replaced_at INTEGER CHECK(replaced_at IS NULL OR (issuer='windows-pc-v1' AND replaced_at>=0)))"
+  },
+  {
+   "type": "table",
+   "name": "settings",
+   "sql": "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+  },
+  {
+   "type": "table",
+   "name": "users",
+   "sql": "CREATE TABLE users (\n        id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE,\n        display_name TEXT NOT NULL, password_hash TEXT NOT NULL,\n        role TEXT NOT NULL CHECK(role IN ('admin','user')),\n        disabled INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL\n      , must_change_credentials INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', is_primary_admin INTEGER NOT NULL DEFAULT 0 CHECK(is_primary_admin IN (0,1)), clipboard_permissions INTEGER NOT NULL DEFAULT 0 CHECK(clipboard_permissions BETWEEN 0 AND 15), rdp_redirections INTEGER NOT NULL DEFAULT 0 CHECK(rdp_redirections BETWEEN 0 AND 127), authorization_revision INTEGER NOT NULL DEFAULT 1\n  CHECK(authorization_revision>=1))"
+  },
+  {
+   "type": "trigger",
+   "name": "users_mfa_authorization_revision",
+   "sql": "CREATE TRIGGER users_mfa_authorization_revision\nAFTER UPDATE OF password_hash,disabled,role,must_change_credentials ON users\nWHEN OLD.password_hash!=NEW.password_hash OR OLD.disabled!=NEW.disabled OR\n     OLD.role!=NEW.role OR OLD.must_change_credentials!=NEW.must_change_credentials\nBEGIN\n  UPDATE users SET authorization_revision=authorization_revision+1 WHERE id=NEW.id;\nEND"
+  }
+ ]
+}

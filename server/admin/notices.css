@@ -1,0 +1,95 @@
+/* 공지 (js/notices.js): the page, its two windows and the 먼저 알리기 step in
+   confirmations. Tokens and shared parts: console.css. */
+
+/* 공지 쓰기: the form of a window; 보내기 stands in the bar of the window. */
+.notice-form>label{margin:0 0 14px}
+.notice-form>.field-hint{margin:0 0 14px}
+.notice-field{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin:0 0 14px}
+.notice-field .stack-label{color:var(--ink-2);font-size:12.5px;font-weight:600}
+.notice-choice{max-width:100%}
+.notice-choice .segmented{flex-wrap:wrap}
+.notice-choice .segment{min-height:calc(var(--h) - 2px);padding:0 14px;font-size:13px}
+.notice-target-detail:empty{display:none}
+.notice-select{min-width:240px;max-width:100%}
+.notice-recipients{margin:0;color:var(--ink-2);font-size:13px;line-height:1.55;white-space:pre-line}
+.notice-recipients.is-waiting{color:var(--muted)}
+.notice-when{width:100%;margin:4px 0 0}
+.notice-when[hidden]{display:none}
+.notice-when input{display:block;width:auto;min-width:240px;font-variant-numeric:tabular-nums}
+.notice-label-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.notice-count{color:var(--muted);font-family:var(--mono);font-size:12px;font-weight:400}
+.notice-form textarea{min-height:120px}
+.notice-error:empty{display:none}
+/* What is wrong with a field is said under it, and the field is marked. */
+.notice-form label>.notice-error{margin:5px 0 0;color:var(--red);font-size:12.5px;font-weight:400}
+.notice-form :is(input,textarea)[aria-invalid=true]{border-color:var(--red)}
+.notice-form>.notice-error:not(:empty){margin:0;padding:9px 12px;border:1px solid var(--red-line);background:var(--red-soft)}
+
+/* 지금 받을 수 있는 사람: one row each. */
+.notice-people{display:block;max-height:440px;margin:0!important;padding:0;list-style:none;overflow:auto;scrollbar-width:thin}
+.notice-person{display:flex;align-items:center;gap:12px;min-width:0;min-height:var(--h-row);padding:4px var(--pad);border-bottom:1px solid var(--line-soft)}
+.notice-person:last-child{border-bottom:0}
+.notice-person-text{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 10px;flex:1 1 auto;min-width:0}
+.notice-person-text strong{overflow:hidden;color:var(--ink);font-size:13px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.notice-person-text small{color:var(--muted)}
+.notice-where{flex:0 1 auto;max-width:44%;overflow:hidden;color:var(--ink-2);font-size:12.5px;text-overflow:ellipsis;white-space:nowrap}
+.notice-person button{flex:none}
+
+/* A notice as its reader sees it: in the send confirmation, in 먼저 알리기 and in the window of a sent notice. */
+.notice-preview{margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);background:var(--surface-2)}
+.notice-preview-head{display:flex;align-items:center;gap:8px;margin:0 0 6px}
+.notice-preview-head small{color:var(--muted)}
+.notice-preview strong{display:block;color:var(--ink);font-size:13.5px;font-weight:700;overflow-wrap:anywhere}
+.notice-preview p{margin:4px 0 0;color:var(--ink-2);font-size:13px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
+
+/* 보낸 공지: the board. A long text is two lines there and whole in the window. */
+.notice-table td{padding-top:8px;padding-bottom:8px;vertical-align:top}
+.notice-table td:first-child{white-space:nowrap;font-variant-numeric:tabular-nums}
+.notice-table td:is(:nth-child(5),:nth-child(6)){text-align:right}
+.notice-table :is(th,td):last-child{width:76px;text-align:center}
+.notice-to{display:inline-flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
+.notice-cell{min-width:200px;max-width:520px;white-space:normal}
+.notice-cell-head{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.notice-kind{color:var(--ink-2);font-size:12.5px;font-weight:600}
+.notice-cell strong{display:block;overflow-wrap:anywhere}
+.notice-cell p{display:-webkit-box;overflow:hidden;color:var(--ink-2);font-size:12.5px;line-height:1.5;white-space:pre-line;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+.notice-number{display:inline-flex;flex-direction:column;align-items:flex-end;font-variant-numeric:tabular-nums;white-space:nowrap}
+.notice-state{display:inline-flex;flex-direction:column;align-items:flex-start;gap:4px}
+
+/* 먼저 알리기: a tick, then how long to wait and what people will read; while it waits, the countdown and 취소. */
+.announce-first{margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);background:var(--surface-2)}
+#modal .announce-toggle{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:1px 8px;margin:0;color:var(--ink);font-size:13px;font-weight:600;cursor:pointer}
+#modal .announce-toggle input{margin:0}
+#modal .announce-toggle small{grid-column:2;color:var(--muted);font-weight:400}
+.announce-options{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:10px}
+.announce-options[hidden],.announce-countdown[hidden]{display:none}
+.announce-options .announce-preview{width:100%;margin:2px 0 0;background:var(--surface)}
+.announce-options .field-hint{margin-top:0}
+.announce-countdown{display:flex;align-items:center;gap:12px;margin-top:10px}
+.announce-countdown>div{display:flex;flex:1 1 auto;flex-direction:column;min-width:0}
+.announce-countdown strong{color:var(--ink);font-size:13px}
+.announce-remaining{color:var(--ink-2);font-size:13px;font-variant-numeric:tabular-nums}
+#modal .announce-countdown button{flex:none}
+/* 취소 of the wait: what happened, in plain words (not an error). */
+.announce-note{margin:10px 0 0;color:var(--ink-2);font-size:13px;line-height:1.6;white-space:pre-line}
+.announce-note[hidden]{display:none}
+/* While it counts down the only thing to do is its own 취소: the buttons of the dialog (disabled then) step aside. */
+#modal.is-announcing .modal-actions,#modal.is-announcing #modal-close{display:none}
+
+@media(max-width:900px){
+  .notice-people{max-height:320px}
+}
+/* Stacked rows: every cell reads from the left, under the same column of names. */
+@media(max-width:720px){
+  .notice-table td:nth-child(n){width:100%;text-align:left}
+  .notice-number{align-items:flex-start}
+}
+@media(max-width:560px){
+  .notice-select,.notice-when input{width:100%;min-width:0}
+  .notice-person{flex-wrap:wrap}
+  .notice-person-text{flex-basis:100%}
+  .notice-where{max-width:calc(100% - 110px)}
+  .notice-person button{margin-left:auto}
+  .notice-cell{min-width:0;max-width:none}
+  .announce-countdown{flex-wrap:wrap}
+}

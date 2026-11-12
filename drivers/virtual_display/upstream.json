@@ -1,0 +1,21 @@
+{
+  "repository": "https://github.com/VirtualDrivers/Virtual-Display-Driver",
+  "release": "25.7.23",
+  "sourceCommit": "d437ebc9b44a14ce6e5cc9c8b7f6beb08d6faf77",
+  "sourceFile": "Virtual Display Driver (HDR)/MttVDD/Driver.cpp",
+  "sourceFileSha256": "d320a69bb13f7ba7e79adbb03c999c41a09948c5d17ecf3e1ed55aacc1d8df0b",
+  "license": "MIT",
+  "archiveUrl": "https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/download/25.7.23/VirtualDisplayDriver-x86.Driver.Only.zip",
+  "archiveSha256": "e24210692b442b39af763536330ce78b423f19342b7a7792c26de3944e418b3a",
+  "architecture": "amd64 (INF Standard.NTamd64; upstream asset name says x86)",
+  "authenticodeSigner": "SignPath Foundation",
+  "signerThumbprint": "3CF8CF26D8BA266C3A483AB7D26D4A818E317D76",
+  "microsoftWhqlVerified": false,
+  "settingsSha256": "37b3bf7f87e8938b6ec3ab370272ea0f71ff1640f8061fef4b1b74e833e5efa9",
+  "licenseSha256": "c2285c867ddc9b88f43b4f8fa2c77a9eec66207166c1217b37353a2ccd62ac03",
+  "files": {
+    "MttVDD.inf": "550d211fe481e74dfe3f9d724ed78be48b3a9113405965d683d9373e8d672f5d",
+    "MttVDD.dll": "c9ca837f57a98fbd43bc416a7f535a95843626e7759eaf85cf0cd7ce334dbb05",
+    "mttvdd.cat": "08a0093fc9b2e32b287a6f8a77ca4de0a31830d29fc33d2b13a918dc859468f6"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "usbip-win2",
+  "purpose": "USB/IP virtual host controller driver for the VM side of usb-v1 (docs/usb-redirection.md)",
+  "license": "BSD-2-Clause",
+  "licenseUrl": "https://github.com/vadimgrn/usbip-win2/blob/master/LICENSE.txt",
+  "upstream": "https://github.com/vadimgrn/usbip-win2",
+  "release": "0.9.7.5-preview",
+  "publishedBy": "Open Source Codesigning Initiative (OSSign), mirror of the upstream driver build",
+  "source": "https://github.com/OSSign/vadimgrn--usbip-win2-old/releases/tag/0.9.7.5-preview",
+  "published": "2025-12-03",
+  "infDriverVer": { "usbip2_ude": "12/01/2025,17.10.14.812", "usbip2_filter": "12/01/2025,17.10.14.779" },
+  "signature": {
+    "checked": "2026-10-26",
+    "how": "Get-AuthenticodeSignature and WinVerifyTrust (embedded signature of each .sys and .cat; catalog membership of each .sys and .inf) on a downloaded copy, nothing installed",
+    "signer": "Microsoft Windows Hardware Compatibility Publisher",
+    "issuer": "Microsoft Windows Third Party Component CA 2014",
+    "signerThumbprint": "3847B761C2846DB72F61149176D09F9BB2D43E8A",
+    "eku": "1.3.6.1.4.1.311.10.3.5.1 (attested: Microsoft Windows Hardware Compatibility)",
+    "timestamp": "Microsoft Time-Stamp Service (the signing certificate itself expired 2026-07-15; the timestamp keeps the signatures valid)",
+    "kind": "Microsoft attestation signing. Windows 10/11 desktop load it; Windows Server needs HLK-signed drivers and is not supported."
+  },
+  "files": [
+    { "name": "usbip2_ude.inf",    "sha256": "ce84dbdb634e620bdd9b1c2117155b4b04efa1a357b2247b98049989f98ee9b2", "size": 2791 },
+    { "name": "usbip2_ude.sys",    "sha256": "434ab4426dd877f632b0afd4d5a365f2c41bdeb8fea1308fd0fe5042cf1de9ea", "size": 210360 },
+    { "name": "usbip2_ude.cat",    "sha256": "3587f744766f3a55845e3dc9d990730ce6e779c0d67594b748f351d51eb501b3", "size": 11941 },
+    { "name": "usbip2_filter.inf", "sha256": "a3bd59c2d564dbf388ffd3c7a73fbb2fe2235a477fb1061d83a3fc69c25b5911", "size": 2052 },
+    { "name": "usbip2_filter.sys", "sha256": "b4e794626a067af8ba92ef608c049905ac21e312b18ed1da4338d4f155a3fb49", "size": 74936 },
+    { "name": "usbip2_filter.cat", "sha256": "efdb52949e258b79fc60cf522898b67f390856210421fa9b293d89c3ab93eacf", "size": 11964 }
+  ],
+  "notes": [
+    "The files are never edited, re-signed or test-signed; they are not stored in this repository. tools/fetch-usb-drivers.ps1 downloads them into .tools/usb-drivers and checks every SHA-256; the Host package carries them as bin/usb-driver/.",
+    "The upstream installer and tools (usbip.exe, the GUI, the detach-on-shutdown task) are never run or shipped.",
+    "The INF turns on debugging registry values (Parameters\\VerboseOn, Parameters\\Wdf\\VerifierOn, NumberOfUsb20Ports/NumberOfUsb30Ports 30); the registry values are not signed content, so the Host switches the debugging ones off after installing.",
+    "The INF device object is world read/write by design; the Host restricts it to SYSTEM and Administrators and proves that before attaching anything (usb_driver.hpp).",
+    "Not verified: Memory Integrity (HVCI) compatibility, soak behaviour. Upstream 0.9.7.8 shipped a BSOD bug fixed in 0.9.8.0; 0.9.8.1 is an AI-assisted review release that warns of regressions. 0.9.7.5 predates both and was chosen for being the newest release whose driver files could be checked directly."
+  ]
+}

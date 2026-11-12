@@ -1,0 +1,50 @@
+#include "machine.hpp"
+#include "native_display_contract.hpp"
+#include "native_activation_ccd.hpp"
+#include <iostream>
+using namespace host;
+namespace {
+void require(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
+LUID adapter(DWORD value){return {value,-1};}
+DISPLAYCONFIG_PATH_INFO path(LUID luid,UINT32 source,UINT32 target,bool active,bool virtualMode){
+  DISPLAYCONFIG_PATH_INFO p{};p.flags=(active?DISPLAYCONFIG_PATH_ACTIVE:0)|(virtualMode?DISPLAYCONFIG_PATH_SUPPORT_VIRTUAL_MODE:0);
+  p.sourceInfo.adapterId=p.targetInfo.adapterId=luid;p.sourceInfo.id=source;p.targetInfo.id=target;p.targetInfo.targetAvailable=TRUE;
+  p.targetInfo.rotation=DISPLAYCONFIG_ROTATION_ROTATE90;p.targetInfo.scaling=DISPLAYCONFIG_SCALING_CENTERED;p.targetInfo.refreshRate={60000,1001};p.targetInfo.scanLineOrdering=DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
+  if(virtualMode){p.sourceInfo.cloneGroupId=DISPLAYCONFIG_PATH_CLONE_GROUP_INVALID;p.sourceInfo.sourceModeInfoIdx=DISPLAYCONFIG_PATH_SOURCE_MODE_IDX_INVALID;p.targetInfo.targetModeInfoIdx=DISPLAYCONFIG_PATH_TARGET_MODE_IDX_INVALID;p.targetInfo.desktopModeInfoIdx=DISPLAYCONFIG_PATH_DESKTOP_IMAGE_IDX_INVALID;}
+  else p.sourceInfo.modeInfoIdx=p.targetInfo.modeInfoIdx=DISPLAYCONFIG_PATH_MODE_IDX_INVALID;return p;
+}
+NativeCcdData activeFixture(){
+  NativeCcdData ccd;DISPLAYCONFIG_MODE_INFO source{};source.infoType=DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;source.adapterId=adapter(77);source.id=0;source.sourceMode={1600,900,DISPLAYCONFIG_PIXELFORMAT_32BPP,{-1600,0}};
+  DISPLAYCONFIG_MODE_INFO target{};target.infoType=DISPLAYCONFIG_MODE_INFO_TYPE_TARGET;target.adapterId=adapter(77);target.id=9;auto& signal=target.targetMode.targetVideoSignalInfo;
+  signal.pixelRate=108000000;signal.hSyncFreq={67500,1};signal.vSyncFreq={60000,1001};signal.activeSize={1600,900};signal.totalSize={1760,930};signal.scanLineOrdering=DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
+  DISPLAYCONFIG_MODE_INFO desktop{};desktop.infoType=DISPLAYCONFIG_MODE_INFO_TYPE_DESKTOP_IMAGE;desktop.adapterId=adapter(77);desktop.id=0;desktop.desktopImageInfo.PathSourceSize={1600,900};desktop.desktopImageInfo.DesktopImageRegion=desktop.desktopImageInfo.DesktopImageClip={0,0,1600,900};
+  ccd.modes={source,target,desktop};auto p=path(adapter(77),0,9,true,true);p.sourceInfo.sourceModeInfoIdx=0;p.targetInfo.targetModeInfoIdx=1;p.targetInfo.desktopModeInfoIdx=2;ccd.paths={p};return ccd;
+}
+NativeCcdData allFixture(const NativeCcdData& active){auto all=active;all.paths.push_back(path(adapter(33),0,100,false,false));auto inactive=path(adapter(33),1,101,false,true);inactive.sourceInfo.sourceModeInfoIdx=123;inactive.targetInfo.targetModeInfoIdx=234;inactive.targetInfo.desktopModeInfoIdx=345;all.paths.push_back(inactive);return all;}
+std::vector<NativeDisplayTarget> owned(){return {{"0",adapter(33),100,1920,1080},{"1",adapter(33),101,1280,720}};}
+void rejected(const NativeCcdData& before,const NativeCcdData& all,const NativeCcdData& after){bool failed=false;try{(void)mergeNativeActivationCcd(before,all,after);}catch(const std::runtime_error& e){failed=std::string(e.what())=="native_topology_changed"||std::string(e.what())=="native_topology_mode_invalid"||std::string(e.what())=="native_topology_plan_invalid";}require(failed,"Uncertain CCD views were accepted");}
+}
+int main(){try{int passed=0;const auto active=activeFixture(),all=allFixture(active);const auto targets=owned();
+  for(int missing=0;missing<4;++missing){auto incomplete=all;if(missing==1)incomplete.modes.clear();if(missing==2)incomplete.paths[0].sourceInfo.sourceModeInfoIdx=DISPLAYCONFIG_PATH_SOURCE_MODE_IDX_INVALID;if(missing==3)incomplete.paths[0].targetInfo.targetModeInfoIdx=100;
+    const auto merged=mergeNativeActivationCcd(active,incomplete,active);const auto plan=planNativeTopology(merged,targets);
+    require(nativeActiveSignatures(active)==nativeActiveSignatures(merged)&&nativeActiveSignatures(active)==nativeActiveSignatures(plan.supplied,targets),"Foreign mode/geometry/rotation/refresh changed");
+    require(nativeSourceIndex(merged.paths[1])==DISPLAYCONFIG_PATH_MODE_IDX_INVALID&&nativeTargetIndex(merged.paths[1])==DISPLAYCONFIG_PATH_MODE_IDX_INVALID&&nativeSourceIndex(merged.paths[2])==DISPLAYCONFIG_PATH_SOURCE_MODE_IDX_INVALID&&nativeTargetIndex(merged.paths[2])==DISPLAYCONFIG_PATH_TARGET_MODE_IDX_INVALID&&merged.paths[2].targetInfo.desktopModeInfoIdx==DISPLAYCONFIG_PATH_DESKTOP_IMAGE_IDX_INVALID,"Inactive candidate retained indices into the ALL mode array");++passed;
+  }
+  for(int change=0;change<11;++change){auto after=active;switch(change){case 0:after.paths[0].sourceInfo.id++;break;case 1:after.paths[0].targetInfo.id++;break;case 2:after.modes[0].sourceMode.position.x++;break;case 3:after.modes[0].sourceMode.width++;break;case 4:after.paths[0].targetInfo.rotation=DISPLAYCONFIG_ROTATION_IDENTITY;break;case 5:after.paths[0].targetInfo.refreshRate={60,1};break;case 6:after.modes[1].targetMode.targetVideoSignalInfo.pixelRate++;break;case 7:after.modes[2].desktopImageInfo.DesktopImageClip.right--;break;case 8:after.paths[0].flags=0;break;case 9:after.paths[0].sourceInfo.sourceModeInfoIdx=DISPLAYCONFIG_PATH_SOURCE_MODE_IDX_INVALID;break;case 10:after.paths[0].sourceInfo.statusFlags++;break;}rejected(active,all,after);++passed;}
+  for(int change=0;change<9;++change){auto wrong=all;switch(change){case 0:wrong.paths[0].sourceInfo.id++;break;case 1:wrong.paths.erase(wrong.paths.begin());break;case 2:wrong.paths[0].flags&=~DISPLAYCONFIG_PATH_ACTIVE;break;case 3:wrong.paths.push_back(wrong.paths[0]);break;case 4:wrong.modes[0].infoType=DISPLAYCONFIG_MODE_INFO_TYPE_TARGET;break;case 5:wrong.modes[0].adapterId.LowPart++;break;case 6:wrong.modes[0].sourceMode.position.x++;break;case 7:wrong.paths[0].targetInfo.rotation=DISPLAYCONFIG_ROTATION_IDENTITY;break;case 8:wrong.modes[1].id++;break;}rejected(active,wrong,active);++passed;}
+  {auto broken=active;broken.modes.clear();auto missing=all;missing.modes.clear();rejected(broken,missing,broken);++passed;}
+  for(bool conflict:{false,true}){auto clone=active;auto p=clone.paths[0];p.targetInfo.id=10;p.targetInfo.targetModeInfoIdx=UINT32(clone.modes.size());auto target=clone.modes[1];target.id=10;clone.modes.push_back(target);p.sourceInfo.sourceModeInfoIdx=UINT32(clone.modes.size());auto source=clone.modes[0];if(conflict)source.sourceMode.width++;clone.modes.push_back(source);clone.paths.push_back(p);auto expanded=allFixture(clone);
+    if(conflict)rejected(clone,expanded,clone);else require(nativeActiveSignatures(mergeNativeActivationCcd(clone,expanded,clone))==nativeActiveSignatures(clone),"Valid clone was not preserved");++passed;
+  }
+  {NativeCcdData empty;auto headless=allFixture(empty);const auto merged=mergeNativeActivationCcd(empty,headless,empty);require(planNativeTopology(merged,targets).placements[0].primary,"Verified headless views could not activate owned output");++passed;}
+  {auto reindexed=active;std::swap(reindexed.modes[0],reindexed.modes[1]);reindexed.paths[0].sourceInfo.sourceModeInfoIdx=1;reindexed.paths[0].targetInfo.targetModeInfoIdx=0;require(nativeActiveSignatures(mergeNativeActivationCcd(active,all,reindexed))==nativeActiveSignatures(active),"Equivalent mode-array reindexing was rejected");++passed;}
+  for(int issue=1;issue<=4;++issue){auto broken=active;if(issue==1)broken.paths[0].sourceInfo.sourceModeInfoIdx=DISPLAYCONFIG_PATH_SOURCE_MODE_IDX_INVALID;if(issue==2)broken.paths[0].sourceInfo.sourceModeInfoIdx=100;if(issue==3)broken.modes[0].infoType=DISPLAYCONFIG_MODE_INFO_TYPE_TARGET;if(issue==4)broken.modes[0].id++;
+    bool detailed=false;try{(void)mergeNativeActivationCcd(broken,all,active);}catch(const NativeActivationCcdError& e){detailed=e.diagnostic.stage==11&&e.diagnostic.issue==uint32_t(issue)&&e.diagnostic.expected==1;}require(detailed,"CCD role/index/type/identity detail was lost");++passed;
+  }
+  {NativeActivationDiagnostic diagnostic{"native_topology_mode_invalid",0,false,false};diagnostic.ccd=NativeCcdDiagnostic{11,65535,1,0,1};const auto parsed=parseNativeActivationDiagnostic(JsonParser::parse(nativeActivationDiagnosticJson(diagnostic)));require(parsed.ccd&&parsed.ccd->stage==11&&parsed.ccd->index==65535&&parsed.ccd->issue==1&&!parsed.systemError,"Numeric CCD worker ACK detail was lost or misreported as Windows error");diagnostic.windowsVerified=true;bool refused=false;try{(void)parseNativeActivationDiagnostic(JsonParser::parse(nativeActivationDiagnosticJson(diagnostic)));}catch(...){refused=true;}require(refused,"Failure detail was accepted as verified readiness");++passed;}
+  {std::vector<UINT32> flags;NativeCcdQueryAccess access;access.sizes=[&](UINT32 f,UINT32* p,UINT32* m){flags.push_back(f);const auto& value=f&QDC_ONLY_ACTIVE_PATHS?active:all;*p=UINT32(value.paths.size());*m=UINT32(value.modes.size());return LONG(ERROR_SUCCESS);};access.read=[&](UINT32 f,UINT32* p,DISPLAYCONFIG_PATH_INFO* paths,UINT32* m,DISPLAYCONFIG_MODE_INFO* modes){const auto& value=f&QDC_ONLY_ACTIVE_PATHS?active:all;std::copy(value.paths.begin(),value.paths.end(),paths);std::copy(value.modes.begin(),value.modes.end(),modes);*p=UINT32(value.paths.size());*m=UINT32(value.modes.size());return LONG(ERROR_SUCCESS);};
+    require(queryNativeActivationCcd(access).paths.size()==3&&flags==std::vector<UINT32>{18,17,18},"Bounding ACTIVE/ALL/ACTIVE sequence changed");++passed;
+  }
+  {int reads=0;NativeCcdQueryAccess access;access.sizes=[](UINT32,UINT32* p,UINT32* m){*p=*m=1;return LONG(ERROR_SUCCESS);};access.read=[&](UINT32,UINT32*,DISPLAYCONFIG_PATH_INFO*,UINT32*,DISPLAYCONFIG_MODE_INFO*){++reads;return LONG(ERROR_INSUFFICIENT_BUFFER);};bool refused=false;try{(void)queryNativeActivationCcd(access);}catch(const NativeTopologyWindowsError& e){refused=e.code==ERROR_INSUFFICIENT_BUFFER;}require(refused&&reads==3,"Compatibility CCD query retried without a bound");++passed;}
+  std::cout<<"{\"cases\":"<<passed<<",\"queryCalls\":\"substituted\",\"windowsDisplayChanges\":0,\"driverCalls\":0,\"inputEvents\":0,\"filesOpened\":0}\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

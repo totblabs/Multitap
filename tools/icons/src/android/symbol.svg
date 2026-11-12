@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <!-- The bare amber mark for the charcoal splash and launch background. The large drawing of multitap-mark.svg inside the adaptive icon safe area (the centre 66 of 108). Drawn for Multitap 2026-11-11, AGPL-3.0-only. -->
+  <g transform="translate(30 28.6) scale(0.4)" fill="#F5A623">
+    <path d="M47 38H89a23 23 0 0 1 0 46H47a23 23 0 0 1 0-46ZM53.5 61a7.5 7.5 0 1 0-15 0a7.5 7.5 0 1 0 15 0ZM75.5 61a7.5 7.5 0 1 0-15 0a7.5 7.5 0 1 0 15 0ZM97.5 61a7.5 7.5 0 1 0-15 0a7.5 7.5 0 1 0 15 0ZM26 66H20a7 7 0 0 0-7 7V97a5 5 0 0 1-10 0V73a17 17 0 0 1 17-17H26Z"/>
+  </g>
+</svg>

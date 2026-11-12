@@ -1,0 +1,63 @@
+/* 백업·복원 (js/backup.js): the console page, and the same steps inside the
+   first setup screen's card (.backup-setup), which keeps the soft look of the
+   scenic screens. Console tokens and shared parts: console.css. */
+.backup-lines{white-space:pre-line}
+
+/* The console page. */
+.app .backup-download{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--green-line);background:var(--green-soft)}
+.app .backup-download>div{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 10px;min-width:0}
+.app .backup-download strong{font-size:13px;overflow-wrap:anywhere}
+.app .backup-download small{color:var(--muted)}
+.app .backup-choose{display:grid;gap:12px}
+.app .backup-choose label{margin:0}
+.app .backup-choose>:not(.backup-actions){max-width:520px}
+/* The buttons of a box: a bar at its bottom, on the right. */
+.app .backup-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin:4px calc(-1*var(--pad)) calc(-1*var(--pad));padding:12px var(--pad);border-top:1px solid var(--line);background:var(--surface-2)}
+.app .panel>.backup-actions{margin:0}
+.app .backup-progress{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--line);background:var(--surface-2)}
+.app .backup-progress .loading-dot{flex:none;width:16px;height:16px;margin-top:2px}
+.app .backup-progress>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.app .backup-progress strong{font-size:13px}
+.app .backup-progress :is(span,small){color:var(--ink-2);font-size:13px;line-height:1.55}
+.app .backup-preview{display:grid;gap:12px}
+.app .backup-preview h3{margin:0;font-size:13.5px}
+.app .backup-preview>.facts{border:1px solid var(--line);border-top:2px solid var(--rule);border-bottom:0}
+.app .backup-preview>.facts>div{border-bottom-color:var(--line)}
+.app .backup-option{display:flex;align-items:flex-start;gap:8px;margin:0;padding:10px 12px;border:1px solid var(--line);color:var(--ink);font-weight:400;cursor:pointer}
+.app .backup-option input{flex:none;margin-top:3px}
+.app .backup-option span{display:flex;flex-direction:column;gap:1px;min-width:0}
+.app .backup-option strong{font-size:13px}
+.app .backup-option small{color:var(--muted);font-weight:400;line-height:1.55}
+
+/* First setup screen: the same steps in the sign-in card. */
+.auth-notice{margin:0 0 14px;padding:10px 12px;border:1px solid var(--amber-line);border-radius:var(--radius-sm);background:var(--amber-soft);color:var(--ink);font-size:13px;line-height:1.55;white-space:pre-line;text-align:left}
+.auth-notice[hidden]{display:none}
+.backup-setup .auth-lead{white-space:pre-line}
+.backup-setup .backup-choose{display:grid;gap:14px}
+.backup-setup .backup-choose label{margin:0}
+.backup-setup .backup-choose input[type=file]{padding:8px;min-height:42px;font-size:13px}
+.backup-setup .backup-actions{display:grid;gap:8px;margin-top:4px}
+.backup-setup .backup-actions :is(.primary,.danger){width:100%;min-height:44px}
+.backup-setup .backup-progress{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-2)}
+.backup-setup .backup-progress .loading-dot{flex:none;margin-top:4px}
+.backup-setup .backup-progress>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.backup-setup .backup-progress strong{font-size:13.5px}
+.backup-setup .backup-progress :is(span,small){color:var(--ink-2);font-size:13px;line-height:1.55}
+.backup-setup .backup-preview{display:grid;gap:14px}
+.backup-setup .backup-preview h3{margin:0;font-size:14px;font-weight:650}
+.backup-setup .backup-preview :is(.inline-alert,.note){margin:0}
+.backup-setup .backup-option{display:flex;align-items:flex-start;gap:10px;margin:0;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);cursor:pointer}
+.backup-setup .backup-option input{flex:none;width:18px;height:18px;min-height:0;margin-top:2px}
+.backup-setup .backup-option span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.backup-setup .backup-option strong{font-size:13.5px}
+.backup-setup .backup-option small{color:var(--muted);font-size:12.5px;font-weight:400;line-height:1.55}
+.backup-setup .facts>div{grid-template-columns:minmax(84px,32%) minmax(0,1fr)}
+@media (max-width:640px){
+  .app .backup-actions>button{flex:1 1 auto}
+}
+.backup-file-field{display:grid;gap:6px}.backup-file-title{font-weight:600}.backup-file-pick{display:flex;align-items:center;gap:10px;min-height:40px;margin:0;cursor:pointer}.backup-file-pick.is-disabled{cursor:default;opacity:.6}.backup-file-pick:focus-within .button{outline:2px solid var(--focus,#f59e0b);outline-offset:2px}.backup-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted,inherit)}
+
+/* The first setup screen stretches quiet buttons to the card's width: the copy
+   button of the restore command keeps its own (otherwise the command is
+   squeezed to one character per line). */
+.backup-setup .shell-command button{width:auto;margin-top:0}

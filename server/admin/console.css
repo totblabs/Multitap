@@ -1,0 +1,671 @@
+@charset "UTF-8";
+/* Administrator console.
+   1. Sign-in and first setup: the scenic screens, in the soft look of the
+      public pages (tokens: base.css). Everything of theirs is under
+      .auth-screen, or under the dialog that opens while the console is hidden.
+   2. The console: a list page and its windows. A dark top bar, a white menu,
+      a page title, a box of conditions (조회 조건), a board table, and a
+      window (창) for one item. Light by default, square corners, colour for
+      state only. Its tokens are the one block below; the frame is in
+      product-ui.css, the pages in pages.css and the page files.
+   Rules for an element or a class that the scenic screens also use start with
+   :where(.app,.app:not([hidden])~dialog): the console, and a dialog opened
+   from it. */
+
+/* ---- 1. Sign-in and first setup ---- */
+.auth-screen{position:relative;isolation:isolate;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;overflow:hidden;background:var(--canvas)}
+.auth-screen::before{content:"";position:absolute;inset:0;z-index:-2;background:var(--canvas) var(--scene) 62% 50%/cover no-repeat}
+.auth-screen::after{content:"";position:absolute;inset:0;z-index:-1;background:var(--scene-veil)}
+.auth-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px clamp(16px,5vw,56px)}
+.auth-top .theme-toggle{background:var(--glass);border-color:var(--glass-edge)}
+/* One card in the middle of the landscape; the mark and the title are its head. */
+.auth-body{flex:1;display:grid;grid-template-columns:minmax(0,420px);justify-content:center;align-items:center;width:100%;margin:0 auto;padding:16px 16px 40px}
+.eyebrow{display:inline-block;font-size:12px;font-weight:600;letter-spacing:.12em;line-height:1.4;color:var(--amber-ink)}
+.auth-card-head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.auth-card-mark{display:flex;flex:none;border-radius:var(--radius-sm)}
+.auth-card-mark .brand-mark{width:36px;height:36px}
+.auth-card-title{display:flex;flex-direction:column;gap:2px;min-width:0}
+.auth-card-title h1{margin:0;font-size:20px;line-height:1.3;font-weight:650;letter-spacing:-.01em}
+.auth-card-for{font-family:"Segoe UI",var(--font);font-size:12px;color:var(--muted)}
+.auth-step{margin:0 0 6px;color:var(--ink-2);font-size:14px;font-weight:600}
+.auth-step b{margin-right:4px;color:var(--muted);font-weight:600}
+.auth-card{padding:30px 28px 26px;border:1px solid var(--glass-edge);border-radius:var(--radius-lg);background:var(--glass);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(18px) saturate(1.2);backdrop-filter:blur(18px) saturate(1.2)}
+.auth-card h2{margin:8px 0 6px;font-size:22px;font-weight:650;letter-spacing:-.02em}
+.auth-lead{margin-bottom:22px;font-size:13.5px}
+.auth-card label{margin-bottom:14px}
+.auth-card input{min-height:42px}
+.auth-card .primary{width:100%;min-height:44px;margin-top:6px;font-size:14.5px}
+.auth-card .quiet{width:100%;margin-top:8px}
+.auth-note{display:block;margin-top:16px;text-align:center}
+/* The footer row stands on its own strip so its text reads over any part of the landscape. */
+.auth-foot{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;padding:12px clamp(16px,5vw,56px);border-top:1px solid var(--glass-edge);background:var(--glass);font-size:12px;color:var(--muted)}
+/* The client download in the footer row: a plain text link with its icon. */
+.client-download{display:inline-flex;align-items:center;gap:6px;min-width:0;color:var(--ink-2);font-size:12.5px;font-weight:500;text-decoration:none}
+.client-download .download-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.client-download .icon{width:15px;height:15px;color:var(--muted)}
+.client-download:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.auth-screen .error{margin:0;color:var(--red);font-size:13px;line-height:1.55;white-space:pre-line}
+.auth-screen .error:empty{display:none}
+.auth-screen .form-message:empty{display:none}
+.auth-card .error:not(:empty),.auth-screen .form-message:not(:empty),.app[hidden]~dialog #modal-error:not(:empty){margin:0 0 14px;padding:10px 12px;border:1px solid var(--red-line);border-radius:var(--radius-sm);background:var(--red-soft);color:var(--red);font-size:13px;line-height:1.55;white-space:pre-line}
+.auth-screen .form-message.is-success:not(:empty){border-color:var(--green-line);background:var(--green-soft);color:var(--green)}
+/* The restore steps inside the first setup card (js/backup.js). */
+.auth-screen .field-hint{display:block;margin-top:6px;color:var(--muted);font-size:12px;font-weight:400;line-height:1.6}
+.auth-screen .facts{display:grid;gap:0;margin:0}
+.auth-screen .facts>div{display:grid;grid-template-columns:minmax(110px,34%) minmax(0,1fr);gap:4px 16px;padding:10px 0;border-bottom:1px solid var(--line-soft)}
+.auth-screen .facts>div:first-child{padding-top:0}
+.auth-screen .facts>div:last-child{padding-bottom:0;border-bottom:0}
+.auth-screen .facts dt{color:var(--muted);font-size:13px}
+.auth-screen .facts dd{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;margin:0;color:var(--ink);font-size:13.5px;font-weight:500;overflow-wrap:anywhere}
+.auth-screen .facts dd small{font-weight:400}
+.auth-screen .inline-alert{display:flex;align-items:center;flex-wrap:wrap;gap:10px 12px;margin:0 0 16px;padding:12px 12px 12px 14px;border:1px solid var(--red-line);border-radius:10px;background:var(--red-soft)}
+.auth-screen .inline-alert.is-warn{border-color:var(--amber);background:transparent;color:inherit}
+.auth-screen .inline-alert.is-warn>.icon{color:var(--amber-ink)}
+.auth-screen .inline-alert>.icon{align-self:flex-start;margin-top:2px;color:var(--red)}
+.auth-screen .inline-alert>div{display:flex;flex-direction:column;gap:2px;flex:1 1 220px;min-width:0}
+.auth-screen .inline-alert strong{color:var(--ink);font-size:13.5px}
+.auth-screen .inline-alert span{color:var(--ink-2);font-size:13px;line-height:1.55}
+.auth-screen .note{display:flex;align-items:flex-start;gap:8px;margin:12px 0 0;color:var(--muted);font-size:13px;line-height:1.55}
+.auth-screen .note .icon{width:16px;height:16px;flex:none;margin-top:2px;color:var(--faint)}
+/* A confirmation opened from the first setup screen. */
+.app[hidden]~dialog{width:min(540px,calc(100vw - 24px));max-width:none;max-height:min(88vh,920px);margin:auto;padding:0;overflow:hidden;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.app[hidden]~dialog::backdrop{background:var(--backdrop);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+.app[hidden]~dialog[open]{animation:multitap-dialog-in .16s ease-out}
+@keyframes multitap-dialog-in{from{opacity:0;transform:translateY(6px) scale(.985)}}
+.app[hidden]~dialog #modal-form{display:flex;flex-direction:column;max-height:min(88vh,920px)}
+.app[hidden]~dialog .modal-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 12px 4px 22px}
+.app[hidden]~dialog .modal-heading h2{font-size:17px;font-weight:650;overflow-wrap:anywhere}
+.app[hidden]~dialog #modal-fields{flex:1 1 auto;min-height:0;overflow:auto;padding:12px 22px 4px}
+.app[hidden]~dialog #modal-error:not(:empty){margin:0 22px 12px}
+.app[hidden]~dialog .modal-actions{display:flex;justify-content:flex-end;gap:8px;padding:14px 22px 18px;border-top:1px solid var(--line-soft)}
+.app[hidden]~dialog .modal-actions button{min-width:84px}
+.app[hidden]~dialog .modal-actions .danger{border-color:var(--red-solid);background:var(--red-solid);color:#fff}
+.app[hidden]~dialog .modal-description{margin-bottom:18px;color:var(--ink-2);font-size:13.5px;line-height:1.7;white-space:pre-line}
+@media (max-width:860px){
+  .auth-screen::after{background:var(--scene-tint-narrow)}
+  .auth-body{grid-template-columns:minmax(0,1fr);align-items:start;max-width:452px;padding-top:4px}
+}
+@media (max-width:720px){
+  .auth-screen .facts>div{grid-template-columns:minmax(0,1fr);gap:2px}
+  .app[hidden]~dialog{width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:14px}
+  .app[hidden]~dialog #modal-form{max-height:calc(100dvh - 16px)}
+  .app[hidden]~dialog #modal-fields{padding:10px 18px 4px}
+  .app[hidden]~dialog #modal-error:not(:empty){margin:0 18px 12px}
+  .app[hidden]~dialog .modal-heading{padding:12px 8px 2px 18px}
+  .app[hidden]~dialog .modal-actions{padding:12px 18px 16px}
+  .app[hidden]~dialog .modal-actions button{flex:1 1 0;white-space:normal}
+}
+@media (max-width:520px){
+  .auth-card{padding:24px 20px 22px;border-radius:16px}
+}
+.is-error{color:var(--red)}
+.is-warn{color:var(--warn)}
+.is-bad{color:var(--red)}
+
+/* ---- 2. The console ---- */
+/* Tokens. Light unless the viewer picked dark (theme.js): white panels on a
+   pale grey page, grey lines, charcoal for the top bar, a window's title bar
+   and the main button. Amber marks the current place only; red, green and blue
+   are states. --line is a box or heading line, --line-soft a line between
+   rows, --line-2 the border of a control, --rule the thick line on top of a
+   table. Heights: a control 32 px (26 px small), a table row 40 px, a heading
+   row 38 px, the top bar 48 px. */
+.app,.app:not([hidden])~dialog{
+  color-scheme:light;
+  --canvas:#F2F3F5;--sidebar:#FFFFFF;--surface:#FFFFFF;--surface-2:#F7F8F9;--raised:#EEF0F2;--field:#FFFFFF;
+  --line:#D3D8DE;--line-2:#B9C0C7;--line-soft:#E4E7EB;--rule:#3A4046;
+  --bar:#F1F3F5;--row-hover:#FFFAF0;--row-on:#FFF6E5;--btn:#FFFFFF;--btn-hover:#F4F5F6;
+  --gnb:#22272B;--gnb-ink:#FFFFFF;--gnb-muted:#C9CFD4;--gnb-line:#4A5158;--gnb-field:#2E3439;
+  --main:#2B3035;--main-hover:#3A4046;--on-main:#FFFFFF;--win-edge:#2B3035;
+  --ink:#1F2428;--ink-2:#414850;--muted:#5F6871;--faint:#8A939C;--dot:#2B66C4;
+  --amber:#F5A623;--amber-ink:#8A5A00;--amber-soft:#FFF6E5;--amber-line:#F0D49A;--on-amber:#241600;--focus:rgba(245,166,35,.4);--ring:#B36B00;
+  --green:#0F7A4E;--green-soft:#F1FAF6;--green-line:#A9D8C4;
+  --blue:#2B66C4;--blue-soft:#F3F7FD;--blue-line:#B4CAEB;
+  --red:#C2301F;--red-soft:#FDF3F2;--red-line:#E3B1AC;--red-solid:#C2372B;
+  --warn:#8A5A00;--warn-soft:#FFF8E8;--warn-line:#F0D49A;
+  --series-1:#2A78D6;--series-2:#EB6834;--series-3:#1BAF7A;--series-4:#EDA100;
+  --fill-good:#1E9E6A;--fill-warn:#E2A21B;--fill-bad:#D0504A;--fill-neutral:#C3CBD1;
+  --hover:rgba(15,20,25,.05);--press:rgba(15,20,25,.08);--selected:#FFF6E5;--backdrop:rgba(20,24,28,.45);
+  --shadow:0 12px 40px rgba(0,0,0,.28);--shadow-pop:0 6px 20px rgba(0,0,0,.16);--shadow-sm:none;--card-shadow:none;
+  --toast:#22272B;--toast-ink:#F1F4F6;
+  --skeleton:rgba(15,20,25,.06);--skeleton-hi:rgba(15,20,25,.1);
+  --radius-sm:2px;--radius:2px;--radius-lg:3px;
+  --h:32px;--h-sm:26px;--h-row:40px;--h-bar:38px;--h-top:48px;--side-w:196px;--pad:16px;
+  font-size:13px;line-height:1.5
+}
+:root[data-theme="dark"] :is(.app,.app:not([hidden])~dialog){
+  color-scheme:dark;
+  --canvas:#14171A;--sidebar:#1B1F23;--surface:#1B1F23;--surface-2:#20252A;--raised:#2A3036;--field:#14171A;
+  --line:#343B42;--line-2:#4A535B;--line-soft:#2A3036;--rule:#8A939C;
+  --bar:#23282D;--row-hover:#2A2619;--row-on:#33290F;--btn:#23282D;--btn-hover:#2C3238;
+  --gnb:#0E1012;--gnb-ink:#FFFFFF;--gnb-muted:#B4BBC1;--gnb-line:#3A4046;--gnb-field:#1B1F23;
+  --main:#DDE1E4;--main-hover:#FFFFFF;--on-main:#14171A;--win-edge:#4A535B;
+  --ink:#E8EBED;--ink-2:#C3CAD0;--muted:#98A1AA;--faint:#78828B;--dot:#78B9F7;
+  --amber:#F5A623;--amber-ink:#F5A623;--amber-soft:#33290F;--amber-line:#6B5415;--on-amber:#241600;--focus:rgba(245,166,35,.45);--ring:#F5A623;
+  --green:#62E3A9;--green-soft:#15281F;--green-line:#2C5C47;
+  --blue:#78B9F7;--blue-soft:#162534;--blue-line:#2E4E6E;
+  --red:#FF8A7A;--red-soft:#2E1917;--red-line:#6E3A34;--red-solid:#C2412F;
+  --warn:#FFD24A;--warn-soft:#2B2410;--warn-line:#6B5415;
+  --series-1:#3987E5;--series-2:#D95926;--series-3:#199E70;--series-4:#C98500;
+  --fill-good:#3FC48A;--fill-warn:#E5B23A;--fill-bad:#E5675A;--fill-neutral:#4A545C;
+  --hover:rgba(255,255,255,.05);--press:rgba(255,255,255,.09);--selected:#33290F;--backdrop:rgba(0,0,0,.6);
+  --shadow:0 12px 40px rgba(0,0,0,.6);--shadow-pop:0 6px 20px rgba(0,0,0,.5);
+  --toast:#2A3036;--toast-ink:#F1F4F6;
+  --skeleton:rgba(255,255,255,.06);--skeleton-hi:rgba(255,255,255,.11)
+}
+
+/* Text */
+:where(.app,.app:not([hidden])~dialog) :is(h1,h2,h3,h4){font-family:var(--font);letter-spacing:0;text-wrap:wrap}
+:where(.app,.app:not([hidden])~dialog) h1{font-size:20px;line-height:1.3;font-weight:700;letter-spacing:-.02em}
+:where(.app,.app:not([hidden])~dialog) h2{font-size:14px;line-height:1.4;font-weight:700}
+:where(.app,.app:not([hidden])~dialog) h3{font-size:13px;line-height:1.4;font-weight:700}
+:where(.app,.app:not([hidden])~dialog) h4{font-size:12.5px;line-height:1.4;color:var(--ink-2)}
+:where(.app,.app:not([hidden])~dialog) p{line-height:1.6}
+:where(.app,.app:not([hidden])~dialog) small{font-size:12px;line-height:1.5}
+:where(.app,.app:not([hidden])~dialog) a{color:var(--ink);text-decoration-color:var(--line-2)}
+:where(.app,.app:not([hidden])~dialog) a:hover{text-decoration-color:currentColor;text-decoration-thickness:1px}
+:where(.app,.app:not([hidden])~dialog) :is(code,kbd,.mono,.mono-value){font-family:var(--mono);font-size:12.5px}
+:where(.app,.app:not([hidden])~dialog) time{font-variant-numeric:tabular-nums}
+:where(.app,.app:not([hidden])~dialog) .icon{width:15px;height:15px}
+/* Focus: a 2 px ring that shows on white, on the grey page and on the charcoal bars. */
+:where(.app,.app:not([hidden])~dialog) :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+:is(.topbar,.sidebar-head,.win-head,.modal-heading,.as-head,#notice){--ring:#F5A623}
+
+/* Controls: 32 px, 2 px corners, one grey border. The charcoal fill is the
+   main action of its place; every other button is white. Red text is an
+   action that takes something away. */
+:where(.app,.app:not([hidden])~dialog) :is(button,.button){gap:6px;min-height:var(--h);padding:0 14px;border-color:var(--line-2);background:var(--btn);color:var(--ink);font-size:13px;font-weight:600;transition:none}
+:where(.app,.app:not([hidden])~dialog) :is(button,.button):hover{background:var(--btn-hover)}
+:where(.app,.app:not([hidden])~dialog) button:active:not(:disabled),:where(.app,.app:not([hidden])~dialog) .button:active{transform:none}
+:where(.app,.app:not([hidden])~dialog) button .icon,:where(.app,.app:not([hidden])~dialog) .button .icon{width:14px;height:14px}
+:where(.app,.app:not([hidden])~dialog) button.primary,:where(.app,.app:not([hidden])~dialog) .button.primary{border-color:var(--main);background:var(--main);color:var(--on-main)}
+:where(.app,.app:not([hidden])~dialog) button.primary:hover:not(:disabled),:where(.app,.app:not([hidden])~dialog) .button.primary:hover{border-color:var(--main-hover);background:var(--main-hover)}
+:where(.app,.app:not([hidden])~dialog) button.primary:disabled{border-color:var(--line);background:var(--raised);color:var(--muted)}
+:where(.app,.app:not([hidden])~dialog) button.secondary,:where(.app,.app:not([hidden])~dialog) .button.secondary{border-color:var(--line-2);background:var(--btn);box-shadow:none}
+:where(.app,.app:not([hidden])~dialog) button.secondary:hover:not(:disabled),:where(.app,.app:not([hidden])~dialog) .button.secondary:hover{border-color:var(--line-2);background:var(--btn-hover)}
+:where(.app,.app:not([hidden])~dialog) button.quiet,:where(.app,.app:not([hidden])~dialog) .button.quiet{border-color:var(--line-2);background:var(--btn);color:var(--ink-2);font-weight:500}
+:where(.app,.app:not([hidden])~dialog) button.quiet:hover:not(:disabled),:where(.app,.app:not([hidden])~dialog) .button.quiet:hover{background:var(--btn-hover);color:var(--ink)}
+:where(.app,.app:not([hidden])~dialog) button.tonal,:where(.app,.app:not([hidden])~dialog) .button.tonal{border-color:var(--line-2);background:var(--btn);color:var(--ink)}
+:where(.app,.app:not([hidden])~dialog) button.tonal:hover:not(:disabled),:where(.app,.app:not([hidden])~dialog) .button.tonal:hover{border-color:var(--line-2);background:var(--btn-hover)}
+:where(.app,.app:not([hidden])~dialog) button.danger,:where(.app,.app:not([hidden])~dialog) .button.danger{border-color:var(--red-line);background:var(--btn);color:var(--red)}
+:where(.app,.app:not([hidden])~dialog) button.danger:hover:not(:disabled){border-color:var(--red);background:var(--red-soft);color:var(--red)}
+:where(.app,.app:not([hidden])~dialog) button.small,:where(.app,.app:not([hidden])~dialog) .button.small{min-height:var(--h-sm);padding:0 10px;font-size:12.5px;font-weight:500}
+:where(.app,.app:not([hidden])~dialog) .icon-button{min-height:var(--h);min-width:var(--h);padding:0;border-color:transparent;background:transparent;color:var(--muted)}
+:where(.app,.app:not([hidden])~dialog) .icon-button:hover:not(:disabled){border-color:var(--line-2);background:var(--btn);color:var(--ink)}
+:where(.app,.app:not([hidden])~dialog) .icon-button .icon{width:16px;height:16px}
+:where(.app,.app:not([hidden])~dialog) .theme-toggle{border-color:transparent}
+/* The console is light until the viewer picks dark, whatever the system says. */
+:where(.app) .theme-toggle .when-dark{display:none}
+:where(.app) .theme-toggle .when-light{display:block}
+:root[data-theme="dark"] :where(.app) .theme-toggle .when-dark{display:block}
+:root[data-theme="dark"] :where(.app) .theme-toggle .when-light{display:none}
+:where(.app,.app:not([hidden])~dialog) :is(input,select,textarea){min-height:var(--h);padding:4px 8px;border-color:var(--line);font-size:13px;line-height:1.4;transition:none}
+:where(.app,.app:not([hidden])~dialog) :is(input,select,textarea):hover:not(:disabled){border-color:var(--line-2)}
+:where(.app,.app:not([hidden])~dialog) :is(input,select,textarea):focus{border-color:var(--ring);box-shadow:0 0 0 2px var(--focus)}
+:where(.app,.app:not([hidden])~dialog) select{padding-right:28px;background-position:calc(100% - 15px) 52%,calc(100% - 10px) 52%;background-size:5px 5px}
+:where(.app,.app:not([hidden])~dialog) textarea{min-height:80px;padding:7px 8px;line-height:1.55}
+:where(.app,.app:not([hidden])~dialog) input[type=checkbox]{width:15px;height:15px;min-height:0;padding:0;border-radius:2px}
+:where(.app,.app:not([hidden])~dialog) input[type=checkbox]:focus{box-shadow:none}
+:where(.app,.app:not([hidden])~dialog) input[type=file]{padding:3px}
+:where(.app,.app:not([hidden])~dialog) label{margin:0 0 12px;color:var(--ink-2);font-size:12.5px;font-weight:600}
+:where(.app,.app:not([hidden])~dialog) label>:is(input,select,textarea,.readonly-field,.shell-command,.download-link){margin-top:5px;font-weight:400}
+:where(.app,.app:not([hidden])~dialog) :where(details:not(.perf-session,.todo-group))>summary{font-size:13px}
+:where(.app,.app:not([hidden])~dialog) .bone{border-radius:2px}
+.nav-toggle,.nav-close{display:none}
+
+/* State: a small bordered badge in the state's colour; no tone is off or
+   unknown. In a table every badge has the same width. */
+:where(.app,.app:not([hidden])~dialog) .pill{display:inline-flex;align-items:center;justify-content:center;gap:0;min-height:22px;padding:1px 8px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-2);color:var(--muted);font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap}
+:where(.app,.app:not([hidden])~dialog) .pill:is(.red,.green,.amber,.blue)::before{content:none}
+:where(.app,.app:not([hidden])~dialog) .pill.red{border-color:var(--red-line);background:var(--red-soft);color:var(--red)}
+:where(.app,.app:not([hidden])~dialog) .pill.green{border-color:var(--green-line);background:var(--green-soft);color:var(--green)}
+:where(.app,.app:not([hidden])~dialog) .pill.amber{border-color:var(--warn-line);background:var(--warn-soft);color:var(--warn)}
+:where(.app,.app:not([hidden])~dialog) .pill.blue{border-color:var(--blue-line);background:var(--blue-soft);color:var(--blue)}
+.count{color:var(--muted);font-family:var(--mono);font-size:12px;font-weight:500}
+.version{color:var(--muted);font-family:var(--mono);font-size:12px}
+.vm-number{color:var(--muted);font-family:var(--mono);font-size:12.5px}
+.live{color:var(--green)!important}
+.mono-chip{color:var(--ink-2);overflow-wrap:anywhere;white-space:normal}
+.tag-chips{display:flex;flex-wrap:wrap;gap:4px}
+.tag-chip{display:inline-block;max-width:160px;overflow:hidden;padding:0 6px;border:1px solid var(--line);border-radius:2px;background:var(--surface-2);color:var(--muted);font-size:12px;line-height:18px;text-overflow:ellipsis;white-space:nowrap}
+.tag-chip.pool{color:var(--ink-2)}
+.account-notes{display:block;max-width:420px;color:var(--ink-2);white-space:pre-line;overflow-wrap:anywhere}
+.nowrap{white-space:nowrap}
+
+/* Messages */
+:where(.app,.app:not([hidden])~dialog) .error{margin:0;color:var(--red);font-size:13px;line-height:1.55;white-space:pre-line}
+:where(.app,.app:not([hidden])~dialog) :is(.error,.form-message):empty{display:none}
+:where(.app,.app:not([hidden])~dialog) .form-message:not(:empty),.app:not([hidden])~dialog #modal-error:not(:empty){margin:0 0 12px;padding:9px 12px;border:1px solid var(--red-line);background:var(--red-soft);color:var(--ink);font-size:13px;line-height:1.55;white-space:pre-line}
+:where(.app,.app:not([hidden])~dialog) .form-message.is-success:not(:empty){border-color:var(--green-line);background:var(--green-soft)}
+:where(.app,.app:not([hidden])~dialog) .field-hint{display:block;margin-top:5px;color:var(--muted);font-size:12px;font-weight:400;line-height:1.55}
+:where(.app,.app:not([hidden])~dialog) .note{display:flex;align-items:flex-start;gap:7px;color:var(--muted);font-size:12.5px;line-height:1.55}
+:where(.app,.app:not([hidden])~dialog) .note .icon{width:14px;height:14px;flex:none;margin-top:3px;color:var(--faint)}
+/* A failure or a warning inside an area: a bordered box in the state's colour. */
+:where(.app,.app:not([hidden])~dialog) .inline-alert{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;padding:10px 12px;border:1px solid var(--red-line);background:var(--red-soft)}
+:where(.app,.app:not([hidden])~dialog) .inline-alert.is-warn{border-color:var(--warn-line);background:var(--warn-soft)}
+:where(.app,.app:not([hidden])~dialog) .inline-alert>.icon{display:none}
+:where(.app,.app:not([hidden])~dialog) .inline-alert>div{display:flex;flex-direction:column;gap:1px;flex:1 1 220px;min-width:0}
+:where(.app,.app:not([hidden])~dialog) .inline-alert strong{color:var(--ink);font-size:13px}
+:where(.app,.app:not([hidden])~dialog) .inline-alert span{color:var(--ink-2);font-size:13px;line-height:1.55}
+:where(.app,.app:not([hidden])~dialog) .inline-alert>button{flex:none}
+.confirm-who{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:9px 12px;border:1px solid var(--warn-line);background:var(--warn-soft);color:var(--ink);font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.confirm-who.is-calm{border-color:var(--line);background:var(--surface-2);color:var(--ink-2);font-weight:400}
+.confirm-who .icon{flex:none}
+.saved-mark{display:inline-flex;align-items:center;gap:4px;color:var(--green);font-size:12px;font-weight:600}
+
+/* An area: a white box under the thick line of a table, its heading row on
+   top, then its content. Text and forms keep a 16 px margin; tables,
+   key/value tables and row lists go edge to edge. An area inside another is a
+   grey heading row again, never a box in a box. */
+.panel{display:flow-root;min-width:0;border:1px solid var(--line);border-top:2px solid var(--rule);background:var(--surface)}
+.panel>*{margin:var(--pad)}
+.panel>:is(.panel-head,.table-scroll,.facts,.row-list,.row-line,.panel,details,.empty,.todo-list,.todo-rows,.request-list,.perf-list,.result-bar,.same-for-all,.rank-bars,.device-list,.inline-alert){margin:0}
+.panel-head{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;min-height:44px;padding:6px var(--pad);border-bottom:1px solid var(--line)}
+.panel-head:last-child{border-bottom:0}
+.panel-title{display:flex;align-items:baseline;gap:2px 12px;flex-wrap:wrap;flex:1 1 180px;min-width:0}
+.panel-title :is(h2,h3){display:flex;align-items:baseline;gap:6px;margin:0;color:var(--ink);font-size:14px;font-weight:700}
+.panel-title p{color:var(--muted);font-size:12.5px;line-height:1.5}
+.panel-head>.actions{flex:none;gap:6px}
+.panel-head :is(button,.button){min-height:var(--h-sm);padding:0 10px;font-size:12.5px}
+.panel-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:13px}
+.panel-empty{color:var(--muted);font-size:13px}
+.panel>.inline-alert{border-width:0 0 1px}
+.panel .panel{border:0}
+.panel .panel>.panel-head,.panel>.panel-head~.panel-head{min-height:var(--h-bar);border-top:1px solid var(--line);background:var(--bar)}
+.panel .panel>.panel-head :is(h2,h3),.panel>.panel-head~.panel-head :is(h2,h3){color:var(--ink-2);font-size:13px}
+.actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+/* Two areas side by side: a line between them. */
+.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:14px}
+
+/* Key and value: a form table. The name stands in a grey cell on the left,
+   the value on white; .is-pairs puts two of them on a line, .form-table adds
+   the thick line of a table on top. */
+:where(.app,.app:not([hidden])~dialog) .facts{display:grid;margin:0;font-size:13px}
+:where(.app,.app:not([hidden])~dialog) .facts>div{display:grid;grid-template-columns:130px minmax(0,1fr);border-bottom:1px solid var(--line-soft)}
+:where(.app,.app:not([hidden])~dialog) .panel>.facts:last-child>div:last-child,.panel>.row-list:last-child>:last-child:not(.is-open),.panel>.row-list:last-child>li:last-child>.row-line:last-child{border-bottom:0}
+:where(.app,.app:not([hidden])~dialog) .facts dt{display:flex;align-items:center;padding:9px 12px;border-right:1px solid var(--line);background:var(--bar);color:var(--ink-2);font-weight:600}
+:where(.app,.app:not([hidden])~dialog) .facts dd{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;min-width:0;margin:0;padding:9px 12px;color:var(--ink);overflow-wrap:anywhere}
+:where(.app,.app:not([hidden])~dialog) .facts dd small{color:var(--muted)}
+.panel>:not(.panel-head)+.facts{border-top:1px solid var(--line)}
+:where(.app,.app:not([hidden])~dialog) .facts.form-table{border:1px solid var(--line);border-top:2px solid var(--rule);border-bottom:0;background:var(--surface)}
+:where(.app,.app:not([hidden])~dialog) .facts.form-table>div{border-bottom-color:var(--line)}
+:where(.app,.app:not([hidden])~dialog) .facts.is-pairs{grid-template-columns:repeat(2,minmax(0,1fr))}
+:where(.app,.app:not([hidden])~dialog) .facts.is-pairs>div:nth-child(even){border-left:1px solid var(--line)}
+:where(.app,.app:not([hidden])~dialog) .facts.is-pairs>div:last-child:nth-child(odd){grid-column:1/-1}
+/* The Host's report in 자세히: labels of up to ten letters on one line. */
+:where(.app,.app:not([hidden])~dialog) .display-panel .facts>div{grid-template-columns:150px minmax(0,1fr)}
+.fact-list{display:grid;gap:4px;margin:0;padding:0;list-style:none}
+.fact-list li{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:baseline;gap:8px}
+
+/* Tables. In an area: a grey heading row and a line under every row. A board
+   (.board, the list of a page) is a table of its own: the thick line on top,
+   a line around every cell, 40 px rows, cells centred and names on the left. */
+.table-scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}
+th{height:var(--h-bar);padding:0 12px;border-bottom:1px solid var(--line);background:var(--bar);color:var(--ink-2);font-size:13px;font-weight:600;text-align:center;white-space:nowrap}
+td{height:var(--h-row);padding:4px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink-2);vertical-align:middle;white-space:nowrap}
+th+th{border-left:1px solid var(--line)}
+td+td{border-left:1px solid var(--line-soft)}
+tbody tr:hover>td{background:var(--row-hover)}
+.panel>.table-scroll:last-child tbody tr:last-child>td{border-bottom:0}
+td strong{color:var(--ink);font-weight:600}
+td small{display:block;color:var(--muted);font-size:12px}
+td .actions{flex-wrap:nowrap;gap:4px}
+td :is(button,.button){min-height:var(--h-sm);padding:0 10px;font-size:12.5px;font-weight:500}
+td a:not(.button){color:var(--ink);text-decoration:none}
+td a:not(.button):hover{text-decoration:underline}
+.row-link{color:var(--ink);font-weight:600;text-decoration:none}
+td a:not(.button):not(.vm-list-item):not(.account-choice){border-bottom:1px solid var(--line-2);color:var(--ink);text-decoration:none}
+td a:not(.button):not(.vm-list-item):not(.account-choice):hover{border-bottom-color:var(--ink)}
+.board{border-top:2px solid var(--rule);background:var(--surface);table-layout:fixed}
+.board th{border:1px solid var(--line);text-align:center}
+.board td{border:1px solid var(--line-soft);overflow:hidden;text-align:center;text-overflow:ellipsis}
+.board :is(th,td):first-child{border-left-color:var(--line)}
+.board :is(th,td):last-child{border-right-color:var(--line)}
+.board tbody:last-child tr:last-child>td{border-bottom-color:var(--line)}
+.board td.is-left{text-align:left}
+.board td.is-name{color:var(--ink);font-weight:600;text-align:left}
+.board td.is-mono{font-family:var(--mono);font-size:12.5px}
+.board tr.is-pick{cursor:pointer}
+/* The name is the link that opens the row; the line under it says so. */
+.board td.is-name a{color:var(--ink);text-decoration:none}
+.board td.is-name a strong{border-bottom:1px solid var(--line-2);font-weight:600}
+.board td.is-name a:hover strong{border-bottom-color:var(--ink)}
+.board td.is-name a small{display:none}
+.board td.is-name a:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.board tr.board-group>th{height:34px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink-2);font-size:12.5px;text-align:left}
+.board tr.board-group>th>span+span{margin-left:8px;color:var(--muted);font-weight:400}
+.board tr.board-empty>td{height:120px;white-space:normal}
+.board tr.board-empty:hover>td{background:none}
+
+/* 조회 조건: the conditions of a list in one bordered box, each with its
+   name, then 조회 and 초기화. */
+.query-box{display:flex;align-items:center;flex-wrap:wrap;gap:10px 18px;margin:0;padding:12px var(--pad);border:1px solid var(--line);background:var(--surface)}
+.query-box label{display:flex;align-items:center;gap:8px;margin:0;color:var(--ink-2);font-size:13px;font-weight:600;white-space:nowrap}
+.query-box label>:is(input,select){width:auto;margin:0;font-weight:400}
+.query-box label>select{min-width:132px}
+.query-box label>input[type=search]{width:240px}
+.query-name{align-self:center;color:var(--ink-2);font-size:13px;font-weight:600;white-space:nowrap}
+.query-name+*{margin-left:-10px}
+.query-box label.toggle{font-weight:400}
+.query-box label>.search-field{flex:none;width:240px;max-width:none}
+.query-box label>.search-field input{width:100%}
+.query-box .segmented .segment{min-height:calc(var(--h) - 2px);padding:0 14px;font-size:13px}
+.query-actions{display:flex;gap:6px}
+/* Above a board: how many on the left, the page's actions on the right. */
+.list-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-bottom:8px}
+.list-count{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 12px;flex:1 1 240px;min-width:0;margin:0;color:var(--ink-2);font-size:13px}
+.list-count b{color:var(--ink);font-weight:700}
+.list-count .is-bad,.list-count .is-bad b{color:var(--red);font-weight:700}
+.list-count small{color:var(--muted);font-size:12.5px}
+.list-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-left:auto}
+/* A strip for something that waits: amber, its text on the left and its
+   actions on the right. */
+.alert-strip{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;padding:10px var(--pad);border:1px solid var(--warn-line);background:var(--warn-soft);color:var(--ink-2);font-size:13px}
+.alert-strip>span{flex:1 1 200px;min-width:0}
+.alert-strip b,.alert-strip strong{color:var(--ink);font-weight:700}
+
+/* Rows that are not a table: one line each, the name, its note, the actions. */
+.row-list{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
+.row-list>li{min-width:0}
+.row-line{display:flex;align-items:center;flex-wrap:wrap;gap:2px 12px;min-width:0;min-height:44px;padding:6px var(--pad);border-bottom:1px solid var(--line-soft)}
+.row-text{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 10px;flex:1 1 180px;min-width:0}
+.row-text>strong{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;color:var(--ink);font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.row-text>small{color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.row-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px;flex:none;max-width:100%}
+.row-actions :is(button,.button){min-height:var(--h-sm);padding:0 10px;font-size:12.5px}
+/* The icon of a row is the plain glyph in the state's colour. */
+.tile{display:flex;flex:none;color:var(--faint)}
+.tile.bad{color:var(--red)}.tile.warn{color:var(--warn)}.tile.good{color:var(--green)}.tile.live{color:var(--green)}
+
+/* Search fields, joined choices and tabs */
+.search-field{position:relative;display:flex;align-items:center;flex:1 1 220px;min-width:160px;max-width:320px}
+.search-field .icon{position:absolute;left:9px;width:14px;height:14px;color:var(--faint);pointer-events:none}
+.search-field input{padding-left:30px}
+.filter-select{width:auto;min-width:132px;max-width:260px;text-overflow:ellipsis}
+.toggle{display:inline-flex;align-items:center;gap:6px;margin:0;color:var(--ink-2);font-size:13px;font-weight:400;cursor:pointer;user-select:none}
+.result-bar{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;min-height:44px;padding:6px var(--pad);border-bottom:1px solid var(--line);color:var(--ink-2);font-size:13px}
+.result-bar strong{color:var(--ink);font-weight:700}
+.result-bar>small{flex:1;color:var(--muted);font-size:12.5px}
+.result-bar .is-bad{color:var(--red);font-weight:700}
+/* Joined cells; the chosen one is filled. */
+.segmented{display:inline-flex;max-width:100%;border:1px solid var(--line-2);border-radius:var(--radius);background:var(--btn);overflow:hidden}
+.segmented .segment{min-height:calc(var(--h-sm) - 2px);padding:0 11px;border:0;border-right:1px solid var(--line-2);border-radius:0;background:none;color:var(--ink-2);font-size:12.5px;font-weight:500}
+.segmented .segment:last-child{border-right:0}
+.segmented .segment:hover:not(:disabled){background:var(--btn-hover);color:var(--ink)}
+.segmented .segment.selected{background:var(--main);color:var(--on-main);font-weight:600}
+.segmented .segment:focus-visible{outline-offset:-2px}
+/* Tabs: a line under the strip; the current one is a white cell joined to
+   the content below, with the amber mark on top. */
+.log-tabs,.win-tabs{display:flex;align-items:flex-end;flex:none;gap:0;margin:0;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+:is(.log-tabs,.win-tabs)>:is(button,a){flex:none;gap:6px;min-height:36px;margin-bottom:-1px;padding:0 16px;border:1px solid transparent;border-top-width:2px;border-bottom:0;border-radius:0;background:none;color:var(--muted);font-size:13px;font-weight:600;white-space:nowrap}
+:is(.log-tabs,.win-tabs)>:is(button,a):hover{background:none;color:var(--ink)}
+:is(.log-tabs,.win-tabs)>:is(.selected,.on,[aria-selected=true]){border-color:var(--amber) var(--line) transparent;background:var(--surface);color:var(--ink)}
+:is(.log-tabs,.win-tabs)>:is(.selected,.on,[aria-selected=true]):hover{background:var(--surface)}
+:is(.log-tabs,.win-tabs)>:focus-visible{outline-offset:-3px}
+:is(.log-tabs,.win-tabs) b{color:var(--muted);font:500 12px var(--mono)}
+/* A switch: a square track, amber when on. */
+.switch-label{position:relative;display:inline-flex;align-items:center;gap:8px;min-height:var(--h-sm);margin:0;color:var(--ink-2);font-size:13px;font-weight:400;white-space:nowrap;cursor:pointer}
+.switch-input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.switch-track{position:relative;width:30px;height:16px;flex:none;border:1px solid var(--line-2);border-radius:2px;background:var(--raised);pointer-events:none}
+.switch-track::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:1px;background:var(--faint)}
+.switch-input:checked+.switch-track{border-color:var(--amber);background:var(--amber)}
+.switch-input:checked+.switch-track::after{left:16px;background:var(--on-amber)}
+.switch-input:focus-visible+.switch-track{outline:2px solid var(--ring);outline-offset:2px}
+.switch-input:disabled{cursor:not-allowed}.switch-input:disabled+.switch-track{opacity:.5}
+
+/* Folds: a grey heading row with a chevron. */
+.disclosure,.table-view,.dt-more,.pve-disclosure,.todo-later{border-top:1px solid var(--line)}
+:is(.disclosure,.table-view,.dt-more,.pve-disclosure,.todo-later)>summary{display:flex;align-items:center;gap:8px;min-height:var(--h-bar);padding:4px var(--pad);background:var(--bar);color:var(--ink-2);font-size:13px;font-weight:600;user-select:none}
+:is(.disclosure,.table-view,.dt-more,.pve-disclosure,.todo-later)[open]>summary{border-bottom:1px solid var(--line)}
+:is(.disclosure,.table-view,.pve-disclosure)>summary::before{content:"";width:5px;height:5px;flex:none;margin:0 3px 0 2px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(-45deg)}
+:is(.disclosure,.table-view,.pve-disclosure)[open]>summary::before{transform:rotate(45deg)}
+:where(.app,.app:not([hidden])~dialog) :where(details:not(.perf-session,.todo-group,.disclosure,.table-view,.pve-disclosure,.dl-verify))>summary::before{width:5px;height:5px;margin:0 8px 2px 2px;border-width:0 1.5px 1.5px 0;transition:none}
+.disclosure-body{display:grid;gap:12px;padding:var(--pad)}
+
+/* Nothing here, loading, failed: one quiet block with its action. */
+:where(.app,.app:not([hidden])~dialog) .empty{display:flex;flex-direction:column;align-items:center;gap:4px;padding:36px 16px;color:var(--muted);font-size:13px;text-align:center;white-space:normal}
+.panel.empty>*{margin:0}.panel.empty>.empty-icon{margin-bottom:4px}.panel.empty>:is(button,.button){margin-top:10px}
+.empty.compact{padding:24px 12px}
+.empty-icon{display:flex;margin-bottom:4px;color:var(--faint)}
+.empty-icon .icon{width:20px;height:20px}
+.empty strong{color:var(--ink);font-size:13.5px;font-weight:600}
+.empty p{max-width:44em;font-size:13px;overflow-wrap:anywhere}
+.empty .loading-dot{margin-bottom:6px}
+.empty>:is(button,.button){margin-top:10px}
+.empty.is-error .empty-icon{color:var(--red)}
+.empty.is-loading{align-items:stretch;gap:8px;padding:16px;text-align:left}
+.empty.is-loading strong{color:var(--muted);font-size:12.5px;font-weight:400}
+.bones{display:grid;gap:8px}
+.bones .bone:nth-child(2){width:86%}
+.bones .bone:nth-child(3){width:64%}
+.skeleton{display:grid;gap:14px}
+.skeleton-head{display:grid;gap:8px}
+.skeleton-head .bone:first-child{width:160px;height:18px}
+.skeleton-head .bone:last-child{width:min(360px,70%)}
+.skeleton-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);background:var(--surface)}
+.skeleton-card{display:grid;gap:10px;padding:var(--pad);border-right:1px solid var(--line)}
+.skeleton-card:last-child{border-right:0}
+.skeleton-card .bone:first-child{width:40%}
+.skeleton-card .bone.is-big{width:30%;height:20px}
+.skeleton-card.is-table{border:1px solid var(--line);background:var(--surface)}
+.skeleton-card.is-table .bone{width:100%}
+
+/* Toast: what an action did, bottom right. Success clears itself; an error
+   stays until it is closed. While a detail window is open it stands in that
+   window (app.js), so it stays above the dimmed page and can be closed. */
+#notice{position:fixed;right:24px;bottom:24px;z-index:80;display:flex;align-items:flex-start;gap:8px;width:min(440px,calc(100vw - 32px));padding:11px 8px 11px 14px;border-left:3px solid #62E3A9;border-radius:var(--radius);background:var(--toast);color:var(--toast-ink);box-shadow:var(--shadow-pop);font-size:13px;line-height:1.55}
+#notice>.icon{margin-top:3px;color:#62E3A9}
+#notice.is-error{border-left-color:#FF8A7A}
+#notice.is-error>.icon{color:#FF8A7A}
+.notice-text{flex:1;min-width:0;white-space:pre-line;overflow-wrap:anywhere}
+#notice .notice-close{min-height:24px;min-width:24px;border-color:transparent;background:transparent;color:rgba(241,244,246,.66)}
+#notice .notice-close:hover:not(:disabled){background:rgba(255,255,255,.1);color:#fff}
+#notice .notice-action{flex:none;align-self:center;min-height:var(--h-sm);padding:0 10px;border-color:rgba(245,166,35,.55);background:transparent;color:#F5A623;font-size:12.5px;font-weight:600}
+#notice .notice-action:hover:not(:disabled){background:rgba(245,166,35,.14)}
+
+/* A window (창): a charcoal title bar with the name and an X, the body, then
+   a grey bar of buttons. #modal is the form or confirmation of one action;
+   #detail (app.js) shows one item of a list in tabs, its actions on the left
+   of the bar and 닫기 on the right. */
+.app:not([hidden])~dialog,#detail{width:min(520px,calc(100vw - 24px));max-width:none;max-height:min(88vh,920px);margin:auto;padding:0;overflow:hidden;border:1px solid var(--win-edge);border-radius:var(--radius-lg);background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.app:not([hidden])~dialog.is-wide{width:min(780px,calc(100vw - 24px))}
+.app:not([hidden])~dialog::backdrop,#detail::backdrop{background:var(--backdrop)}
+#modal-form{display:flex;flex-direction:column;max-height:min(88vh,920px)}
+.app:not([hidden])~dialog .modal-heading,.win-head{display:flex;align-items:center;gap:10px;flex:none;min-height:46px;padding:0 8px 0 16px;background:var(--gnb);color:var(--gnb-ink)}
+.app:not([hidden])~dialog .modal-heading{justify-content:space-between}
+.app:not([hidden])~dialog .modal-heading h2,.win-head h2{color:var(--gnb-ink);font-size:15px;font-weight:700;overflow-wrap:anywhere}
+.app:not([hidden])~dialog .modal-heading .icon-button,.win-head .icon-button{flex:none;color:var(--gnb-ink)}
+.app:not([hidden])~dialog .modal-heading .icon-button:hover:not(:disabled),.win-head .icon-button:hover:not(:disabled){border-color:transparent;background:rgba(255,255,255,.12);color:var(--gnb-ink)}
+.app:not([hidden])~dialog .modal-heading .icon-button .icon,.win-head .icon-button .icon{width:18px;height:18px}
+#modal-fields{flex:1 1 auto;min-height:0;overflow:auto;padding:16px 16px 6px}
+.app:not([hidden])~dialog #modal-error:not(:empty){margin:0 16px 12px}
+.modal-actions,.win-foot{display:flex;align-items:center;gap:8px;flex:none;padding:12px 16px;border-top:1px solid var(--line);background:var(--surface-2)}
+.modal-actions{justify-content:flex-end}
+.modal-actions button{min-width:76px}
+.modal-actions .danger{border-color:var(--red-solid);background:var(--red-solid);color:#fff}
+.modal-actions .danger:hover:not(:disabled){border-color:var(--red-solid);background:var(--red-solid);color:#fff;filter:brightness(1.1)}
+.modal-description{margin-bottom:14px;color:var(--ink-2);font-size:13px;line-height:1.7;white-space:pre-line}
+.modal-extra{display:flex;justify-content:flex-end;margin-top:4px}
+/* Another way to do what the dialog asks: a named row of the dialog with its own button. */
+.modal-choice{align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding:10px 12px;border:1px solid var(--line);background:var(--surface-2)}
+.modal-choice>span{display:flex;flex-direction:column;gap:1px;min-width:0}
+.modal-choice strong{color:var(--ink);font-size:13px}
+.modal-choice small{color:var(--muted);font-size:12.5px;line-height:1.5}
+.modal-choice button{flex:none}
+#modal-fields .field-hint{white-space:pre-line}
+/* One plain checkbox in a dialog (modal field { checkbox: true }): the box, then its words. */
+#modal-fields .modal-check{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 8px;cursor:pointer}
+#modal-fields .modal-check input{flex:none;width:16px;height:16px;min-height:0;margin:0}
+#modal-fields .modal-check .field-hint{flex-basis:100%}
+.readonly-field{padding:6px 10px;border:1px solid var(--line);background:var(--bar);color:var(--ink);font-weight:400;overflow-wrap:anywhere}
+.download-link{display:flex;align-items:center;justify-content:center;gap:8px;min-height:var(--h);padding:4px 12px;border:1px solid var(--line-2);border-radius:var(--radius);background:var(--btn);color:var(--ink);font-weight:600;text-decoration:none}
+.download-link:hover{background:var(--btn-hover)}
+.form-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 12px}
+/* The detail window: 760 px wide and one height for every tab, so changing
+   the tab never moves the window; a long tab scrolls inside it. */
+#detail{width:min(760px,calc(100vw - 24px))}
+#detail:has(>.is-narrow){width:min(580px,calc(100vw - 24px))}
+#detail:has(>.is-wide){width:min(980px,calc(100vw - 24px))}
+.win-frame.is-narrow .win-body{max-height:min(620px,calc(100dvh - 190px))}
+.win-frame.is-wide .win-body{max-height:min(600px,calc(100dvh - 190px))}
+.win-frame{display:flex;flex-direction:column;max-height:min(88vh,920px)}
+.win-kind{flex:none;color:var(--gnb-muted);font-size:13px;font-weight:600;white-space:nowrap}
+.win-kind::after{content:"·";margin-left:10px;color:var(--gnb-line)}
+/* The title keeps its width; what stands after it (where it is, a memo) gives way first. */
+.win-head h2{flex:0 1 auto;min-width:0;margin:0}.win-head h2:focus{outline:none}
+.win-head>small{flex:0 1000 auto;min-width:0;overflow:hidden;color:var(--gnb-muted);font-size:12.5px;text-overflow:ellipsis;white-space:nowrap}
+.win-head .pill{flex:none;background:var(--surface)}
+.win-head .win-close{margin-left:auto}
+.win-tabs{padding:12px 16px 0}
+.win-body{flex:0 1 auto;height:auto;max-height:min(500px,calc(100dvh - 220px));min-height:120px;padding:16px;overflow:auto;overscroll-behavior:contain}
+.win-body:focus{outline:none}
+.win-panel>*+*{margin-top:14px}
+.win-panel>.note{margin-top:8px}
+.win-panel>.facts.form-table+*{margin-top:14px}
+.win-foot>.win-fill{flex:1}
+.win-foot .win-actions{display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+/* An area of a tab: its name and its action on one line, then a bordered
+   list or table under the thick line. */
+.win-panel>.panel{border:0;background:none}
+.win-panel>.panel>*{margin:0}
+.win-panel>.panel>*+*{margin-top:8px}
+.win-panel>.panel>.panel-head{min-height:var(--h-sm);padding:0;border:0;background:none}
+.win-panel>.panel>:is(.row-list,.table-scroll,.facts,.perf-list,.device-list,.session-list,.empty,.panel-empty){border:1px solid var(--line);border-top:2px solid var(--rule);background:var(--surface)}
+.win-panel>.panel>.disclosure{border:1px solid var(--line)}
+.win-panel>.panel>.panel-empty{padding:22px var(--pad);text-align:center}
+/* A list to tick in a dialog: one line each, lines between. */
+.pick-list-wrap{display:grid;gap:8px}
+.pick-list{display:grid;max-height:min(50vh,360px);overflow:auto;border:1px solid var(--line);border-top:2px solid var(--rule)}
+.pick-item{display:flex!important;flex-direction:row!important;align-items:center;gap:10px;min-height:var(--h-row);margin:0!important;padding:4px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink);font-weight:400!important;cursor:pointer}
+.pick-item:last-child{border-bottom:0}
+.pick-item:hover{background:var(--row-hover)}.pick-item[hidden]{display:none!important}
+.pick-item input{flex:none;margin:0}
+.pick-item span{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 10px;min-width:0}
+.pick-item strong{font-size:13px}.pick-item small{color:var(--muted)}
+
+/* Charts (charts.js): an area of its own, a line around the plot. */
+.chart{display:flex;flex-direction:column;gap:6px;min-width:0;padding:10px var(--pad);border:1px solid var(--line);background:var(--surface)}
+.chart-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.chart-title{color:var(--ink-2);font-size:12.5px;font-weight:600}
+.chart-readout{display:inline-flex;align-items:baseline;gap:6px;min-height:20px;color:var(--ink)}
+.chart-readout strong{font:600 13px var(--mono)}
+.chart-frame{display:grid;grid-template-columns:40px minmax(0,1fr)}
+.chart-frame:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.chart-y{display:flex;flex-direction:column;justify-content:space-between;height:96px;padding-right:8px;color:var(--muted);font:11px/1 var(--mono);text-align:right}
+.chart-plot{width:100%;height:96px;overflow:visible;cursor:crosshair}
+.chart-x{display:flex;justify-content:space-between;padding-left:40px;color:var(--muted);font:11px var(--mono)}
+.chart-grid{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.chart-line{fill:none;stroke:var(--series-1);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.chart-area{fill:var(--series-1);opacity:.1}
+.chart-dot{stroke:var(--series-1);stroke-width:6;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.chart-dot.is-hover{stroke-width:8}
+.chart-cross{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}
+.chart.is-empty .empty{padding:12px}
+.stack{display:flex;flex-direction:column;gap:8px;margin:0}
+.stack+.stack{margin-top:14px}
+.stack-label{color:var(--ink-2);font-size:12.5px;font-weight:600}
+.stack-track{height:10px;overflow:hidden;background:var(--bar)}
+.stack-svg{width:100%;height:100%}
+.stack-seg{stroke:var(--surface);stroke-width:2;vector-effect:non-scaling-stroke}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;padding:0;list-style:none;font-size:12.5px}
+.legend li{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+.legend strong{color:var(--ink);font-family:var(--mono);font-weight:600}
+.swatch{width:8px;height:8px;flex:none}
+.c-good{fill:var(--fill-good);background:var(--fill-good)}
+.c-warn{fill:var(--fill-warn);background:var(--fill-warn)}
+.c-bad{fill:var(--fill-bad);background:var(--fill-bad)}
+.c-neutral{fill:var(--fill-neutral);background:var(--fill-neutral)}
+.c-s1{fill:var(--series-1);background:var(--series-1)}
+.c-s2{fill:var(--series-2);background:var(--series-2)}
+.c-s3{fill:var(--series-3);background:var(--series-3)}
+.c-s4{fill:var(--series-4);background:var(--series-4)}
+
+/* Records (timeline.js logBoard): a board of 시간 | 사용자 | 데스크톱 | 작업 | 결과 |
+   원인, a grey heading row per day. 실패 is red text; 조치 필요 a small line under
+   the cause. A row opens its detail (a window, or a line under it). */
+.log-board th.col-time{width:92px}.log-board th.col-who{width:118px}.log-board th.col-desktop{width:150px}
+.log-board th.col-event{width:24%}.log-board th.col-result{width:68px}.log-board th.col-manage{width:72px}
+html:not([lang^="ko"]) .log-board th.col-result{width:76px}html:not([lang^="ko"]) .log-board th.col-manage{width:96px}
+.log-board td.col-time{color:var(--muted);font-variant-numeric:tabular-nums}
+.log-board td.col-event{color:var(--ink);font-weight:500}
+.log-board td.col-cause{line-height:1.45;white-space:normal}
+.log-board td.col-cause small{color:var(--muted);font-size:12px}
+.log-board td.col-result .is-bad{font-weight:600}
+.log-board tr.is-on>td{background:var(--row-on)}
+.board tr.board-detail>td{height:auto;padding:10px 12px 12px;background:var(--surface-2);text-align:left;white-space:normal}
+.board tr.board-detail:hover>td{background:var(--surface-2)}
+.log-facts dd code,.log-raw{font-size:12px;overflow-wrap:anywhere}
+.log-limit{margin:8px 0 0}
+
+/* Narrow: a table becomes stacked rows, each cell on a line with its column
+   name; a board shows the name with one line under it and the state. A
+   window fills the screen. */
+@media (max-width:900px){
+  .detail-grid{grid-template-columns:minmax(0,1fr)}
+  .skeleton-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:720px){
+  .table-scroll{overflow-x:visible}
+  .data-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .data-table,.data-table tbody,.data-table tr,.data-table td{display:block;width:100%}
+  .data-table tr{padding:6px 0;border-bottom:1px solid var(--line)}
+  .data-table tbody tr>td{background:none}
+  .data-table td,.data-table td:nth-child(n){display:grid;grid-template-columns:clamp(76px,30%,132px) minmax(0,1fr);align-items:baseline;gap:10px;width:100%;min-width:0;max-width:none;height:auto;padding:3px var(--pad);border:0;text-align:left;white-space:normal}
+  .data-table td::before{content:attr(data-label);color:var(--muted);font-size:12px}
+  .data-table td>*{min-width:0;justify-self:start}
+  .data-table td .actions{flex-wrap:wrap}
+  .data-table td:empty{display:none}
+  .board,.board tbody{display:block;width:100%}
+  .board thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .board tr{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;border:1px solid var(--line);border-top:0}
+  .board tr>td{display:none;height:auto;border:0}
+  .board tr>td.is-name{grid-column:1;grid-row:1;display:block;padding:9px 12px;white-space:normal}
+  .board tr>td.is-state{grid-column:2;grid-row:1;display:block;padding:0 12px 0 0}
+  .board td.is-name a{display:flex;flex-direction:column;gap:1px}
+  .board td.is-name a strong{border-bottom:0}
+  .board td.is-name a small{display:block;overflow:hidden;color:var(--muted);font-weight:400;text-overflow:ellipsis;white-space:nowrap}
+  .board tr.board-group{display:block}.board tr.board-group>th{display:block;height:auto;padding:8px 12px;border:0}
+  .board tr.board-empty{display:block}.board tr.board-empty>td{display:block;height:auto}
+  .query-box{align-items:stretch;gap:8px 12px;padding:12px}
+  .query-box label{flex:1 1 140px}
+  .query-box label>:is(input,select),.query-box label>input[type=search]{flex:1;width:auto;min-width:0}
+  .query-box label.is-search{flex-basis:100%}
+  .query-box label.toggle{flex:0 1 auto}.query-box label.toggle>input{flex:none}
+  .query-actions{flex:1 1 100%}.query-actions>button{flex:1}
+  .list-actions{flex:1 1 100%;margin-left:0}
+  .list-actions>.switch-label{flex:1 1 100%}
+  .list-actions>:is(button,.button){flex:1 1 0}
+  :where(.app,.app:not([hidden])~dialog) .facts>div{grid-template-columns:104px minmax(0,1fr)}
+  :where(.app,.app:not([hidden])~dialog) .facts.is-pairs{grid-template-columns:minmax(0,1fr)}
+  :where(.app,.app:not([hidden])~dialog) .facts.is-pairs>div:nth-child(even){border-left:0}
+  .row-line>.row-actions{justify-content:flex-start;width:100%}
+  .search-field{flex:1 1 100%;max-width:none;min-width:0}
+  .filter-select{flex:1 1 130px;max-width:none}
+  .form-grid{grid-template-columns:minmax(0,1fr)}
+  /* A record on a phone: what and its result, then when and why. */
+  .log-board tr>td.col-time,.log-board tr>td.col-cause{display:block;grid-column:1/-1;padding:0 12px 8px;color:var(--muted);font-size:12.5px;text-align:left}
+  .log-board tr>td.col-time{grid-row:2}.log-board tr>td.col-cause{grid-row:3}
+  .board tr.board-detail{display:block}.board tr.board-detail>td{display:block}
+  #notice{right:16px;bottom:16px;left:16px;width:auto}
+  .app:not([hidden])~dialog,.app:not([hidden])~dialog.is-wide{width:calc(100vw - 16px);max-height:calc(100dvh - 16px)}
+  #modal-form{max-height:calc(100dvh - 16px)}
+  .modal-actions{flex-wrap:wrap}
+  .modal-actions button{flex:1 1 auto;white-space:nowrap}
+  .modal-choice{flex-wrap:wrap}.modal-choice button{flex:1 1 auto}
+  #detail,#detail:has(>:is(.is-narrow,.is-wide)){width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}
+  .win-frame{height:100dvh;max-height:none}
+  .win-body,.win-frame:is(.is-narrow,.is-wide) .win-body{flex:1 1 0;height:auto;min-height:0;max-height:none;padding:12px}
+  .win-tabs{padding:10px 12px 0}
+  .win-head{position:relative;flex-wrap:wrap;gap:0 10px;padding:6px 44px 6px 12px}
+  .win-head .win-close{position:absolute;top:6px;right:4px;margin:0}
+  .win-head>small{order:5;flex-basis:100%;padding-bottom:4px}
+  .win-foot{flex-wrap:wrap;padding:10px 12px}
+  .win-foot>.win-fill{display:none}
+  .win-foot .win-actions{flex:1 1 100%}
+  .win-foot .win-actions>*{flex:1 1 auto}
+  .win-foot .win-actions>.segmented{flex:none}
+  .win-foot>.win-done{flex:1 1 100%}
+  .win-foot>.win-main{flex:1 1 0}.win-foot>.win-main+.win-done{flex:1 1 0}
+}
+.auth-top .lang-switch{margin-left:auto;margin-right:-8px;background:var(--glass);border-color:var(--glass-edge)}

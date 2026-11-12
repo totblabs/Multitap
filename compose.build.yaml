@@ -1,0 +1,13 @@
+# Build the broker image from this checkout instead of pulling the published one:
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
+# server/release-bundle/ must hold a prepared download bundle (docs/docker-deployment.md);
+# the image's version is server/package.json (server/Dockerfile checks it).
+services:
+  broker:
+    image: multitap-broker:local
+    pull_policy: build
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      args:
+        MULTITAP_ALLOW_EMPTY_RELEASE_BUNDLE: ${MULTITAP_ALLOW_EMPTY_RELEASE_BUNDLE:-false}

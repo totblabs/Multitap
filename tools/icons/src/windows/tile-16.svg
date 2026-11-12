@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Multitap app icon, 16 px grid: amber tile, power-strip mark snapped to whole pixels. Drawn for Multitap 2026-11-11, AGPL-3.0-only; built by tools/icons/build-icons.mjs. -->
+  <rect width="16" height="16" rx="3.5" fill="#F5A623"/>
+  <path fill="#1E1503" d="M6.5 5H11.5a3 3 0 0 1 0 6H6.5a3 3 0 0 1 0 -6ZM5.6 7a0.6 0.6 0 0 0 -0.6 0.6V8.4a0.6 0.6 0 0 0 0.6 0.6H6.4a0.6 0.6 0 0 0 0.6 -0.6V7.6a0.6 0.6 0 0 0 -0.6 -0.6ZM8.6 7a0.6 0.6 0 0 0 -0.6 0.6V8.4a0.6 0.6 0 0 0 0.6 0.6H9.4a0.6 0.6 0 0 0 0.6 -0.6V7.6a0.6 0.6 0 0 0 -0.6 -0.6ZM11.6 7a0.6 0.6 0 0 0 -0.6 0.6V8.4a0.6 0.6 0 0 0 0.6 0.6H12.4a0.6 0.6 0 0 0 0.6 -0.6V7.6a0.6 0.6 0 0 0 -0.6 -0.6ZM4.5 8.75H3.5a0.5 0.5 0 0 0 -0.5 0.5V12.25a0.75 0.75 0 0 1 -1.5 0V9.25a2 2 0 0 1 2 -2H4.5Z"/>
+</svg>

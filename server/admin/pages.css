@@ -1,0 +1,320 @@
+@charset "UTF-8";
+/* The console's pages: 데스크톱, the Host parts pages share, 화질·속도,
+   Proxmox 연결, 업데이트 and 서버 정보. Tokens and shared parts: console.css. */
+
+/* ---- 데스크톱: the list as a board; one desktop in its window ---- */
+/* The board. The heading of a column sets its width; the name takes the rest. */
+.vm-table th.col-num{width:56px}
+.vm-table th.col-state{width:104px}
+.vm-table th.col-kind{width:96px}
+.vm-table th.col-node{width:96px}
+.vm-table th.col-users{width:16%}
+.vm-table th.col-host{width:132px}
+.vm-table th.col-seen{width:150px}
+.vm-table th.col-manage{width:84px}
+.vm-table td.col-num{color:var(--muted)}
+.vm-table tr.is-on>td{background:var(--row-on)}
+/* Beside the name: why a desktop cannot be reached. */
+.vm-list-why{display:inline-block;color:var(--muted);font-size:12.5px;font-weight:400}
+/* Beside the name while there is room; with none it goes under the name, whole, instead of being cut ("Wind…"). */
+.vm-table td.is-name{white-space:normal}
+.vm-table .vm-list-item{margin-right:12px}
+/* The numbers of a list stay on one line; the buttons beside them go under it when both do not fit. */
+.list-head>.list-count{flex:1 1 auto}
+.vm-table tr[data-status=bad] .vm-list-why{color:var(--red)}
+.vm-list-update{margin-left:6px;color:var(--amber-ink);font-family:var(--font);font-size:11.5px;font-weight:600}
+.vm-list-group+.vm-list-group{margin-top:18px}
+.vm-list-group-label{display:flex;align-items:baseline;gap:10px;margin:0 0 6px;color:var(--ink);font-size:13.5px;font-weight:700}
+.vm-list-group-label span:last-child{color:var(--muted);font-size:12.5px;font-weight:400}
+.vm-list-caption span{color:var(--ink);font-weight:700}
+.update-bar>button{flex:none}
+/* The window. A problem the operator has to act on stands as one plain bordered line on top of 기본 정보
+   (nothing when all is well); the values under it are plain text. */
+.dt-alerts{display:grid;gap:6px}
+.dt-alert{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;min-height:40px;padding:7px 12px;border:1px solid var(--line);background:var(--surface);font-size:13px;line-height:1.5}
+.dt-alert>strong{color:var(--red);font-weight:700}
+.dt-alert>span{color:var(--ink-2)}
+.dt-alert>:is(button,.button){margin-left:auto}
+.dt-alert :is(button,.button) .icon{display:none}
+/* 상태: a dot in the state's colour and its word; grey when there is no tone. */
+.state-dot{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.state-dot>i{flex:none;width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.state-dot.is-green>i{background:var(--green)}.state-dot.is-blue>i{background:var(--blue)}.state-dot.is-red>i{background:var(--red)}.state-dot.is-amber>i{background:var(--warn)}
+/* The word is coloured only for a problem: 접속 불가 red, 사용 중지 grey (lists and form tables). */
+.state-dot.is-red{color:var(--red)}.state-dot.is-muted{color:var(--muted)}
+.state-fact{display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px 10px}
+.state-why{color:var(--red)}
+.win-head .state-dot{flex:none;color:var(--gnb-ink);font-size:12.5px;font-weight:600}
+.win-head .state-dot>i{background:#9AA3AB}
+.win-head .state-dot.is-green>i{background:#3DD68C}.win-head .state-dot.is-blue>i{background:#7CB4F5}.win-head .state-dot.is-red>i{background:#FF7B6B}.win-head .state-dot.is-amber>i{background:#F5C04A}
+.win-head>small.win-busy{flex:none}
+/* The bar of a window: plain buttons without icons; 삭제 the same with red text. The main one stays dark. */
+.win-foot :is(button,.button) .icon{display:none}
+.win-foot button.danger,.win-foot .button.danger{border-color:var(--line-2);background:var(--btn);color:var(--red)}
+.win-foot button.danger:hover:not(:disabled){border-color:var(--line-2);background:var(--btn-hover);color:var(--red)}
+/* A folded explanation (홈 first-run help). */
+.dt-more>p{margin:12px var(--pad) 0;color:var(--muted);font-size:13px;line-height:1.6;white-space:pre-line}
+/* Sharing of one person on one desktop: three named choices, then the switches. */
+.person-row.is-open>.row-line,.assigned-row.is-open>.row-line{background:var(--row-on)}
+.same-for-all{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--muted);font-size:12.5px}
+.same-for-all>span{margin-right:4px}
+.sharing-control{display:block}
+.sharing-control-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px var(--pad);border-bottom:1px solid var(--line-soft);background:var(--surface-2)}
+.preset-seg{flex:0 1 auto;flex-wrap:wrap}
+.preset-seg .is-custom{display:inline-flex;align-items:center}
+.sharing-fine{border-bottom:1px solid var(--line);box-shadow:inset 3px 0 var(--amber)}
+.sharing-fine h4{margin:0;padding:7px var(--pad) 7px 19px;border-bottom:1px solid var(--line-soft);background:var(--bar);font-size:12.5px}
+.sharing-fine .row-line{min-height:40px;padding-left:19px}
+.sharing-fine .row-actions{gap:16px}
+.sharing-fine details{border-bottom:1px solid var(--line-soft)}
+.sharing-fine details:last-child{border-bottom:0}
+.sharing-fine details>summary{min-height:36px;padding:8px var(--pad) 8px 19px;color:var(--ink-2);font-size:12.5px}
+.sharing-fine details>p{margin:0;padding:0 var(--pad) 10px 19px;color:var(--muted);font-size:12.5px;line-height:1.6;white-space:pre-line}
+.console-permission-alert span{white-space:pre-line}
+/* What the desktop can offer now (devicePanel): name | state | note. */
+.device-row{display:grid;grid-template-columns:130px 150px minmax(0,1fr);align-items:center;border-bottom:1px solid var(--line-soft)}
+.device-row:last-child{border-bottom:0}
+.device-row>strong{display:flex;align-items:center;align-self:stretch;min-width:0;padding:9px 12px;border-right:1px solid var(--line);background:var(--bar);color:var(--ink-2);font-size:13px;font-weight:600}
+.device-row>.state-dot{justify-self:start;margin:0 12px}
+.device-detail{min-width:0;padding:9px 12px 9px 0;color:var(--muted);font-size:12.5px;line-height:1.55;white-space:pre-line}
+.device-more p{margin:4px 0 0}
+.assignment-retained{display:flex;align-items:flex-start;gap:8px;margin:0;padding:9px 12px;border:1px solid var(--warn-line);background:var(--warn-soft);color:var(--ink-2);font-size:12.5px}
+.assignment-retained .icon{display:none}
+
+/* ---- Host parts shared by pages ---- */
+.host-cell{display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px 0;min-width:0}
+.host-note::before{content:"·";margin:0 6px;color:var(--faint)}
+.host-note.is-warn{color:var(--warn)}.host-note.is-bad{color:var(--red)}
+.host-cell>.host-update-progress{flex-basis:100%;margin-top:4px}
+.host-update-status{display:grid;gap:3px}
+.host-update-status small{max-width:260px;white-space:pre-line;overflow-wrap:anywhere}
+.host-update-progress{width:100%;max-width:160px;height:6px;accent-color:var(--amber)}
+.host-update-notes-field{display:grid;gap:5px;margin-top:4px;color:var(--ink-2);font-size:12.5px;font-weight:600}
+.host-update-notes,.release-notes{max-height:240px;margin:0;padding:10px 12px;overflow:auto;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);font:400 13px/1.65 var(--font);white-space:pre-wrap;overflow-wrap:anywhere}
+.release-notes{max-height:320px}
+.host-update-now{display:grid;gap:8px;margin-top:12px;padding:10px 12px;border:1px solid var(--red-line);background:var(--red-soft)}
+.host-update-now .field-hint{margin:0;color:var(--ink-2)}
+.host-update-now button{justify-self:end}
+.host-batch-summary{color:var(--ink);font-weight:600}
+.host-batch-reason{display:block;max-width:420px;white-space:pre-line;overflow-wrap:anywhere}
+/* 승인 대기: an amber strip above the list, one line per request. The first
+   line is who asks, the code to compare, what the server found and the two
+   answers; the instruction is under it. */
+.requests-panel{border-color:var(--warn-line);background:var(--warn-soft)}
+.requests-panel>.panel-head{min-height:0;padding:10px var(--pad) 0;border-bottom:0}
+.requests-panel .panel-title h2{color:var(--ink);font-size:13.5px}
+.requests-panel .panel-title h2 .count{color:var(--amber-ink);font-family:inherit;font-size:inherit;font-weight:700}
+.requests-panel .panel-title h2 .count::after{content:"대"}
+.requests-panel .panel-title p{color:var(--ink-2)}
+.request-list{display:block}
+.request-card{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;padding:10px var(--pad);border-bottom:1px solid var(--warn-line);font-size:13px}
+.request-card.is-contested{box-shadow:inset 3px 0 var(--red)}
+.request-list>.request-card:last-child{border-bottom:0}
+.request-main,.request-main>div{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 12px;min-width:0}
+.request-main strong{color:var(--ink);font-weight:700}
+.request-main small{color:var(--ink-2)}
+.request-icon,.request-match .icon,.request-duplicate .icon{display:none}
+.request-identity{color:var(--ink-2);font-size:12px;overflow-wrap:anywhere}
+.request-more{order:5;flex-basis:100%;color:var(--muted);font-size:12.5px}
+.request-more>summary{cursor:pointer}
+.request-more>p{margin:4px 0 0}
+.request-code{display:contents;color:var(--ink-2)}
+.request-code>span{margin-right:-8px}
+.request-code-value{color:var(--ink);font:700 14px var(--mono);letter-spacing:.04em}
+.request-code .field-hint,.request-pc-hint,.request-duplicate{order:5;flex-basis:100%;margin:0}
+/* The heading of 승인 대기 already says to compare the code. */
+.requests-panel .field-hint.is-routine{display:none}
+.request-duplicate{color:var(--red);line-height:1.55}
+.request-match{display:flex;align-items:baseline;gap:6px;margin:0;color:var(--ink-2);font-size:13px}
+.request-match.no-match{color:var(--warn)}
+.request-match button.request-manual{min-height:var(--h-sm);padding:0 8px}
+.request-card .actions{margin-left:auto;flex-wrap:nowrap}
+.request-card .actions :is(button,.button){min-height:var(--h-sm);padding:0 10px;font-size:12.5px}
+.host-request-list{margin-top:12px;border:1px solid var(--line)}
+.host-request-list .panel-head{min-height:var(--h-bar);background:var(--bar)}
+.host-request-list .panel-head h3{color:var(--ink-2);font-size:13px}
+.host-request-list .request-card{border-bottom-color:var(--line-soft)}
+.event-list{display:grid;margin:0;padding:0;border:1px solid var(--line);list-style:none}
+.event-list li{display:grid;gap:1px;padding:8px 12px;border-bottom:1px solid var(--line-soft)}
+.event-list li:last-child{border-bottom:0}
+.event-list code{color:var(--ink-2);white-space:normal;overflow-wrap:anywhere}
+.session-list{display:block;margin:0;padding:0;list-style:none}
+.session-list li{display:flex;align-items:center;gap:10px;min-height:var(--h-row);padding:4px var(--pad);border-bottom:1px solid var(--line-soft)}
+.session-list li:last-child{border-bottom:0}
+.session-list li>.icon{display:none}
+.session-list li>span:first-of-type{flex:1;min-width:0}
+.session-list li>span>a{color:var(--ink);font-weight:600;text-decoration:none}
+.session-list a:hover{text-decoration:underline}
+
+/* ---- 화질·속도 (perf.js) ---- */
+/* One connection: who and when, its numbers, and 상세 for its charts (기록); in the
+   window of a desktop the same connection is a fold. */
+.perf-list{display:block;margin:0;padding:0;list-style:none}
+.perf-session{border-bottom:1px solid var(--line)}
+.perf-session:last-child{border-bottom:0}
+li.perf-session{display:grid;gap:8px;padding:10px var(--pad) 12px}
+.perf-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.perf-session>summary{display:grid;gap:8px;padding:10px var(--pad) 12px;cursor:pointer}
+.perf-session>summary:hover{background:var(--surface-2)}
+.perf-session[open]>summary{border-bottom:1px solid var(--line-soft);background:var(--bar)}
+.perf-title{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap;min-width:0}
+.perf-title strong{color:var(--ink);font-size:13px;font-weight:700}
+.perf-title small{color:var(--muted)}
+summary>.perf-title::before{content:"";width:5px;height:5px;flex:none;align-self:center;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(-45deg)}
+.perf-session[open]>summary>.perf-title::before{transform:rotate(45deg)}
+.perf-detail{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding:var(--pad)}
+.perf-window .perf-detail{padding:0}
+.metric-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid var(--line);background:var(--surface)}
+.metric{display:flex;flex-direction:column;min-width:0;padding:7px 12px;border-right:1px solid var(--line-soft)}
+.metric:last-child{border-right:0}
+.metric span{color:var(--ink-2);font-size:12px;font-weight:600}
+.metric strong{color:var(--ink);font:700 14px var(--mono)}
+.metric small{color:var(--muted);font-size:12px}
+.findings{display:grid;margin:0;padding:0;border:1px solid var(--line);list-style:none}
+.findings li{padding:8px 12px 8px 15px;border-bottom:1px solid var(--line-soft);box-shadow:inset 3px 0 var(--dot);color:var(--ink-2);font-size:13px;line-height:1.55}
+.findings li:last-child{border-bottom:0}
+.findings li.is-warn{box-shadow:inset 3px 0 var(--fill-warn)}
+.chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+/* In a window: three numbers on a line. */
+#detail .dt-main .metric-row{grid-template-columns:repeat(3,minmax(0,1fr))}
+#detail .dt-main .metric:nth-child(3n){border-right:0}#detail .dt-main .metric:nth-child(n+4){border-top:1px solid var(--line-soft)}
+.perf-stages{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--line)}
+.perf-stages .stack-track{height:12px}
+.perf-detail>.facts{border:1px solid var(--line);border-top:2px solid var(--rule);border-bottom:0}
+.perf-detail>.facts>div{border-bottom-color:var(--line)}
+.perf-detail>.table-view{border:1px solid var(--line)}
+.perf-table :is(th,td){padding:0 10px;font-size:12.5px}
+.perf-table td{font-family:var(--mono);text-align:right}
+.perf-table :is(th,td):first-child{text-align:left}
+.perf-table th{text-align:right}
+
+/* ---- Proxmox 연결 ---- */
+.shell-setup>p{margin-bottom:4px}
+.setup-step{display:flex;align-items:baseline;gap:10px}
+.setup-step-number{display:grid;place-items:center;flex:none;width:20px;height:20px;border-radius:50%;background:var(--main);color:var(--on-main);font:700 11.5px var(--mono)}
+.setup-step>div{display:flex;flex-direction:column;gap:1px;min-width:0}
+.setup-step strong{color:var(--ink);font-size:13px;font-weight:700}
+.setup-step p{font-size:13px}
+.shell-setup :is(.shell-command,.connection-import-field,.import-status){margin-left:46px}
+/* 연결하기: in the bar at the bottom of the box, on the right; what it does is said beside it. */
+.shell-setup>.actions{flex-direction:row-reverse;justify-content:space-between;gap:8px 16px;margin:0;padding:12px var(--pad);border-top:1px solid var(--line);background:var(--surface-2)}
+.shell-setup>.actions small{color:var(--muted);font-size:12.5px}
+.shell-setup .shell-command{margin-top:8px;margin-bottom:16px}
+.connection-import-field{margin-top:8px;margin-bottom:12px}
+.panel>.shell-command{margin-right:var(--pad)}
+.shell-command{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0 12px;padding:4px 4px 4px 12px;border:1px solid var(--line-2);background:var(--surface-2)}
+.shell-command code{min-width:0;color:var(--ink);font:12.5px/1.7 var(--mono);overflow-wrap:anywhere;white-space:pre-wrap;user-select:all}
+.shell-command button{flex:none;min-height:var(--h-sm);padding:0 10px;font-size:12.5px;font-weight:500}
+.shell-command button.is-done{color:var(--green)}
+.connection-import{min-height:96px;max-height:220px;font:12.5px/1.6 var(--mono)}
+.import-status{margin-top:8px;font-size:13px}
+.import-status:empty{display:none}
+.pve-identity{display:flex;align-items:baseline;gap:10px;min-width:0}
+.pve-identity>div{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 12px;min-width:0}
+.pve-identity h2{margin:0;font-size:14px}
+.pve-identity p{color:var(--muted);font-family:var(--mono);font-size:12.5px;overflow-wrap:anywhere}
+.connection-icon{display:none}
+.pve-connection-card{padding-bottom:0}
+.pve-connection-card>*{margin:var(--pad)}
+.pve-connection-card>.panel-head{margin:0}
+.pve-details{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);margin:0!important;border-bottom:1px solid var(--line)}
+.pve-detail{display:flex;flex-direction:column;gap:2px;min-width:0;padding:10px var(--pad);border-right:1px solid var(--line-soft)}
+.pve-detail:last-child{border-right:0}
+.pve-detail>span{color:var(--ink-2);font-size:12px;font-weight:600}
+.pve-detail strong{color:var(--ink);font-size:14px;font-weight:700;overflow-wrap:anywhere}
+.pve-detail small{color:var(--muted);overflow-wrap:anywhere}
+.pve-detail.is-warn strong{color:var(--warn)}
+.pve-card-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+/* Changing the connection: a box that opens. */
+#content>.pve-disclosure{border:1px solid var(--line);background:var(--surface)}
+.pve-disclosure>:not(summary,details){margin:var(--pad)}
+.pve-disclosure>.pve-disclosure{margin:0}
+.pve-disclosure .pve-raw-form{display:grid;padding:var(--pad)}
+.pve-raw-form textarea{min-height:88px;max-height:180px;font:12.5px/1.7 var(--mono)}
+.pve-raw-form>button,.pve-raw-form>.actions{justify-self:end}
+/* The steps of the first setup: joined cells, the current one marked (as 시작하기 on 홈). */
+.onboarding-steps{display:flex;margin:0;padding:0;border:1px solid var(--line);background:var(--surface);list-style:none}
+.onboarding-steps li{display:inline-flex;align-items:center;gap:8px;flex:1 0 auto;min-height:44px;padding:0 16px;border-right:1px solid var(--line);color:var(--muted);font-size:13px}
+.onboarding-steps li:last-child{border-right:0}
+.onboarding-steps .icon{width:14px;height:14px}
+.onboarding-steps .complete{color:var(--green)}
+.onboarding-steps a{color:inherit}
+.onboarding-steps .current{background:var(--row-on);box-shadow:inset 0 3px var(--amber);color:var(--ink);font-weight:700}
+
+/* ---- 업데이트 and 서버 정보 ---- */
+.release-current{margin:0;color:var(--ink);font-size:13.5px;font-weight:600}
+/* The new version: what changed, then 업데이트 in a bar at the bottom of the box, on the right. */
+.server-release{display:flex;flex-direction:column}
+.server-release>div:not(.panel-head){display:flex;flex:1;flex-direction:column;gap:12px;margin:0;padding:var(--pad)}
+.server-release h3{margin:0 0 6px;color:var(--ink-2);font-size:12.5px;font-weight:600}
+.server-release>div:not(.panel-head)>.field-hint{order:1;margin:0}
+.server-release>div:not(.panel-head)>.actions{order:2;justify-content:flex-end;margin:auto calc(-1*var(--pad)) calc(-1*var(--pad));padding:12px var(--pad);border-top:1px solid var(--line);background:var(--surface-2)}
+.progress-block progress{width:100%;height:6px;margin-top:6px;accent-color:var(--amber)}
+.steps-list{display:grid;gap:6px;padding-left:20px;color:var(--ink-2);font-size:13px;line-height:1.7}
+.steps-list li::marker{color:var(--muted);font-family:var(--mono)}
+/* 서버 정보 · 관리 콘솔 보호: how each protection works, under 자세히. */
+.protection-more{padding:8px var(--pad) 10px}
+.protection-list{display:block;margin:6px 0 0!important;padding:0;list-style:none}
+.protection-list li{padding:4px 0;color:var(--muted);font-size:12.5px;line-height:1.6}
+.protection-list strong{color:var(--ink-2);font-weight:600}
+/* One line about the server and Proxmox, in a box of its own. */
+.health-line{display:flex;flex-wrap:wrap;gap:2px 18px;margin:0;padding:9px var(--pad);border:1px solid var(--line);background:var(--surface);color:var(--ink-2);font-size:12.5px}
+.health-line span{display:inline-flex;align-items:center;gap:6px}
+.health-line i{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.health-line .is-good i{background:var(--green)}.health-line .is-bad i{background:var(--red)}
+
+@media(max-width:1250px){
+  .vm-table th.col-node,.vm-table td.col-node,.vm-table th.col-seen,.vm-table td.col-seen{display:none}
+  .metric-row{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .metric:nth-child(3n){border-right:0}.metric:nth-child(n+4){border-top:1px solid var(--line-soft)}
+}
+@media(max-width:1000px){
+  .vm-table :is(th,td):is(.col-num,.col-host,.col-kind){display:none}
+  .pve-details{grid-auto-flow:row;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .pve-detail:nth-child(2n){border-right:0}.pve-detail:nth-child(n+3){border-top:1px solid var(--line-soft)}
+  .chart-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+}
+/* Phones: a row of the board is two lines (the name with where and who under it, and the state). */
+@media(max-width:720px){
+  .sharing-fine .row-line>.row-actions{width:auto;margin-left:auto}
+  .request-card .actions{margin-left:0}
+  .device-row{grid-template-columns:104px minmax(0,1fr)}
+  .device-detail{grid-column:1/-1;padding:8px 12px;border-top:1px solid var(--line-soft)}
+  .chart-grid{grid-template-columns:minmax(0,1fr)}
+  .metric-row,#detail .dt-main .metric-row{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .metric:nth-child(n),#detail .dt-main .metric:nth-child(n){border-right:1px solid var(--line-soft);border-top:0}.metric:nth-child(2n),#detail .dt-main .metric:nth-child(2n){border-right:0}.metric:nth-child(n+3),#detail .dt-main .metric:nth-child(n+3){border-top:1px solid var(--line-soft)}
+  .pve-details{grid-template-columns:minmax(0,1fr)}
+  .pve-detail:nth-child(n){border-top:0;border-right:0;border-bottom:1px solid var(--line-soft)}.pve-detail:last-child{border-bottom:0}
+  .shell-command{flex-wrap:wrap}
+  .shell-command code{flex:1 1 180px}
+  .shell-setup :is(.shell-command,.connection-import-field,.import-status){margin-left:var(--pad)}
+  .onboarding-steps{flex-wrap:wrap}
+  .onboarding-steps li{flex-basis:100%;border-right:0;border-bottom:1px solid var(--line-soft)}
+  .onboarding-steps li:last-child{border-bottom:0}
+  .perf-row{flex-wrap:wrap}
+}
+
+/* Proxmox step: what the command creates and allows (proxmox-shell-setup.js). */
+.pve-scope{margin:4px 0 12px}
+/* minmax(0,1fr): the table (width:100%) no longer sets the column to its widest line (a 360 px screen cut the text off). */
+.pve-scope-body{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:12px var(--pad,16px);font-size:13px;line-height:1.6;color:var(--ink)}
+.pve-scope-body p{margin:0}
+.scope-table{width:100%;border-collapse:collapse;border-top:2px solid var(--rule);background:var(--surface)}
+.scope-table :is(th,td){border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top;white-space:normal}
+.scope-table th{font-weight:600;color:var(--muted)}
+.scope-table td:first-child{white-space:nowrap;width:1%}
+@media (max-width:640px){.scope-table td:first-child{white-space:normal}
+  /* The first-setup bar: its three names side by side, wrapping inside themselves (the third was cut off and nothing said it scrolls). */
+  #content .section-navigation .section-link{flex:1 1 0;min-width:0;justify-content:center;padding:4px 8px;line-height:1.25;text-align:center;white-space:normal}}
+/* English (docs/i18n.md): the count stands alone, without the Korean counter word. */
+html:not([lang^="ko"]) .requests-panel .panel-title h2 .count::after{content:none}
+/* English words are longer than the Korean ones the columns were sized for. */
+html:not([lang^="ko"]) .vm-table th.col-state{width:128px}
+html:not([lang^="ko"]) .vm-table th.col-manage{width:96px}
+/* 삭제: the checkbox column of the desktop list for 선택 삭제, and 삭제 at the far left of a
+   desktop window's bar, apart from the power buttons. */
+.vm-table th.col-check{width:44px}
+.vm-table :is(th,td).col-check{text-align:center;padding-left:6px;padding-right:6px}
+.vm-table .row-check{width:16px;height:16px;margin:0;cursor:pointer;accent-color:var(--amber)}
+.vm-table tr.is-chosen>td{background:var(--amber-soft)}
+.win-actions .dt-delete{margin-right:14px}

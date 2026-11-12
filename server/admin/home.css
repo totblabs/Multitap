@@ -1,0 +1,107 @@
+@charset "UTF-8";
+/* Public pages (GET / and GET /download, src/landing.mjs): the site header,
+   a scenic hero band, sections and footer. The download cards that overlap
+   the band are in downloads.css. Tokens: base.css. Mobile first at 390 px. */
+.home{--gutter:clamp(16px,5vw,40px);--page:1200px;min-height:100vh;display:flex;flex-direction:column}
+.home main{flex:1;outline:none}
+.site-top-inner,.dl-section,.home-section,.missing-actions,.site-foot-inner{width:100%;max-width:calc(var(--page) + 2 * var(--gutter));margin-left:auto;margin-right:auto;padding-left:var(--gutter);padding-right:var(--gutter)}
+
+/* Header: over the top of the hero band. */
+.site-top{position:absolute;top:0;left:0;right:0;z-index:5}
+.site-top-inner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:18px;padding-bottom:18px}
+.site-nav{display:flex;align-items:center;gap:2px}
+.site-link{padding:7px 12px;border-radius:8px;color:var(--ink-2);font-size:14px;font-weight:500;text-decoration:none;transition:background-color .12s,color .12s}
+.site-link:hover{background:var(--hover);color:var(--ink)}
+.site-link:active{background:var(--press)}
+.site-nav .theme-toggle{margin:0 6px 0 8px;background:var(--glass);border-color:var(--glass-edge)}
+.site-nav .site-admin{background:var(--glass);border-color:var(--glass-edge);color:var(--ink)}
+.site-nav .site-admin:hover{border-color:var(--faint)}
+
+/* Hero: the client's scenery, tinted so it frames rather than dominates. */
+.hero{position:relative;isolation:isolate;overflow:hidden;padding:120px var(--gutter) 150px}
+.hero::before{content:"";position:absolute;inset:0;z-index:-2;background:var(--canvas) var(--scene) 62% 40%/cover no-repeat}
+.hero::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,transparent 40%,var(--canvas) 100%),var(--scene-tint)}
+.hero-inner{max-width:var(--page);margin:0 auto}
+.hero h1{margin:0 0 14px;font-family:var(--font-display);font-size:clamp(30px,4.2vw,46px);line-height:1.2;font-weight:600;letter-spacing:-.025em}
+.hero-lead{max-width:36em;color:var(--ink-2);font-size:17px;line-height:1.7}
+.hero-lead b{color:var(--ink);font-weight:600;white-space:nowrap}
+.hero.is-compact{padding-bottom:138px}
+
+/* Download section: pulled up over the bottom of the hero band. */
+.dl-section{position:relative;z-index:1;margin-top:-100px;scroll-margin-top:16px}
+.dl-section .dl-platform{background:var(--glass);border-color:var(--glass-edge);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.missing-actions{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:10px;margin-top:-96px}
+.missing-actions .button{min-height:46px;padding:10px 20px;font-size:15px}
+
+/* Sections */
+.home-section{scroll-margin-top:16px}
+.dl-section+.home-section{margin-top:104px}
+.home-section+.home-section{margin-top:88px}
+.section-head{max-width:640px;margin-bottom:26px}
+.section-head h2{margin-bottom:8px;font-family:var(--font-display);font-size:26px;line-height:1.3;font-weight:600;letter-spacing:-.03em}
+.section-head p{font-size:15.5px}
+
+/* 사용 방법: three steps and the connection structure. */
+.steps{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:0;padding:0}
+.steps li{display:flex;gap:16px;min-width:0;padding:22px;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--card-shadow)}
+.steps li>div{min-width:0}
+.step-no{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:50%;background:var(--amber-soft);color:var(--amber-ink);font-size:15px;font-weight:600}
+.steps h3{margin:5px 0 6px;font-size:16px}
+.steps p{font-size:14.5px}
+.steps code{overflow-wrap:anywhere;padding:1px 6px;border-radius:5px;background:var(--surface-2);color:var(--ink);font-size:13px}
+.flow{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1.2fr) auto minmax(0,1fr);align-items:center;gap:12px;margin-top:16px;padding:14px;border:1px solid var(--line-soft);border-radius:var(--radius-lg);background:var(--surface-2)}
+.flow-node{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:12px;align-items:center;min-width:0;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+.flow-node.is-center{border-color:var(--amber-line);background:var(--amber-soft)}
+.flow-icon{grid-row:span 2;display:grid;place-items:center;width:40px;height:40px;border-radius:11px;background:var(--surface-2);color:var(--amber-ink)}
+.flow-node.is-center .flow-icon{background:var(--surface)}
+.flow-icon .icon{width:21px;height:21px}
+.flow-node strong{align-self:end;font-size:14.5px;font-weight:600;line-height:1.35}
+.flow-node small{align-self:start;font-size:12.5px;overflow-wrap:break-word}
+.flow-link{display:grid;place-items:center;color:var(--faint)}
+.flow-note{margin-top:12px;font-size:13.5px}
+
+/* 기능 */
+.features{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 32px;margin:0;padding:0}
+.features li{display:flex;gap:14px;min-width:0;padding:20px 0;border-top:1px solid var(--line)}
+.feature-icon{display:grid;place-items:center;width:38px;height:38px;flex:none;border-radius:11px;background:var(--amber-soft);color:var(--amber-ink)}
+.feature-icon .icon{width:19px;height:19px}
+.features h3{margin:2px 0 4px;font-size:15px}
+.features p{font-size:14px}
+
+/* Footer */
+.site-foot{margin-top:96px;border-top:1px solid var(--line);background:var(--sidebar);color:var(--muted);font-size:13px}
+.site-foot-inner{display:flex;flex-wrap:wrap;align-items:center;gap:14px 28px;padding-top:28px;padding-bottom:36px}
+/* One small line: where Multitap is explained (multitap.me), and the version. */
+.site-foot-about{margin:0 auto 0 0;color:var(--muted);font-size:13px}
+.site-foot-about a{color:var(--ink-2);font-weight:500}
+.site-foot-version b{color:var(--ink-2)}
+
+@media (max-width:959px){
+  .steps{grid-template-columns:minmax(0,1fr)}
+  .features{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:760px){
+  .site-link{display:none}
+  .flow{grid-template-columns:minmax(0,1fr)}
+  .flow-link .icon{transform:rotate(90deg)}
+  .hero::after{background:linear-gradient(180deg,transparent 45%,var(--canvas) 100%),var(--scene-tint-narrow)}
+}
+@media (max-width:600px){
+  .site-nav .site-admin span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .site-nav .site-admin{min-width:38px;padding:0 10px}
+  .site-nav .theme-toggle{margin:0 6px}
+  .hero{padding-top:92px;padding-bottom:86px}
+  .hero.is-compact{padding-bottom:80px}
+  .hero h1{font-size:29px}
+  .hero-lead{font-size:15.5px}
+  .dl-section{margin-top:-44px}
+  .dl-server-box{flex:1 1 100%}
+  .missing-actions{margin-top:-36px}
+  .missing-actions .button{flex:1 1 100%}
+  .dl-section+.home-section{margin-top:72px}
+  .home-section+.home-section{margin-top:64px}
+  .section-head h2{font-size:23px}
+  .steps li{padding:20px}
+  .features{grid-template-columns:minmax(0,1fr)}
+  .site-foot{margin-top:72px}
+}

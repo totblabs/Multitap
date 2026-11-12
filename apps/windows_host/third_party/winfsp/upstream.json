@@ -1,0 +1,66 @@
+﻿{
+    "name":  "WinFsp",
+    "purpose":  "User-mode file system driver for streaming drive redirection (docs/drive-redirection.md, WinFsp backend); the Host setup installs its core feature",
+    "license":  "GPL-3.0 with the FLOSS exception (permission to link the platform WinFsp DLL and to distribute the unmodified project installer)",
+    "licenseUrl":  "https://github.com/winfsp/winfsp/blob/master/License.txt",
+    "licenseFile":  "License.txt",
+    "upstream":  "https://github.com/winfsp/winfsp",
+    "copyrightNotice":  "WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos",
+    "release":  "v2.1",
+    "version":  "2.1.25156",
+    "publishedBy":  "winfsp/winfsp GitHub release (Navimatics LLC)",
+    "published":  "2025-06-05",
+    "msi":  {
+                "name":  "winfsp-2.1.25156.msi",
+                "url":  "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi",
+                "sha256":  "073a70e00f77423e34bed98b86e600def93393ba5822204fac57a29324db9f7a",
+                "size":  2191360,
+                "productCode":  "{C79D9B29-3AF0-45B3-9DB9-226F3C2D2204}",
+                "upgradeCode":  "{5466A3D8-3AA1-4240-B6A0-3A051940A3EC}",
+                "features":  "F.Main/F.User (\u0027Core\u0027, install level 1: default); F.Developer, F.KernelDeveloper, F.Cygfuse are level 1000 (off unless INSTALLLEVEL is raised)"
+            },
+    "signature":  {
+                      "checked":  "2026-10-27",
+                      "how":  "Get-AuthenticodeSignature on the downloaded MSI and, after msiexec /a (administrative extract, nothing installed or run), on the driver and DLLs inside",
+                      "msi":  {
+                                  "status":  "Valid",
+                                  "signer":  "NAVIMATICS LLC (Kirkland, Washington, US)",
+                                  "issuer":  "DigiCert Global G3 Code Signing ECC SHA384 2021 CA1",
+                                  "thumbprint":  "ECC9BCB47D6506452753F3DF19677B35AEB36E2B",
+                                  "timestamp":  "DigiCert Timestamp 2024 (the signing certificate expired 2025-07-03; the timestamp keeps the signature valid)"
+                              },
+                      "driver":  {
+                                     "file":  "winfsp-x64.sys",
+                                     "sha256":  "03553fffacd362f4a9a08c00b4f236a82354a183bc6028494fb32055386e13c9",
+                                     "status":  "Valid",
+                                     "signer":  "Microsoft Windows Hardware Compatibility Publisher",
+                                     "issuer":  "Microsoft Windows Third Party Component CA 2014",
+                                     "thumbprint":  "A5D13378E659DDC05C03EE71B432DD667A302999",
+                                     "eku":  "1.3.6.1.4.1.311.10.3.5 and .5.1 (Windows hardware driver attestation)",
+                                     "note":  "Microsoft attestation signing; certificate expired 2025-10-09, the timestamp keeps it valid"
+                                 },
+                      "dll":  {
+                                  "file":  "winfsp-x64.dll",
+                                  "sha256":  "08d7389b8d030770a4de108a60a86047d5cdd00b9ecafc6dd66e957bc51c2437",
+                                  "status":  "Valid",
+                                  "signer":  "NAVIMATICS LLC"
+                              }
+                  },
+    "headers":  [
+                    {
+                        "name":  "inc/winfsp/winfsp.h",
+                        "sha256":  "163332ebe058dd6e49d038edefef273454912c2ec44e8430a18ed73112e5678c"
+                    },
+                    {
+                        "name":  "inc/winfsp/fsctl.h",
+                        "sha256":  "7a83a69cdeb155751032eedbbb6875234b1e0824be7cf2d7ba23c1ef44944651"
+                    }
+                ],
+    "notes":  [
+                  "The MSI is never edited, repackaged or re-signed and is not stored in this repository (large binary, same convention as usbip-win2/UsbDk): tools/fetch-winfsp.ps1 downloads it into .tools/winfsp and checks the SHA-256 and the Authenticode signature; the Host package carries it as bin/winfsp/.",
+                  "Only the SDK headers winfsp.h and fsctl.h are vendored (GPLv3 + FLOSS exception). The Host does not link winfsp-x64.lib: it loads winfsp-x64.dll with FspLoad (registry InstallDir) and resolves the few exports it needs with GetProcAddress, so a Host without WinFsp starts and falls back to WebDAV.",
+                  "FLOSS-exception conditions met: AGPL-3.0 project (free software), unmodified installer, notice \u0027WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos\u0027 with the repository link in THIRD-PARTY-NOTICES.txt, the Host setup text and docs/drive-redirection.md.",
+                  "Source offer: the WinFsp source is at https://github.com/winfsp/winfsp (tag v2.1). The Multitap Host source is offered like the x264 obligation (README of the Host package).",
+                  "The MSI installs the WinFsp.Launcher service and the WinFsp driver service; the Host setup runs msiexec with the default (Core) feature set only."
+              ]
+}

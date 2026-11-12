@@ -1,0 +1,55 @@
+{
+    "name": "libvirtualdisplay",
+    "purpose": "Native virtual display provider of the Host: the control SDK (libvirtualdisplay::driver) is compiled from the pinned source and linked statically into MultitapHost.exe and MultitapHostTool.exe (drivers/display_bridge); the upstream signed SunshineVirtualDisplayDriver package is shipped unmodified as bin/native-display-driver/",
+    "license": "MIT",
+    "licenseFile": "drivers/display_bridge/UPSTREAM-LICENSE.txt",
+    "licenseFileSha256": "ea02dadd8f31a1323ebcf741f24af3b4b8a5c7123fe8ca370c8374f1e7c6a516",
+    "copyrightNotice": "Copyright (c) 2026 Chase Payne",
+    "upstream": "https://github.com/Nonary/libvirtualdisplay",
+    "tag": "v1.6.5",
+    "version": "1.6.5",
+    "sourceCommit": "b6874684d82925d0d76f487d8e4ba3ec71c9721a",
+    "sourceArchive": {
+        "name": "libvirtualdisplay-b6874684d82925d0d76f487d8e4ba3ec71c9721a.zip",
+        "url": "https://codeload.github.com/Nonary/libvirtualdisplay/zip/b6874684d82925d0d76f487d8e4ba3ec71c9721a",
+        "sha256": "502e06e971a85cb365ec603762561bc6df3060885c88eb1d1e71c0d375db9767",
+        "size": 433915,
+        "root": "libvirtualdisplay-b6874684d82925d0d76f487d8e4ba3ec71c9721a",
+        "files": 158,
+        "bytes": 1662417,
+        "treeSha256": "abecf1e39b89e56e42cf0cff78a0492c078bd0cc6f3a6a1b821ebe0c849c6d0f",
+        "treeSha256Method": "SHA-256 of the UTF-8 text made of one line '<lowercase file SHA-256><two spaces><path below root, / separated>' plus LF per file, sorted by path (ordinal). It identifies the extracted tree even if GitHub ever re-creates the archive with different bytes."
+    },
+    "releaseArchive": {
+        "name": "libvirtualdisplay-1.6.5-windows-x64.zip",
+        "url": "https://github.com/Nonary/libvirtualdisplay/releases/download/v1.6.5/libvirtualdisplay-1.6.5-windows-x64.zip",
+        "sha256": "e37967d86c0102903bcff0bc40c5aece6653686165276c5e1045a7e11aad522d",
+        "size": 7208272,
+        "root": "libvirtualdisplay-1.6.5-windows-x64",
+        "driverVer": "10/29/2026,1.6.5.0",
+        "extracted": {
+            "LICENSE": "ca650cb3861fe59ba88b671da0360b7a7f996f23ba6f373d7696d97cb24ea351",
+            "driver/SunshineVirtualDisplayDriver.inf": "c5e5abf485e35d5eff4bf8696d50f6ceb4d42f7c09e3562eeba53557b510d32a",
+            "driver/SunshineVirtualDisplayDriver.dll": "c4238424b5ce2786b52a7d7e4e1cb6e366f91ea972835f275654955364a0a1fd",
+            "driver/SunshineVirtualDisplayDriver.cat": "a310627e2b34bfb2a54c2fc7a697391e410d4ad6def52ab23a0e75648cd30c22",
+            "driver/SunshineVirtualDisplayDriver.cer": "a42a04d241438ac8bd9107bc302e11b1232796c9536bf45d99717dee256746a1"
+        },
+        "notExtracted": "driver/SunshineVirtualDisplayDriver.pdb, tools/, vulkan-layer/ and README.md: not used by the Host build or package",
+        "signing": {
+            "channel": "self-signed upstream release certificate (not Microsoft-signed, not WHQL)",
+            "subject": "CN=Sunshine Virtual Display Release Signing",
+            "thumbprint": "37E100B2B382866FA7CE04EE33FE53DF53AEDC6D",
+            "signedFile": "SunshineVirtualDisplayDriver.cat (the DLL itself carries no signature; the catalog covers it)"
+        }
+    },
+    "crossCheck": "Official Nonary/libvirtualdisplay v1.6.5 release metadata and all thirteen package files were independently verified.",
+    "fetch": "tools/fetch-libvirtualdisplay.ps1 downloads both archives into .tools/libvirtualdisplay (git-ignored), checks every value above, extracts the source tree and the five release files, and prints both folders (tools/host-installer/build-native.ps1 reads the source tree from there).",
+    "build": "apps/windows_host/CMakeLists.txt (MULTITAP_NATIVE_DISPLAY_SDK) adds the source with BUILD_TESTS, BUILD_SUNSHINE_VIRTUAL_DISPLAY_DRIVER, BUILD_VIRTUALDISPLAY_TOOLS, BUILD_VIRTUALDISPLAY_PROBE and BUILD_VIRTUALDISPLAY_VULKAN_LAYER off: only the control SDK is compiled, unmodified. The driver is not built by Multitap.",
+    "notes": [
+        "Released Host packages are native builds: bin/native-display-driver/ holds the four driver files above, byte for byte (the build leaves out the .pdb). Changing them would break the upstream catalog; Multitap never re-signs them.",
+        "Host settings checks the same four hashes and the signer thumbprint before it installs the driver (apps/windows_host/src/host_prerequisites.hpp, setup_pnp.hpp pins).",
+        "GPL corresponding source: a Host build links this MIT source together with GPL x264 and libopus; the pinned archive above, fetched by the script, is the libvirtualdisplay part of the Host's corresponding source.",
+        "The Linux kernel-derived files in the upstream repository have their own licences; Multitap does not compile or ship them."
+    ],
+    "checked": "2026-11-04: original 1.6.5 release/archive/source hashes and INF/DLL catalog membership verified under existing machine trust; matching SDK compiled with 375 project bridge fixture checks. Actual owned-device upgrade/runtime qualification is a separate gate."
+}

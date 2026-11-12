@@ -1,0 +1,42 @@
+@charset "UTF-8";
+/* 홈 자원 (js/resources.js): 서버 and Multitap 컨테이너 / 서비스 as two small
+   항목 | 값 tables side by side (one under the other on a phone). The label
+   column is grey, the values are plain text with their units. A share has one
+   thin bar: neutral, amber above 80 %, red above 95 %. The desktops' board
+   under it keeps its own rules (operations.css). Tokens: console.css. */
+.resource-panel>.res-sections{margin:0}
+.res-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:12px;padding:12px var(--pad);border-bottom:1px solid var(--line)}
+.res-facts{width:100%;table-layout:fixed;border:1px solid var(--line);border-top:2px solid var(--rule);background:var(--surface)}
+.res-facts thead th{height:34px;padding:0 12px;border:0;border-bottom:1px solid var(--line);background:var(--surface-2);color:var(--ink);font-size:13px;font-weight:700;text-align:left}
+.res-facts col.res-key{width:104px}
+.res-facts tbody th{height:34px;padding:0 12px;border:0;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);background:var(--bar);color:var(--ink-2);font-size:12.5px;font-weight:600;text-align:left;white-space:normal}
+.res-facts tbody td{height:34px;padding:5px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink);font-size:13px;text-align:left;white-space:normal}
+.res-facts tbody tr:last-child>*{border-bottom:0}
+.res-facts tbody tr:hover>td{background:none}
+.res-fact{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;min-width:0}
+.res-text{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.res-text.is-high{color:var(--warn);font-weight:600}
+.res-text.is-full{color:var(--red);font-weight:600}
+.res-gauge{display:block;flex:0 0 96px;width:96px;height:4px}
+/* The bars line up: the text before a bar keeps one width. */
+.res-text:has(+.res-gauge){min-width:7.5em}
+.res-level.is-calm{fill:var(--fill-neutral)}
+.res-level.is-high{fill:var(--fill-warn)}
+.res-level.is-full{fill:var(--fill-bad)}
+.res-hint{display:inline;color:var(--muted);font-size:12px}
+.res-unknown{color:var(--muted)}
+@media(max-width:900px){
+  .res-sections{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:720px){
+  .res-sections{gap:10px;padding:10px 12px}
+  .res-facts col.res-key{width:88px}
+  .res-facts tbody th{padding:0 10px}
+  .res-facts tbody td{padding:5px 10px}
+  /* On a phone the note stays beside the number and the bar goes under both. */
+  .res-text:has(+.res-gauge){min-width:0}
+  .res-hint{order:2}
+  .res-gauge{order:3;flex:0 0 100%;width:100%;max-width:160px}
+}
+/* Totals by node: the share and the vCPUs on one line. */
+.res-nodes td>span:has(.res-sub){white-space:nowrap}.res-nodes .res-sub{display:inline;color:var(--muted)}

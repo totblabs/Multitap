@@ -1,0 +1,22 @@
+#include "stream_prepare_diagnostics.hpp"
+#include <iostream>
+int main(){using namespace host;try{
+  const std::string session="00000000-0000-0000-0000-000000000001";int cases=0;
+  const auto require=[](bool ok){if(!ok)throw std::runtime_error("stream diagnostic assertion failed");};
+  for(const uint32_t phase:{1u,3u,7u,10u,13u,255u}){const auto value=JsonParser::parse(streamPreparationPacket(session,phase,UINT32_MAX));const auto parsed=streamPreparationObservation(value,session);require(parsed&&parsed->first==phase&&parsed->second==UINT32_MAX);++cases;}
+  const auto original=JsonParser::parse(streamPreparationPacket(session,7,1));
+  for(int scenario=0;scenario<10;++scenario){auto value=original;auto& fields=std::get<Json::Object>(value.value);switch(scenario){case 0:fields["sessionId"].value=std::string("different");break;case 1:fields["stage"].value=-1.0;break;case 2:fields["stage"].value=256.0;break;case 3:fields["stage"].value=7.5;break;case 4:fields["error"].value=-1.0;break;case 5:fields["error"].value=4294967296.0;break;case 6:fields["error"].value=true;break;case 7:fields["message"].value=std::string("PRIVATE_SENTINEL");break;case 8:fields.erase("error");break;case 9:fields["type"].value=std::string("stream.info");break;}require(!streamPreparationObservation(value,session));++cases;}
+  // Stage 43 reason 2 (capture not on hardware) is an ok record that also asks for the render adapter re-arm; nothing else does.
+  require(streamObservationNoHardwareCapture(43,2)&&streamObservationNoHardwareCapture(43,(9u<<8)|2u)&&streamObservationNoHardwareCapture(43,0x80020002u)&&streamObservationOk(43,2));++cases;
+  for(const auto [stage,error]:{std::pair<uint32_t,uint32_t>{43,1},{43,3},{43,5},{43,0x200},{42,2},{41,2},{243,2},{3,2}})require(!streamObservationNoHardwareCapture(stage,error));++cases;
+  require(streamCaptureFailureCode("No initial virtual display frame")==1&&streamCaptureFailureCode("PRIVATE_SENTINEL")==0&&streamPreparationReasonCode("worker_failed")==1&&streamPreparationReasonCode("capture_failed")==2&&streamPreparationReasonCode("PRIVATE_SENTINEL")==0);++cases;
+  require(streamPreparationPacket(session,7,streamCaptureFailureCode("PRIVATE_SENTINEL")).find("PRIVATE_SENTINEL")==std::string::npos);++cases;
+  require(streamProfileFailureCode("native_stream_profile_validate_failed")==10&&streamProfileFailureCode("native_stream_profile_query_failed")==15&&streamProfileFailureCode("PRIVATE_SENTINEL")==0);++cases;
+  const auto viewport=JsonParser::parse(R"({"ok":false,"nativeStage":5,"nativeError":4294967295,"profileStage":2})");
+  const auto parsed=streamViewportDiagnostic(viewport);require(parsed&&parsed->nativeStage==5&&parsed->nativeError==UINT32_MAX&&parsed->profileStage==2);++cases;
+  for(int scenario=0;scenario<9;++scenario){auto value=viewport;auto& fields=std::get<Json::Object>(value.value);switch(scenario){case 0:fields["nativeStage"].value=true;break;case 1:fields["nativeStage"].value=10.0;break;case 2:fields["nativeError"].value=4294967296.0;break;case 3:fields["profileStage"].value=8.0;break;case 4:fields["profileStage"].value=2.5;break;case 5:fields["ok"].value=std::string("true");break;case 6:fields["ok"].value=true;break;case 7:fields.erase("nativeError");break;case 8:fields["nativeError"].value=-1.0;break;}require(!streamViewportDiagnostic(value));++cases;}
+  require(streamViewportDiagnostic(JsonParser::parse(R"({"ok":true,"nativeStage":0,"nativeError":0,"profileStage":0})")).has_value());++cases;
+  for(int scenario=0;scenario<7;++scenario){auto value=viewport;auto& fields=std::get<Json::Object>(value.value);switch(scenario){case 0:fields["nativeReason"].value=100.0;break;case 1:fields["nativeReason"].value=256.0;break;case 2:fields["nativeReason"].value=true;break;case 3:fields["nativeReason"].value=2.5;break;case 4:fields["nativeReason"].value=-1.0;break;case 5:fields["consoleReturned"].value=1.0;break;case 6:fields["consoleReturned"].value=std::string("true");break;}require(!streamViewportDiagnostic(value));++cases;}
+  {const auto observed=streamViewportDiagnostic(JsonParser::parse(R"({"ok":true,"nativeStage":0,"nativeError":0,"profileStage":0,"nativeReason":0,"consoleReturned":true})"));require(observed&&observed->consoleReturned&&!observed->nativeReason);++cases;}
+  std::cout<<"{\"kind\":\"private-stream-prepare-diagnostics\",\"cases\":"<<cases<<",\"arbitraryTextExcluded\":true,\"readinessGranted\":false,\"actualVm149\":false}\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

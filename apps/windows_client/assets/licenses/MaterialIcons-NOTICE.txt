@@ -1,0 +1,15 @@
+Material Icons by Google
+========================
+
+The application includes a subset of the Material Icons font distributed with
+Flutter. The Flutter build removes unused glyphs from the font.
+
+The license accompanying this pinned Flutter font artifact is Creative Commons
+Attribution 4.0 International. Its complete text is provided in
+MaterialIcons-CC-BY-4.0.txt.
+
+Original artifact:
+https://storage.googleapis.com/flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip
+
+License:
+https://creativecommons.org/licenses/by/4.0/

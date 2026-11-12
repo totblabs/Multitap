@@ -1,0 +1,28 @@
+Pretendard static fonts: provenance
+
+Font       Pretendard 1.3.9, static OpenType (OTF), four weights
+Upstream   https://github.com/orioncactus/pretendard (release v1.3.9)
+Archive    https://github.com/orioncactus/pretendard/releases/download/v1.3.9/Pretendard-1.3.9.zip
+           SHA-256 04be351a74d6bf7d60c480a3087e51d185485d35a52023142af1df19eb8c428a
+Licence    SIL Open Font License 1.1, full text in Pretendard-LICENSE.txt beside this
+           file (the archive's LICENSE.txt, byte for byte; the same text is also
+           apps/windows_client/assets/licenses/Pretendard-LICENSE.txt for the in-app
+           licence list).
+Copyright  Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard),
+           with Reserved Font Name Pretendard.
+
+Each file is the archive entry public/static/<name>, unmodified (not renamed,
+subset or re-encoded):
+
+  Pretendard-Regular.otf    1,574,352 bytes  3ffbacde6ab8411f1d2db54bb9b1f0b3ee2a738932033722cf0388c06aed1c93
+  Pretendard-Medium.otf     1,584,068 bytes  d39e50e4bb52b4993b6a4eeb821a171254745bd824446af01e1f616b89fface0
+  Pretendard-SemiBold.otf   1,583,704 bytes  c89bc43027dc7cde5726e96223376f8eec09302b2fc1f8147fd5b57cfc376118
+  Pretendard-Bold.otf       1,576,660 bytes  2e91915fab54df71cc9598ebf608b2bdb54c6fe3c066ac61dff0bc44fca71cc7
+  Pretendard-LICENSE.txt        4,419 bytes  b04538c9abec39a3db75108cf0af0fd9c77032fe8aa2cf38345b4d250e98e38e  (archive LICENSE.txt)
+
+Checked 2026-11-03: the official archive was downloaded again; its SHA-256 and
+the SHA-256 of every entry above match the values recorded here.
+
+pubspec.yaml lists the four OTF files and Pretendard-LICENSE.txt one by one,
+so this file is not packaged into the apps. The admin web console uses the
+variable WOFF2 of the same release (server/admin/fonts/PROVENANCE.txt).

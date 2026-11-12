@@ -1,0 +1,152 @@
+{
+  "mass storage stick": {
+    "descriptors": "1201000200000040341278560001000000010902200001010080320904000002080650000705810200020007050202000200",
+    "expect": {
+      "allowed": true,
+      "requires": [
+        "drives"
+      ],
+      "classes": [
+        8
+      ]
+    }
+  },
+  "cdc serial adapter": {
+    "descriptors": "12010002020000403412785600010000000109023500020100803209040000010202010007058303100000052400100109040100020a0000000705810200020007050202000200",
+    "expect": {
+      "allowed": true,
+      "requires": [
+        "serialPorts"
+      ],
+      "classes": [
+        2,
+        10
+      ]
+    }
+  },
+  "vendor specific serial chip": {
+    "descriptors": "1201000200000040341278560001000000010902200001010080320904000002ff0000000705810200020007050202000200",
+    "expect": {
+      "allowed": true,
+      "requires": [],
+      "classes": [
+        255
+      ]
+    }
+  },
+  "printer": {
+    "descriptors": "1201000200000040341278560001000000010902200001010080320904000002070102000705810200020007050202000200",
+    "expect": {
+      "allowed": true,
+      "requires": [
+        "printers"
+      ],
+      "classes": [
+        7
+      ]
+    }
+  },
+  "smart card reader": {
+    "descriptors": "12010002000000403412785600010000000109022700010100803209040000030b000000070581024000000705020240000007058303080000",
+    "expect": {
+      "allowed": true,
+      "requires": [
+        "smartCards"
+      ],
+      "classes": [
+        11
+      ]
+    }
+  },
+  "fido key (report-protocol hid)": {
+    "descriptors": "1201000200000040341278560001000000010902200001010080320904000002030000000705810340000007050103400000",
+    "expect": {
+      "allowed": true,
+      "requires": [],
+      "classes": [
+        3
+      ]
+    }
+  },
+  "multitap game mouse (report-protocol hid, made up by the client)": {
+    "descriptors": "12010002000000400912010000010102030109022200010100a032090400000103000000092111010001224f0007058103070001",
+    "expect": {
+      "allowed": true,
+      "requires": [],
+      "classes": [
+        3
+      ]
+    }
+  },
+  "storage plus serial composite": {
+    "descriptors": "12010002000000403412785600010000000109024e00030100803209040000020806500007058102000200070502020002000904010002ff000000070581020002000705020200020009040200020a0000000705810200020007050202000200",
+    "expect": {
+      "allowed": true,
+      "requires": [
+        "drives",
+        "serialPorts"
+      ],
+      "classes": [
+        8,
+        10,
+        255
+      ]
+    }
+  },
+  "boot keyboard": {
+    "descriptors": "12010002000000403412785600010000000109021900010100803209040000010301010007058103080000",
+    "expect": {
+      "allowed": false,
+      "reason": "usb_hid_boot_denied"
+    }
+  },
+  "boot mouse": {
+    "descriptors": "12010002000000403412785600010000000109021900010100803209040000010301020007058103040000",
+    "expect": {
+      "allowed": false,
+      "reason": "usb_hid_boot_denied"
+    }
+  },
+  "keyboard with a storage interface": {
+    "descriptors": "120100020000004034127856000100000001090230000201008032090400000208065000070581020002000705020200020009040100010301010007058203080000",
+    "expect": {
+      "allowed": false,
+      "reason": "usb_hid_boot_denied"
+    }
+  },
+  "hub": {
+    "descriptors": "12010002090000403412785600010000000109021900010100803209040000010900000007058103010000",
+    "expect": {
+      "allowed": false,
+      "reason": "usb_class_denied"
+    }
+  },
+  "bluetooth adapter": {
+    "descriptors": "12010002e0010140341278560001000000010902270001010080320904000003e0010100070581031000000705020240000007058202400000",
+    "expect": {
+      "allowed": false,
+      "reason": "usb_class_denied"
+    }
+  },
+  "usb headset (audio, isochronous)": {
+    "descriptors": "12010002000000403412785600010000000109022200010100803209040100000102000009040101010102000007050109c00000",
+    "expect": {
+      "allowed": false,
+      "reason": "usb_isochronous_denied"
+    }
+  },
+  "webcam (video)": {
+    "descriptors": "12010002000000403412785600010000000109021900010100803209040000010e02000007058303100000",
+    "expect": {
+      "allowed": false,
+      "reason": "usb_isochronous_denied"
+    }
+  },
+  "vendor device with an isochronous endpoint": {
+    "descriptors": "1201000200000040341278560001000000010902190001010080320904000001ff00000007058101800000",
+    "expect": {
+      "allowed": false,
+      "reason": "usb_isochronous_denied"
+    }
+  }
+}

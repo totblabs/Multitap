@@ -1,0 +1,28 @@
+# Allow only broker runtime sources into the build context.
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!package-lock.json
+!docker-entrypoint.sh
+!src/
+!src/**
+!update/
+!update/**
+!admin/
+!admin/**
+!setup/
+!setup/proxmox.py
+!release-bundle/
+!release-bundle/**
+
+# Runtime state and dependency/test directories must never become image contents.
+**/node_modules/**
+**/.local/**
+**/.env
+**/.env.*
+**/*.sqlite*
+**/vault.key
+**/initial-account.json
+**/__pycache__/**
+**/*.pyc

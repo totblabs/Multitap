@@ -1,0 +1,13 @@
+Web backdrops for the landing page and the administrator sign-in, derived 2026-10-26
+from the Windows client's own AI-generated scenic images (apps/windows_client/assets/backgrounds,
+see alpine-daylight.provenance.txt there). Downscaled with System.Drawing (high-quality
+bicubic, JPEG quality 74); no other edits.
+
+scene-dusk.jpg      <- alpine-dusk.png     8fccdbd2e1d014e2571ba06c2d42e68b1a7c5134b38ce09e325cf09875aed2be
+                       output SHA-256      3a7ff680cead98331746881ea81ba4f22a30a5c763dd2cc40c54a6226d2779b1
+scene-daylight.jpg  <- alpine-daylight.png 9dcd1ff6253c8c269795bc22500a68c51809eef36a8c87f031f8eceadbbbe3d5
+                       output SHA-256      83959fb4d0ff8d1f5c4789aca1aeae26bbe986bb8140b4e62050929e5e56b5bd
+
+mark.svg is a byte copy of tools/icons/src/multitap-mark-small.svg and favicon.svg of
+tools/icons/src/windows/tile-16.svg (the power-strip mark, drawn for Multitap on
+2026-11-11, AGPL-3.0-only; copied by tools/icons/build-icons.mjs).

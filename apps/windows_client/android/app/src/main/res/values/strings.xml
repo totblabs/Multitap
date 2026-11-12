@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Native text in English (default). Korean: values-ko. The app's own
+     "언어 / Language" choice picks between them (MultitapText.kt). -->
+<resources>
+    <string name="clipboard_check_failed">Couldn\'t check the clipboard data.</string>
+    <string name="storage_save_failed">Couldn\'t save the settings securely.</string>
+    <string name="storage_internal">Internal storage</string>
+    <string name="storage_external">SD card · USB storage</string>
+    <string name="storage_device">Storage</string>
+    <string name="notices_channel">Notices</string>
+    <string name="notices_channel_description">Shows notices from your administrator.</string>
+    <string name="session_channel">Keep remote connection</string>
+    <string name="session_channel_description">Shows that you\'re connected, and lets you disconnect from the notification.</string>
+    <string name="session_disconnecting">Multitap · Disconnecting</string>
+    <string name="session_running">Multitap is running</string>
+    <string name="session_disconnect_failed">Couldn\'t disconnect. Open the app and disconnect again.</string>
+    <string name="session_tap_to_return">Tap to go back to the remote screen.</string>
+    <string name="session_action_open">Back to app</string>
+    <string name="session_action_disconnect">Disconnect</string>
+    <string name="tv_only">Only available on TV.</string>
+    <string name="tv_input_busy">Finish the other input first.</string>
+    <string name="tv_input_invalid">Check the input settings.</string>
+    <string name="tv_next">Next</string>
+    <string name="tv_go">OK</string>
+    <string name="tv_done">Done</string>
+    <string name="cancel">Cancel</string>
+    <string name="close">Close</string>
+    <string name="console_connecting">Connecting to Console.</string>
+    <string name="console_webview_update">Update Android System WebView, then connect again.</string>
+    <string name="console_no_download">You can\'t download files in Console.</string>
+    <string name="console_address_refused">This Console address isn\'t allowed.</string>
+    <string name="console_disconnected">Console disconnected. Close it and connect again.</string>
+    <string name="console_certificate">Couldn\'t verify the server certificate.</string>
+    <string name="console_auth_failed">Couldn\'t complete Console authentication.</string>
+    <string name="console_frozen">Console stopped responding. Close it and connect again.</string>
+    <string name="console_time_up">Console connection time is up. Close it and connect again.</string>
+    <string name="console_auth_not_saved">Couldn\'t save Console authentication.</string>
+    <string name="console_connect_failed">Couldn\'t connect to Console. Close it and connect again.</string>
+    <string name="console_close_title">Close Console?</string>
+    <string name="console_close_message">The desktop and running work stay as they are.</string>
+</resources>

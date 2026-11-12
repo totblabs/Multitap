@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Multitap app icon, 256 px master (also 64 and 128): amber tile, the large drawing of multitap-mark.svg placed so its weight sits on the centre. Drawn for Multitap 2026-11-11, AGPL-3.0-only; built by tools/icons/build-icons.mjs. -->
+  <rect width="256" height="256" rx="58" fill="#F5A623"/>
+  <g transform="translate(32 27.2) scale(1.6)">
+    <path fill="#1E1503" d="M47 38H89a23 23 0 0 1 0 46H47a23 23 0 0 1 0-46ZM53.5 61a7.5 7.5 0 1 0-15 0a7.5 7.5 0 1 0 15 0ZM75.5 61a7.5 7.5 0 1 0-15 0a7.5 7.5 0 1 0 15 0ZM97.5 61a7.5 7.5 0 1 0-15 0a7.5 7.5 0 1 0 15 0ZM26 66H20a7 7 0 0 0-7 7V97a5 5 0 0 1-10 0V73a17 17 0 0 1 17-17H26Z"/>
+  </g>
+</svg>

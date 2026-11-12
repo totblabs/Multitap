@@ -1,0 +1,13 @@
+{
+    "repository":  "https://github.com/NVIDIA/VideoProcessingFramework",
+    "commit":  "529fb192f22ec305b8b237ed9e6014e171339c81",
+    "source":  "https://raw.githubusercontent.com/NVIDIA/VideoProcessingFramework/529fb192f22ec305b8b237ed9e6014e171339c81/src/TC/third_party/nvEncodeAPI.h",
+    "sourcePath":  "src/TC/third_party/nvEncodeAPI.h",
+    "file":  "nvEncodeAPI.h",
+    "sha256":  "067c51597e586b72ced8127b2456f48dfe3a9f7d7e0d00dcbb26f9535c05b4ad",
+    "license":  "MIT notice applies to this header only; no SDK sample or runtime binary is included",
+    "apiMajor":  12,
+    "apiMinor":  0,
+    "modified":  false,
+    "runtime":  "Installed NVIDIA driver only; not redistributed"
+}

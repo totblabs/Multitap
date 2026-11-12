@@ -1,0 +1,27 @@
+Multitap browser VM console third-party notices
+
+noVNC 1.7.0 — Copyright the noVNC authors, MPL-2.0.
+Pinned upstream commit: 63107bd06d9e1f6136ff21aeda8cd62cbf0d433e
+Source: https://github.com/novnc/noVNC/tree/63107bd06d9e1f6136ff21aeda8cd62cbf0d433e
+Core and vendor JavaScript is included unmodified as preferred source under
+vendor/novnc/1.7.0/. File-level copyright/license notices are retained.
+See vendor/novnc/1.7.0/AUTHORS and LICENSE.txt for attribution and scope.
+Full MPL text: vendor/novnc/1.7.0/docs/LICENSE.MPL-2.0.
+core/crypto/des.js retains the original Widget Workshop, AT&T Laboratories
+Cambridge and Jef Poskanzer/ACME notices. Additional full BSD texts are under
+vendor/novnc/1.7.0/docs/LICENSE.BSD-2-Clause and LICENSE.BSD-3-Clause.
+vendor/pako is MIT-licensed; its full notice is retained at
+vendor/novnc/1.7.0/vendor/pako/LICENSE.
+Other included upstream license texts are retained without modification.
+The versioned vendor tree and vendor/novnc/manifest.json identify exact bytes.
+
+Pretendard Variable — Copyright (c) 2021, Kil Hyung-jin.
+Reserved Font Name: Pretendard. SIL Open Font License 1.1.
+Copied byte-for-byte from the existing Multitap admin font, not renamed or modified.
+Full attribution and license: fonts/LICENSE.txt. Release 1.3.9; source and
+SHA-256: fonts/PROVENANCE.txt.
+Upstream: https://github.com/orioncactus/pretendard
+
+These files are served locally from the same origin. No external font, CDN,
+analytics, telemetry, QR or third-party network request is required.
+Multitap's own application license remains separate from upstream file licenses.

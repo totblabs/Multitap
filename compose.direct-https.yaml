@@ -1,0 +1,66 @@
+# Standalone alternative with the broker's own TLS (no reverse proxy).
+# Select it once in .env with COMPOSE_FILE=compose.direct-https.yaml; plain
+# `docker compose pull && docker compose up -d` then uses this file.
+# Supplied certificate/key only. No trust-store or certificate-generation steps.
+name: multitap
+
+services:
+  broker:
+    image: ${MULTITAP_IMAGE:-ghcr.io/totblabs/multitap-broker}:${MULTITAP_VERSION:?Set MULTITAP_VERSION in .env to the release to run}
+    user: "1000:1000"
+    init: true
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      MULTITAP_HOST: 0.0.0.0
+      MULTITAP_PORT: "18480"
+      MULTITAP_DATA_DIR: /var/lib/multitap
+      MULTITAP_DEPLOYMENT_KIND: docker
+      # The time zone of the server's days, as in compose.yaml (TZ in .env).
+      TZ: ${TZ:-UTC}
+      MULTITAP_PUBLIC_ORIGIN: ${MULTITAP_PUBLIC_ORIGIN:-}
+      MULTITAP_ALLOW_INSECURE_HTTP: ${MULTITAP_ALLOW_INSECURE_HTTP:-0}
+      # First setup by IP (plain HTTP) while no public address is set.
+      MULTITAP_SERVER_ADDRESS: ${MULTITAP_SERVER_ADDRESS:-}
+      MULTITAP_PUBLISHED_PORT: ${MULTITAP_PUBLISH_PORT:-18480}
+      MULTITAP_TLS_MODE: direct
+      MULTITAP_TLS_CERT_FILE: /etc/multitap/tls/cert.pem
+      MULTITAP_TLS_KEY_FILE: /etc/multitap/tls/key.pem
+      MULTITAP_TRUSTED_PROXIES: ${MULTITAP_TRUSTED_PROXIES:-}
+      MULTITAP_DOCKER_UPDATE_FEED: ${MULTITAP_DOCKER_UPDATE_FEED:-}
+      MULTITAP_UDP_PORT: ${MULTITAP_UDP_PORT:-18481}
+      MULTITAP_UDP_MEDIA: ${MULTITAP_UDP_MEDIA:-}
+      MULTITAP_STUN_SERVERS: ${MULTITAP_STUN_SERVERS:-}
+      MULTITAP_UDP_HOST_RELAYS: ${MULTITAP_UDP_HOST_RELAYS:-}
+      MULTITAP_UDP_CLIENT_RELAYS: ${MULTITAP_UDP_CLIENT_RELAYS:-}
+      MULTITAP_HOST_ROUTE: ${MULTITAP_HOST_ROUTE:-}
+    ports:
+      - "${MULTITAP_PUBLISH_PORT:-18480}:18480"
+      - "${MULTITAP_UDP_PUBLISH_PORT:-18481}:${MULTITAP_UDP_PORT:-18481}/udp"
+    volumes:
+      - broker-data:/var/lib/multitap
+      - type: bind
+        source: ${MULTITAP_TLS_DIRECTORY:?Set the protected absolute supplied-certificate directory}
+        target: /etc/multitap/tls
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16777216,uid=1000,gid=1000,mode=1770
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  broker-data:
+    name: ${MULTITAP_DATA_VOLUME:-multitap-broker-data}

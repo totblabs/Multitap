@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "package": "@novnc/novnc",
+  "version": "1.7.0",
+  "gitCommit": "63107bd06d9e1f6136ff21aeda8cd62cbf0d433e",
+  "license": "MPL-2.0",
+  "release": "https://github.com/novnc/noVNC/releases/tag/v1.7.0",
+  "npm": {
+    "url": "https://registry.npmjs.org/@novnc/novnc/-/novnc-1.7.0.tgz",
+    "sha256": "32689f18d6abe96bc6530828a6bd0b9ae33bda07c083a6575ed255b5a8f2e903",
+    "integrity": "sha512-ucEJOx4T2avIRCleodk7YobZj5O2Ga2AeLfQ69A/yjG9HHba2+PDgwSkN3FttrmG+70ZGx21sElNFouK13RzyA=="
+  },
+  "github": {
+    "url": "https://codeload.github.com/novnc/noVNC/tar.gz/63107bd06d9e1f6136ff21aeda8cd62cbf0d433e",
+    "sha256": "06dac239be3973ed79a00e357a68aab996e6ed2fd496ee2cc6e6a34020344ac9"
+  }
+}

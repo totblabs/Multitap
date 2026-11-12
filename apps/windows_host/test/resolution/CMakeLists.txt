@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+project(MultitapHostResolutionGeometryQA LANGUAGES CXX)
+add_executable(host_resolution_geometry_qa fixture.cpp)
+target_compile_features(host_resolution_geometry_qa PRIVATE cxx_std_20)
+target_compile_options(host_resolution_geometry_qa PRIVATE /W4 /WX /permissive- /EHsc /utf-8)

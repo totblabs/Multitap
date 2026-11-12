@@ -1,0 +1,23 @@
+﻿import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
+import { downloadRoutes } from '../src/downloads.mjs';
+test('Installer EXEs require an exact published product/version name and serve an attachment', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'multitap-installer-')); t.after(() => rm(root, {recursive:true,force:true}));
+  const bytes = Buffer.from('MZ isolated installer fixture');
+  const good = {product:'host',version:'0.2.5',filename:'Multitap-Host-0.2.5-windows-x64.exe',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};
+  await writeFile(join(root,good.filename),bytes);
+  await writeFile(join(root,'releases.json'),JSON.stringify([good,{...good,product:'client'},{...good,version:'0.2.6'},{...good,filename:'setup.exe'},{...good,filename:good.filename+'.ps1'}]));
+  const route=downloadRoutes(root), server=createServer(async(req,res)=>{if(!await route(req,res,new URL(req.url,'http://localhost').pathname)){res.writeHead(404);res.end();}});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const origin='http://127.0.0.1:'+server.address().port;
+  const list=await(await fetch(origin+'/api/v1/downloads')).json();assert.equal(list.releases.length,1);assert.equal(list.releases[0].format,'installer');
+  const response=await fetch(origin+list.releases[0].url);assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'application/vnd.microsoft.portable-executable');
+  assert.match(response.headers.get('content-disposition'),/^attachment;/);assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes);
+  assert.equal((await fetch(origin+'/downloads/setup.exe')).status,404);
+  const head=await fetch(origin+list.releases[0].url,{method:'HEAD'});assert.equal(head.status,200);assert.equal((await head.arrayBuffer()).byteLength,0);
+});

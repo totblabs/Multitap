@@ -1,0 +1,226 @@
+@charset "UTF-8";
+/* Multitap web design system: tokens and shared components for the landing
+   page and the administrator console. Colours follow the Windows client's
+   launcher palette (apps/windows_client/lib/ui/app_palette.dart): neutral
+   charcoal with an amber accent, and a light appearance. The system
+   preference decides until the viewer picks one (theme.js sets data-theme on
+   <html>). Amber marks the primary action, focus and the current place only;
+   status colours always come with a text label.
+   Chart colours: categorical slots validated with the dataviz palette
+   checker against the surfaces of both appearances. */
+:root{
+  color-scheme:dark;
+  --canvas:#0F1215;--sidebar:#0B0E10;--surface:#15191D;--surface-2:#1B2024;--raised:#232A2F;--field:#111518;
+  --line:#272D33;--line-soft:#1F2429;--ink:#ECEFF1;--ink-2:#C6CDD2;--muted:#9BA5AD;--faint:#7E8991;
+  --amber:#F5A623;--amber-ink:#F5A623;--amber-hover:#FFB648;--amber-press:#E2951A;--on-amber:#241600;--amber-soft:rgba(245,166,35,.13);--amber-line:rgba(245,166,35,.48);
+  --green:#62E3A9;--green-soft:rgba(98,227,169,.12);--green-line:rgba(98,227,169,.3);
+  --blue:#78B9F7;--blue-soft:rgba(120,185,247,.13);--blue-line:rgba(120,185,247,.3);
+  --red:#FF8A7A;--red-soft:rgba(255,138,122,.12);--red-line:rgba(255,138,122,.34);--red-solid:#C2412F;
+  --warn:#FFD24A;--warn-soft:rgba(255,210,74,.11);--warn-line:rgba(255,210,74,.3);
+  --series-1:#3987E5;--series-2:#D95926;--series-3:#199E70;--series-4:#C98500;
+  --fill-good:#3FC48A;--fill-warn:#E5B23A;--fill-bad:#E5675A;--fill-neutral:#4A545C;
+  --vdi:#B5C5DC;--proxmox:#E4B48C;
+  --hover:rgba(255,255,255,.045);--press:rgba(255,255,255,.08);--selected:rgba(255,255,255,.07);--backdrop:rgba(3,6,8,.66);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3);--shadow:0 24px 64px rgba(0,0,0,.55);--shadow-pop:0 12px 32px rgba(0,0,0,.42);--card-shadow:none;
+  --glass:rgba(15,18,21,.86);--glass-edge:rgba(255,255,255,.12);
+  --toast:#262D33;--toast-ink:#F1F4F6;
+  --skeleton:rgba(255,255,255,.06);--skeleton-hi:rgba(255,255,255,.11);
+  --scene:url("/admin/scene-dusk.jpg");
+  --scene-tint:linear-gradient(105deg,rgba(15,18,21,.94) 0%,rgba(15,18,21,.74) 42%,rgba(15,18,21,.36) 100%);
+  --scene-tint-narrow:linear-gradient(180deg,rgba(15,18,21,.9) 0%,rgba(15,18,21,.7) 55%,rgba(15,18,21,.88) 100%);
+  --scene-veil:rgba(15,18,21,.62);
+  /* The client's typeface first when installed; Hangul then falls back to
+     Noto Sans KR (the same Source Han design as Pretendard's Hangul). */
+  --font:"Pretendard","Pretendard Variable","Segoe UI Variable Text","Segoe UI","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,-apple-system,Roboto,sans-serif;
+  --font-display:"Pretendard","Pretendard Variable","Segoe UI Variable Display","Segoe UI","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --mono:"Cascadia Mono","Cascadia Code",ui-monospace,Consolas,"D2Coding",monospace;
+  --radius-sm:8px;--radius:12px;--radius-lg:16px;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    color-scheme:light;
+    --canvas:#F4F5F7;--sidebar:#FBFBFC;--surface:#FFFFFF;--surface-2:#F5F6F8;--raised:#ECEFF1;--field:#FFFFFF;
+    --line:#E0E4E8;--line-soft:#ECEEF1;--ink:#161C21;--ink-2:#36414A;--muted:#5B6770;--faint:#6B767F;
+    --amber:#F5A623;--amber-ink:#865000;--amber-hover:#E99A14;--amber-press:#D98C0C;--on-amber:#241600;--amber-soft:rgba(245,166,35,.16);--amber-line:rgba(214,138,10,.55);
+    --green:#147652;--green-soft:rgba(20,118,82,.09);--green-line:rgba(20,118,82,.28);
+    --blue:#286CB2;--blue-soft:rgba(40,108,178,.09);--blue-line:rgba(40,108,178,.28);
+    --red:#B8404B;--red-soft:rgba(184,64,75,.08);--red-line:rgba(184,64,75,.3);--red-solid:#BF3B30;
+    --warn:#8F6200;--warn-soft:rgba(232,176,20,.15);--warn-line:rgba(170,120,0,.32);
+    --series-1:#2A78D6;--series-2:#EB6834;--series-3:#1BAF7A;--series-4:#EDA100;
+    --fill-good:#1E9E6A;--fill-warn:#E2A21B;--fill-bad:#D0504A;--fill-neutral:#C3CBD1;
+    --vdi:#2D4352;--proxmox:#66360A;
+    --hover:rgba(15,20,25,.045);--press:rgba(15,20,25,.08);--selected:rgba(15,20,25,.06);--backdrop:rgba(16,24,32,.4);
+    --shadow-sm:0 1px 2px rgba(16,24,32,.06);--shadow:0 24px 60px rgba(16,24,32,.18);--shadow-pop:0 12px 32px rgba(16,24,32,.14);--card-shadow:0 1px 2px rgba(16,24,32,.04);
+    --glass:rgba(255,255,255,.9);--glass-edge:rgba(14,42,58,.14);
+    --toast:#1F2A31;--toast-ink:#F1F4F6;
+    --skeleton:rgba(15,20,25,.06);--skeleton-hi:rgba(15,20,25,.1);
+    --scene:url("/admin/scene-daylight.jpg");
+    --scene-tint:linear-gradient(105deg,rgba(247,249,250,.93) 0%,rgba(247,249,250,.7) 42%,rgba(247,249,250,.12) 100%);
+    --scene-tint-narrow:linear-gradient(180deg,rgba(247,249,250,.9) 0%,rgba(247,249,250,.62) 55%,rgba(247,249,250,.85) 100%);
+    --scene-veil:rgba(247,249,250,.42);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --canvas:#F4F5F7;--sidebar:#FBFBFC;--surface:#FFFFFF;--surface-2:#F5F6F8;--raised:#ECEFF1;--field:#FFFFFF;
+  --line:#E0E4E8;--line-soft:#ECEEF1;--ink:#161C21;--ink-2:#36414A;--muted:#5B6770;--faint:#6B767F;
+  --amber:#F5A623;--amber-ink:#865000;--amber-hover:#E99A14;--amber-press:#D98C0C;--on-amber:#241600;--amber-soft:rgba(245,166,35,.16);--amber-line:rgba(214,138,10,.55);
+  --green:#147652;--green-soft:rgba(20,118,82,.09);--green-line:rgba(20,118,82,.28);
+  --blue:#286CB2;--blue-soft:rgba(40,108,178,.09);--blue-line:rgba(40,108,178,.28);
+  --red:#B8404B;--red-soft:rgba(184,64,75,.08);--red-line:rgba(184,64,75,.3);--red-solid:#BF3B30;
+  --warn:#8F6200;--warn-soft:rgba(232,176,20,.15);--warn-line:rgba(170,120,0,.32);
+  --series-1:#2A78D6;--series-2:#EB6834;--series-3:#1BAF7A;--series-4:#EDA100;
+  --fill-good:#1E9E6A;--fill-warn:#E2A21B;--fill-bad:#D0504A;--fill-neutral:#C3CBD1;
+  --vdi:#2D4352;--proxmox:#66360A;
+  --hover:rgba(15,20,25,.045);--press:rgba(15,20,25,.08);--selected:rgba(15,20,25,.06);--backdrop:rgba(16,24,32,.4);
+  --shadow-sm:0 1px 2px rgba(16,24,32,.06);--shadow:0 24px 60px rgba(16,24,32,.18);--shadow-pop:0 12px 32px rgba(16,24,32,.14);--card-shadow:0 1px 2px rgba(16,24,32,.04);
+  --glass:rgba(255,255,255,.9);--glass-edge:rgba(14,42,58,.14);
+  --toast:#1F2A31;--toast-ink:#F1F4F6;
+  --skeleton:rgba(15,20,25,.06);--skeleton-hi:rgba(15,20,25,.1);
+  --scene:url("/admin/scene-daylight.jpg");
+  --scene-tint:linear-gradient(105deg,rgba(247,249,250,.93) 0%,rgba(247,249,250,.7) 42%,rgba(247,249,250,.12) 100%);
+  --scene-tint-narrow:linear-gradient(180deg,rgba(247,249,250,.9) 0%,rgba(247,249,250,.62) 55%,rgba(247,249,250,.85) 100%);
+  --scene-veil:rgba(247,249,250,.42);
+}
+
+/* Base */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;background:var(--canvas)}
+/* keep-all: Korean words wrap whole, never mid-syllable-cluster. */
+body{margin:0;min-width:0;background:var(--canvas);color:var(--ink);font:400 14px/1.55 var(--font);word-break:keep-all;overflow-wrap:break-word;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+[hidden]{display:none!important}
+h1,h2,h3,h4,p,figure{margin:0}
+/* No stranded last word: headings balance their lines, running text avoids
+   a lone short word (e.g. "이") at a line end or on the last line. */
+h1,h2,h3,h4{text-wrap:balance;color:var(--ink)}
+p,small,li,dd,label,.field-hint{text-wrap:pretty}
+h1{font-family:var(--font-display);font-size:22px;line-height:1.3;font-weight:650;letter-spacing:-.022em}
+h2{font-size:15px;line-height:1.4;font-weight:600;letter-spacing:0}
+h3{font-size:14px;line-height:1.45;font-weight:600}
+h4{font-size:13px;line-height:1.45;font-weight:600}
+p{color:var(--muted);line-height:1.6}
+small{color:var(--muted);font-size:12.5px;line-height:1.5}
+strong,b{font-weight:600}
+a{color:var(--amber-ink);text-underline-offset:3px;cursor:pointer}
+a:hover{text-decoration-thickness:2px}
+code,pre,kbd{font-family:var(--mono);font-size:.92em}
+img,svg{display:block;max-width:100%}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+::selection{background:rgba(245,166,35,.3)}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-size:12px}
+.mono-value{font-family:var(--mono);font-size:.94em;overflow-wrap:anywhere}
+.icon{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.visually-hidden{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip-link{position:absolute;left:12px;top:-60px;z-index:100;padding:10px 14px;border-radius:var(--radius-sm);background:var(--amber);color:var(--on-amber);font-weight:600;text-decoration:none}
+.skip-link:focus{top:12px}
+
+/* Buttons: one geometry (36 px, 8 px corners). Amber primary, outlined
+   secondary, borderless quiet, red danger. Every state is visible: hover,
+   pressed, focus ring and a disabled look whose reason is its tooltip. */
+button,.button{font:inherit;font-size:13.5px;font-weight:500;line-height:1.2;color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:7px 13px;border:1px solid transparent;border-radius:var(--radius-sm);background:var(--surface-2);text-decoration:none;white-space:nowrap;user-select:none;-webkit-tap-highlight-color:transparent;transition:background-color .12s,border-color .12s,color .12s,box-shadow .12s,transform .06s}
+button:hover,.button:hover{background:var(--raised)}
+button:active:not(:disabled),.button:active{transform:translateY(1px)}
+button:disabled{cursor:not-allowed;opacity:.5}
+button .icon,.button .icon{width:16px;height:16px}
+button.primary,.button.primary{background:var(--amber);border-color:var(--amber);color:var(--on-amber);font-weight:600}
+button.primary:hover:not(:disabled),.button.primary:hover{background:var(--amber-hover);border-color:var(--amber-hover)}
+button.primary:active:not(:disabled),.button.primary:active{background:var(--amber-press);border-color:var(--amber-press)}
+/* A disabled primary action turns neutral instead of a faded amber. */
+button.primary:disabled{opacity:1;background:var(--raised);border-color:var(--line);color:var(--faint)}
+button.secondary,.button.secondary{background:var(--surface);border-color:var(--line);color:var(--ink);box-shadow:var(--card-shadow)}
+button.secondary:hover:not(:disabled),.button.secondary:hover{background:var(--surface-2);border-color:var(--faint)}
+button.secondary:active:not(:disabled),.button.secondary:active{background:var(--raised)}
+button.quiet,.button.quiet{background:transparent;border-color:transparent;color:var(--ink-2)}
+button.quiet:hover:not(:disabled),.button.quiet:hover{background:var(--hover);color:var(--ink)}
+button.quiet:active:not(:disabled),.button.quiet:active{background:var(--press)}
+/* Recommended, but one of several on a page (a row of a list): an amber
+   tint. The amber fill is for the one action a person decides. */
+button.tonal,.button.tonal{background:var(--amber-soft);border-color:transparent;color:var(--amber-ink);font-weight:600}
+button.tonal:hover:not(:disabled),.button.tonal:hover{border-color:var(--amber-line)}
+button.tonal:active:not(:disabled),.button.tonal:active{background:var(--amber-soft);border-color:var(--amber)}
+button.danger,.button.danger{background:transparent;border-color:var(--red-line);color:var(--red)}
+button.danger:hover:not(:disabled){background:var(--red-solid);border-color:var(--red-solid);color:#fff}
+button.danger:active:not(:disabled){filter:brightness(.92)}
+.icon-button{min-height:34px;min-width:34px;padding:0;background:transparent;border-color:transparent;color:var(--muted)}
+.icon-button:hover:not(:disabled){background:var(--hover);color:var(--ink)}
+.icon-button:active:not(:disabled){background:var(--press)}
+.icon-button .icon{width:18px;height:18px}
+.theme-toggle{border-color:var(--line)}
+.theme-toggle .when-light{display:none}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]) .theme-toggle .when-dark{display:none}
+  :root:not([data-theme="dark"]) .theme-toggle .when-light{display:block}
+}
+:root[data-theme="light"] .theme-toggle .when-dark{display:none}
+:root[data-theme="light"] .theme-toggle .when-light{display:block}
+
+/* Fields */
+input,select,textarea{font:inherit;font-size:14px;line-height:1.4;width:100%;min-height:38px;padding:8px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--field);color:var(--ink);transition:border-color .12s,box-shadow .12s}
+input::placeholder,textarea::placeholder{color:var(--faint);opacity:1}
+input:hover:not(:disabled),select:hover:not(:disabled),textarea:hover:not(:disabled){border-color:var(--faint)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-soft)}
+input:user-invalid,select:user-invalid,textarea:user-invalid{border-color:var(--red)}
+input:user-invalid:focus,textarea:user-invalid:focus{box-shadow:0 0 0 3px var(--red-soft)}
+input:disabled,select:disabled,textarea:disabled{opacity:.6;cursor:not-allowed}
+/* The arrow is a chevron drawn as two 1.7 px strokes (\ and /), like every
+   other arrow of the console, in the theme's own colour and with no image
+   (the page's content policy allows none from data: addresses). */
+select{appearance:none;padding-right:34px;background-image:linear-gradient(45deg,transparent calc(50% - .85px),var(--muted) calc(50% - .85px) calc(50% + .85px),transparent calc(50% + .85px)),linear-gradient(135deg,transparent calc(50% - .85px),var(--muted) calc(50% - .85px) calc(50% + .85px),transparent calc(50% + .85px));background-position:calc(100% - 19px) 52%,calc(100% - 13px) 52%;background-size:6px 6px;background-repeat:no-repeat;cursor:pointer}
+textarea{min-height:96px;resize:vertical;line-height:1.6}
+input[type=checkbox]{width:16px;height:16px;min-height:0;padding:0;margin:0;accent-color:var(--amber);cursor:pointer;flex:none}
+input[type=checkbox]:focus{box-shadow:none}
+input[type=checkbox]:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+input[type=search]::-webkit-search-cancel-button{cursor:pointer}
+label{display:block;margin:0 0 16px;font-size:13px;font-weight:500;color:var(--ink-2)}
+label>input,label>select,label>textarea,label>.readonly-field,label>.shell-command,label>.download-link{margin-top:6px}
+label>.shell-command{margin-bottom:0}
+/* One fold everywhere (design audit F-11): a chevron on the left that turns
+   down when open, then a 13/600 label in the secondary ink. Never the
+   browser's triangle. A summary drawn as something else is left alone: a row
+   (.perf-session, .todo-group). The four folds
+   that already draw this chevron in a padded row keep their own rule. */
+summary{cursor:pointer;list-style:none}
+summary::-webkit-details-marker{display:none}
+:where(details:not(.perf-session,.todo-group))>summary{color:var(--ink-2);font-size:13px;font-weight:600;line-height:1.5}
+:where(details:not(.perf-session,.todo-group))>summary:hover{color:var(--ink)}
+:where(details:not(.perf-session,.todo-group,.disclosure,.table-view,.pve-disclosure,.dl-verify))>summary::before{content:"";display:inline-block;width:6px;height:6px;margin:0 10px 2px 3px;vertical-align:middle;border-right:1.7px solid var(--muted);border-bottom:1.7px solid var(--muted);transform:rotate(-45deg);transition:transform .15s}
+:where(details:not(.perf-session,.todo-group,.disclosure,.table-view,.pve-disclosure,.dl-verify))[open]>summary::before{transform:rotate(45deg)}
+
+/* Status badges: a soft tint and a dot for live states. Tone classes keep
+   their meaning across both appearances. */
+.pill{display:inline-flex;align-items:center;gap:6px;min-height:22px;padding:1px 8px;border:1px solid transparent;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:12px;font-weight:500;line-height:1.4;white-space:nowrap;vertical-align:middle}
+.pill.green{background:var(--green-soft);color:var(--green)}
+.pill.blue{background:var(--blue-soft);color:var(--blue)}
+.pill.amber{background:var(--warn-soft);color:var(--warn)}
+.pill.red{background:var(--red-soft);color:var(--red)}
+.pill.green::before,.pill.amber::before,.pill.red::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+
+/* Wordmark: the bare power-strip mark, "Multitap" in one weight and a "for Proxmox VE" line.
+   An independent tool for Proxmox VE: "Proxmox VE" takes Multitap's own amber
+   (#F5A623 dark, #865000 light: at least 4.5:1 on the light scene's tint and
+   on white), never Proxmox's orange or logo. */
+.brand{display:inline-flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;min-width:0}
+.brand-mark{width:32px;height:32px;flex:none;background:var(--amber-ink);-webkit-mask:url(/admin/mark.svg) center/contain no-repeat;mask:url(/admin/mark.svg) center/contain no-repeat}
+.wordmark{display:flex;flex-direction:column;min-width:0;line-height:1.05}
+.wordmark-name{font-family:var(--font);font-size:20px;font-weight:700;letter-spacing:-.04em;white-space:nowrap}
+.wordmark-name b{font-weight:700}
+.wordmark-for{margin-top:3px;font-family:"Segoe UI",var(--font);font-size:10px;letter-spacing:.05em;color:var(--muted);white-space:nowrap}
+.wordmark-for b{font-weight:650;color:var(--amber-ink)}
+
+/* Loading: a spinner for actions, shimmering placeholders for content. */
+.loading-dot{display:block;width:20px;height:20px;border:2px solid var(--line);border-top-color:var(--amber);border-radius:50%;animation:multitap-spin .8s linear infinite;flex:none}
+@keyframes multitap-spin{to{transform:rotate(360deg)}}
+.bone{display:block;height:12px;border-radius:6px;background:linear-gradient(90deg,var(--skeleton) 0%,var(--skeleton-hi) 50%,var(--skeleton) 100%) 0 0/200% 100%;animation:multitap-shimmer 1.4s ease-in-out infinite}
+@keyframes multitap-shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+@media (forced-colors:active){.pill,.kpi,.panel,button,.button{border:1px solid CanvasText}}
+
+/* Language (lang.js, js/i18n.js): an English page stays hidden until its Korean markup is translated, at most 1.5 s. */
+html.i18n-pending body{visibility:hidden;animation:i18n-reveal 0s linear 1.5s forwards}
+@keyframes i18n-reveal{to{visibility:visible}}
+/* The language switch beside the theme toggle: both names, the shown one pressed. */
+.lang-switch{display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--line);border-radius:var(--radius-sm);flex:none}
+.lang-switch button{min-height:28px;padding:3px 8px;border:0;background:transparent;color:var(--muted);font-size:12.5px;font-weight:500;box-shadow:none}
+.lang-switch button:hover:not([aria-pressed="true"]){background:var(--hover);color:var(--ink)}
+.lang-switch button[aria-pressed="true"]{background:var(--amber-soft);color:var(--amber-ink);font-weight:600;cursor:default}

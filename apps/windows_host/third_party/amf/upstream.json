@@ -1,0 +1,215 @@
+{
+    "schema":  1,
+    "repository":  "https://github.com/GPUOpen-LibrariesAndSDKs/AMF",
+    "tag":  "v1.4.30",
+    "commit":  "a118570647cfa579af8875c3955a314c3ddd7058",
+    "commitDate":  "2023-07-06T19:32:01Z",
+    "commitApi":  "https://api.github.com/repos/GPUOpen-LibrariesAndSDKs/AMF/commits/v1.4.30",
+    "license":  "MIT public headers; original copyright/standards notices preserved",
+    "version":  {
+                    "major":  1,
+                    "minor":  4,
+                    "release":  30,
+                    "build":  0
+                },
+    "modified":  false,
+    "runtime":  "Installed AMD driver System32/amfrt64.dll only; never redistributed",
+    "samplesIncluded":  false,
+    "driverIncluded":  false,
+    "ffmpegIncluded":  false,
+    "notice":  "NOTICE.txt",
+    "files":  [
+                  {
+                      "path":  "include/components/ColorSpace.h",
+                      "sourcePath":  "amf/public/include/components/ColorSpace.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/components/ColorSpace.h",
+                      "bytes":  7276,
+                      "sha256":  "44a2b7a2fc1c4526540d899f3db0feb6fd087c122a2e63b3fa5c44141a3048dd",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/components/Component.h",
+                      "sourcePath":  "amf/public/include/components/Component.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/components/Component.h",
+                      "bytes":  25393,
+                      "sha256":  "f3f18680d55a65fdf5e0351d3fde1dcd9bdd2d6caec268c8c915c4227ffa1edc",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/components/ComponentCaps.h",
+                      "sourcePath":  "amf/public/include/components/ComponentCaps.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/components/ComponentCaps.h",
+                      "bytes":  8420,
+                      "sha256":  "2479eb2a6174a1b63552c509abac1b701eddcab5a5eac5a7f4d9f40274d588b4",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/components/PreAnalysis.h",
+                      "sourcePath":  "amf/public/include/components/PreAnalysis.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/components/PreAnalysis.h",
+                      "bytes":  7590,
+                      "sha256":  "e94d51822b65e47a339e5ba1a17af702d049baecb85f33912c7f71710371a0cf",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/components/VideoEncoderVCE.h",
+                      "sourcePath":  "amf/public/include/components/VideoEncoderVCE.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/components/VideoEncoderVCE.h",
+                      "bytes":  30514,
+                      "sha256":  "be8e5dca4085403a1100b350c6fc9aa212f0a69f3e3f4d31265ced6061511529",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/AudioBuffer.h",
+                      "sourcePath":  "amf/public/include/core/AudioBuffer.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/AudioBuffer.h",
+                      "bytes":  11654,
+                      "sha256":  "3e4cfb7fd9e9561c341e956cd764ffb1cc4619f87b06c78bf85d7473d54aa53e",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Buffer.h",
+                      "sourcePath":  "amf/public/include/core/Buffer.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Buffer.h",
+                      "bytes":  9615,
+                      "sha256":  "01d93d50ca3659bdd8f9d82efe9d77cb52206577fec580dc7766d2565b069cf4",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Compute.h",
+                      "sourcePath":  "amf/public/include/core/Compute.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Compute.h",
+                      "bytes":  18575,
+                      "sha256":  "ef5721466fe48e1c038151018699519761e6e351e66e76a5de65386924653e20",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/ComputeFactory.h",
+                      "sourcePath":  "amf/public/include/core/ComputeFactory.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/ComputeFactory.h",
+                      "bytes":  8147,
+                      "sha256":  "50acf69fb670bc6cf093384d1b698bf9e44cda8dd49e02ef24eacfb86ad8ccae",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Context.h",
+                      "sourcePath":  "amf/public/include/core/Context.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Context.h",
+                      "bytes":  44321,
+                      "sha256":  "f9b4acb784038aad234ddec490e5f6ad6dacc4b14794eb84f3523d56dc3d6dd2",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Data.h",
+                      "sourcePath":  "amf/public/include/core/Data.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Data.h",
+                      "bytes":  9331,
+                      "sha256":  "4e0d8746b5ee890421eaf8db738c5c228d8abdae6818b3511885482cd8457de1",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Debug.h",
+                      "sourcePath":  "amf/public/include/core/Debug.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Debug.h",
+                      "bytes":  3317,
+                      "sha256":  "56666589bf6ad20c6286a048da751c2d7722f70c73d962ee3c205a6d709b6aff",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Factory.h",
+                      "sourcePath":  "amf/public/include/core/Factory.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Factory.h",
+                      "bytes":  5700,
+                      "sha256":  "9ba2ebe93af628bce621f29de493cddab87bf8a030eed504b25fcdc822c61b44",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Interface.h",
+                      "sourcePath":  "amf/public/include/core/Interface.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Interface.h",
+                      "bytes":  8351,
+                      "sha256":  "b57aa7161d61af67c05a139d2b29f53c5839c46ec548c307c75519f564e5fdac",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Plane.h",
+                      "sourcePath":  "amf/public/include/core/Plane.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Plane.h",
+                      "bytes":  5260,
+                      "sha256":  "5ad5165e9de2afcfc2da828e8704c838b1f82e8ead7422fbcfc32c758672e1f3",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Platform.h",
+                      "sourcePath":  "amf/public/include/core/Platform.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Platform.h",
+                      "bytes":  15429,
+                      "sha256":  "5956a4a881398df12f8c30fbdc755a2a4d6bdee7275b16ffb94c5d4e25c70ce3",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/PropertyStorage.h",
+                      "sourcePath":  "amf/public/include/core/PropertyStorage.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/PropertyStorage.h",
+                      "bytes":  12981,
+                      "sha256":  "0059b787e78cd7c4e57212ccaab56ad7e17e9474a31337da0eac5b2d056a5dd8",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/PropertyStorageEx.h",
+                      "sourcePath":  "amf/public/include/core/PropertyStorageEx.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/PropertyStorageEx.h",
+                      "bytes":  10249,
+                      "sha256":  "871136e46586baa1fc77121935b503aaa16523d006c3e435ce50698605675fad",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Result.h",
+                      "sourcePath":  "amf/public/include/core/Result.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Result.h",
+                      "bytes":  5579,
+                      "sha256":  "a7dc077c2c1f73e8429c383f3819f41e315e8c83d58baf48b6774c7e820f392a",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Surface.h",
+                      "sourcePath":  "amf/public/include/core/Surface.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Surface.h",
+                      "bytes":  17124,
+                      "sha256":  "917e6e07b494d282fc44b2ee4d5bd91d508acc1432ba5b59c4193e87a49536e9",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Trace.h",
+                      "sourcePath":  "amf/public/include/core/Trace.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Trace.h",
+                      "bytes":  9835,
+                      "sha256":  "ae8c5fee671f02b90d3ccab312cfa6f74424351f070a7dd4ed7aba437fd55c30",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Variant.h",
+                      "sourcePath":  "amf/public/include/core/Variant.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Variant.h",
+                      "bytes":  91932,
+                      "sha256":  "68d3dcd48b2ffacc93cd97e281d5ed20b7dfafa843ade3a7909c12564e4caad3",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "include/core/Version.h",
+                      "sourcePath":  "amf/public/include/core/Version.h",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/amf/public/include/core/Version.h",
+                      "bytes":  2879,
+                      "sha256":  "52e39a56cfc660fd2e2bfcc0495cbd92bf7b8983fbce5e1fc95a71a39df12239",
+                      "modified":  false
+                  },
+                  {
+                      "path":  "LICENSE.txt",
+                      "sourcePath":  "LICENSE.txt",
+                      "source":  "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/AMF/a118570647cfa579af8875c3955a314c3ddd7058/LICENSE.txt",
+                      "bytes":  1747,
+                      "sha256":  "eb297397aaa455b5668ab67d216b83828466152dab123fa92384c6ec16b74170",
+                      "modified":  false
+                  }
+              ]
+}

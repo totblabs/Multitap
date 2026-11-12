@@ -1,0 +1,15 @@
+{
+  "name": "usb.ids (vendor names only)",
+  "purpose": "Vendor names for the USB picker (docs/usb-redirection.md, 'Picker'): VID -> manufacturer, shown in small text. Only vendor lines are kept; products and interfaces are not used.",
+  "license": "BSD-3-Clause (usb.ids is offered under GPL-2.0-or-later OR BSD-3-Clause; Multitap uses it under BSD-3-Clause)",
+  "licenseStatement": "http://www.linux-usb.org/usb-ids.html (the file itself carries no licence header)",
+  "upstream": "http://www.linux-usb.org/usb.ids",
+  "version": "2026.06.26 (Date 2026-06-26 20:34:02), maintained by Stephen J. Gowdy",
+  "retrieved": "2026-10-27",
+  "sourceSha256": "f5a48b0cc8dae1607c2f0bae6b8dc13f2ecef69dbeaef34b4be8e280d34dba4",
+  "generated": "apps/windows_client/windows/runner/usb_vendors_data.h by tools/generate-usb-vendors.ps1: 3427 vendor lines, 87097 bytes, LZMS-compressed to 36624 bytes (Windows Compression API); decompressed text SHA-256 788e575eff3a12cdffa622107db04decdd50185cf11704f7c674ffe6c5e9f3c7",
+  "notes": [
+    "Refresh by downloading usb.ids again and running tools/generate-usb-vendors.ps1 -UsbIds <file>; update this file's version and hashes.",
+    "Names are shown on the user's own PC only; no vendor or product ID is logged or sent (docs/usb-redirection.md)."
+  ]
+}

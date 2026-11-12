@@ -1,0 +1,102 @@
+/* 모니터링 (js/usage.js) and the bars of js/charts.js it draws with.
+   Tokens and shared parts: console.css. */
+
+/* The numbers: the four tiles of now and today (operations.css), then the totals as one ruled row. */
+.usage-strip{display:flex;flex-wrap:wrap;margin:0;border:1px solid var(--line);border-top:2px solid var(--rule);background:var(--surface)}
+.usage-strip>div{display:flex;flex:1 1 auto;align-items:baseline;gap:8px;min-width:0;padding:9px var(--pad);border-right:1px solid var(--line-soft)}
+.usage-strip>div:last-child{border-right:0}
+.usage-strip dt{color:var(--ink-2);font-size:12.5px;font-weight:600;white-space:nowrap}
+.usage-strip dd{margin:0;color:var(--ink);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* The areas of a tab stand under each other like the areas of a page. */
+.log-panel>*+*{margin-top:14px}
+.usage-panel td time small{display:block;color:var(--muted);font-size:12px}
+.usage-events td:first-child{white-space:nowrap;font-variant-numeric:tabular-nums}
+.usage-events td .pill+strong,.usage-events td strong+.pill{margin-left:6px}
+.usage-more{display:flex;justify-content:center;padding:10px var(--pad);border-top:1px solid var(--line-soft)}
+.usage-client{display:inline-flex;align-items:baseline;gap:8px;min-width:0}
+.usage-client small{display:inline;color:var(--muted)}
+.link-button,td .link-button{min-height:0;padding:0;border:0;border-radius:0;background:none;color:var(--ink);font-size:inherit;font-weight:600;text-align:left;text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:3px}
+.link-button:hover{background:none;text-decoration-color:currentColor}
+.link-button[aria-pressed=true]{box-shadow:inset 0 -2px var(--amber)}
+
+/* 기간 and the day: the conditions of the area under them; their buttons act at once. */
+.usage-range>small{color:var(--muted);font-size:12.5px}
+.usage-date{display:inline-flex;flex-direction:row;align-items:center;gap:8px;margin:0}
+.usage-date input,.usage-day-input{width:auto;font-variant-numeric:tabular-nums}
+.usage-stepper{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.usage-stepper .icon-button{border-color:var(--line-2);background:var(--btn)}
+.usage-day{min-width:180px;color:var(--ink);font-size:13px;font-weight:700;text-align:center;white-space:nowrap;font-variant-numeric:tabular-nums}
+.usage-history-bar .is-search{margin-left:auto}
+.usage-history-bar .search-field{flex:none;width:240px;max-width:100%}
+/* 기록: the people of the day as a list beside their logins and connections. */
+.usage-history-list{min-width:0}
+/* 그래프 / 표 of a window stands above what it changes. */
+.usage-view{display:flex;justify-content:flex-end}
+.usage-view .segment{min-height:var(--h-sm);padding:0 12px;font-size:12.5px}
+.usage-view+*{margin-top:8px}
+.usage-detail :is(td,dd,.rank-name){overflow-wrap:anywhere}
+
+/* The window of one person or desktop: its numbers as a ruled row, the days, then its connections. */
+.usage-facts{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));margin:0;border:1px solid var(--line);border-top:2px solid var(--rule)}
+.usage-facts>div{min-width:0;padding:8px 12px;border-right:1px solid var(--line-soft)}
+.usage-facts>div:last-child{border-right:0}
+.usage-facts dt{color:var(--ink-2);font-size:12px;font-weight:600}
+.usage-facts dd{margin:2px 0 0;color:var(--ink);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.usage-detail .win-panel h3{margin:18px 0 8px;color:var(--ink);font-size:13.5px}
+.usage-detail .win-panel>.table-scroll,.usage-detail .win-panel>.rank-bars,.usage-shares>.rank-bars{border:1px solid var(--line);border-top:2px solid var(--rule)}
+.usage-detail .win-panel>.empty{border:1px solid var(--line);border-top:2px solid var(--rule)}
+.usage-detail .usage-more{border:1px solid var(--line);border-top:0}
+.panel>:is(.usage-history-list,.usage-more){margin:0}
+
+/* Ranked bars (charts.js rankBars): name | bar | value, a line on every row. One series, so no legend. */
+.rank-bars{display:block;margin:0;padding:0;list-style:none}
+.rank-bars>li{border-bottom:1px solid var(--line-soft)}
+.rank-bars>li:last-child{border-bottom:0}
+.rank-row,button.rank-row{display:grid;grid-template-columns:minmax(96px,200px) minmax(0,1fr) 260px;align-items:stretch;gap:0;width:100%;min-height:var(--h-row);padding:0;border:0;border-radius:0;background:none;color:var(--ink);font:inherit;text-align:left}
+.rank-row>*{display:flex;align-items:center;min-width:0;padding:0 12px}
+button.rank-row{cursor:pointer}
+button.rank-row:hover{background:var(--row-hover)}
+button.rank-row:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
+button.rank-row.selected{background:var(--row-on);box-shadow:inset 3px 0 var(--amber)}
+.rank-name{display:block;border-right:1px solid var(--line-soft);overflow:hidden;font-size:13px;font-weight:600;line-height:39px;text-overflow:ellipsis;white-space:nowrap}
+.rank-track{border-right:1px solid var(--line-soft)}
+.rank-svg{display:block;width:100%;height:12px;background:var(--bar)}
+.rank-fill{fill:var(--series-1)}
+.rank-value{justify-content:flex-end;gap:8px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.rank-value strong{font-size:13px;font-weight:700}
+.rank-value small{color:var(--muted);font-size:12px}
+
+/* One bar per day (charts.js dayBars). */
+.panel>.day-chart{margin:0;border-width:0 0 1px}
+.day-chart .chart-frame{grid-template-columns:72px minmax(0,1fr)}
+.day-chart .chart-x{padding-left:72px}
+.day-chart .chart-plot{height:120px;cursor:default}
+.day-chart .chart-y{height:120px}
+.day-chart :is(.chart-y,.chart-x,.chart-readout strong){font-family:var(--font);font-variant-numeric:tabular-nums}
+.day-bar{fill:var(--series-1)}
+.day-marker{fill:var(--hover)}
+
+@media(max-width:1100px){
+  .usage-facts{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .usage-facts>div:nth-child(3n){border-right:0}.usage-facts>div:nth-child(n+4){border-top:1px solid var(--line-soft)}
+}
+@media(max-width:900px){
+}
+@media(max-width:720px){
+  .usage-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .usage-strip>div:nth-child(2n){border-right:0}
+  .usage-strip>div:nth-child(-n+2){border-bottom:1px solid var(--line-soft)}
+  .usage-strip>div{justify-content:space-between}
+  .usage-facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .usage-facts>div:nth-child(n){border-right:1px solid var(--line-soft);border-top:0}.usage-facts>div:nth-child(2n){border-right:0}.usage-facts>div:nth-child(n+3){border-top:1px solid var(--line-soft)}
+  .rank-row,button.rank-row{grid-template-columns:minmax(0,1fr) auto;padding:6px 0}
+  .rank-name{border-right:0;line-height:1.6}
+  .rank-track{grid-column:1/-1;grid-row:2;padding-bottom:4px;border-right:0}
+  .rank-value{flex-direction:column;align-items:flex-end;gap:0}
+  .usage-day{min-width:0;flex:1 1 auto}
+  .usage-stepper{width:100%}
+  .usage-history-bar .is-search{margin-left:0}
+  .usage-history-bar .search-field{width:100%}
+  .day-chart .chart-frame{grid-template-columns:60px minmax(0,1fr)}
+  .day-chart .chart-x{padding-left:60px}
+}

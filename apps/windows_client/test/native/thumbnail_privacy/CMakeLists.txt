@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(MultitapThumbnailPrivacy LANGUAGES CXX)
+add_executable(thumbnail_privacy_qa fixture.cpp)
+target_compile_features(thumbnail_privacy_qa PRIVATE cxx_std_17)
+target_compile_options(thumbnail_privacy_qa PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+target_include_directories(thumbnail_privacy_qa PRIVATE "../../../windows/runner")

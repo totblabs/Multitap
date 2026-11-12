@@ -1,0 +1,14 @@
+# The Gradle wrapper (gradlew, gradlew.bat, gradle/wrapper/) is tracked: it is
+# the one Flutter generates (Gradle 2.10 wrapper JAR, checksum published by
+# Gradle; distribution pinned in gradle-wrapper.properties).
+/.gradle
+/captures/
+/local.properties
+GeneratedPluginRegistrant.java
+.cxx/
+
+# Remember to never publicly share your keystore.
+# See https://flutter.dev/to/reference-keystore
+key.properties
+**/*.keystore
+**/*.jks

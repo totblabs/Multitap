@@ -1,0 +1,44 @@
+# Local configuration and secrets: never commit these.
+.env
+.env.*
+!.env.example
+.local/
+secrets/
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+key.properties
+
+# Toolchains and caches fetched by the build scripts
+/.tools/
+/.npm-cache/
+**/node_modules/
+
+# Build output
+.artifacts/
+**/bin/
+**/obj/
+**/build/
+**/build-*/
+**/target/
+**/.dart_tool/
+**/.gradle/
+**/.kotlin/
+**/.idea/
+*.user
+*.suo
+*.log
+
+# Release binaries are build outputs, not source.
+server/release-bundle/*.exe
+server/release-bundle/*.zip
+server/release-bundle/*.apk
+
+# Generated QA media and results
+*.h264
+*.h265
+tools/**/results*/
+tools/**/product-policy*/

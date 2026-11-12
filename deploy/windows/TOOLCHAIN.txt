@@ -1,0 +1,8 @@
+﻿NSIS 3.13 portable compiler
+Source: https://sourceforge.net/projects/nsis/files/NSIS%203/3.13/nsis-3.13.zip/download
+Downloaded: 2026-10-23 KST
+Upstream published SHA-256: ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8
+Local archive: .tools/nsis-download/nsis-3.13.zip (verified against upstream)
+License: NSIS COPYING, distributed compiler source at the official project. Generated installers may be used commercially without purchasing NSIS.
+Compiler is a development dependency. Original driver package bytes/signatures are unchanged.
+The generated Multitap installer itself is not code-signed.

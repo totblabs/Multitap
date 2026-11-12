@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <!-- Multitap mark: a power strip (three outlets and its cord). Large drawing, for 40 px and above. Drawn for Multitap 2026-11-11, AGPL-3.0-only. One path, non-zero fill: bar, three holes wound the other way, cord. -->
+  <path id="mark" fill="#F5A623" d="M47 38H89a23 23 0 0 1 0 46H47a23 23 0 0 1 0-46ZM53.5 61a7.5 7.5 0 1 0-15 0a7.5 7.5 0 1 0 15 0ZM75.5 61a7.5 7.5 0 1 0-15 0a7.5 7.5 0 1 0 15 0ZM97.5 61a7.5 7.5 0 1 0-15 0a7.5 7.5 0 1 0 15 0ZM26 66H20a7 7 0 0 0-7 7V97a5 5 0 0 1-10 0V73a17 17 0 0 1 17-17H26Z"/>
+</svg>

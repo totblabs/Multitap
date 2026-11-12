@@ -1,0 +1,59 @@
+/* 계정 보안 (js/account-security-view.js): the same window as the console's
+   other dialogs: a charcoal title bar with the account beside the title and
+   an X, the body, then a bar of buttons with the main one last. Tokens: console.css.
+   The sign-in step of 2단계 인증 (#admin-mfa) is one of the scenic screens and
+   keeps their look. A phone-wide window or a finger gets taller controls. */
+.app:not([hidden])~dialog.account-security-dialog{width:min(30rem,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;overscroll-behavior:contain;word-break:keep-all;overflow-wrap:anywhere;scrollbar-color:var(--faint) var(--surface)}
+/* The result (the recovery codes) shows after the console is hidden: the sign-in screens' dialog rule (console.css
+   .app[hidden]~dialog, overflow hidden) would cut it off in a short window, so it scrolls there too. */
+.app[hidden]~dialog.account-security-dialog{max-height:calc(100dvh - 24px);overflow:auto;overscroll-behavior:contain}
+.account-security-dialog .as-head{display:flex;align-items:center;gap:12px;min-height:46px;padding:2px 8px 2px 16px;background:var(--gnb)}
+.account-security-dialog .as-titles{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 10px;flex:1;min-width:0}
+.account-security-dialog h2{min-width:0;color:var(--gnb-ink);font-size:15px;font-weight:700}
+.account-security-dialog h2:focus{outline:none}
+.account-security-dialog .as-close{flex:none;width:var(--h);min-width:var(--h);padding:0;border-color:transparent;background:transparent;color:var(--gnb-ink)}
+.account-security-dialog .as-close:hover{border-color:transparent;background:rgba(255,255,255,.12);color:var(--gnb-ink)}
+.account-security-dialog .as-close svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.account-security-dialog .as-body{display:grid;gap:12px;min-width:0;padding:16px 16px 0}
+.account-security-dialog p{max-width:65ch;color:var(--ink-2);font-size:13px;line-height:1.6}
+.account-security-dialog .as-head .as-account{color:var(--gnb-muted);font-size:12.5px;overflow-wrap:anywhere}
+.account-security-dialog :is(.as-status,.as-impact){color:var(--ink);font-weight:600}
+.account-security-dialog .as-hint{color:var(--muted);font-size:12px}
+.account-security-dialog .as-message{padding:9px 12px;border:1px solid var(--red-line);background:var(--red-soft);color:var(--ink)}
+/* What was done (the change is applied), not something that went wrong. */
+.account-security-dialog .as-message.is-done{border-color:var(--green-line);background:var(--green-soft)}
+.account-security-dialog .as-form{display:grid;gap:10px;min-width:0;margin:0;padding:0}
+.account-security-dialog .as-field{display:grid;gap:4px;min-width:0;margin:0}
+.account-security-dialog input:not([type=checkbox]){width:100%;caret-color:var(--amber-ink)}
+.account-security-dialog :is(.as-methods,.as-actions){display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.account-security-dialog .as-methods button[aria-pressed=true]{border-color:var(--main);background:var(--main);color:var(--on-main)}
+.account-security-dialog button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.account-security-dialog button:disabled{opacity:1;border-color:var(--line);background:var(--raised);color:var(--faint)}
+/* The main button is first, in the document and on screen; 취소 or 닫기 is the last one on the right. */
+.account-security-dialog .as-actions{justify-content:flex-start;align-items:center;gap:8px;margin:4px -16px 0;padding:12px 16px;border-top:1px solid var(--line);background:var(--surface-2)}
+.account-security-dialog .as-actions button{min-width:76px}
+/* Other things to do on the left; the main one on the right, right before 닫기 (always last). */
+.account-security-dialog .as-actions>:is(.primary,.as-done):first-child,.account-security-dialog .as-actions>:not(.primary):not(.as-done)+.primary,.account-security-dialog .as-actions>:not(.primary):not(.as-done)+.as-done{margin-left:auto}
+.account-security-dialog .as-actions>.danger:first-child+.as-done{margin-left:auto}
+.account-security-dialog .as-secret-value{display:block;padding:8px 10px;border:1px solid var(--line-2);background:var(--field);font:400 13px/1.7 var(--mono);overflow-wrap:anywhere;user-select:text}
+.account-security-dialog .as-codes{display:grid;grid-template-columns:1fr;margin:0;padding:0;border:1px solid var(--line);list-style-position:inside;min-width:0}
+.account-security-dialog .as-codes li{min-width:0;padding:4px 10px;border-bottom:1px solid var(--line);color:var(--muted);font-size:11.5px}
+.account-security-dialog .as-codes code{display:block;color:var(--ink);font:400 13px/1.6 var(--mono);overflow-wrap:anywhere;word-break:break-all;user-select:text}
+.account-security-dialog .as-saved{display:flex;align-items:flex-start;gap:8px;margin:0;color:var(--ink);font-size:12.5px;line-height:1.6}
+.account-security-dialog .as-saved input{flex:none;margin:3px 0 0}
+#admin-mfa :focus-visible{outline:2px solid var(--amber-ink);outline-offset:3px}
+.account-security-dialog ::selection{background:var(--amber-soft);color:var(--ink)}
+/* The controller owner adds the dedicated admin login-MFA markup. */
+#admin-mfa .auth-card{min-width:0;max-width:28rem}
+#admin-mfa form{display:grid;gap:1rem}
+#admin-mfa form label{margin:0}
+#admin-mfa input{min-height:48px;font-size:1rem;caret-color:var(--amber-ink)}
+#admin-mfa button{min-height:48px;white-space:normal;line-height:1.45}
+#admin-mfa [role=group],#admin-mfa .mfa-methods{display:flex;flex-wrap:wrap;gap:.5rem}
+#admin-mfa [aria-pressed=true]{border-color:var(--amber-line);background:var(--amber-soft);color:var(--ink)}
+#admin-mfa-error{color:var(--red);font-size:.875rem;line-height:1.6;overflow-wrap:anywhere}
+/* One column at every width: two columns in this window broke each 32-character code after its 30th character. */
+/* By finger, or in a phone-wide window: taller controls, the buttons stacked full width. */
+@media(pointer:coarse),(max-width:30rem){.account-security-dialog button:not(.as-close),.account-security-dialog input:not([type=checkbox]){min-height:40px}.account-security-dialog .as-close{width:40px;min-width:40px;min-height:40px}}
+@media(max-width:30rem){.account-security-dialog .as-actions{flex-direction:column;align-items:stretch}}
+@media(prefers-reduced-motion:reduce){.account-security-dialog button{transition:none}}

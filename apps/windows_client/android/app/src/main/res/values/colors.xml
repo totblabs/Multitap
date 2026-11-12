@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The product charcoal behind the splash screen, and the amber of the launcher icon. -->
+<resources><color name="multitap_charcoal">#1A2025</color><color name="multitap_amber">#F5A623</color></resources>

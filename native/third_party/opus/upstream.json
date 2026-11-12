@@ -1,0 +1,28 @@
+{
+    "name":  "libopus",
+    "purpose":  "Streaming audio codec (audio-opus-v1): the Host encodes the VM's loopback capture, the Windows client decodes it (contract: apps/windows_host/src/opus_audio.hpp)",
+    "license":  "BSD-3-Clause (Opus licence, with the royalty-free patent licences it names)",
+    "licenseUrl":  "https://opus-codec.org/license/",
+    "licenseFile":  "COPYING",
+    "licenseFileSha256":  "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+    "copyrightNotice":  "Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon",
+    "upstream":  "https://gitlab.xiph.org/xiph/opus",
+    "release":  "v1.6.1",
+    "version":  "1.6.1",
+    "tag":  {
+                "name":  "v1.6.1",
+                "commit":  "22244de5a79bd1d6d623c32e72bf1954b56235be",
+                "created":  "2026-01-13T15:16:34-05:00",
+                "signed":  "PGP-signed annotated tag 'Opus release 1.6.1' (signature not verified here)"
+            },
+    "tarball":  {
+                    "name":  "opus-1.6.1.tar.gz",
+                    "url":  "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz",
+                    "sha256":  "6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1",
+                    "size":  10472813,
+                    "publishedSha256":  "https://downloads.xiph.org/releases/opus/SHA256SUMS.txt (same value, fetched 2026-11-03)",
+                    "lastModified":  "Thu, 15 Jan 2026 00:31:28 GMT"
+                },
+    "build":  "opus.cmake: CMake checks the tarball's SHA-256 (FetchContent URL_HASH) and builds it unmodified with libopus' own CMake as a static library: float, OPUS_HARDENING on, runtime-dispatched x86 SIMD (upstream defaults); no programs, tests, DRED, OSCE/BWE, deep PLC, custom modes or install rules",
+    "checked":  "2026-11-03"
+}

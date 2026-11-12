@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko" data-i18n-source="ko">
+<head>
+  <link rel="icon" href="/admin/favicon.svg" type="image/svg+xml">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="referrer" content="no-referrer">
+  <title data-i18n="console.html.1">Multitap · 콘솔</title>
+  <script src="/admin/lang.js"></script>
+  <link rel="stylesheet" href="/console/assets/console.css">
+  <link rel="stylesheet" href="/admin/account-security.css">
+  <script type="module" src="/console/assets/console.js"></script>
+</head>
+<body data-tone="progress">
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-reconnect" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.35-5.65"/><path d="M20 4v4.5h-4.5"/></symbol>
+    <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M6.5 9.5h1M10.5 9.5h1M14.5 9.5h1M6.5 13h1M16.5 9.5h1M16.5 13h1M9 15h6"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="8.5" y="3" width="7" height="3.5" rx="1"/><path d="M15.5 4.75H17a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6.75a2 2 0 0 1 2-2h1.5M9 12h6M9 16h4"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></symbol>
+    <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20"/></symbol>
+    <symbol id="i-window" viewBox="0 0 24 24"><path d="M13 4h7v7M20 4l-9 9M17.5 13.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2h4.5"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.75"/><path d="M12 3v1.75M12 19.25V21M3 12h1.75M19.25 12H21M5.64 5.64l1.24 1.24M17.12 17.12l1.24 1.24M5.64 18.36l1.24-1.24M17.12 6.88l1.24-1.24"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10Z"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.75"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.85.85c0 1.7-2.45 2.2-2.45 3.75M12 16.75v.01"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4M15 16.5l4.5-4.5L15 7.5M19.5 12H9.5"/></symbol>
+    <symbol id="i-fold" viewBox="0 0 24 24"><path d="M7 14.5l5-5 5 5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M7 9.5l5 5 5-5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.6 3.2 17a2 2 0 0 0 1.7 3h14.2a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4M12 16.75v.01"/></symbol>
+    <symbol id="i-unplug" viewBox="0 0 24 24"><path d="M9.5 6.5 8 5a4.24 4.24 0 0 0-6 6l1.5 1.5M14.5 17.5 16 19a4.24 4.24 0 0 0 6-6l-1.5-1.5M8.5 15.5l2-2M13.5 10.5l2-2M3 3l18 18"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.75"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5M12 14.5v2"/></symbol>
+    <symbol id="i-mark" viewBox="0 0 120 120"><path d="M46 34H88a26 26 0 0 1 0 52H46a26 26 0 0 1 0-52ZM52 60a9 9 0 1 0-18 0a9 9 0 1 0 18 0ZM76 60a9 9 0 1 0-18 0a9 9 0 1 0 18 0ZM100 60a9 9 0 1 0-18 0a9 9 0 1 0 18 0ZM24 66.5H20a5.5 5.5 0 0 0-5.5 5.5V98a6.5 6.5 0 0 1-13 0V72a18.5 18.5 0 0 1 18.5-18.5H24Z"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></symbol>
+  </svg>
+  <header class="toolbar" id="toolbar">
+    <a data-i18n-attr="aria-label:console.html.2" class="brand browser-only" href="/" aria-label="Multitap 홈"><svg class="brand-mark" aria-hidden="true"><use href="#i-mark"/></svg><span>Multitap<small>for <b>Proxmox VE</b></small></span></a>
+    <div class="identity" id="identity" data-tip="">
+      <span class="state-dot" aria-hidden="true"></span>
+      <span class="identity-text"><strong data-i18n="console.html.3" id="desktop-name">콘솔</strong><span data-i18n="console.html.4" id="connection-state" role="status" aria-live="polite">로그인 확인 중</span></span>
+      <span data-i18n="console.html.5" class="chip-label" aria-hidden="true">연결됨</span>
+    </div>
+    <nav data-i18n-attr="aria-label:console.html.6" class="tools" aria-label="콘솔 도구">
+      <div class="group">
+        <button data-i18n-attr="aria-label:console.html.7 data-tip:console.html.7" id="reconnect" class="tool" type="button" hidden aria-label="다시 연결" data-tip="다시 연결"><svg aria-hidden="true"><use href="#i-reconnect"/></svg></button>
+        <button data-i18n-attr="aria-label:console.html.8 data-tip:console.html.8" id="send-cad" class="tool" type="button" hidden disabled aria-label="Ctrl+Alt+Del 보내기" data-tip="Ctrl+Alt+Del 보내기"><svg aria-hidden="true"><use href="#i-keys"/></svg></button>
+        <button data-i18n-attr="aria-label:console.html.9 data-tip:console.html.10" id="clipboard-open" class="tool" type="button" hidden disabled aria-label="텍스트 클립보드" data-tip="텍스트 클립보드 · 관리자가 허용한 방향만"><svg aria-hidden="true"><use href="#i-clipboard"/></svg></button>
+      </div>
+      <div class="group">
+        <button data-i18n-attr="aria-label:console.html.11 data-tip:console.html.11" id="fullscreen" class="tool" type="button" hidden aria-label="전체 화면" data-tip="전체 화면"><svg aria-hidden="true"><use href="#i-expand"/></svg></button>
+        <a data-i18n-attr="aria-label:console.html.12 data-tip:console.html.12" id="new-window" class="tool browser-only" target="_blank" rel="noopener noreferrer" aria-label="새 창에서 열기" data-tip="새 창에서 열기"><svg aria-hidden="true"><use href="#i-window"/></svg></a>
+        <button data-i18n-attr="aria-label:console.html.13 data-tip:console.html.13" id="theme" class="tool browser-only" type="button" aria-label="밝은 화면으로" data-tip="밝은 화면으로"><svg aria-hidden="true"><use href="#i-sun"/></svg></button>
+        <button data-i18n-attr="aria-label:console.html.14 data-tip:console.html.14" id="help-open" class="tool" type="button" aria-label="도움말" data-tip="도움말"><svg aria-hidden="true"><use href="#i-help"/></svg></button>
+      </div>
+      <div class="group browser-only">
+        <button data-i18n-attr="aria-label:console.html.15 data-tip:console.html.16" id="account-security" class="tool" type="button" hidden aria-label="내 계정의 2단계 인증" data-tip="내 계정 보안"><svg aria-hidden="true"><use href="#i-lock"/></svg></button>
+        <button data-i18n-attr="aria-label:console.html.17 data-tip:console.html.17" id="logout" class="tool" type="button" hidden aria-label="로그아웃" data-tip="로그아웃"><svg aria-hidden="true"><use href="#i-logout"/></svg></button>
+      </div>
+      <div class="group fold-group"><button data-i18n-attr="aria-label:console.html.18 data-tip:console.html.19" id="toolbar-fold" class="tool" type="button" aria-label="도구 접기" data-tip="도구 접기 (Esc)"><svg aria-hidden="true"><use href="#i-fold"/></svg></button></div>
+    </nav>
+  </header>
+  <button data-i18n-attr="aria-label:console.html.20" id="toolbar-grip" class="grip" type="button" aria-label="콘솔 도구 열기" aria-expanded="false" aria-controls="toolbar">
+    <span class="grip-rest" aria-hidden="true"><i></i><i></i></span>
+    <span data-i18n="console.html.5" class="grip-open" aria-hidden="true"><i class="dot"></i>연결됨<svg><use href="#i-down"/></svg></span>
+  </button>
+  <div id="touch-tools" class="touch-tools">
+    <button data-i18n-attr="aria-label:console.html.20" id="touch-menu" class="touch-tool" type="button" aria-label="콘솔 도구 열기" aria-controls="toolbar"><svg aria-hidden="true"><use href="#i-menu"/></svg><span data-i18n="console.html.58">메뉴</span></button>
+    <button data-i18n-attr="aria-label:console.html.60" id="touch-keyboard" class="touch-tool" type="button" aria-label="화상 키보드 열기"><svg aria-hidden="true"><use href="#i-keys"/></svg><span data-i18n="console.html.59">키보드</span></button>
+  </div>
+  <textarea id="touch-keys" class="touch-keys" tabindex="-1" aria-hidden="true" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+  <main id="workspace">
+    <div data-i18n-attr="aria-label:console.html.21" id="remote" aria-label="데스크톱 콘솔 화면"></div>
+    <section id="login-panel" class="card login" hidden aria-labelledby="login-heading">
+      <div class="card-icon" aria-hidden="true"><svg><use href="#i-monitor"/></svg></div>
+      <h1 data-i18n="console.html.22" id="login-heading">내 데스크톱에 연결</h1>
+      <p data-i18n-html="console.html.23" id="login-intro">Multitap 계정으로 로그인하세요.<br>배정된 데스크톱만 열 수 있어요.</p>
+      <p id="login-message" role="alert" hidden></p>
+      <form id="login-form">
+        <label data-i18n="console.html.24" for="username">아이디</label><input id="username" name="username" autocomplete="username" required maxlength="120" spellcheck="false" autocapitalize="none">
+        <label data-i18n="console.html.25" for="password">비밀번호</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256">
+        <button data-i18n="console.html.26" id="login-submit" class="primary" type="submit">로그인하고 연결</button>
+      </form>
+      <form id="mfa-form" hidden>
+        <p id="mfa-remaining"></p>
+        <label data-i18n="console.html.27" id="mfa-mode" class="mfa-mode"><input id="mfa-recovery" type="checkbox">복구 코드 사용</label>
+        <label data-i18n="console.html.28" for="mfa-code" id="mfa-code-label">인증 코드</label>
+        <input id="mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" required maxlength="6" autocorrect="off" spellcheck="false" autocapitalize="none">
+        <p id="mfa-message" role="alert" hidden></p>
+        <div class="mfa-actions"><button data-i18n="console.html.29" id="mfa-cancel" type="button">취소</button><button data-i18n="console.html.30" id="mfa-submit" class="primary" type="submit">인증하고 연결</button></div>
+      </form>
+    </section>
+    <section id="notice" class="card status" data-tone="progress" aria-live="polite">
+      <div class="card-icon" aria-hidden="true"><span class="spinner"></span><svg><use id="notice-icon" href="#i-monitor"/></svg></div>
+      <h1 data-i18n="console.html.31" id="notice-title">연결 준비 중</h1>
+      <p data-i18n="console.html.32" id="notice-text">계정을 확인하고 있어요.</p>
+      <div class="card-actions"><button data-i18n="console.html.33" id="takeover" class="primary" type="button" hidden><svg aria-hidden="true"><use href="#i-reconnect"/></svg>스트리밍 끊고 연결</button><button data-i18n="console.html.7" id="retry" class="primary" type="button" hidden><svg aria-hidden="true"><use href="#i-reconnect"/></svg>다시 연결</button></div>
+      <details id="notice-more" hidden><summary data-i18n="console.html.34">자세히</summary><p id="notice-detail"></p><p id="notice-code" class="code"></p></details>
+    </section>
+    <p id="frame-note" class="frame-note" hidden role="status"></p>
+    <p id="touch-note" class="frame-note touch-note" hidden role="status"></p>
+  </main>
+  <dialog id="help-dialog" aria-labelledby="help-heading">
+    <div class="dialog-heading"><span class="dialog-icon" aria-hidden="true"><svg><use href="#i-help"/></svg></span><h2 data-i18n="console.html.35" id="help-heading">콘솔 도움말</h2><button data-i18n-attr="aria-label:console.html.36" class="tool" type="button" data-close="help-dialog" aria-label="도움말 닫기"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <p data-i18n-html="console.html.37">화면을 누르면 키보드 입력이 데스크톱으로 가요.<br>Ctrl+Alt+Del은 위쪽 도구에서 보내세요.</p>
+    <p data-i18n-html="console.html.38" class="browser-only">브라우저가 예약한 단축키는 PC에서 실행될 수 있어요.<br>전체 키 전달과 일반 업무는 설치형 클라이언트를 사용하세요.</p>
+    <p data-i18n-html="console.html.39" class="app-only">Console은 비상용이에요.<br>일반 업무는 스트리밍으로 연결하세요.</p>
+    <details><summary data-i18n="console.html.40">화면·한글·클립보드 호환성</summary><p data-i18n="console.html.41">연결됨 표시는 Windows 로그인이나 화면 준비 완료를 뜻하지 않아요. QEMU 콘솔이 꺼져 있으면 화면이 보이지 않을 수 있어요.</p><p data-i18n="console.html.42">한글은 Host가 읽어 준 한/영 상태에 맞춰 보내요. Host가 상태를 알려 주지 못하면 영어·숫자·기호만 보내요. 기존 VNC 클립보드는 Latin-1 문자만 전송해요.</p><p data-i18n="console.html.43">연결을 닫아도 데스크톱 전원과 실행 중인 작업은 유지돼요. 자동 재연결은 하지 않아요.</p></details>
+    <details><summary data-i18n="console.html.44">오픈소스 안내</summary><p data-i18n-html="console.html.45">noVNC 1.7.0을 원본 그대로 포함해요. MPL-2.0과 포함 라이선스는 <a href="/console/assets/THIRD-PARTY-NOTICES.txt" target="_blank" rel="noopener noreferrer">오픈소스 안내</a>에서 확인하세요.</p></details>
+  </dialog>
+  <dialog id="clipboard-dialog" aria-labelledby="clipboard-heading">
+    <div class="dialog-heading"><span class="dialog-icon" aria-hidden="true"><svg><use href="#i-clipboard"/></svg></span><h2 data-i18n="console.html.9" id="clipboard-heading">텍스트 클립보드</h2><button data-i18n-attr="aria-label:console.html.46" class="tool" type="button" data-close="clipboard-dialog" aria-label="클립보드 닫기"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <p data-i18n-html="console.html.47">관리자가 허용한 방향으로만 사용할 수 있어요.<br>한글 등 Latin-1 밖의 문자는 전송하지 않아요.</p>
+    <label data-i18n="console.html.48" for="clipboard-text">텍스트</label><textarea id="clipboard-text" rows="5" maxlength="65536" spellcheck="false"></textarea>
+    <div class="dialog-actions"><button data-i18n="console.html.49" id="clipboard-send" type="button" disabled>데스크톱으로 보내기</button><button data-i18n="console.html.50" id="clipboard-copy" type="button" disabled>PC에 복사</button></div>
+    <p id="clipboard-status" role="status" aria-live="polite"></p>
+  </dialog>
+  <dialog id="login-confirm-dialog" class="confirm" aria-labelledby="login-confirm-heading" aria-describedby="login-confirm-text">
+    <div class="dialog-heading"><span class="dialog-icon" aria-hidden="true"><svg><use href="#i-logout"/></svg></span><h2 data-i18n="console.html.51" id="login-confirm-heading">기존 로그인 연결을 종료할까요?</h2></div>
+    <p data-i18n-html="console.html.52" id="login-confirm-text">로그인하면 기존 원격·콘솔 연결이 종료돼요.<br>데스크톱과 실행 중인 작업은 유지돼요.</p>
+    <p data-i18n="console.html.53" id="login-confirm-recovery" hidden>복구 코드는 사용됐어요. 취소해도 다시 쓸 수 없어요.</p>
+    <div class="dialog-actions"><button data-i18n="console.html.29" id="login-confirm-cancel" type="button" autofocus>취소</button><button data-i18n="console.html.54" id="login-confirm-accept" class="primary" type="button">로그인</button></div>
+  </dialog>
+  <dialog id="close-dialog" class="confirm" aria-labelledby="close-heading" aria-describedby="close-text">
+    <div class="dialog-heading"><span class="dialog-icon" aria-hidden="true"><svg><use href="#i-unplug"/></svg></span><h2 data-i18n="console.html.55" id="close-heading">콘솔을 닫을까요?</h2></div>
+    <p data-i18n="console.html.56" id="close-text">데스크톱과 작업은 그대로 유지돼요.</p>
+    <div class="dialog-actions"><button data-i18n="console.html.29" id="close-cancel" type="button">취소</button><button data-i18n="console.html.57" id="close-confirm" class="primary" type="button">닫기</button></div>
+  </dialog>
+</body>
+</html>

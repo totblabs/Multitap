@@ -1,0 +1,7 @@
+// Pretendard 1.3.9 (orioncactus/pretendard, SIL OFL 1.1), the client's UI
+// font, unmodified static OTFs from apps/windows_client/assets/fonts. The
+// setup windows load them privately (DirectWrite, GDI); nothing is installed.
+201 RCDATA "@MULTITAP_FONT_DIR@/Pretendard-Regular.otf"
+202 RCDATA "@MULTITAP_FONT_DIR@/Pretendard-SemiBold.otf"
+203 RCDATA "@MULTITAP_FONT_DIR@/Pretendard-Bold.otf"
+204 RCDATA "@MULTITAP_FONT_DIR@/Pretendard-LICENSE.txt"

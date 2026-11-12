@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(InputIntegrityQA LANGUAGES CXX)
+add_executable(input_integrity_qa input_integrity_qa.cpp)
+target_compile_features(input_integrity_qa PRIVATE cxx_std_20)
+target_compile_definitions(input_integrity_qa PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+target_compile_options(input_integrity_qa PRIVATE /W4 /permissive- /EHsc /utf-8)
+target_include_directories(input_integrity_qa PRIVATE "../../apps/windows_host/src")
+target_link_libraries(input_integrity_qa PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../apps/windows_host/build/Release/host_engine.lib" mfplat mf mfuuid wmcodecdspuuid ole32 oleaut32 gdi32 user32 uuid d3d11 dxgi windowsapp winhttp crypt32 advapi32 shell32 comctl32 imm32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)

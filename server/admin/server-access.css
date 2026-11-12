@@ -1,0 +1,95 @@
+@charset "UTF-8";
+/* 서버 접속 설정 (js/server-access.js): the two ways in as areas with their
+   own heading row and switch, in one box; beside it what is applied now and
+   the last check, each in a box of its own. Tokens and shared parts: console.css. */
+.server-access-page{container:server-access/inline-size}
+.server-access-page>*+*{margin-top:14px}
+.server-access-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);align-items:start;gap:14px}
+.server-access-side{display:grid;gap:14px;min-width:0}
+.server-access-editor,.server-access-current,.server-access-results{min-width:0}
+.server-access-page :is(p,small){white-space:pre-line;overflow-wrap:anywhere}
+.server-access-editor>*{max-width:720px}
+.server-access-editor>:is(.panel-head,.server-access-endpoint,.server-access-actions){max-width:none}
+/* One way in: a heading row with its switch, then its fields. */
+.panel>.server-access-endpoint{margin:0;border-bottom:1px solid var(--line)}
+.server-access-endpoint-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;min-height:var(--h-bar);padding:4px var(--pad);border-bottom:1px solid var(--line-soft);background:var(--bar)}
+.server-access-endpoint.is-off .server-access-endpoint-head{border-bottom:0}
+.server-access-endpoint-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.server-access-endpoint-title>.icon{display:none}
+.server-access-endpoint-title h2{margin:0;font-size:13px;font-weight:700}
+.server-access-switch{display:flex!important;align-items:center;gap:8px;margin:0!important;color:var(--ink);font-size:13px;font-weight:400!important;cursor:pointer}
+.server-access-switch input{appearance:none;position:relative;width:30px;height:16px;min-height:0;margin:0;padding:0;flex:none;border:1px solid var(--line-2);border-radius:2px;background:var(--raised);cursor:inherit}
+.server-access-switch input::before{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:1px;background:var(--faint)}
+.server-access-switch input:checked{border-color:var(--amber);background:var(--amber)}
+.server-access-switch input:checked::before{left:16px;background:var(--on-amber)}
+.server-access-switch input:focus{box-shadow:none}
+.server-access-switch:has(input:focus-visible){outline:2px solid var(--ring);outline-offset:3px}
+.server-access-endpoint-fields{max-width:720px;min-width:0;margin:0;padding:var(--pad);border:0}
+.server-access-endpoint.is-off .server-access-endpoint-fields{padding-top:0;padding-bottom:0}
+.server-access-endpoint-fields[hidden]{display:none}
+.server-access-endpoint-fields>:first-child{margin-top:0}
+.server-access-field{display:grid!important;gap:5px;min-width:0;margin:12px 0 0}
+/* A field the page hides stays hidden (the !important grid above would show the command beside '지금 이 주소로 열려 있어요'). */
+.server-access-field[hidden],[data-access-command-same][hidden]{display:none!important}
+.panel>.server-access-field{margin:var(--pad)}
+.panel>.server-access-advanced{margin:0 var(--pad)}
+.server-access-field :is(input,select,textarea){width:100%;min-width:0;margin:0}
+.server-access-field textarea{resize:vertical}
+.server-access-bind{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(100px,.8fr);gap:12px}
+.server-access-advanced{margin-top:12px;border-top:1px solid var(--line-soft)}
+.server-access-endpoint.is-off .server-access-advanced{margin-top:0;border-top:0}
+.server-access-advanced>summary{padding:8px 0;overflow-wrap:anywhere}
+.server-access-advanced[open]{padding-bottom:8px}
+.server-access-certificates{display:grid;gap:2px}
+.server-access-warning,.server-access-waiting{margin:12px 0;padding:9px 12px;border:1px solid var(--warn-line);background:var(--warn-soft);color:var(--ink)}
+.panel>:is(.server-access-warning,.server-access-waiting){margin:12px var(--pad)}
+.server-access-waiting .server-access-warning{margin:0 0 6px;padding:0;border:0;background:none}
+.server-access-error{margin-top:12px;white-space:pre-line;overflow-wrap:anywhere}
+.server-access-operation{color:var(--muted)}
+.server-access-operation:empty{display:none}
+.plain-tag{color:var(--muted);font-size:12.5px;font-weight:400}
+/* The buttons of the box: on the right at its bottom, the one that saves last. */
+.panel>.server-access-actions{justify-content:flex-end;gap:8px;margin:0;padding:12px var(--pad);border-top:1px solid var(--line);background:var(--surface-2)}
+.server-access-checks{display:block;margin:0!important;padding:0;list-style:none}
+.server-access-checks li{display:flex;align-items:baseline;gap:8px;min-width:0;padding:9px var(--pad);border-bottom:1px solid var(--line-soft);color:var(--ink)}
+.server-access-checks li:last-child{border-bottom:0}
+.server-access-checks .icon{flex:none;align-self:center;width:14px;height:14px;color:var(--muted)}
+.server-access-checks small{display:block;color:var(--muted)}
+.server-access-current .facts>div{grid-template-columns:118px minmax(0,1fr)}
+.server-access-current .facts dd{white-space:pre-line}
+.server-access-extra{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:end}
+.server-access-extra>.server-access-field{grid-column:1}
+.server-access-extra>small{grid-column:1;margin-top:4px}
+.server-access-extra>button{grid-column:2;grid-row:1}
+.server-access-extra-add{display:grid;justify-items:start;gap:5px;margin-top:12px}
+/* The two folds under the editor: a box each, with a heading row. */
+.server-access-help,.server-access-forward{display:block;border:1px solid var(--line);background:var(--surface)}
+:is(.server-access-help,.server-access-forward)>summary{display:flex;align-items:center;min-height:var(--h-bar);margin:0;padding:4px var(--pad);background:var(--bar);color:var(--ink-2);font-size:13px;font-weight:600}
+:is(.server-access-help,.server-access-forward)[open]>summary{border-bottom:1px solid var(--line)}
+:is(.server-access-help,.server-access-forward)>:not(summary){max-width:720px;margin:var(--pad)}
+.server-access-help-steps{display:grid;gap:5px;padding-left:20px;color:var(--ink-2);line-height:1.6}
+.server-access-help-steps li{white-space:pre-line;overflow-wrap:anywhere}
+.server-access-table-wrap{overflow:auto;border:1px solid var(--line);border-top:2px solid var(--rule)}
+/* Words stay whole (a narrow screen cut "Method" and "HTTPS" in two): the table scrolls in its wrap instead. */
+.server-access-forward table :is(th,td){white-space:normal;overflow-wrap:break-word}
+.server-access-forward table th{overflow-wrap:normal;word-break:keep-all}
+.server-access-forward tbody th{background:var(--bar);border-bottom-color:var(--line-soft);color:var(--ink-2);font-weight:600}
+.server-access-forward tbody tr:last-child>*{border-bottom:0}
+@media(max-width:1000px){.server-access-layout{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:640px){.server-access-bind{grid-template-columns:minmax(0,1fr)}.panel>.server-access-actions{align-items:stretch;flex-direction:column}.server-access-actions button{width:100%}}
+@container server-access (max-width:860px){.server-access-layout{grid-template-columns:minmax(0,1fr)}}
+
+/* 집 밖에서 접속하려면: two ways, numbered steps (server-access.js outsideSteps). */
+.outside-ways{list-style:none;margin:0;padding:12px 16px;display:grid;gap:14px}
+.outside-way{display:grid;gap:6px}
+.outside-way>strong{display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink)}
+.outside-step{display:flex;gap:8px;align-items:flex-start;padding-left:4px}
+.outside-step p{margin:0;font-size:13px;line-height:1.6;color:var(--ink)}
+.outside-step code{margin-left:2px;white-space:nowrap}
+.outside-step-number{flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-top:2px;border-radius:50%;background:var(--line);color:var(--ink);font-size:11px;font-weight:700}
+/* Docker Compose를 직접 쓰는 경우: the fold's inside gets the panel's padding. */
+.compose-env-body{display:grid;gap:8px;padding:12px var(--pad,16px) 14px}
+.compose-env-body>.server-access-field{margin:0}
+.compose-env-body .server-access-actions{margin:0;justify-content:flex-start}
+/* A Korean placeholder inside an example address reads in the text face. */
+.outside-step code .ph{font-family:inherit;font-style:normal;color:var(--muted)}

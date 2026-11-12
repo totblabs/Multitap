@@ -1,0 +1,48 @@
+﻿Multitap Host - third-party software notices
+===========================================
+
+x264 - H.264/MPEG-4 AVC video encoder library
+  Version   0.165.3222 b35605a (x264 API build 165, stable branch)
+  Commit    b35605ace3ddf7c1a5d67a2eb553f034aef41d55 (2025-06-08)
+  Upstream  https://code.videolan.org/videolan/x264.git
+  Copyright (C) 2003-2025 x264 project (authors: AUTHORS in the source archive)
+  Licence   GNU General Public License, version 2 or (at your option) any
+            later version. Full text: COPYING.x264.txt
+  Use       Statically linked, unmodified, into MultitapHost.exe and
+            MultitapHostTool.exe as the streaming (ToTBSeamless) H.264 encoder.
+            Built for Windows x86_64, 8-bit, without the x264 command-line tool
+            or OpenCL, with MSVC and NASM version 2.16.03 compiled on Apr 17 2024.
+  Source    x264-b35605a-source.zip in this directory: the complete source of
+            that commit (git archive) and the Multitap files used to configure
+            and compile it (multitap-x264-build/).
+
+MultitapHost.exe and MultitapHostTool.exe contain x264. Multitap's own code is
+under the GNU Affero General Public License version 3 (AGPL-3.0) and x264 is
+used under the GNU General Public License version 3, which its "version 2 or
+later" licence allows. The Host program is AGPL-3.0 code linked with GPL-3.0
+code, which section 13 of both licences permits.
+
+Corresponding source (written offer): for at least three years after you
+received this installer, the operator of the Multitap server it was downloaded
+from will give anyone who has it the complete corresponding source code of this
+Multitap Host build under those licences, on request, for no more than the cost
+of providing it.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License and the GNU
+General Public License for more details.
+
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+  Version   2.1.25156 (v2.1), the project's unmodified installer winfsp/winfsp-2.1.25156.msi
+  Upstream  https://github.com/winfsp/winfsp
+  Licence   GNU General Public License version 3 with the FLOSS exception (permission to
+            link the WinFsp DLL and to distribute the unmodified project installer for
+            Free/Libre and Open Source software). Full text: COPYING.winfsp.txt
+  Use       The Host setup installs WinFsp (core feature only) when it is missing or older, so
+            that folders shared from the PC appear in the VM as drives with files over 4 GB and
+            ranged reads. The Host loads the WinFsp DLL at run time; Multitap is distributed under
+            AGPL-3.0, a FLOSS licence.
+  SHA-256   073a70e00f77423e34bed98b86e600def93393ba5822204fac57a29324db9f7a
+  Source    https://github.com/winfsp/winfsp (tag v2.1); the same written offer as above applies
+            to the Multitap Host source.

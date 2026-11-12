@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "components": [
+    {"name": "Multitap", "license": "GNU AGPL v3", "textAsset": "assets/licenses/AGPL-3.0.txt", "source": "https://spdx.org/licenses/AGPL-3.0-only.html"},
+    {"name": "Pretendard", "license": "SIL Open Font License 1.1", "version": "1.3.9", "textAsset": "assets/licenses/Pretendard-LICENSE.txt", "source": "https://github.com/orioncactus/pretendard/tree/v1.3.9"},
+    {"name": "Material Icons", "license": "Creative Commons Attribution 4.0", "textAsset": "assets/licenses/MaterialIcons-CC-BY-4.0.txt", "source": "https://creativecommons.org/licenses/by/4.0/"},
+    {"name": "Material Icons", "license": "Attribution and modification notice", "textAsset": "assets/licenses/MaterialIcons-NOTICE.txt", "source": "https://storage.googleapis.com/flutter_infra_release/flutter/fonts/3012db47f3130e62f7cc0beabff968a33cbec8d8/fonts.zip"},
+    {"name": "USB ID Repository", "license": "BSD 3-Clause", "textAsset": "assets/licenses/usb-ids-NOTICE.txt", "source": "http://www.linux-usb.org/usb.ids"},
+    {"name": "UsbDk", "license": "Apache License 2.0", "version": "1.0.22", "textAsset": "assets/licenses/UsbDk-LICENSE.txt", "source": "https://github.com/daynix/UsbDk/tree/v1.00-22"},
+    {"name": "libopus", "license": "BSD 3-Clause", "version": "1.6.1", "textAsset": "assets/licenses/libopus-COPYING.txt", "source": "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz"},
+    {"name": "Microsoft WebView2 SDK", "license": "BSD 3-Clause", "version": "1.0.4314.35", "textAsset": "assets/licenses/WebView2-LICENSE.txt", "source": "https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.4314.35"},
+    {"name": "Microsoft WebView2 SDK", "license": "Third-party notices", "version": "1.0.4314.35", "textAsset": "assets/licenses/WebView2-NOTICE.txt", "source": "https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.4314.35"},
+    {"name": "Microsoft Visual C++ Runtime", "license": "Microsoft Software License Terms", "version": "2015–2022", "textAsset": "assets/licenses/Microsoft-VC-Runtime-LICENSE.txt", "source": "https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/"}
+  ]
+}

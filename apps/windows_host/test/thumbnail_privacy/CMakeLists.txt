@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.24)
+project(MultitapHostThumbnailPrivacyFixture LANGUAGES CXX)
+add_executable(MultitapHostThumbnailPrivacyFixture fixture.cpp)
+target_compile_features(MultitapHostThumbnailPrivacyFixture PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(MultitapHostThumbnailPrivacyFixture PRIVATE /W4 /WX /EHsc)
+endif()

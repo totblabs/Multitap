@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Notification (status bar) icon: the small drawing of multitap-mark-small.svg filling the 24 dp box; Android uses only its alpha. Drawn for Multitap 2026-11-11, AGPL-3.0-only. -->
+  <g transform="translate(1.03 -1.16) scale(0.19)" fill="#FFFFFF">
+    <path d="M46 34H88a26 26 0 0 1 0 52H46a26 26 0 0 1 0-52ZM52 60a9 9 0 1 0-18 0a9 9 0 1 0 18 0ZM76 60a9 9 0 1 0-18 0a9 9 0 1 0 18 0ZM100 60a9 9 0 1 0-18 0a9 9 0 1 0 18 0ZM24 66.5H20a5.5 5.5 0 0 0-5.5 5.5V98a6.5 6.5 0 0 1-13 0V72a18.5 18.5 0 0 1 18.5-18.5H24Z"/>
+  </g>
+</svg>
