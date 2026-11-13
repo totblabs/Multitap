@@ -25,6 +25,7 @@
 #include "touch_input.hpp"
 #include "caret_follow.hpp"
 #include "frame_pacer.hpp"
+#include "audio_capture_control.hpp"
 #include "capture_topology_watch.hpp"
 #include "capture_follow.hpp"
 #include "stream_priority.hpp"
@@ -412,8 +413,9 @@ class Agent {
         if(plan.audio)audio=std::thread([this,beginning,&audioGo,&audioEnabled,&pipeline,promise=std::move(audioReady),opus=std::move(opusEncoder)]()mutable{
           const auto com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);bool announced=false;
           try{check(com,"Track audio COM");Loopback loopback;const bool available=loopback.available();promise.set_value(available);announced=true;
+            if(!available){audioCaptureRecord(loopback.failureRecord());}
             if(available){while(!audioGo&&!streamStop_)std::this_thread::sleep_for(std::chrono::milliseconds(2));
-              if(!streamStop_&&audioEnabled)loopback.run(streamStop_,beginning,[this,&pipeline](std::vector<uint8_t> bytes){if(auto packet=pipeline->audio(bytes))enqueue({false,std::move(*packet)});},nullptr,opus?&*opus:nullptr);
+              if(!streamStop_&&audioEnabled)loopback.run(streamStop_,beginning,[this,&pipeline](std::vector<uint8_t> bytes){if(auto packet=pipeline->audio(bytes))enqueue({false,std::move(*packet)});},nullptr,opus?&*opus:nullptr,[this](uint32_t value){audioCaptureRecord(value);});
             }
           }catch(...){if(!announced)promise.set_value(false);report(L"소리 캡처를 사용할 수 없습니다.");}
           if(SUCCEEDED(com))CoUninitialize();
@@ -616,6 +618,8 @@ class Agent {
   std::function<HostUpdateEnvironment(const std::wstring&)> hostUpdateEnvironment_; std::unique_ptr<HostUpdater> updater_;
   std::function<HostPowerEnvironment()> hostPowerEnvironment_; std::unique_ptr<HostPower> power_; std::function<void()> machineChanged_;
   std::function<void(uint32_t,uint32_t)> captureDiagnostic_;
+  // audio_capture_control.hpp: one sound capture record (stage 47 of the worker's fixed record; 0 is none).
+  void audioCaptureRecord(uint32_t value) noexcept { if(value&&captureDiagnostic_)try{captureDiagnostic_(audioCaptureRecordStage,value);}catch(...){ } }
   std::atomic<HINTERNET> socket_{nullptr}; std::thread worker_, capture_;
   // queueMutex_ guards the queue, queueClosed_ and sending_ (the sender has
   // taken a packet and is writing it).
@@ -1012,7 +1016,9 @@ class Agent {
         const bool audioOpus = opusEncoder.has_value();
         if(audioRequested)audio = std::thread([this, beginning, &audioGo, promise = std::move(audioReady), opus = std::move(opusEncoder)]() mutable {
           const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED); bool announced = false;
-          try { check(com, "Audio COM startup"); Loopback loopback; const bool available = loopback.available(); promise.set_value(available); announced = true; if (available) { while (!audioGo && !streamStop_) std::this_thread::sleep_for(std::chrono::milliseconds(2)); if (!streamStop_) loopback.run(streamStop_, beginning, [this](std::vector<uint8_t> bytes) { enqueue({false, std::move(bytes)}); }, &audioCapture_, opus ? &*opus : nullptr); } }
+          // audio_capture_control.hpp: the capture opens again after any error or default device change until the
+          // stream stops; each start, failure, restart and change is a fixed record (hostAction 297 in the service).
+          try { check(com, "Audio COM startup"); Loopback loopback; const bool available = loopback.available(); promise.set_value(available); announced = true; if (!available) audioCaptureRecord(loopback.failureRecord()); if (available) { while (!audioGo && !streamStop_) std::this_thread::sleep_for(std::chrono::milliseconds(2)); if (!streamStop_) loopback.run(streamStop_, beginning, [this](std::vector<uint8_t> bytes) { enqueue({false, std::move(bytes)}); }, &audioCapture_, opus ? &*opus : nullptr, [this](uint32_t value) { audioCaptureRecord(value); }); } }
           catch (...) { if (!announced) promise.set_value(false); report(L"소리 캡처를 사용할 수 없습니다. 화면 연결은 유지합니다."); }
           if (SUCCEEDED(com)) CoUninitialize();
         });

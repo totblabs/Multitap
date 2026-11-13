@@ -296,7 +296,7 @@ function startPolling() {
     // 서버 접속 설정 back to the Proxmox step.
     if (!setupRequired()) for (const name of ['hosts', 'hostRequests']) void load(name);
     if (newVersion) followServerVersion(newVersion);
-    if (serverLost || Date.now() - serverInfoAt >= 600000) void loadServerInfo();
+    if (serverLost || Date.now() - serverInfoAt >= 30000) void loadServerInfo();
   }, 5000);
   pollTimer.unref?.();
 }

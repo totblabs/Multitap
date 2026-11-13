@@ -88,6 +88,68 @@ String androidWifiLockLabel(Object? lock, Object? refused) => switch (lock) {
   _ => _unmeasured,
 };
 
+/// The 연결 통계 dialog's "오디오" rows: the facts that decide a "no sound"
+/// report, on the phone itself. [hostPerSecond]: audio packets per second the
+/// Host reported sending lately (RemoteSession.hostAudioPerSecond, null before
+/// its stream.stats said anything); the rest from the engine's `stats`
+/// (AndroidMedia.kt): which decoder plays, audio focus and whether it mutes,
+/// the device's media volume, and this stream's underruns and audio thread
+/// errors. Empty with sound off.
+List<(String, String)> androidAudioMetrics(
+  Map<String, dynamic>? stats, {
+  double? hostPerSecond,
+}) {
+  if (stats == null || stats['audioEnabled'] != true) return const [];
+  int? count(Object? value) =>
+      value is int && value >= 0 && value <= 0xffffffff ? value : null;
+  final host = hostPerSecond == null || !hostPerSecond.isFinite
+      ? _unmeasured
+      : hostPerSecond.round() <= 0
+      ? l10n.audioNoneSent
+      : l10n.audioPacketsPerSecond(hostPerSecond.round());
+  final decoder = switch (stats['audioDecoder']) {
+    1 => l10n.audioOpusBuiltIn,
+    2 => 'Opus',
+    3 =>
+      stats['audioOpusUnusable'] == true
+          ? l10n.audioDecoderPcmNext
+          : l10n.audioDecoderRetrying,
+    0 => stats['audioOpus'] == true ? l10n.preparing : 'PCM',
+    _ => _unmeasured,
+  };
+  final focus = switch (stats['audioFocus']) {
+    0 => l10n.none,
+    1 => l10n.audioFocusHeld,
+    2 => l10n.audioFocusWaiting,
+    3 => l10n.audioFocusPaused,
+    4 => l10n.audioFocusLost,
+    _ => _unmeasured,
+  };
+  final volume = count(stats['mediaVolume']), top = count(stats['mediaVolumeMax']);
+  final level = volume == null || top == null || top == 0 || volume > top
+      ? _unmeasured
+      : volume == 0
+      ? l10n.deviceVolumeSilent('0/$top')
+      : '$volume/$top';
+  final underruns = count(stats['audioStreamUnderruns']);
+  final errors = count(stats['audioThreadErrors']) ?? 0;
+  var playback = underruns == null
+      ? _unmeasured
+      : stats['audioPlaying'] == true
+      ? l10n.audioPlayingUnderruns(underruns)
+      : l10n.audioSilentUnderruns(underruns);
+  if (underruns != null && errors > 0) {
+    playback = l10n.audioThreadErrorsSuffix(playback, errors);
+  }
+  return [
+    (l10n.audioFromHost, host),
+    (l10n.audioDecoder, decoder),
+    (l10n.audioFocus, focus),
+    (l10n.deviceVolume, level),
+    (l10n.audioPlayback, playback),
+  ];
+}
+
 List<(String, String)> androidEngineMetrics(Map<String, dynamic>? stats) {
   if (stats == null) return const [];
   String count(Object? value) => value is int && value >= 0 ? '$value' : '—';

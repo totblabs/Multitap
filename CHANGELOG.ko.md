@@ -2,7 +2,18 @@
 
 [English](CHANGELOG.md)
 
-Multitap을 설치하고 쓰는 사람에게 달라지는 것을 적습니다. 릴리스 번호는 서버 버전을 따르고, 1.1.1부터 1.1.3까지는 Windows 앱, Android 앱, Host도 같은 번호입니다. 설치 파일은 [Releases](https://github.com/totblabs/Multitap/releases)에 있습니다.
+Multitap을 설치하고 쓰는 사람에게 달라지는 것을 적습니다. 릴리스 번호는 서버 버전을 따르고, 1.1.1부터 1.1.4까지는 Windows 앱, Android 앱, Host도 같은 번호입니다. 설치 파일은 [Releases](https://github.com/totblabs/Multitap/releases)에 있습니다.
+
+## [1.1.4](https://github.com/totblabs/Multitap/releases/tag/v1.1.4)
+
+### 소리
+
+- **Host**: 소리 장치에 오류가 나거나 기본 출력 장치가 바뀌어도 다음 연결까지 조용히 있지 않고 소리를 다시 잡습니다. 소리를 10 ms마다 고르게 보냅니다. 캡처의 시작, 오류, 다시 시작이 Host 기록에 남습니다.
+- **Android**: 다른 앱이나 통화가 소리를 가져간 뒤에도 어떤 상태든(잠시 넘겨줌, 기다림, 빼앗김, 분할 화면) 다시 소리가 납니다. Opus 디코더가 실패해도 그 실행 내내 포기하지 않고 다시 시도합니다. 연결 통계에 오디오 칸이 생겼습니다: Host가 보내는 소리, 디코더, 오디오 포커스, 기기 음량, 재생 상태.
+
+### 관리자 페이지
+
+- 서버를 업데이트하는 동안 열어 둔 페이지가 30초 안에 새 버전으로 바뀝니다.
 
 ## [1.1.3](https://github.com/totblabs/Multitap/releases/tag/v1.1.3)
 

@@ -160,8 +160,42 @@ class AudioStatsTracker {
   double _captureSumUs = 0, _queueSumUs = 0;
   double? _captureMaxUs, _queueMaxUs;
 
-  /// A stream.stats of the current stream (already filtered by the session).
-  void host(Map<String, dynamic> event) {
+  /// The audio packets each stream.stats said the Host handed on, with its
+  /// arrival (session µs), for [hostAudioPerSecond]; a reading without an
+  /// `audioSend` member counts 0 (the Host sent no sound in its window).
+  final _hostAudio = <(int, int)>[];
+  int? _firstHostUs;
+
+  /// How much of the window [hostAudioPerSecond] looks back on.
+  static const hostAudioWindowUs = 3000000;
+
+  /// Audio packets per second the Host handed on over the last
+  /// [hostAudioWindowUs] of stream.stats (a 10 ms packet each: about 100
+  /// while sound plays, 0 while the desktop is silent or its capture sends
+  /// nothing); null before any stream.stats or when none came lately.
+  double? hostAudioPerSecond(int nowUs) {
+    _hostAudio.removeWhere((entry) => nowUs - entry.$1 >= hostAudioWindowUs);
+    final first = _firstHostUs;
+    if (first == null || _hostAudio.isEmpty) return null;
+    // Each stream.stats covers about the second before it (its measuredMs).
+    final span = (nowUs - first + 1000000).clamp(1000000, hostAudioWindowUs);
+    var sent = 0;
+    for (final entry in _hostAudio) {
+      sent += entry.$2;
+    }
+    return sent * 1000000 / span;
+  }
+
+  /// A stream.stats of the current stream (already filtered by the session),
+  /// received at [nowUs] (session µs) when the caller keeps the send rate.
+  void host(Map<String, dynamic> event, {int? nowUs}) {
+    if (nowUs != null) {
+      final send = event['audioSend'];
+      final sent = send is Map ? _count(send['sent']) ?? 0 : 0;
+      _firstHostUs ??= nowUs;
+      _hostAudio.add((nowUs, sent));
+      _hostAudio.removeWhere((entry) => nowUs - entry.$1 >= hostAudioWindowUs);
+    }
     final capture = event['audioCapture'];
     if (capture is Map) {
       final packets = _count(capture['packets']);
@@ -267,6 +301,8 @@ class AudioStatsTracker {
   /// times the real count). An engine that really restarted
   /// reports less than its baseline, which [_delta] already takes as a restart.
   void reset() {
+    _hostAudio.clear();
+    _firstHostUs = null;
     _capturePackets = _sent = _dropped = _queuePackets = 0;
     _captureSumUs = _queueSumUs = 0;
     _captureMaxUs = _queueMaxUs = null;

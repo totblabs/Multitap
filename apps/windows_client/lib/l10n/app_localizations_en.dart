@@ -11983,4 +11983,72 @@ class AppLocalizationsEn extends AppLocalizations {
   String usbUnreadableDevices(Object count) {
     return '$count USB device(s) could not be read. Unplug and plug in again.';
   }
+
+  @override
+  String get audioFromHost => 'Audio sent by Host';
+
+  @override
+  String audioPacketsPerSecond(Object count) {
+    return '$count/s';
+  }
+
+  @override
+  String get audioNoneSent => 'None sent';
+
+  @override
+  String get audioDecoder => 'Audio decoder';
+
+  @override
+  String get audioOpusBuiltIn => 'Opus (built in)';
+
+  @override
+  String get audioDecoderRetrying => 'None · retrying';
+
+  @override
+  String get audioDecoderPcmNext => 'None · PCM from next connection';
+
+  @override
+  String get audioFocus => 'Audio focus';
+
+  @override
+  String get audioFocusHeld => 'Held';
+
+  @override
+  String get audioFocusWaiting => 'Waiting (muted)';
+
+  @override
+  String get audioFocusPaused => 'Paused (muted)';
+
+  @override
+  String get audioFocusLost => 'Taken by another app (muted)';
+
+  @override
+  String get deviceVolume => 'Device volume';
+
+  @override
+  String deviceVolumeSilent(Object volume) {
+    return '$volume (silent)';
+  }
+
+  @override
+  String get audioPlayback => 'Audio playback';
+
+  @override
+  String audioPlayingUnderruns(Object count) {
+    return 'Playing · $count underruns';
+  }
+
+  @override
+  String audioSilentUnderruns(Object count) {
+    return 'Silent · $count underruns';
+  }
+
+  @override
+  String audioThreadErrorsSuffix(Object text, Object count) {
+    return '$text · $count errors';
+  }
+
+  @override
+  String get otherAppUsingSound =>
+      'Another app is using sound. It comes back when that app is done.';
 }

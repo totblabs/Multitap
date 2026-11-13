@@ -332,21 +332,23 @@ grep -qx 'source=saved' "$work/show-1.txt" || fail "access-cli does not see the 
 grep -qx "http=$origin,$loopback" "$work/show-1.txt" || fail "access-cli shows other addresses than the console saved"
 say "a save was applied by the server itself, in the same container"
 
-# 2. A new main address that cannot answer (no such name): the server starts
-#    with it, cannot reach it, puts the previous policy back and starts again.
+# 2. A new main address that cannot answer (no such name): the connection
+#    test tries it, gives no test id, and a save without one is refused, so
+#    nothing is written, nobody is disconnected and the server is not started.
 before=$(starts)
-save_access "c.primaryOrigin='https://smoke.invalid';c.https={...c.https,enabled:true,origin:'https://smoke.invalid'}"
-wait_access failed_rolled_back
+body=$(access | changed_config "c.primaryOrigin='https://smoke.invalid';c.https={...c.https,enabled:true,origin:'https://smoke.invalid'}")
+api POST /server-access/test "$body" >"$work/test-2.json"
+[ -z "$(json testId <"$work/test-2.json" 2>/dev/null)" ] || fail "an address that cannot answer passed the connection test"
+api POST /server-access/save "$body" >"$work/save-2.json"
+grep -Eq 'server_access_(test|confirmation)_required' "$work/save-2.json" || fail "a save of an address that cannot answer was not refused"
 access >"$work/access-2.json"
-[ "$(json applied.primaryOrigin <"$work/access-2.json")" = "$origin" ] || fail "the previous primary address is not back"
-[ "$(json applied.https.enabled <"$work/access-2.json")" = false ] || fail "the refused HTTPS address stayed"
-[ "$(starts)" -eq $((before + 2)) ] || fail "going back did not take exactly two starts"
-[ "$(compose ps -q broker)" = "$cid" ] || fail "the container was replaced while going back"
-[ "$(status_of "$loopback/api/v1/downloads")" = 200 ] || fail "the previous addresses do not answer after going back"
+[ "$(json applied.primaryOrigin <"$work/access-2.json")" = "$origin" ] || fail "the primary address changed although the save was refused"
+[ "$(starts)" -eq "$before" ] || fail "a refused save started the server again"
+[ "$(status_of "$loopback/api/v1/downloads")" = 200 ] || fail "the saved addresses stopped answering after a refused save"
 cli show >"$work/show-2.txt" || fail "access-cli show failed"
-grep -qx "http=$origin,$loopback" "$work/show-2.txt" || fail "access-cli shows other addresses after going back"
-grep -qx 'pending=' "$work/show-2.txt" || fail "a change is still pending after going back"
-say "a save whose address cannot answer was put back by the server"
+grep -qx "http=$origin,$loopback" "$work/show-2.txt" || fail "access-cli shows other addresses after a refused save"
+grep -qx 'pending=' "$work/show-2.txt" || fail "a refused save left a change pending"
+say "a save whose address cannot answer was refused before anything changed"
 
 # 3. The same policy from the command line: set replaces it (read at the next
 #    start), revert puts back what set replaced.

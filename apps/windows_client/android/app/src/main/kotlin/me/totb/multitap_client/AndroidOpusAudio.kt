@@ -159,10 +159,14 @@ internal data class PcmShape(val channels: Int, val float: Boolean)
  * A decoder that fails (an error, a refused input, none could be made) is
  * replaced at the next packet; one whose output format cannot be played
  * ([unusable]) is passed over for the next in trial order. After
- * [MAX_FAILURES] in a row without a decoded frame, or when the platform lists
- * no Opus decoder that was not passed over, [failed] is set and the stream
- * plays no sound (the video goes on; the app asks for PCM from the next
- * connection on, AndroidOpusDecoder.unusableThisRun).
+ * [MAX_FAILURES] in a row without a decoded frame the pipe rests ([failed]:
+ * no sound for now, the video goes on) and asks for a fresh decoder again at
+ * the first packet after [RETRY_NANOS] (doubling to [RETRY_MAX_NANOS]), for
+ * the life of the stream; the next stream starts fresh. Only when the
+ * platform lists no Opus decoder at all ([noDecoder] 1), or every one it lists
+ * was passed over for its output format ([noDecoder] 2), is the sound given up
+ * for the stream (the app asks for PCM from the next connection on,
+ * AndroidOpusDecoder.unusableThisRun).
  *
  * Worker thread only; [Codecs] makes and releases decoders elsewhere.
  */
@@ -196,9 +200,21 @@ internal class AndroidOpusPipe<C : Any>(
     private val pending = ArrayDeque<Pending>()
     private var failures = 0
     private val rejected = LinkedHashSet<String>()
+    // Resting after [MAX_FAILURES]: the next decoder is asked for at the first packet from [retryAt] on.
+    private var resting = false
+    private var retryAt = 0L
+    private var retryWait = RETRY_NANOS
 
-    /** No decoder could be made (or kept): this stream has no sound. */
-    var failed = false
+    /** No decoder plays now: resting after failures, or none at all ([noDecoder]). */
+    val failed get() = resting || noDecoder != 0
+    /**
+     * Why this stream has no Opus decoder for good (0: it has or may have one): 1 the platform lists
+     * none, 2 every one it lists was passed over (its output format cannot be played).
+     */
+    var noDecoder = 0
+        private set
+    /** Fresh decoders asked for after a rest (audio-path diagnostics). */
+    var retries = 0L
         private set
     /** The decoder in use ("" before one was handed over). */
     var name = ""
@@ -212,9 +228,18 @@ internal class AndroidOpusPipe<C : Any>(
         if (current == null && !failed && open()) stream.reset()
     }
 
+    /** Resting, and [now] is the time to ask for a fresh decoder again. */
+    private fun rested(now: Long): Boolean {
+        if (!resting || now - retryAt < 0) return false
+        resting = false; failures = 0; retries++
+        return true
+    }
+
     /** One audio-opus-v1 payload ([length] bytes at [offset], already valid), its PTS and arrival. */
     fun packet(bytes: ByteArray, offset: Int, length: Int, pts: Long, accepted: Long) {
-        if (failed) return
+        if (noDecoder != 0) return
+        if (resting && !rested(accepted)) return
+        lastSeen = accepted
         if (current == null) {
             if (!open()) return
             stream.reset()
@@ -230,8 +255,9 @@ internal class AndroidOpusPipe<C : Any>(
     fun opened(attempt: Attempt<C>, codec: C?, name: String, none: Boolean) {
         if (attempt !== current) { codec?.let(codecs::retire); return }
         if (codec == null) {
+            // MediaCodecList said so: none listed at all, or none left that was not passed over.
+            if (none) { close(); noDecoder = if (rejected.isEmpty()) 1 else 2; return }
             broken()
-            if (none) failed = true
             return
         }
         attempt.codec = codec
@@ -251,7 +277,7 @@ internal class AndroidOpusPipe<C : Any>(
         if (!current(attempt)) return
         // [emit] reports its own track failures; nothing escapes into the codec's callback.
         try {
-            if (size > 0 && stream.decoded(pts, pcm, size, emit)) failures = 0
+            if (size > 0 && stream.decoded(pts, pcm, size, emit)) { failures = 0; retryWait = RETRY_NANOS }
         } catch (_: Exception) {}
     }
 
@@ -295,10 +321,20 @@ internal class AndroidOpusPipe<C : Any>(
         return false
     }
 
-    /** The decoder failed: the next packet asks for a new one, up to [MAX_FAILURES] in a row. */
+    // The arrival of the newest packet (the pipe's clock: packets come every 10 ms while sound plays).
+    private var lastSeen = 0L
+
+    /**
+     * The decoder failed: the next packet asks for a new one, up to [MAX_FAILURES] in a row; then the pipe
+     * rests for [retryWait] (doubling up to [RETRY_MAX_NANOS] while fresh decoders keep failing).
+     */
     private fun broken() {
         close()
-        if (++failures > MAX_FAILURES) failed = true
+        if (++failures > MAX_FAILURES) {
+            resting = true
+            retryAt = lastSeen + retryWait
+            retryWait = minOf(retryWait * 2, RETRY_MAX_NANOS)
+        }
     }
 
     private fun queue(bytes: ByteArray, offset: Int, length: Int, pts: Long) {
@@ -327,8 +363,11 @@ internal class AndroidOpusPipe<C : Any>(
     }
 
     companion object {
-        /** Decoders replaced in a row without a decoded frame before the stream gives up its sound. */
+        /** Decoders replaced in a row without a decoded frame before the pipe rests. */
         const val MAX_FAILURES = 3
+        /** The first rest after [MAX_FAILURES]; each further one doubles, up to [RETRY_MAX_NANOS]. */
+        const val RETRY_NANOS = 2_000_000_000L
+        const val RETRY_MAX_NANOS = 30_000_000_000L
         /** 160 ms of packets waiting for the decoder or an input buffer at most. */
         const val MAX_PENDING = 16
     }
@@ -371,7 +410,10 @@ internal class AndroidOpusStream {
         const val RESTART = 2
         const val MAX_CONCEALED = 6
         const val LATE_WINDOW = 64
-        /** The Host stamps frames from its loopback reads, which a ~16 ms timer can delay. */
+        /**
+         * Older Hosts stamp frames from their loopback reads, which a ~16 ms timer can delay; current ones stamp
+         * them from the capture's position (audio_capture_control.hpp), exactly 10 ms apart. Kept for the older.
+         */
         const val PAUSE_US = 25_000L
         const val FADE_IN_SAMPLES = 120
         /** Packets in the decoder without their output yet; a working decoder holds one or two. */

@@ -128,24 +128,85 @@ class AndroidOpusPipeTest {
     }
 
     @Test
-    fun noDecoderIsAskedAgainAtTheNextPacketAndGivenUpAfterMaxFailures() {
+    fun failuresRestThenAFreshDecoderIsAskedForWithinTheStream() {
+        // MAX_FAILURES decoders in a row that could not be made: the pipe rests (no sound for now, nothing
+        // asked), then asks for a fresh decoder at the first packet after RETRY_NANOS. It never gives up for
+        // the stream, and the app does not switch to PCM for a failure (noDecoder stays 0).
         var sequence = 0
         repeat(AndroidOpusPipe.MAX_FAILURES + 1) {
             packet(sequence++)
             pipe.opened(codecs.asked.last(), null, "", none = false)
         }
         assertTrue(pipe.failed)
+        assertEquals(0, pipe.noDecoder)
         val asked = codecs.asked.size
-        packet(sequence)
-        assertEquals("a stream without sound asks no more", asked, codecs.asked.size)
+        val restsUntil = (sequence - 1) * AndroidOpus.FRAME_US * 1000 + AndroidOpusPipe.RETRY_NANOS
+        while ((sequence * AndroidOpus.FRAME_US * 1000) < restsUntil) packet(sequence++)
+        assertEquals("resting: nothing asked", asked, codecs.asked.size)
+        packet(sequence++)
+        assertEquals("after the rest a fresh decoder is asked for", asked + 1, codecs.asked.size)
+        assertEquals(1L, pipe.retries)
+        assertFalse(pipe.failed)
+        val fresh = codecs.asked.last()
+        pipe.opened(fresh, "opus", "c2.android.opus.decoder", none = false)
+        pipe.inputAvailable(fresh, 0)
+        assertEquals((sequence - 1) * AndroidOpus.FRAME_US, fed().last())
+        pipe.decoded(fresh, (sequence - 1) * AndroidOpus.FRAME_US, pcm, pcm.size)
+        assertEquals("the sound is back", (sequence - 1) * AndroidOpus.FRAME_US, played.last())
+    }
+
+    @Test
+    fun repeatedRestsDoubleUpToTheirLimitAndNeverEnd() {
+        var sequence = 0
+        var rests = 0
+        val waits = ArrayList<Long>()
+        while (rests < 6) {
+            packet(sequence++)
+            pipe.opened(codecs.asked.last(), null, "", none = false)
+            if (pipe.failed) {
+                rests++
+                val from = (sequence - 1) * AndroidOpus.FRAME_US * 1000
+                val asked = codecs.asked.size
+                while (codecs.asked.size == asked) packet(sequence++)
+                waits.add((sequence - 1) * AndroidOpus.FRAME_US * 1000 - from)
+            }
+        }
+        // Each rest at least its wait (2, 4, 8, 16, 30, 30 s), measured by packet arrival.
+        val expected = listOf(2L, 4L, 8L, 16L, 30L, 30L).map { it * 1_000_000_000L }
+        for ((index, wait) in waits.withIndex()) assertTrue("rest $index: $wait", wait >= expected[index] && wait < expected[index] + 20_000_000L)
+        assertEquals(0, pipe.noDecoder)
+    }
+
+    @Test
+    fun aDecodedFrameEndsTheBackoff() {
+        var sequence = 0
+        repeat(AndroidOpusPipe.MAX_FAILURES + 1) { packet(sequence++); pipe.opened(codecs.asked.last(), null, "", none = false) }
+        while (!(!pipe.failed && codecs.asked.last().codec == null && codecs.asked.size > AndroidOpusPipe.MAX_FAILURES + 1)) packet(sequence++)
+        val fresh = codecs.asked.last()
+        pipe.opened(fresh, "opus", "opus", none = false)
+        pipe.inputAvailable(fresh, 0)
+        pipe.decoded(fresh, (sequence - 1) * AndroidOpus.FRAME_US, pcm, pcm.size)
+        // It fails again later: the first rest is the short one again.
+        repeat(AndroidOpusPipe.MAX_FAILURES + 1) { pipe.codecFailed(codecs.asked.last()); packet(sequence++); }
+        pipe.codecFailed(codecs.asked.last())
+        assertTrue(pipe.failed)
+        val from = (sequence - 1) * AndroidOpus.FRAME_US * 1000
+        val asked = codecs.asked.size
+        while (codecs.asked.size == asked) packet(sequence++)
+        val wait = (sequence - 1) * AndroidOpus.FRAME_US * 1000 - from
+        // Measured from the last packet the pipe took in (the one before the rest began, 10 ms earlier).
+        assertTrue("wait $wait", wait in AndroidOpusPipe.RETRY_NANOS - 20_000_000L until AndroidOpusPipe.RETRY_NANOS + 20_000_000L)
     }
 
     @Test
     fun noOpusDecoderListedGivesUpAtOnce() {
+        // MediaCodecList lists none: the only case (with every one passed over) that ends Opus for good.
         pipe.prepare()
         pipe.opened(codecs.asked.single(), null, "", none = true)
         assertTrue(pipe.failed)
+        assertEquals(1, pipe.noDecoder)
         packet(0)
+        packet(100_000)
         assertEquals(1, codecs.asked.size)
     }
 
@@ -213,6 +274,7 @@ class AndroidOpusPipeTest {
         // The maker finds nothing outside the skip set: none.
         pipe.opened(codecs.asked.last(), null, "", none = true)
         assertTrue(pipe.failed)
+        assertEquals("every listed decoder was passed over", 2, pipe.noDecoder)
         val asked = codecs.asked.size
         packet(1)
         assertEquals(asked, codecs.asked.size)

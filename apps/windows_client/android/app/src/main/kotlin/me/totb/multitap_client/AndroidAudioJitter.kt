@@ -475,6 +475,16 @@ internal class AudioFeed(private val playout: AudioJitterBuffer, capacityFrames:
     /** Bytes the track has not taken yet (written first at the next look). */
     val pending get() = pendingBytes
 
+    /**
+     * Sound is due and the track should be playing as of the last look: it
+     * holds the level it waits for, or it did not take all it was given (a
+     * track with room takes it; one that is full plays). AudioStartWatch makes
+     * a track again when its play head then does not move. A track that takes
+     * nothing from its first write on holds nothing, so the level alone would
+     * never call it stuck.
+     */
+    val waitsToPlay get() = playing && (pendingBytes > 0 || (device > 0 && device >= startLevel))
+
     /** A new stream: nothing written yet. */
     fun newStream() { written = 0; trackWritten = 0; pendingBytes = 0 }
 
@@ -505,7 +515,12 @@ internal class AudioFeed(private val playout: AudioJitterBuffer, capacityFrames:
             val n = sink.write(scratch, pendingOffset, pendingBytes)
             if (n < 0) return n
             took(n); pendingOffset += n; pendingBytes -= n
-            if (pendingBytes > 0) return 0
+            if (pendingBytes > 0) {
+                // Nothing new is pulled until it is in, but the play head is still read (waitsToPlay).
+                head = sink.head()
+                device = audioDeviceFrames(trackWritten, head, capacity)
+                return 0
+            }
         }
         head = sink.head()
         device = audioDeviceFrames(trackWritten, head, capacity)
@@ -574,7 +589,8 @@ internal fun audioDeviceFrames(written: Long, head: Int, capacity: Int): Int {
 
 /**
  * A track that is written to and does not play: its play head stays the same
- * for [stuckNanos] while it holds the level it waits for ([full]).
+ * for [stuckNanos] while it should be playing ([full]: AudioFeed.waitsToPlay,
+ * it holds the level it waits for or did not take what it was given).
  * AndroidAudioOut then makes the track again with its buffer following the
  * target: whatever level the platform waits for, the new track reaches it.
  */
@@ -614,5 +630,64 @@ internal class RemakeLimiter(
         if (recent.isNotEmpty() && now - recent.last() < gapNanos) return false
         recent.addLast(now)
         return true
+    }
+}
+
+/**
+ * The audio thread's guard (AndroidAudioOut): a look that throws anything, a Java Error too, is
+ * counted and the thread goes on; the caller then gives up the track, which is made again within
+ * RemakeLimiter's rate. Before, an Error ended the thread without a trace (overruns rose, the level
+ * stood still, no sound for the rest of the stream).
+ */
+internal class AudioLoopGuard {
+    /** Looks that threw, this stream. */
+    var errors = 0L
+        private set
+    /** The last one: 0 none, 1 an Exception, 2 an Error (or another Throwable). */
+    var lastKind = 0
+        private set
+
+    /** One look at [now]; false when it threw. */
+    fun look(now: Long, tick: (Long) -> Unit): Boolean = try {
+        tick(now); true
+    } catch (failure: Throwable) {
+        errors++; lastKind = if (failure is Exception) 1 else 2
+        false
+    }
+
+    fun reset() { errors = 0; lastKind = 0 }
+}
+
+/**
+ * The audio thread itself: one that ended while the stream still wants sound (anything outside the
+ * guarded look) is started again, at most as often as [limiter] allows.
+ */
+internal class AudioThreadKeeper(private val limiter: RemakeLimiter = RemakeLimiter()) {
+    /** Threads started again this stream. */
+    var restarts = 0L
+        private set
+
+    /** [running]: the stream wants the thread; [alive]: it runs. True when it is to be started again now. */
+    fun restart(running: Boolean, alive: Boolean, now: Long): Boolean {
+        if (!running || alive || !limiter.allow(now)) return false
+        restarts++
+        return true
+    }
+
+    fun reset() { restarts = 0; limiter.reset() }
+}
+
+/**
+ * Whether the VM's sound is to be reported as playing at [now] (AndroidAudioOut's onSound, which asks
+ * audio focus again where it is not held): when it starts, then once every [periodNanos] while it goes on.
+ */
+internal class SoundNotice(private val periodNanos: Long = 1_000_000_000L) {
+    private var last = 0L
+    private var noted = false
+
+    fun due(now: Long, started: Boolean, playing: Boolean): Boolean {
+        if (started || (playing && (!noted || now - last >= periodNanos))) { last = now; noted = true; return true }
+        if (!playing) noted = false
+        return false
     }
 }

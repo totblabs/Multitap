@@ -11149,4 +11149,71 @@ class AppLocalizationsKo extends AppLocalizations {
   String usbUnreadableDevices(Object count) {
     return '장치 정보를 읽지 못한 USB 장치가 $count개 있어요. 빼고 다시 꽂아 보세요.';
   }
+
+  @override
+  String get audioFromHost => 'Host가 보낸 오디오';
+
+  @override
+  String audioPacketsPerSecond(Object count) {
+    return '초당 $count개';
+  }
+
+  @override
+  String get audioNoneSent => '보내지 않음';
+
+  @override
+  String get audioDecoder => '오디오 디코더';
+
+  @override
+  String get audioOpusBuiltIn => 'Opus (기기 기본)';
+
+  @override
+  String get audioDecoderRetrying => '없음 · 다시 시도 중';
+
+  @override
+  String get audioDecoderPcmNext => '없음 · 다음 연결은 PCM';
+
+  @override
+  String get audioFocus => '오디오 포커스';
+
+  @override
+  String get audioFocusHeld => '받음';
+
+  @override
+  String get audioFocusWaiting => '기다리는 중 (음소거)';
+
+  @override
+  String get audioFocusPaused => '잠시 넘겨줌 (음소거)';
+
+  @override
+  String get audioFocusLost => '다른 앱이 가져감 (음소거)';
+
+  @override
+  String get deviceVolume => '기기 음량';
+
+  @override
+  String deviceVolumeSilent(Object volume) {
+    return '$volume (소리 꺼짐)';
+  }
+
+  @override
+  String get audioPlayback => '오디오 재생';
+
+  @override
+  String audioPlayingUnderruns(Object count) {
+    return '재생 중 · 끊김 $count회';
+  }
+
+  @override
+  String audioSilentUnderruns(Object count) {
+    return '조용함 · 끊김 $count회';
+  }
+
+  @override
+  String audioThreadErrorsSuffix(Object text, Object count) {
+    return '$text · 오류 $count회';
+  }
+
+  @override
+  String get otherAppUsingSound => '다른 앱이 소리를 쓰고 있어요. 그 앱이 끝나면 다시 나요.';
 }

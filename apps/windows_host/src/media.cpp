@@ -1,5 +1,6 @@
 #include "media.hpp"
 #include "audio_stats.hpp"
+#include "audio_capture_control.hpp"
 #include "opus_audio.hpp"
 #include "gpu_h264.hpp"
 
@@ -1113,73 +1114,228 @@ std::vector<uint8_t> mediaPacket(uint8_t kind, uint64_t ptsUs, const std::vector
   std::vector<uint8_t> packet(12 + payload.size()); packet[0] = kind; packet[1] = uint8_t((key ? 1 : 0) | (recovery ? 2 : 0));
   for (int i = 0; i < 8; i++) packet[4 + i] = uint8_t(ptsUs >> (i * 8)); std::memcpy(packet.data() + 12, payload.data(), payload.size()); return packet;
 }
-struct Loopback::Impl {
-  Com<IAudioClient> client; Com<IAudioCaptureClient> capture; WAVEFORMATEX* format = nullptr; bool ready = false, floating = false;
-  ~Impl() { if (client && ready) client->Stop(); if (format) CoTaskMemFree(format); }
+namespace {
+// The default render endpoint's changes (eRender, eConsole: the role Loopback opens). Windows calls it on
+// one of its own threads; it only sets a flag and wakes the capture loop. Reference counted, as COM wants.
+class DefaultRenderWatch final : public IMMNotificationClient {
+ public:
+  DefaultRenderWatch() : wake_(CreateEventW(nullptr, FALSE, FALSE, nullptr)) {}
+  std::atomic<bool> changed{false};
+  HANDLE wake() const { return wake_; }
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+  ULONG STDMETHODCALLTYPE Release() override { const ULONG left = --references_; if (!left) delete this; return left; }
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
+    if (!out) return E_POINTER;
+    if (iid == __uuidof(IUnknown) || iid == __uuidof(IMMNotificationClient)) { *out = static_cast<IMMNotificationClient*>(this); AddRef(); return S_OK; }
+    *out = nullptr; return E_NOINTERFACE;
+  }
+  HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR) override {
+    if (flow == eRender && role == eConsole) { changed = true; if (wake_) SetEvent(wake_); }
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
+  HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return S_OK; }
+  HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { return S_OK; }
+  HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
+ private:
+  ~DefaultRenderWatch() { if (wake_) CloseHandle(wake_); }
+  std::atomic<ULONG> references_{1};
+  HANDLE wake_;
 };
-Loopback::Loopback() : impl_(std::make_unique<Impl>()) {
-  try {
-    Com<IMMDeviceEnumerator> enumerator; check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator)), "Audio device enumerator");
-    Com<IMMDevice> device; check(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device), "Loopback audio endpoint");
-    check(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(impl_->client.GetAddressOf())), "Activate loopback audio");
-    check(impl_->client->GetMixFormat(&impl_->format), "Audio mix format"); const auto* format = impl_->format;
-    if (!format->nChannels || format->nChannels > 8 || format->nSamplesPerSec < 8000 || format->nSamplesPerSec > 192000) return;
+}
+// One opened loopback client of the default render endpoint (eRender, eConsole). Opened again after
+// a failure or a default device change (audio_capture_control.hpp); never throws.
+struct Loopback::Impl {
+  Com<IAudioClient> client; Com<IAudioCaptureClient> capture; WAVEFORMATEX* format = nullptr;
+  bool ready = false, floating = false, events = false, started = false;
+  HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  AudioCaptureStep failedStep = AudioCaptureStep::none; HRESULT failedResult = S_OK;
+  ~Impl() { close(); if (event) CloseHandle(event); }
+  void close() {
+    if (client && started) client->Stop();
+    started = false; ready = false; events = false; capture.Reset(); client.Reset();
+    if (format) { CoTaskMemFree(format); format = nullptr; }
+  }
+  bool fail(AudioCaptureStep step, HRESULT result) { failedStep = step; failedResult = result; close(); return false; }
+  AudioCaptureSample sample() const {
+    if (floating) return AudioCaptureSample::float32;
+    return format->wBitsPerSample == 16 ? AudioCaptureSample::pcm16 : format->wBitsPerSample == 24 ? AudioCaptureSample::pcm24 : AudioCaptureSample::pcm32;
+  }
+  bool open() {
+    close(); failedStep = AudioCaptureStep::none; failedResult = S_OK;
+    Com<IMMDeviceEnumerator> enumerator;
+    HRESULT result = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
+    if (FAILED(result)) return fail(AudioCaptureStep::enumerator, result);
+    Com<IMMDevice> device; result = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+    if (FAILED(result)) return fail(AudioCaptureStep::endpoint, result);
+    result = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(client.GetAddressOf()));
+    if (FAILED(result)) return fail(AudioCaptureStep::activate, result);
+    result = client->GetMixFormat(&format);
+    if (FAILED(result)) return fail(AudioCaptureStep::mixFormat, result);
+    if (!format->nChannels || format->nChannels > 8 || format->nSamplesPerSec < 8000 || format->nSamplesPerSec > 192000) return fail(AudioCaptureStep::formatUnsupported, S_OK);
     GUID subtype{};
     if (format->wFormatTag == WAVE_FORMAT_EXTENSIBLE && format->cbSize >= 22) subtype = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(format)->SubFormat;
-    impl_->floating = format->wFormatTag == WAVE_FORMAT_IEEE_FLOAT || subtype == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+    floating = format->wFormatTag == WAVE_FORMAT_IEEE_FLOAT || subtype == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
     const bool pcm = format->wFormatTag == WAVE_FORMAT_PCM || subtype == KSDATAFORMAT_SUBTYPE_PCM;
-    if (!(impl_->floating && format->wBitsPerSample == 32) && !(pcm && (format->wBitsPerSample == 16 || format->wBitsPerSample == 24 || format->wBitsPerSample == 32))) return;
-    check(impl_->client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 1000000, 0, format, nullptr), "Initialize loopback capture");
-    check(impl_->client->GetService(IID_PPV_ARGS(&impl_->capture)), "Loopback capture service"); impl_->ready = true;
-  } catch (...) { impl_->ready = false; }
-}
+    if (!(floating && format->wBitsPerSample == 32) && !(pcm && (format->wBitsPerSample == 16 || format->wBitsPerSample == 24 || format->wBitsPerSample == 32))) return fail(AudioCaptureStep::formatUnsupported, S_OK);
+    // Event-driven where Windows supports it for loopback (Windows 10 1703 and later; earlier ones never
+    // signal it, which the loop finds out and polls instead). A client that refuses it is made again without.
+    if (event) {
+      result = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 1000000, 0, format, nullptr);
+      if (SUCCEEDED(result)) result = client->SetEventHandle(event);
+      events = SUCCEEDED(result);
+    }
+    if (!events) {
+      client.Reset();
+      result = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(client.GetAddressOf()));
+      if (FAILED(result)) return fail(AudioCaptureStep::activate, result);
+      result = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 1000000, 0, format, nullptr);
+      if (FAILED(result)) return fail(AudioCaptureStep::initialize, result);
+    }
+    result = client->GetService(IID_PPV_ARGS(&capture));
+    if (FAILED(result)) return fail(AudioCaptureStep::service, result);
+    ready = true; return true;
+  }
+};
+Loopback::Loopback() : impl_(std::make_unique<Impl>()) { impl_->open(); }
 Loopback::~Loopback() = default;
 bool Loopback::available() const { return impl_->ready; }
-void Loopback::run(std::atomic<bool>& stop, Clock::time_point start, const std::function<void(std::vector<uint8_t>)>& output, AudioCaptureWindow* window, OpusAudioEncoder* opus) {
+uint32_t Loopback::failureRecord() const { return impl_->ready || impl_->failedStep == AudioCaptureStep::none ? 0 : audioCaptureFailed(impl_->failedStep, impl_->failedResult); }
+void Loopback::run(std::atomic<bool>& stop, Clock::time_point start, const std::function<void(std::vector<uint8_t>)>& output, AudioCaptureWindow* window, OpusAudioEncoder* opus, const std::function<void(uint32_t)>& record) {
   if (!available()) return;
-  check(impl_->client->Start(), "Start loopback capture");
-  const auto* format = impl_->format; const int channels = format->nChannels, bytesPerSample = format->wBitsPerSample / 8;
-  double next = 0; uint64_t sourceFrame = 0; float previousLeft = 0, previousRight = 0;
+  Impl& impl = *impl_;
+  AudioCaptureRestart restart; AudioPtsClock pts;
+  const auto journal = [&](uint32_t value) { if (record && restart.record(Clock::now())) { try { record(value); } catch (...) {} } };
+  // The default endpoint's changes for the life of this run (a missing watch only loses the prompt reopen).
+  DefaultRenderWatch* watch = new DefaultRenderWatch();
+  Com<IMMDeviceEnumerator> notifier; bool registered = false;
+  {
+    HRESULT result = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&notifier));
+    if (SUCCEEDED(result)) result = notifier->RegisterEndpointNotificationCallback(watch);
+    registered = SUCCEEDED(result);
+    if (!registered) journal(audioCaptureFailed(AudioCaptureStep::notification, result));
+  }
+  HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, 0x00000002 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
+  if (!timer) timer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+  struct Release {
+    Com<IMMDeviceEnumerator>& notifier; DefaultRenderWatch* watch; bool registered; HANDLE timer;
+    ~Release() { if (registered) notifier->UnregisterEndpointNotificationCallback(watch); watch->Release(); if (timer) CloseHandle(timer); }
+  } release{notifier, watch, registered, timer};
+  LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
+
+  // The open client's shape and the resampler to 48 kHz stereo s16 (reset at each open).
+  int channels = 0, bytesPerSample = 0, blockAlign = 0; uint32_t rate = 48000; bool floating = false;
+  double next = 0, step = 1; uint64_t sourceFrame = 0; float previousLeft = 0, previousRight = 0;
+  uint32_t eventsSeen = 0; bool discontinuity = true;
   const auto sendFrame = [&output](uint64_t ptsUs, std::vector<uint8_t> payload) { output(mediaPacket(2, ptsUs, payload)); };
   // audio-opus-v1: the loopback sends nothing while the VM is silent, so the
   // part of a frame it left behind goes once a packet period has passed without more.
   auto lastPacket = Clock::now();
-  const double step = double(format->nSamplesPerSec) / 48000.0;
-  auto value = [&](const BYTE* pointer) {
-    if (impl_->floating) { float f = 0; std::memcpy(&f, pointer, 4); return std::isfinite(f) ? std::clamp(f, -1.0f, 1.0f) : 0.0f; }
+  const auto value = [&](const BYTE* pointer) {
+    if (floating) { float f = 0; std::memcpy(&f, pointer, 4); return std::isfinite(f) ? std::clamp(f, -1.0f, 1.0f) : 0.0f; }
     int32_t n = 0;
     if (bytesPerSample == 2) { int16_t s = 0; std::memcpy(&s, pointer, 2); return float(s) / 32768.0f; }
     if (bytesPerSample == 3) { n = int32_t(pointer[0]) | (int32_t(pointer[1]) << 8) | (int32_t(pointer[2]) << 16); if (n & 0x800000) n |= int32_t(0xff000000); return float(n) / 8388608.0f; }
     std::memcpy(&n, pointer, 4); return float(double(n) / 2147483648.0);
   };
+  const auto flushHeld = [&] { if (opus && opus->held()) { try { opus->flush(sendFrame); } catch (...) {} } };
+  // The client went (an error, a changed default device): what was held leaves, the client closes, and
+  // the next open waits for the backoff.
+  const auto broke = [&](AudioCaptureStep where, HRESULT result) {
+    journal(audioCaptureFailed(where, result));
+    flushHeld(); impl.close(); restart.failed(Clock::now()); pts.reset(); discontinuity = true;
+  };
+  const auto startCapture = [&]() -> bool {
+    const HRESULT result = impl.client->Start();
+    if (FAILED(result)) { broke(AudioCaptureStep::start, result); return false; }
+    impl.started = true; restart.opened(Clock::now());
+    const auto* format = impl.format;
+    channels = format->nChannels; bytesPerSample = format->wBitsPerSample / 8; blockAlign = format->nBlockAlign; rate = format->nSamplesPerSec; floating = impl.floating;
+    step = double(rate) / 48000.0; next = 0; sourceFrame = 0; previousLeft = previousRight = 0; eventsSeen = 0; discontinuity = true;
+    journal(audioCaptureStarted(rate, uint32_t(channels), impl.events, impl.sample()));
+    return true;
+  };
+  // Sleeps at most `period`: the capture's event, a default device change or the timer ends it.
+  // True when the capture's own event did.
+  const auto wait = [&](std::chrono::microseconds period, bool capture) {
+    HANDLE handles[3]; DWORD count = 0;
+    const bool withEvent = capture && impl.events && impl.event;
+    if (withEvent) handles[count++] = impl.event;
+    if (watch->wake()) handles[count++] = watch->wake();
+    DWORD timeout = DWORD(period.count() / 1000 + 1);
+    if (timer) { LARGE_INTEGER due{}; due.QuadPart = -std::max<LONGLONG>(1, LONGLONG(period.count()) * 10); if (SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) { handles[count++] = timer; timeout = 1000; } }
+    if (!count) { std::this_thread::sleep_for(period); return false; }
+    const DWORD result = WaitForMultipleObjects(count, handles, FALSE, timeout);
+    if (timer) CancelWaitableTimer(timer);
+    return withEvent && result == WAIT_OBJECT_0;
+  };
+
+  (void)startCapture();
   while (!stop) {
-    UINT32 pending = 0; check(impl_->capture->GetNextPacketSize(&pending), "Read audio packet size");
+    if (watch->changed.exchange(false)) {
+      journal(audioCaptureDeviceChanged(impl.ready));
+      flushHeld(); impl.close(); restart.changed(Clock::now()); pts.reset(); discontinuity = true;
+    }
+    if (!impl.ready) {
+      const auto now = Clock::now();
+      if (now < restart.due()) { wait(std::min<std::chrono::microseconds>(std::chrono::duration_cast<std::chrono::microseconds>(restart.due() - now) + std::chrono::microseconds(1), std::chrono::milliseconds(10)), false); continue; }
+      journal(audioCaptureRestarting(restart.attempt()));
+      if (!impl.open()) { journal(audioCaptureFailed(impl.failedStep, impl.failedResult)); restart.failed(Clock::now()); continue; }
+      if (!startCapture()) continue;
+    }
+    const bool byEvent = wait(audioWakePeriod(eventsSeen >= audioEventsProven), true);
+    if (stop || watch->changed.load()) continue;
+    UINT32 pending = 0; HRESULT result = impl.capture->GetNextPacketSize(&pending);
+    if (FAILED(result)) { broke(AudioCaptureStep::packetSize, result); continue; }
     if (!pending) {
-      if (opus && opus->held() && Clock::now() - lastPacket > std::chrono::milliseconds(20)) opus->flush(sendFrame);
-      std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue;
+      if (opus && opus->held() && Clock::now() - lastPacket > std::chrono::milliseconds(20)) flushHeld();
+      continue;
     }
-    lastPacket = Clock::now();
-    BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0; UINT64 position = 0;
-    check(impl_->capture->GetBuffer(&data, &frames, &flags, nullptr, &position), "Read loopback audio");
-    if (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) position = 0;
-    std::vector<uint8_t> pcm; pcm.reserve(size_t(frames) * 4 * 48000 / format->nSamplesPerSec + 16);
-    for (UINT32 i = 0; i < frames; i++, sourceFrame++) {
-      float left = 0, right = 0;
-      if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT)) { const BYTE* sample = data + size_t(i) * format->nBlockAlign; left = value(sample); right = channels > 1 ? value(sample + bytesPerSample) : left; if (channels > 2) { const float center = value(sample + 2 * bytesPerSample) * 0.7071f; left += center; right += center; } }
-      while (next <= double(sourceFrame)) {
-        const float fraction = sourceFrame == 0 ? 1.0f : float(std::clamp(next - double(sourceFrame - 1), 0.0, 1.0));
-        const int16_t l = int16_t(std::clamp(previousLeft + (left - previousLeft) * fraction, -1.0f, 1.0f) * 32767);
-        const int16_t r = int16_t(std::clamp(previousRight + (right - previousRight) * fraction, -1.0f, 1.0f) * 32767);
-        pcm.push_back(uint8_t(l)); pcm.push_back(uint8_t(uint16_t(l) >> 8)); pcm.push_back(uint8_t(r)); pcm.push_back(uint8_t(uint16_t(r) >> 8)); next += step;
+    if (byEvent && eventsSeen < audioEventsProven) ++eventsSeen;
+    bool failed = false;
+    while (pending && !stop) {
+      lastPacket = Clock::now();
+      BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0; UINT64 position = 0;
+      result = impl.capture->GetBuffer(&data, &frames, &flags, nullptr, &position);
+      if (FAILED(result)) { broke(AudioCaptureStep::buffer, result); failed = true; break; }
+      if (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) position = 0;
+      if (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) discontinuity = true;
+      try {
+        std::vector<uint8_t> pcm; pcm.reserve(size_t(frames) * 4 * 48000 / rate + 16);
+        for (UINT32 i = 0; i < frames; i++, sourceFrame++) {
+          float left = 0, right = 0;
+          if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT)) { const BYTE* sample = data + size_t(i) * blockAlign; left = value(sample); right = channels > 1 ? value(sample + bytesPerSample) : left; if (channels > 2) { const float center = value(sample + 2 * bytesPerSample) * 0.7071f; left += center; right += center; } }
+          while (next <= double(sourceFrame)) {
+            const float fraction = sourceFrame == 0 ? 1.0f : float(std::clamp(next - double(sourceFrame - 1), 0.0, 1.0));
+            const int16_t l = int16_t(std::clamp(previousLeft + (left - previousLeft) * fraction, -1.0f, 1.0f) * 32767);
+            const int16_t r = int16_t(std::clamp(previousRight + (right - previousRight) * fraction, -1.0f, 1.0f) * 32767);
+            pcm.push_back(uint8_t(l)); pcm.push_back(uint8_t(uint16_t(l) >> 8)); pcm.push_back(uint8_t(r)); pcm.push_back(uint8_t(uint16_t(r) >> 8)); next += step;
+          }
+          previousLeft = left; previousRight = right;
+        }
+        result = impl.capture->ReleaseBuffer(frames);
+        if (FAILED(result)) { broke(AudioCaptureStep::release, result); failed = true; break; }
+        if (!pcm.empty()) {
+          // The packet's first frame on the stream clock: from the QPC time WASAPI gave it, else the read
+          // time minus its length. AudioPtsClock keeps consecutive packets exactly their length apart.
+          LARGE_INTEGER counter{}; QueryPerformanceCounter(&counter);
+          const int64_t latency = audioCaptureLatencyUs(counter.QuadPart, frequency.QuadPart, position);
+          const int64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count();
+          const int64_t measured = latency >= 0 ? nowUs - latency : nowUs - int64_t(frames) * 1000000 / int64_t(rate);
+          const uint64_t ptsUs = uint64_t(pts.stamp(measured, discontinuity)); discontinuity = false;
+          pts.advance(pcm.size() / 4);
+          if (opus) opus->push(ptsUs, pcm.data(), pcm.size(), sendFrame); else output(mediaPacket(2, ptsUs, pcm));
+          if (window && latency >= 0) window->add(uint64_t(latency));
+        }
+      } catch (...) {
+        broke(AudioCaptureStep::output, E_UNEXPECTED); failed = true; break;
       }
-      previousLeft = left; previousRight = right;
+      result = impl.capture->GetNextPacketSize(&pending);
+      if (FAILED(result)) { broke(AudioCaptureStep::packetSize, result); failed = true; break; }
     }
-    impl_->capture->ReleaseBuffer(frames);
-    if (!pcm.empty()) { const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count(); const uint64_t duration = uint64_t(pcm.size() / 4) * 1000000 / 48000; const uint64_t pts = elapsed > LONGLONG(duration) ? uint64_t(elapsed) - duration : 0;
-      if (opus) opus->push(pts, pcm.data(), pcm.size(), sendFrame); else output(mediaPacket(2, pts, pcm));
-      if (window) { LARGE_INTEGER counter{}, frequency{}; QueryPerformanceCounter(&counter); QueryPerformanceFrequency(&frequency); if (const auto latency = audioCaptureLatencyUs(counter.QuadPart, frequency.QuadPart, position); latency >= 0) window->add(uint64_t(latency)); } }
+    (void)failed;
   }
-  impl_->client->Stop();
+  impl.close();
 }
 int encodeSelfTest(const std::wstring& path, bool captureDesktop, int frames) {
   Runtime runtime; const int width = 1280, height = 720, fps = 60;

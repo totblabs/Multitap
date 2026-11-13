@@ -8176,5 +8176,64 @@
     "placeholders": {
       "count": {}
     }
-  }
+  },
+  "audioFromHost": "Host가 보낸 오디오",
+  "@audioFromHost": {},
+  "audioPacketsPerSecond": "초당 {count}개",
+  "@audioPacketsPerSecond": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "audioNoneSent": "보내지 않음",
+  "@audioNoneSent": {},
+  "audioDecoder": "오디오 디코더",
+  "@audioDecoder": {},
+  "audioOpusBuiltIn": "Opus (기기 기본)",
+  "@audioOpusBuiltIn": {},
+  "audioDecoderRetrying": "없음 · 다시 시도 중",
+  "@audioDecoderRetrying": {},
+  "audioDecoderPcmNext": "없음 · 다음 연결은 PCM",
+  "@audioDecoderPcmNext": {},
+  "audioFocus": "오디오 포커스",
+  "@audioFocus": {},
+  "audioFocusHeld": "받음",
+  "@audioFocusHeld": {},
+  "audioFocusWaiting": "기다리는 중 (음소거)",
+  "@audioFocusWaiting": {},
+  "audioFocusPaused": "잠시 넘겨줌 (음소거)",
+  "@audioFocusPaused": {},
+  "audioFocusLost": "다른 앱이 가져감 (음소거)",
+  "@audioFocusLost": {},
+  "deviceVolume": "기기 음량",
+  "@deviceVolume": {},
+  "deviceVolumeSilent": "{volume} (소리 꺼짐)",
+  "@deviceVolumeSilent": {
+    "placeholders": {
+      "volume": {}
+    }
+  },
+  "audioPlayback": "오디오 재생",
+  "@audioPlayback": {},
+  "audioPlayingUnderruns": "재생 중 · 끊김 {count}회",
+  "@audioPlayingUnderruns": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "audioSilentUnderruns": "조용함 · 끊김 {count}회",
+  "@audioSilentUnderruns": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "audioThreadErrorsSuffix": "{text} · 오류 {count}회",
+  "@audioThreadErrorsSuffix": {
+    "placeholders": {
+      "text": {},
+      "count": {}
+    }
+  },
+  "otherAppUsingSound": "다른 앱이 소리를 쓰고 있어요. 그 앱이 끝나면 다시 나요.",
+  "@otherAppUsingSound": {}
 }

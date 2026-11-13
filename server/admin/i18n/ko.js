@@ -1287,6 +1287,7 @@ export default {
   "labels.hostActions.282": "GPU 재준비",
   "labels.hostActions.285": "Host 제거 정리",
   "labels.hostActions.291": "서버 기능 확인",
+  "labels.hostActions.297": "소리 캡처",
   "labels.33": "설정 읽음",
   "labels.34": "서버 연결",
   "labels.35": "Windows 로그인",

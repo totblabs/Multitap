@@ -1042,6 +1042,31 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     }
   }
 
+  /// Audio focus asked for again and not had (AndroidAudioFocus.blocked: a
+  /// call or another app holds it, the sound is muted): said once on screen
+  /// per such time, and not again within a minute.
+  bool _audioBlockedShown = false;
+  DateTime? _audioBlockedShownAt;
+  void _noticeAudioBlocked(RemoteSession? session) {
+    final blocked =
+        session != null &&
+        !session.closed &&
+        _media?.diagnostics['audioFocusBlocked'] == true;
+    if (!blocked) {
+      _audioBlockedShown = false;
+      return;
+    }
+    if (_audioBlockedShown) return;
+    _audioBlockedShown = true;
+    final now = DateTime.now();
+    final last = _audioBlockedShownAt;
+    if (last != null && now.difference(last) < const Duration(minutes: 1)) {
+      return;
+    }
+    _audioBlockedShownAt = now;
+    _notice(l10n.otherAppUsingSound, duration: const Duration(seconds: 6));
+  }
+
   void _changed() {
     final authentication = _session?.diagnosticCode;
     if (const {
@@ -1054,6 +1079,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     }
     if (!mounted) return;
     final session = _session;
+    _noticeAudioBlocked(session);
     if (session?.resizing == true && _pen.active) {
       _penPointerEpoch++;
       _pen.reset();
@@ -4033,6 +4059,10 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
         value == null ? l10n.notMeasured : '${value.toStringAsFixed(0)} ms';
     String fps(double? value) =>
         value == null ? l10n.notMeasured : '${value.toStringAsFixed(1)} fps';
+    final audioRows = androidAudioMetrics(
+      diagnostics,
+      hostPerSecond: session.hostAudioPerSecond,
+    );
     return [
       SessionMetricSection(l10n.streaming, [
         SessionMetric(l10n.technology, '${StreamOptions.engineName} · H.264'),
@@ -4111,6 +4141,11 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
         ],
         note: l10n.inputNewFrameDecodedRuns,
       ),
+      // The sound's way on the phone: what decides a "no sound" report (android_engine_stats.dart).
+      if (audioRows.isNotEmpty)
+        SessionMetricSection(l10n.audio, [
+          for (final (label, value) in audioRows) SessionMetric(label, value),
+        ]),
       // What the native engine measured on this device (android_engine_stats.dart).
       if (diagnostics != null)
         SessionMetricSection(l10n.processingDevice, [

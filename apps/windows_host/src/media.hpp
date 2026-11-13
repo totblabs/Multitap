@@ -458,9 +458,14 @@ class Loopback {
   Loopback();
   ~Loopback();
   bool available() const;
+  // Why the endpoint did not open (an audio_capture_control.hpp failed record), 0 when it did.
+  uint32_t failureRecord() const;
+  // Until `stop`: a capture that fails or whose default render endpoint changes is opened again
+  // (audio_capture_control.hpp), so the audio never ends for good before the stream does.
   // `window` (optional): each packet's capture -> handed-on time (audio_stats.hpp).
   // `opus` (optional, audio-opus-v1): packets are 10 ms Opus frames instead of PCM.
-  void run(std::atomic<bool>& stop, Clock::time_point start, const std::function<void(std::vector<uint8_t>)>& output, AudioCaptureWindow* window = nullptr, OpusAudioEncoder* opus = nullptr);
+  // `record` (optional): each fixed audio_capture_control.hpp record (started, failed, restarting, device changed).
+  void run(std::atomic<bool>& stop, Clock::time_point start, const std::function<void(std::vector<uint8_t>)>& output, AudioCaptureWindow* window = nullptr, OpusAudioEncoder* opus = nullptr, const std::function<void(uint32_t)>& record = {});
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

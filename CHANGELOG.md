@@ -2,7 +2,18 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.3 carry the Windows app, the Android app and the Host at the same number. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.4 carry the Windows app, the Android app and the Host at the same number. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.4](https://github.com/totblabs/Multitap/releases/tag/v1.1.4)
+
+### Sound
+
+- **Host**: sound capture recovers from device errors and follows a change of the default output device, instead of staying silent until the next connection. Sound is sent evenly every 10 ms. Start, failure and restart of the capture appear in the Host's log.
+- **Android**: sound comes back after another app or a call has taken it, in every state (paused, waiting, lost, split screen). A failing Opus decoder is tried again instead of being given up for the whole run. Connection statistics have an audio section: what the Host sends, the decoder, audio focus, media volume and playback.
+
+### Admin console
+
+- A page left open during a server update switches to the new version within 30 seconds.
 
 ## [1.1.3](https://github.com/totblabs/Multitap/releases/tag/v1.1.3)
 

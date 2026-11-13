@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.3 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.4 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -646,6 +646,11 @@ target_compile_options(MultitapHostUdpMediaLoopbackTest PRIVATE /W4 /WX /permiss
 add_executable(MultitapHostOpusAudioTest EXCLUDE_FROM_ALL src/opus_audio_test.cpp)
 target_link_libraries(MultitapHostOpusAudioTest PRIVATE host_engine winhttp crypt32)
 target_compile_options(MultitapHostOpusAudioTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# The stream's sound capture (audio_capture_control.hpp): its journal record, the restart backoff, the wake
+# cadence and the PTS from the capture's position; then this PC's real loopback for a moment, where it has one.
+add_executable(MultitapHostAudioCaptureControlTest EXCLUDE_FROM_ALL src/audio_capture_control_test.cpp)
+target_link_libraries(MultitapHostAudioCaptureControlTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
+target_compile_options(MultitapHostAudioCaptureControlTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostQemuConsoleTest EXCLUDE_FROM_ALL src/qemu_console_test.cpp)
 # ime-state-v1: the console session's 한/영 mode for the browser Console (memory only).
 add_executable(MultitapHostImeStateTest EXCLUDE_FROM_ALL src/ime_state_test.cpp)

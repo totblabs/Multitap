@@ -1286,6 +1286,7 @@ export default {
   "labels.hostActions.282": "GPU re-preparation",
   "labels.hostActions.285": "Host removal cleanup",
   "labels.hostActions.291": "Server feature check",
+  "labels.hostActions.297": "Sound capture",
   "labels.33": "Settings read",
   "labels.34": "Server connection",
   "labels.35": "Windows sign-in",

@@ -2,6 +2,7 @@ package me.totb.multitap_client
 
 import android.content.Context
 import android.hardware.display.DisplayManager
+import android.media.AudioManager
 import android.media.AudioTimestamp
 import android.media.AudioTrack
 import android.media.MediaCodec
@@ -166,6 +167,10 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     private var concealedBefore = 0L
     // [playout]'s dropped frames (overrun cuts and drift trims) when this stream started: audioDroppedFrames is per stream.
     private var droppedBefore = 0L
+    // [playout]'s underruns when this stream started: audioStreamUnderruns is per stream (the 연결 통계 dialog).
+    private var underrunsBefore = 0L
+    // The device's media volume, for the 연결 통계 dialog (a phone at 0 plays nothing).
+    private val audioManager = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager?
     private var width = 0
     private var height = 0
     private var targetFps = 60
@@ -222,7 +227,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     fun visible(shown: Boolean) {
         trackState?.lanes?.forEach { it.decoder.visible(shown) }
         wifi?.visible(shown)
-        if (shown) audioFocus.foreground()
+        audioFocus.visible(shown)
         if (hidden == !shown) return
         hidden = !shown
         worker.post {
@@ -620,6 +625,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             error = 0; decodeCalls = 0; decodeMs = 0.0; decodeMaxMs = 0.0; clock.resetBusy()
             decodeRecent.reset(); arrivalRecent.reset(); presentRecent.reset()
             droppedBefore = synchronized(playout) { playout.counters.overrunFrames + playout.counters.trimmedFrames }
+            underrunsBefore = synchronized(playout) { playout.counters.underruns }
             if (audioEnabled) audioOut.open()
             // Asked for, not made here: the start answer and the video decoder do not wait for it.
             if (audioOpus && audioOut.active) opus = AndroidOpusDecoder(worker, setup, ::opusFrame).also { it.prepare() }
@@ -638,8 +644,14 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         }
     }
 
+    /** The media stream's volume now and its top (null where it cannot be read). */
+    private fun mediaVolume(): Int? = try { audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) } catch (_: Exception) { null }
+    private fun mediaVolumeMax(): Int? = try { audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC)?.takeIf { it > 0 } } catch (_: Exception) { null }
+
     /** Worker. Statistics of the current decoder (fixed fields, no content). */
     private fun stats(): Map<String, Any?> {
+        // A feeding thread that ended anyway is started again (AudioThreadKeeper's rate).
+        if (audioEnabled) audioOut.keepRunning()
         val track = audioOut.track
         val played = try { (track?.playbackHeadPosition?.toLong() ?: 0L) and 0xffffffffL } catch (_: Exception) { 0L }
         val oldest = pending.firstOrNull()?.accepted
@@ -727,6 +739,21 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             "audioFocus" to audioFocus.stateCode,
             "audioMuted" to (audioFocus.volume == 0f),
             "audioOpusUnusable" to AndroidOpusDecoder.unusableThisRun,
+            // Why (1 the platform lists no Opus decoder, 2 none it lists plays), and fresh Opus decoders this
+            // stream asked for after failures (AndroidOpusPipe's rest).
+            "audioOpusUnusableReason" to AndroidOpusDecoder.unusableReason,
+            // The stream's sound is Opus (audioDecoder 0 then means its decoder is still being made, not PCM).
+            "audioOpus" to (audioEnabled && audioOpus),
+            "audioOpusRetries" to (decoder?.retries ?: 0L),
+            // An ask for focus again left the sound muted (AndroidAudioFocus.blocked: a call, another app).
+            "audioFocusBlocked" to audioFocus.blocked,
+            // The audio thread: looks that threw (an Error too) and threads started again (AndroidAudioOut).
+            "audioThreadErrors" to audioOut.threadErrors,
+            "audioThreadRestarts" to audioOut.threadRestarts,
+            // This stream's underruns (the sound went on through them), and the device's media volume.
+            "audioStreamUnderruns" to (sound[0] - underrunsBefore).coerceAtLeast(0),
+            "mediaVolume" to mediaVolume(),
+            "mediaVolumeMax" to mediaVolumeMax(),
             "androidApi" to Build.VERSION.SDK_INT,
             // Decoder latency: queued to the codec -> its decoded output, per frame.
             "decodeCalls" to decodeCalls, "decodeTotalMs" to decodeMs, "decodeMaxMs" to decodeMaxMs,

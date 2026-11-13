@@ -216,7 +216,13 @@ A 12-byte little-endian header followed by the payload:
   or, with `audio-opus-v1`, one 10 ms Opus packet per message preceded by a
   little-endian u16 sequence number. `session.start` then carries
   `audioCodec:'opus'` and `stream.info` states the format actually sent.
-  Independent outputs get Opus only with `audio-opus-tracks-v1`.
+  Independent outputs get Opus only with `audio-opus-tracks-v1`. The Host
+  captures the default render endpoint (console role); after any capture
+  error or a change of that default it opens the capture again with a backoff
+  for the life of the stream, so the sound pauses instead of ending. A packet's
+  PTS is its first sample on the stream clock, taken from the capture's own
+  position, so consecutive packets are exactly their length apart; a silence
+  or a reopened capture starts the stamps over (a gap in PTS, no sequence gap).
 - A message is at most 4 MiB; each relay socket queue is bounded at 8 MiB.
   When a client's backlog passes half of that, a Host that advertises
   `keyFrameProtocol:'keyframe-v1'` receives `{type:'stream.keyframe', sessionId}`;

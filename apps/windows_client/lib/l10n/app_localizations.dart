@@ -19232,6 +19232,120 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'장치 정보를 읽지 못한 USB 장치가 {count}개 있어요. 빼고 다시 꽂아 보세요.'**
   String usbUnreadableDevices(Object count);
+
+  /// No description provided for @audioFromHost.
+  ///
+  /// In ko, this message translates to:
+  /// **'Host가 보낸 오디오'**
+  String get audioFromHost;
+
+  /// No description provided for @audioPacketsPerSecond.
+  ///
+  /// In ko, this message translates to:
+  /// **'초당 {count}개'**
+  String audioPacketsPerSecond(Object count);
+
+  /// No description provided for @audioNoneSent.
+  ///
+  /// In ko, this message translates to:
+  /// **'보내지 않음'**
+  String get audioNoneSent;
+
+  /// No description provided for @audioDecoder.
+  ///
+  /// In ko, this message translates to:
+  /// **'오디오 디코더'**
+  String get audioDecoder;
+
+  /// No description provided for @audioOpusBuiltIn.
+  ///
+  /// In ko, this message translates to:
+  /// **'Opus (기기 기본)'**
+  String get audioOpusBuiltIn;
+
+  /// No description provided for @audioDecoderRetrying.
+  ///
+  /// In ko, this message translates to:
+  /// **'없음 · 다시 시도 중'**
+  String get audioDecoderRetrying;
+
+  /// No description provided for @audioDecoderPcmNext.
+  ///
+  /// In ko, this message translates to:
+  /// **'없음 · 다음 연결은 PCM'**
+  String get audioDecoderPcmNext;
+
+  /// No description provided for @audioFocus.
+  ///
+  /// In ko, this message translates to:
+  /// **'오디오 포커스'**
+  String get audioFocus;
+
+  /// No description provided for @audioFocusHeld.
+  ///
+  /// In ko, this message translates to:
+  /// **'받음'**
+  String get audioFocusHeld;
+
+  /// No description provided for @audioFocusWaiting.
+  ///
+  /// In ko, this message translates to:
+  /// **'기다리는 중 (음소거)'**
+  String get audioFocusWaiting;
+
+  /// No description provided for @audioFocusPaused.
+  ///
+  /// In ko, this message translates to:
+  /// **'잠시 넘겨줌 (음소거)'**
+  String get audioFocusPaused;
+
+  /// No description provided for @audioFocusLost.
+  ///
+  /// In ko, this message translates to:
+  /// **'다른 앱이 가져감 (음소거)'**
+  String get audioFocusLost;
+
+  /// No description provided for @deviceVolume.
+  ///
+  /// In ko, this message translates to:
+  /// **'기기 음량'**
+  String get deviceVolume;
+
+  /// No description provided for @deviceVolumeSilent.
+  ///
+  /// In ko, this message translates to:
+  /// **'{volume} (소리 꺼짐)'**
+  String deviceVolumeSilent(Object volume);
+
+  /// No description provided for @audioPlayback.
+  ///
+  /// In ko, this message translates to:
+  /// **'오디오 재생'**
+  String get audioPlayback;
+
+  /// No description provided for @audioPlayingUnderruns.
+  ///
+  /// In ko, this message translates to:
+  /// **'재생 중 · 끊김 {count}회'**
+  String audioPlayingUnderruns(Object count);
+
+  /// No description provided for @audioSilentUnderruns.
+  ///
+  /// In ko, this message translates to:
+  /// **'조용함 · 끊김 {count}회'**
+  String audioSilentUnderruns(Object count);
+
+  /// No description provided for @audioThreadErrorsSuffix.
+  ///
+  /// In ko, this message translates to:
+  /// **'{text} · 오류 {count}회'**
+  String audioThreadErrorsSuffix(Object text, Object count);
+
+  /// No description provided for @otherAppUsingSound.
+  ///
+  /// In ko, this message translates to:
+  /// **'다른 앱이 소리를 쓰고 있어요. 그 앱이 끝나면 다시 나요.'**
+  String get otherAppUsingSound;
 }
 
 class _AppLocalizationsDelegate

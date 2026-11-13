@@ -25,7 +25,13 @@ import java.util.concurrent.locks.LockSupport
  *
  * [onTrack] runs on the feeding thread when a track starts (its owner takes
  * audio focus), [onSound] when sound starts after priming (the stream's
- * start or the end of a silence).
+ * start or the end of a silence) and once a second while it plays (its owner
+ * asks again for a focus it does not hold, AndroidAudioFocus).
+ *
+ * A look that throws anything, a Java Error too, is counted ([threadErrors],
+ * AudioLoopGuard) and its track given up, to be made again within the remake
+ * rate; a thread that ended anyway is started again by [keepRunning] (the
+ * worker calls it at each statistics reading, AudioThreadKeeper).
  */
 internal class AndroidAudioOut(
     private val playout: AudioJitterBuffer,
@@ -46,6 +52,11 @@ internal class AndroidAudioOut(
     /** The stream has a feeding thread (sound was asked for and the stream has not ended). */
     @Volatile var active = false
         private set
+    /** Looks of this stream that threw (AudioLoopGuard) and feeding threads started again (AudioThreadKeeper). */
+    @Volatile var threadErrors = 0L
+        private set
+    @Volatile var threadRestarts = 0L
+        private set
 
     private val feed = AudioFeed(playout, CAPACITY_FRAMES)
     val trackWritten get() = feed.trackWritten
@@ -60,6 +71,9 @@ internal class AndroidAudioOut(
     private val limiter = RemakeLimiter()
     private val startWatch = AudioStartWatch()
     private var forceFollow = false
+    private val guard = AudioLoopGuard()
+    private val keeper = AudioThreadKeeper()
+    private val soundNotice = SoundNotice()
 
     /** The decoder worker, at a stream's start: a track and its feeding thread. */
     fun open() {
@@ -67,9 +81,17 @@ internal class AndroidAudioOut(
         synchronized(playout) { playout.clear() }
         feed.newStream()
         restarts = 0; stuck = 0; forceFollow = false; error = 0
-        limiter.reset()
+        limiter.reset(); guard.reset(); keeper.reset(); threadErrors = 0; threadRestarts = 0
         create()
         running = true; active = true
+        thread = Thread({ loop() }, "Multitap audio").apply { start() }
+    }
+
+    /** The decoder worker: a feeding thread that ended while the stream still wants sound is started again. */
+    fun keepRunning() {
+        val feeding = thread ?: return
+        if (!keeper.restart(running, feeding.isAlive, System.nanoTime())) return
+        threadRestarts = keeper.restarts
         thread = Thread({ loop() }, "Multitap audio").apply { start() }
     }
 
@@ -97,7 +119,11 @@ internal class AndroidAudioOut(
         try { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) } catch (_: Exception) {}
         var next = System.nanoTime()
         while (running) {
-            try { tick(System.nanoTime()) } catch (_: Exception) { error = -1 }
+            if (!guard.look(System.nanoTime(), ::tick)) {
+                // Anything a look threw (an Error too): counted, and the track made again within the remake rate.
+                error = -1; threadErrors = guard.errors
+                try { release() } catch (_: Throwable) { track = null; sink = null }
+            }
             next += TICK_NANOS
             val now = System.nanoTime()
             // Behind by more than a look (the thread was not run): no burst of looks to catch up.
@@ -119,10 +145,9 @@ internal class AndroidAudioOut(
             if (code == AudioTrack.ERROR_DEAD_OBJECT || code == AudioTrack.ERROR) release()
             return
         }
-        if (feed.soundStarted) onSound()
-        // A track that holds the level it waits for and whose head does not move is made again.
-        val full = feed.playing && feed.device > 0 && feed.device >= feed.startLevel
-        if (startWatch.stuck(now, feed.head.toLong() and 0xffffffffL, full) && limiter.allow(now)) {
+        if (soundNotice.due(now, feed.soundStarted, feed.playing)) onSound()
+        // A track that should be playing (AudioFeed.waitsToPlay) and whose head does not move is made again.
+        if (startWatch.stuck(now, feed.head.toLong() and 0xffffffffL, feed.waitsToPlay) && limiter.allow(now)) {
             stuck++; forceFollow = true
             release()
             create()
@@ -156,10 +181,12 @@ internal class AndroidAudioOut(
                 val fast = try { made.performanceMode == AudioTrack.PERFORMANCE_MODE_LOW_LATENCY } catch (_: Exception) { false }
                 feed.track(follows, buffer, capacity, if (follows) buffer else threshold.coerceAtLeast(0), fineReads = fast)
                 startWatch.reset()
-                try { made.setVolume(volume()) } catch (_: Exception) {}
-                made.play()
+                // Published before its volume is read: a focus change on the main thread meanwhile either
+                // came first (read here) or finds this track (setVolume), never neither.
                 sink = TrackSink(made)
                 track = made
+                try { made.setVolume(volume()) } catch (_: Exception) {}
+                made.play()
             } catch (failure: Exception) { try { made.release() } catch (_: Exception) {}; throw failure }
             error = 0
             onTrack()

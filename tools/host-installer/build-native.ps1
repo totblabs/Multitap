@@ -54,6 +54,9 @@ if (-not $SkipTests) {
     'MultitapHostResumeTest','MultitapHostChannelRedialTest','MultitapHostClipboardReconnectTest','MultitapHostClipboardFilesTest','MultitapHostCursorTest','MultitapHostCursorShownSizeTest','MultitapHostStandardUserAccessTest','MultitapHostQemuConsoleTest',
     # The Console's 한/영: what the session's IME reading means, the wire, when the user's helper runs.
     'MultitapHostImeStateTest',
+    # The stream's sound capture: opened again after any error or default device change, its journal record,
+    # an even 10 ms cadence and PTS from the capture's position (then this PC's loopback for a moment, read only).
+    'MultitapHostAudioCaptureControlTest',
     # Korean and English: every text of the installers, tray and service in both languages (docs/i18n.md).
     'MultitapHostUiTextTest',
     # A registration copied with the disk (full clone) is not used on another machine (host-machine-v1).

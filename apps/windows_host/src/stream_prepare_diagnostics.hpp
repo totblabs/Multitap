@@ -1,6 +1,7 @@
 #pragma once
 #include <string_view>
 #include "support.hpp"
+#include "audio_capture_control.hpp"
 namespace host {
 struct StreamViewportDiagnostic {uint32_t nativeStage=0,nativeError=0,profileStage=0,nativeReason=0;bool consoleReturned=false;};
 inline std::optional<StreamViewportDiagnostic> streamViewportDiagnostic(const Json& value){
@@ -38,6 +39,9 @@ inline bool streamObservationOk(uint32_t stage,uint32_t error)noexcept{
   // 46: where input went (secure_desktop_scope.hpp, system_input.hpp): counts and levels only, every one an
   // observation. The stream is never ended by any of them.
   if(stage==46)return true;
+  // 47: the stream's sound capture (audio_capture_control.hpp): started, restarting and a changed default
+  // device are observations; a failed capture is a failure, which the capture itself answers by opening again.
+  if(stage==audioCaptureRecordStage)return audioCaptureRecordOk(error);
   return false;
 }
 // Stage 43 with reason 2 (gpu_capture.hpp gpuPathNoHardwareCapture): the capture ran on WARP or GDI, so the

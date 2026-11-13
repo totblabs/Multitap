@@ -44,8 +44,12 @@ internal class AndroidOpusDecoder(
     }, emit)
 
     val stream get() = pipe.stream
-    /** No decoder could be made (or kept): this stream has no sound (and the app asks for PCM from now on). */
-    val failed get() = pipe.failed.also { if (it) unusableThisRun = true }
+    /** No decoder plays now (resting after failures, or none at all). */
+    val failed get() = pipe.failed.also { noted() }
+    /** Why this device has no Opus decoder for good (AndroidOpusPipe.noDecoder: 0 it has one, 1 none listed, 2 none playable). */
+    val noDecoder get() = pipe.noDecoder
+    /** Fresh decoders asked for after a rest in this stream. */
+    val retries get() = pipe.retries
     /** The decoder in use ("" before one was handed over). */
     val name get() = pipe.name
 
@@ -68,14 +72,18 @@ internal class AndroidOpusDecoder(
     /** One audio-opus-v1 payload ([length] bytes at [offset], already valid), its PTS and arrival. */
     fun packet(bytes: ByteArray, offset: Int, length: Int, pts: Long, accepted: Long) {
         pipe.packet(bytes, offset, length, pts, accepted)
-        if (pipe.failed) unusableThisRun = true
+        noted()
     }
+
+    // Only a device without any Opus decoder that plays makes the app ask for PCM; failures are retried.
+    private fun noted() { if (pipe.noDecoder != 0) { unusableThisRun = true; unusableReason = pipe.noDecoder } }
 
     fun close() = pipe.close()
 
     /** [setup]: the first decoder in trial order that starts, handed to the worker. */
     private fun make(attempt: AndroidOpusPipe.Attempt<MediaCodec>) {
-        val candidates = names().filter { it !in attempt.skip }
+        val listed = names()
+        val candidates = listed.filter { it !in attempt.skip }
         var made: MediaCodec? = null
         var madeName = ""
         // Each decoder with 16-bit output asked for, then with the plain format
@@ -97,7 +105,10 @@ internal class AndroidOpusDecoder(
             break@search
         }
         val codec = made
-        if (!worker.post { pipe.opened(attempt, codec, madeName, candidates.isEmpty()) } && codec != null) release(codec)
+        // "None" only when the platform's list was read and has nothing left to try; a list that could not be
+        // read is a failure like any other (asked again after the rest).
+        val none = candidates.isEmpty() && listedOk
+        if (!worker.post { pipe.opened(attempt, codec, madeName, none) } && codec != null) release(codec)
     }
 
     private fun format(encodingKey: Boolean): MediaFormat =
@@ -158,12 +169,17 @@ internal class AndroidOpusDecoder(
         @Volatile private var softwareNames: Set<String> = emptySet()
 
         /**
-         * An Opus stream of this app run had no usable decoder (none listed,
-         * none made or kept, no output format that plays). The Dart side then
+         * This device has no Opus decoder that plays: the platform lists none,
+         * or every one it lists puts out a format that cannot be played. A
+         * decoder that fails is not this: it is retried. The Dart side then
          * asks for PCM (audio-opus-v1 not requested) from the next connection
          * on, so the sound comes back instead of staying silent on this device.
          */
         @Volatile var unusableThisRun = false
+        /** Why (AndroidOpusPipe.noDecoder): 1 the platform lists no Opus decoder, 2 none it lists plays; 0 before. */
+        @Volatile var unusableReason = 0
+        // The platform's list was read (an empty list then means none); a failed read is asked again.
+        @Volatile private var listedOk = false
 
         /**
          * Names in trial order (AndroidOpus.decoderOrder); empty when the
@@ -179,10 +195,14 @@ internal class AndroidOpusDecoder(
                 }
                 .map { AvcDecoderCandidate(it.name, hardware(it)) }
             softwareNames = candidates.filter { !it.hardware }.map { it.name }.toSet()
-            AndroidOpus.decoderOrder(candidates)
+            AndroidOpus.decoderOrder(candidates).also {
+                listed = it; listedOk = true
+                if (it.isEmpty()) { unusableThisRun = true; unusableReason = 1 }
+            }
         } catch (_: Exception) {
+            // Not kept: the next stream reads the list again.
             emptyList()
-        }.also { listed = it; if (it.isEmpty()) unusableThisRun = true }
+        }
 
         private fun hardware(info: MediaCodecInfo): Boolean =
             if (Build.VERSION.SDK_INT >= 29) info.isHardwareAccelerated && !info.isSoftwareOnly

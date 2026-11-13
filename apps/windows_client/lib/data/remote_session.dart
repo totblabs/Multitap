@@ -1189,6 +1189,11 @@ class RemoteSession extends ChangeNotifier {
   );
   AudioStatsReading? audioTick;
 
+  /// Audio packets per second the Host reported sending lately (the 연결 통계
+  /// dialog); null before its stream.stats said anything.
+  double? get hostAudioPerSecond =>
+      _audioStats.hostAudioPerSecond(_clock.elapsedMicroseconds);
+
   /// audio-path-v1 of the latest native reading (audioPathValues); null with
   /// sound off, empty for an engine that does not report it (Windows).
   Map<String, Object>? audioPathTick;
@@ -3019,7 +3024,7 @@ class RemoteSession extends ChangeNotifier {
         final telemetry = HostStreamTelemetry.parse(event);
         if (telemetry == null) return;
         hostTelemetry = telemetry;
-        _audioStats.host(event);
+        _audioStats.host(event, nowUs: _clock.elapsedMicroseconds);
         _stallWatch.host(event, _clock.elapsedMicroseconds);
         final fpsTarget = event['fpsTarget'];
         hostFpsTarget = fpsTarget is int && fpsTarget > 0 && fpsTarget <= 240

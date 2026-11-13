@@ -1150,7 +1150,14 @@ class ServiceBridge final : public AgentBridge {
       const bool trackCursor=trackSession&&cursor::trackSessionRequested(request),trackOpus=trackSession&&trackAudioOpusGranted(request);
       WorkerRelayFacts relayFacts;OwnedWorkerExit workerExit;DisplayV2TraceCollector v2Trace;
       const auto consumeV2Trace=[&](Json& value){consumeDisplayV2Trace(value,v2,id_,v2Trace,[](auto values){recordHostEvent("hostAction",values);});};
-      const auto preparationLog=[](bool ok,uint32_t stage,uint32_t error=0){recordHostEvent("hostAction",{{"action",uint32_t(200)},{"ok",ok},{"stage",stage},{"error",error}});};
+      // The worker's stage 47 (200 + 47: its sound capture, audio_capture_control.hpp) is written as hostAction 297
+      // with its fields unpacked: stage = started 1 / failed 2 / restarting 3 / default device changed 4, cause = the
+      // failed step, error = its HRESULT, format/items/expected = sample type, channels and rate (or the restart number),
+      // active = event-driven (or a capture was running when the device changed). No device name or id.
+      const auto preparationLog=[](bool ok,uint32_t stage,uint32_t error=0){
+        if(stage==200+audioCaptureRecordStage){const auto row=audioCaptureJournal(error);if(!row.valid)return;
+          recordHostEvent("hostAction",{{"action",int64_t(audioCaptureAction)},{"ok",row.ok},{"stage",row.stage},{"cause",row.cause},{"error",row.error},{"format",row.format},{"items",row.items},{"expected",row.expected},{"active",row.active}});return;}
+        recordHostEvent("hostAction",{{"action",uint32_t(200)},{"ok",ok},{"stage",stage},{"error",error}});};
       if(trackSession){
         // Independent outputs: output 0's size and the requested output count.
         uint32_t width=0,height=0,outputs=0;try{const auto tracks=nativeInitialTrackViewport(request);width=tracks.outputs.front().width;height=tracks.outputs.front().height;outputs=uint32_t(tracks.outputs.size());}catch(...){ }
