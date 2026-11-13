@@ -2,7 +2,17 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.4 carry the Windows app, the Android app and the Host at the same number. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.5 carry the Windows app, the Android app and the Host at the same number. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.5](https://github.com/totblabs/Multitap/releases/tag/v1.1.5)
+
+### Android app
+
+- **Fixed: sound played at first and never came back after the first pause.** Android's own Opus decoder (from Android 16 QPR2 and the updated media module) stamps its output from its first input on and ignores later timestamps. The desktop sends nothing while it is silent, so after the first pause every decoded frame looked old and was dropped without an error. The app now gives the decoder timestamps of its own and plays each frame at the desktop's time.
+
+### Server, Windows app and Host
+
+- No change; the number follows the Android app.
 
 ## [1.1.4](https://github.com/totblabs/Multitap/releases/tag/v1.1.4)
 

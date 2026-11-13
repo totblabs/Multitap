@@ -248,7 +248,8 @@ internal class AndroidOpusPipe<C : Any>(
             AndroidOpusStream.LATE -> return
             AndroidOpusStream.RESTART -> if (!open()) return
         }
-        queue(bytes, offset + 2, length - 2, pts)
+        // The decoder gets the stream's own even timestamps, never the Host's PTS (AndroidOpusStream says why).
+        queue(bytes, offset + 2, length - 2, stream.admittedDecoderPts)
     }
 
     /** The decoder asked for by [attempt]: [codec] named [name], or null when none could be made ([none]: the platform lists no Opus decoder). */
@@ -402,6 +403,21 @@ internal class AndroidOpusPipe<C : Any>(
  * Concealed frames carry the PTS right before the packet that showed the gap,
  * so the jitter buffer's pause rule (AudioJitterBuffer) measures from real
  * sound. Not thread-safe (the media worker).
+ *
+ * The decoder never sees the Host's PTS. Each admitted packet gets a decoder
+ * timestamp of its own ([admittedDecoderPts]): [DECODER_START_US], then
+ * [AndroidOpus.FRAME_US] more for each packet after it, with no jump at the
+ * VM's silent pauses (where the Host's PTS jumps by the pause). [decoded]
+ * matches an output to its packet by that timestamp, within half a packet,
+ * and emits the packet's Host PTS. This is needed because Android's own
+ * decoder (C2SoftOpusDec) from android16-qpr2 on (and its swcodec module
+ * update) stamps each output as the first input's PTS plus the samples it
+ * has put out since, ignoring every later input PTS; given the Host's PTS,
+ * every output after the first pause was older than any packet waiting and
+ * was dropped, so the sound stopped for the rest of the stream without an
+ * error (field data: androidApi 37, 2026-11-13). Earlier versions stamp each
+ * output with its input's PTS; both agree with these even timestamps, the
+ * newer within 2.5 ms (the codec delay trimmed from the first output).
  */
 internal class AndroidOpusStream {
     companion object {
@@ -418,6 +434,8 @@ internal class AndroidOpusStream {
         const val FADE_IN_SAMPLES = 120
         /** Packets in the decoder without their output yet; a working decoder holds one or two. */
         const val MAX_WAITING = 32
+        /** The first packet's decoder timestamp after a reset (not 0: the platform decoder trims its codec delay again at PTS 0). */
+        const val DECODER_START_US = 1_000_000L
     }
 
     var packets = 0L
@@ -439,6 +457,12 @@ internal class AndroidOpusStream {
     private var started = false
     private var expected = 0
     private var nextPts = 0L
+    // Packets admitted since the last reset: the next one's decoder timestamp follows from it.
+    private var admitted = 0L
+    /** The decoder timestamp of the packet [admit] took last: what goes to the decoder with it as its presentation time. */
+    var admittedDecoderPts = 0L
+        private set
+    private val waitingDecoderPts = LongArray(MAX_WAITING)
     private val waitingPts = LongArray(MAX_WAITING)
     private val waitingAccepted = LongArray(MAX_WAITING)
     private val waitingConceal = IntArray(MAX_WAITING)
@@ -455,7 +479,8 @@ internal class AndroidOpusStream {
      * One received packet ([sequence], [pts] in µs, [accepted] its arrival):
      * [LATE] (drop it), [DECODE] (to the decoder now) or [RESTART] (to a new
      * decoder). [DECODE] and [RESTART] packets must reach the decoder in this
-     * order, with [pts] as their presentation time.
+     * order, with [admittedDecoderPts] (read right after this call) as their
+     * presentation time, not [pts].
      */
     fun admit(sequence: Int, pts: Long, accepted: Long): Int {
         var action = DECODE
@@ -475,6 +500,8 @@ internal class AndroidOpusStream {
         // A decoder that keeps packets without output: the oldest is gone.
         if (count == MAX_WAITING) { head = (head + 1) % MAX_WAITING; count--; lost++ }
         val slot = (head + count) % MAX_WAITING
+        admittedDecoderPts = DECODER_START_US + admitted++ * AndroidOpus.FRAME_US
+        waitingDecoderPts[slot] = admittedDecoderPts
         waitingPts[slot] = pts
         waitingAccepted[slot] = accepted
         waitingConceal[slot] = conceal
@@ -487,16 +514,19 @@ internal class AndroidOpusStream {
 
     /**
      * The decoder's output ([length] bytes of s16 stereo in [pcm], which may
-     * be faded in place) for the packet it was given with presentation time
-     * [pts] (a decoder may shift it by less than a packet). [emit] gets each
-     * piece in play order: (pcm, length, the packet's PTS, its arrival). False
-     * when the output belongs to no admitted packet or is not whole frames.
+     * be faded in place) with presentation time [decoderPts]: the decoder
+     * timestamp ([admittedDecoderPts]) of the packet it came from, shifted by
+     * less than half a packet (the newer platform decoder: 2.5 ms earlier
+     * after its first output). [emit] gets each piece in play order: (pcm,
+     * length, the packet's Host PTS, its arrival). False when the output
+     * belongs to no admitted packet or is not whole frames.
      */
-    fun decoded(pts: Long, pcm: ByteArray, length: Int, emit: (ByteArray, Int, Long, Long) -> Unit): Boolean {
+    fun decoded(decoderPts: Long, pcm: ByteArray, length: Int, emit: (ByteArray, Int, Long, Long) -> Unit): Boolean {
+        val at = decoderPts + AndroidOpus.FRAME_US / 2
         // Outputs come in input order: admitted packets before this one that
         // produced nothing are gone.
-        while (count > 1 && waitingPts[(head + 1) % MAX_WAITING] <= pts) { pop(); lost++ }
-        if (count == 0 || waitingPts[head] > pts) return false
+        while (count > 1 && waitingDecoderPts[(head + 1) % MAX_WAITING] <= at) { pop(); lost++ }
+        if (count == 0 || waitingDecoderPts[head] > at) return false
         val packetPts = waitingPts[head]
         val accepted = waitingAccepted[head]
         val conceal = waitingConceal[head]
@@ -530,6 +560,7 @@ internal class AndroidOpusStream {
         head = 0
         count = 0
         haveLast = false
+        admitted = 0
     }
 
     private fun pop() { head = (head + 1) % MAX_WAITING; count-- }

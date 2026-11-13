@@ -38,6 +38,12 @@ class AndroidOpusPipeTest {
 
     private fun fed() = codecs.inputs.map { it.pts }
 
+    /**
+     * The decoder timestamp of the n-th packet a decoder takes in: its own count from DECODER_START_US,
+     * never the Host's PTS (a platform decoder may stamp its outputs from its first input on).
+     */
+    private fun dec(n: Int) = AndroidOpusStream.DECODER_START_US + n * AndroidOpus.FRAME_US
+
     @Test
     fun startAsksWithoutMakingAndEarlyPacketsGoInOnceMade() {
         pipe.prepare()
@@ -52,16 +58,16 @@ class AndroidOpusPipeTest {
         pipe.opened(attempt, "opus", "c2.android.opus.decoder", none = false)
         assertTrue(pipe.current(attempt))
         assertEquals("c2.android.opus.decoder", pipe.name)
-        assertEquals(listOf(0L, 10_000L), fed())
+        assertEquals(listOf(dec(0), dec(1)), fed())
         assertEquals(listOf(0, 1), codecs.inputs.map { it.index })
         pipe.inputAvailable(attempt, 2)
-        assertEquals(listOf(0L, 10_000L, 20_000L), fed())
+        assertEquals(listOf(dec(0), dec(1), dec(2)), fed())
         // A packet with a free input goes straight in.
         pipe.inputAvailable(attempt, 3)
         packet(3)
-        assertEquals(30_000L, fed().last())
-        // Their PCM plays in order through the stream.
-        for (n in 0 until 4) pipe.decoded(attempt, n * AndroidOpus.FRAME_US, pcm, pcm.size)
+        assertEquals(dec(3), fed().last())
+        // Their PCM plays in order through the stream, at the Host's times.
+        for (n in 0 until 4) pipe.decoded(attempt, dec(n), pcm, pcm.size)
         assertEquals(listOf(0L, 10_000L, 20_000L, 30_000L), played)
         assertEquals(1, codecs.asked.size)
     }
@@ -73,9 +79,9 @@ class AndroidOpusPipeTest {
         packet(1)
         pipe.inputAvailable(attempt, 5)
         pipe.opened(attempt, "opus", "opus", none = false)
-        assertEquals(listOf(0L), fed())
+        assertEquals(listOf(dec(0)), fed())
         pipe.inputAvailable(attempt, 6)
-        assertEquals(listOf(0L, 10_000L), fed())
+        assertEquals(listOf(dec(0), dec(1)), fed())
     }
 
     @Test
@@ -86,9 +92,10 @@ class AndroidOpusPipeTest {
         for (n in 0 until count) packet(n)
         pipe.opened(attempt, "opus", "opus", none = false)
         for (n in 0 until count) pipe.inputAvailable(attempt, n)
-        assertEquals((4 until count).map { it * AndroidOpus.FRAME_US }, fed())
-        // The dropped ones made no output; the first that did plays, with no concealment before it.
-        pipe.decoded(attempt, 4 * AndroidOpus.FRAME_US, pcm, pcm.size)
+        // Each packet is numbered when it is admitted; the oldest four were dropped while waiting.
+        assertEquals((4 until count).map { dec(it) }, fed())
+        // The first that went in plays at its Host time, with no concealment before it.
+        pipe.decoded(attempt, dec(4), pcm, pcm.size)
         assertEquals(listOf(4 * AndroidOpus.FRAME_US), played)
         assertEquals(0L, pipe.stream.concealed)
     }
@@ -123,7 +130,7 @@ class AndroidOpusPipeTest {
         assertEquals(2, codecs.asked.size)
         pipe.opened(second, "opus", "opus", none = false)
         pipe.inputAvailable(second, 0)
-        assertEquals(listOf(10_000L), fed())
+        assertEquals("a new decoder counts from the start again", listOf(dec(0)), fed())
         assertEquals("opus", codecs.inputs.single().codec)
     }
 
@@ -150,8 +157,8 @@ class AndroidOpusPipeTest {
         val fresh = codecs.asked.last()
         pipe.opened(fresh, "opus", "c2.android.opus.decoder", none = false)
         pipe.inputAvailable(fresh, 0)
-        assertEquals((sequence - 1) * AndroidOpus.FRAME_US, fed().last())
-        pipe.decoded(fresh, (sequence - 1) * AndroidOpus.FRAME_US, pcm, pcm.size)
+        assertEquals(dec(0), fed().last())
+        pipe.decoded(fresh, dec(0), pcm, pcm.size)
         assertEquals("the sound is back", (sequence - 1) * AndroidOpus.FRAME_US, played.last())
     }
 
@@ -185,7 +192,7 @@ class AndroidOpusPipeTest {
         val fresh = codecs.asked.last()
         pipe.opened(fresh, "opus", "opus", none = false)
         pipe.inputAvailable(fresh, 0)
-        pipe.decoded(fresh, (sequence - 1) * AndroidOpus.FRAME_US, pcm, pcm.size)
+        pipe.decoded(fresh, dec(0), pcm, pcm.size)
         // It fails again later: the first rest is the short one again.
         repeat(AndroidOpusPipe.MAX_FAILURES + 1) { pipe.codecFailed(codecs.asked.last()); packet(sequence++); }
         pipe.codecFailed(codecs.asked.last())
@@ -237,9 +244,9 @@ class AndroidOpusPipeTest {
         assertEquals(2, codecs.asked.size)
         pipe.inputAvailable(second, 9)
         pipe.opened(second, "second", "second", none = false)
-        assertEquals(5_000_000L, fed().last())
+        assertEquals(dec(0), fed().last())
         assertEquals("second", codecs.inputs.last().codec)
-        pipe.decoded(second, 5_000_000, pcm, pcm.size)
+        pipe.decoded(second, dec(0), pcm, pcm.size)
         assertEquals(listOf(5_000_000L), played)
     }
 
@@ -259,8 +266,8 @@ class AndroidOpusPipeTest {
         assertEquals(setOf("c2.vendor.opus.decoder"), next.skip)
         pipe.opened(next, "software", "c2.android.opus.decoder", none = false)
         pipe.inputAvailable(next, 0)
-        assertEquals(listOf(0L), fed())
-        pipe.decoded(next, 0, pcm, pcm.size)
+        assertEquals(listOf(dec(0)), fed())
+        pipe.decoded(next, dec(0), pcm, pcm.size)
         assertEquals(listOf(0L), played)
     }
 

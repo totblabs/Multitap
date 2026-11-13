@@ -2,7 +2,17 @@
 
 [English](CHANGELOG.md)
 
-Multitap을 설치하고 쓰는 사람에게 달라지는 것을 적습니다. 릴리스 번호는 서버 버전을 따르고, 1.1.1부터 1.1.4까지는 Windows 앱, Android 앱, Host도 같은 번호입니다. 설치 파일은 [Releases](https://github.com/totblabs/Multitap/releases)에 있습니다.
+Multitap을 설치하고 쓰는 사람에게 달라지는 것을 적습니다. 릴리스 번호는 서버 버전을 따르고, 1.1.1부터 1.1.5까지는 Windows 앱, Android 앱, Host도 같은 번호입니다. 설치 파일은 [Releases](https://github.com/totblabs/Multitap/releases)에 있습니다.
+
+## [1.1.5](https://github.com/totblabs/Multitap/releases/tag/v1.1.5)
+
+### Android 앱
+
+- **고침: 소리가 처음에만 나오고, 한 번 멈춘 뒤로는 다시 나오지 않던 문제.** Android 기본 Opus 디코더가(Android 16 QPR2와 업데이트된 미디어 모듈부터) 출력 시각을 첫 입력부터 이어서 붙이고 이후 입력의 시각을 무시합니다. 데스크톱은 조용할 때 아무것도 보내지 않아서, 첫 멈춤 뒤로는 모든 소리가 오래된 것으로 보여 오류 없이 버려졌습니다. 이제 앱이 디코더에 자기 시각을 붙여 주고, 소리는 데스크톱의 시각에 맞춰 재생합니다.
+
+### 서버, Windows 앱, Host
+
+- 바뀐 것은 없고 Android 앱과 번호를 맞췄습니다.
 
 ## [1.1.4](https://github.com/totblabs/Multitap/releases/tag/v1.1.4)
 

@@ -17,7 +17,9 @@ import java.nio.ByteOrder
  * waits on it: the video decoder's callbacks share that thread. Listing,
  * creating, configuring, starting and releasing decoders run on [setup]
  * instead (AndroidOpusPipe says why); everything else is the pipe's, on the
- * worker. Each 10 ms packet goes in as one input with its PTS; its PCM comes
+ * worker. Each 10 ms packet goes in as one input with the stream's own even
+ * decoder timestamp (never the Host's PTS, which jumps at every silent pause:
+ * AndroidOpusStream says why); its PCM comes
  * back as one output, and [AndroidOpusStream] puts it behind the concealment
  * of any packet lost before it. Every piece goes to [emit] (pcm, bytes, PTS,
  * arrival) for the same track path as PCM packets.

@@ -50,18 +50,26 @@ private class Emitted(val pcm: ByteArray, val pts: Long, val accepted: Long)
 /**
  * MediaCodec "audio/opus" as configured here: outputs in input order, one per
  * input, [keep] of them still inside, presentation time shifted by [shiftUs];
- * the input numbers in [silent] give no output at all.
+ * the input numbers in [silent] give no output at all. [anchored]: the
+ * output's presentation time as AOSP C2SoftOpusDec stamps it from
+ * android16-qpr2 on (the first input's PTS plus the samples put out since,
+ * whatever the later inputs' PTS); otherwise the input's, as before it.
  */
-private class StandIn(private val fixture: Fixture, private val shiftUs: Long, private val keep: Int, private val silent: Set<Int>) {
+private class StandIn(private val fixture: Fixture, private val shiftUs: Long, private val keep: Int, private val silent: Set<Int>, private val anchored: Boolean = false) {
     private val inside = ArrayDeque<LongArray>()
     private var first = true
     private var inputs = 0
+    private var anchor = 0L
+    private var samplesOut = 0L
     private val buffer = ByteArray(AndroidOpus.FRAME_BYTES * 2)
-    fun restart() { inside.clear(); first = true }
+    /** Every presentation time the decoder was given, in order. */
+    val given = ArrayList<Long>()
+    fun restart() { inside.clear(); first = true; samplesOut = 0 }
     fun input(payload: ByteArray, pts: Long) {
         val opus = payload.copyOfRange(2, payload.size)
         val index = fixture.packets.indexOfFirst { it.contentEquals(opus) }
         check(index >= 0)
+        given.add(pts)
         inside.addLast(longArrayOf(index.toLong(), pts, (inputs++).toLong()))
     }
     fun drain(stream: AndroidOpusStream, out: MutableList<Emitted>, keep: Int = this.keep) {
@@ -69,17 +77,20 @@ private class StandIn(private val fixture: Fixture, private val shiftUs: Long, p
             val (index, pts, number) = inside.removeFirst()
             if (number.toInt() in silent) continue
             val skip = if (first) AndroidOpus.PRE_SKIP * 4 else 0
+            if (first) anchor = pts
             first = false
             val length = AndroidOpus.FRAME_BYTES - skip
             System.arraycopy(fixture.pcm[index.toInt()], skip, buffer, 0, length)
-            stream.decoded(pts + shiftUs, buffer, length) { pcm, bytes, at, accepted -> out.add(Emitted(pcm.copyOf(bytes), at, accepted)) }
+            val stamped = if (anchored) anchor + samplesOut * 1_000_000L / AndroidOpus.RATE else pts + shiftUs
+            samplesOut += length / 4
+            stream.decoded(stamped, buffer, length) { pcm, bytes, at, accepted -> out.add(Emitted(pcm.copyOf(bytes), at, accepted)) }
         }
     }
 }
 
-private class Run(private val fixture: Fixture, shiftUs: Long = 0, keep: Int = 0, silent: Set<Int> = emptySet()) {
+private class Run(private val fixture: Fixture, shiftUs: Long = 0, keep: Int = 0, silent: Set<Int> = emptySet(), anchored: Boolean = false) {
     val stream = AndroidOpusStream()
-    private val codec = StandIn(fixture, shiftUs, keep, silent)
+    val codec = StandIn(fixture, shiftUs, keep, silent, anchored)
     val out = ArrayList<Emitted>()
     val actions = ArrayList<Int>()
 
@@ -91,7 +102,8 @@ private class Run(private val fixture: Fixture, shiftUs: Long = 0, keep: Int = 0
         actions.add(action)
         if (action == AndroidOpusStream.LATE) return
         if (action == AndroidOpusStream.RESTART) codec.restart()
-        codec.input(bytes, pts)
+        // As AndroidOpusPipe: the decoder gets the stream's decoder timestamp, never the Host's PTS.
+        codec.input(bytes, stream.admittedDecoderPts)
         codec.drain(stream, out)
     }
 
@@ -215,6 +227,31 @@ fun main(args: Array<String>) {
     val jitter = Run(fixture).apply { for (i in 0 until n) if (i != 10) packet(i, i, pts(i) + if (i >= 11) 20_000 else 0) }.finish()
     verify(jitter.stream.concealed == 1L && jitter.out.size == n, "a late stamp within 25 ms is still concealed")
 
+    // --- the newer platform decoder (C2SoftOpusDec from android16-qpr2 on) ----
+    // It stamps each output as the first input's PTS plus the samples put out
+    // since. Given the Host's PTS, which jumps at the VM's pauses, every output
+    // after the first pause was older than any waiting packet and was dropped:
+    // no sound for the rest of the stream (field data, androidApi 37).
+    val dts = List(n) { AndroidOpusStream.DECODER_START_US + it * AndroidOpus.FRAME_US }
+    verify(paused.codec.given == dts, "the decoder is given even timestamps from 1 s across the pause, never the Host's PTS (never 0)")
+    val anchoredPause = Run(fixture, anchored = true).apply { for (i in 0 until n) packet(i, i, pts(i) + if (i >= 10) pause else 0) }.finish()
+    verify(anchoredPause.out.size == n && anchoredPause.stream.lost == 0L && anchoredPause.stream.concealed == 0L &&
+        (0 until n).all { anchoredPause.out[it].pcm.contentEquals(clean.out[it].pcm) }, "a decoder that stamps from its first PTS plays on after the VM's pause")
+    verify((0 until n).all { anchoredPause.out[it].pts == pts(it) + if (it >= 10) pause else 0 }, "each frame with its Host PTS (the jitter buffer's pause rule)")
+    val jumps = Run(fixture, anchored = true).apply { var offset = 0L; for (i in 0 until n) { if (i % 4 == 0 && i > 0) offset += 1_500_000L + i * 7_000L; packet(i, i, pts(i) + offset) } }.finish()
+    verify(jumps.out.size == n && jumps.stream.lost == 0L && (0 until n).all { jumps.out[it].pcm.contentEquals(clean.out[it].pcm) }, "a pause every 40 ms: every frame once, in order")
+    val restamped = Run(fixture, anchored = true).apply { for (i in 0 until n) packet(i, i, pts(i) + if (i >= 7) 21_000 else 0) }.finish()
+    verify(restamped.out.size == n && restamped.stream.concealed == 0L && restamped.stream.lost == 0L, "the Host's stamps starting over 21 ms later within sound (AudioPtsClock.restartUs)")
+    val behindStamp = Run(fixture, anchored = true).apply { for (i in 0 until n) packet(i, i, pts(i) - if (i >= 7) 30_000 else 0) }.finish()
+    verify(behindStamp.out.size == n && behindStamp.stream.lost == 0L, "or 30 ms earlier")
+    val anchoredLoss = Run(fixture, anchored = true).apply { for (i in 0 until n) if (i != 5) packet(i, i, pts(i)) }.finish()
+    verify(anchoredLoss.out.map { it.pcm.toList() } == one.out.map { it.pcm.toList() } && anchoredLoss.stream.concealed == 1L, "a loss is concealed as with the older decoder")
+    val anchoredLagging = Run(fixture, keep = 3, anchored = true).apply { for (i in 0 until n) packet(i, i, pts(i) + if (i >= 10) pause else 0) }.finish()
+    verify(anchoredLagging.out.map { it.pcm.toList() } == clean.out.map { it.pcm.toList() }, "and with the decoder three packets behind")
+    val anchoredRestart = Run(fixture, anchored = true).apply { for (i in 0 until 10) packet(i, 100 + i, pts(i)); for (i in 10 until n) packet(i, i - 10, pts(i) + pause) }.finish()
+    verify(anchoredRestart.stream.restarts == 1L && anchoredRestart.out.size == n &&
+        anchoredRestart.codec.given.subList(10, n) == dts.subList(0, n - 10), "a new decoder starts its timestamps over")
+
     // --- late, repeated, reordered ------------------------------------------
     val repeated = Run(fixture).apply { for (i in 0..5) packet(i, i, pts(i)); packet(5, 5, pts(5)); for (i in 6 until n) packet(i, i, pts(i)) }.finish()
     verify(repeated.actions[6] == AndroidOpusStream.LATE && repeated.out.size == n && repeated.stream.late == 1L, "a repeated packet is dropped")
@@ -239,7 +276,9 @@ fun main(args: Array<String>) {
     val stuck = AndroidOpusStream()
     for (i in 0 until 40) stuck.admit(i, pts(i), 0)
     verify(stuck.waiting == AndroidOpusStream.MAX_WAITING && stuck.lost == 8L, "a decoder that answers nothing holds at most 32")
-    verify(!stuck.decoded(pts(0), ByteArray(1920), 1920) { _, _, _, _ -> } && stuck.decoded(pts(39), ByteArray(1920), 1920) { _, _, _, _ -> }, "an output older than every waiting packet is no one's")
+    verify(stuck.admittedDecoderPts == AndroidOpusStream.DECODER_START_US + 39 * AndroidOpus.FRAME_US, "decoder timestamps 10 ms apart")
+    verify(!stuck.decoded(AndroidOpusStream.DECODER_START_US, ByteArray(1920), 1920) { _, _, _, _ -> } &&
+        stuck.decoded(stuck.admittedDecoderPts, ByteArray(1920), 1920) { _, _, _, _ -> }, "an output older than every waiting packet is no one's")
     verify(!AndroidOpusStream().decoded(BASE, ByteArray(1920), 1920) { _, _, _, _ -> }, "an output before any packet is no one's")
 
     // --- bitrate ------------------------------------------------------------
