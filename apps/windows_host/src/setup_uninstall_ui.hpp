@@ -2,6 +2,10 @@
 // Included by setup_main.cpp after its shared native painting and roots
 // (inside its unnamed namespace; setup_main.cpp includes setup_uninstall_reason.hpp itself).
 // All product removal happens in a verified protected child, never the UI QA.
+// While the files are removed (the buttons are hidden then) a short piece runs
+// along a bar under the text: the removal has no measure this window could
+// show, so the bar never fills, it only says that the work is going on. The
+// removal runs on its own thread; the window keeps answering Windows.
 class RemovalWindow {
  public:
   int run(bool worker,std::function<void()> action={},bool preview=false){
@@ -32,6 +36,12 @@ class RemovalWindow {
     p.text(body,28,90,width-56,48,13,Body,0,22);
     if(failed_){const auto wide=multitap::payload::widen(code_).value_or(L"uninstall_failed");p.text(txf(S::RemoveCode,{wide}),28,150,width-56,24,12,Danger,Single|CenterV);}
     else p.text(tx(S::RemoveUnchanged),28,150,width-56,24,12,Muted,Single|CenterV);
+    if(worker_&&!finished_){
+      const double track=width-56,piece=track/3,at=double(GetTickCount64()%1400)/1400.;
+      const double from=std::max(0.,(track+piece)*at-piece),to=std::min(track,(track+piece)*at);
+      roundRect(p.g(),scale_,28,192,track,5,2.5,Line);
+      if(to>from)roundRect(p.g(),scale_,28+from,192,to-from,5,2.5,Blue);
+    }
     p.present(dc);
   }
   void start(){EnableWindow(accept_,FALSE);try{if(preview_)return;action_();DestroyWindow(window_);}catch(const multitap::payload::Failure& failure){code_=failure.code;failed_=finished_=true;worker_=true;layout();}catch(...){code_="uninstall_failed";failed_=finished_=true;worker_=true;layout();}}
@@ -39,8 +49,9 @@ class RemovalWindow {
     case WM_CREATE:accept_=CreateWindowExW(0,L"BUTTON",tx(S::RemoveAction),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,0,0,window_,reinterpret_cast<HMENU>(IDOK),GetModuleHandleW(nullptr),nullptr);cancel_=CreateWindowExW(0,L"BUTTON",tx(S::Cancel),WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,0,0,0,0,window_,reinterpret_cast<HMENU>(IDCANCEL),GetModuleHandleW(nullptr),nullptr);layout();return 0;
     case DM_GETDEFID:return MAKELONG(IDCANCEL,DC_HASDEFID);
     case WM_COMMAND:if(LOWORD(wp)==IDOK&&!worker_){start();return 0;}if(LOWORD(wp)==IDCANCEL&&(!worker_||finished_)){DestroyWindow(window_);return 0;}break;
-    case WM_TIMER:if(wp==1){KillTimer(window_,1);if(preview_){finished_=true;layout();return 0;}thread_=std::thread([this]{try{action_();}catch(const multitap::payload::Failure& failure){code_=failure.code;}catch(...){code_="uninstall_failed";}PostMessageW(window_,WM_APP+31,0,0);});}return 0;
-    case WM_APP+31:if(thread_.joinable())thread_.join();finished_=true;failed_=!code_.empty();layout();SetFocus(cancel_);return 0;
+    case WM_TIMER:if(wp==2){if(finished_)KillTimer(window_,2);else InvalidateRect(window_,nullptr,FALSE);return 0;}
+      if(wp==1){KillTimer(window_,1);if(preview_){finished_=true;layout();return 0;}SetTimer(window_,2,33,nullptr);thread_=std::thread([this]{try{action_();}catch(const multitap::payload::Failure& failure){code_=failure.code;}catch(...){code_="uninstall_failed";}PostMessageW(window_,WM_APP+31,0,0);});}return 0;
+    case WM_APP+31:KillTimer(window_,2);if(thread_.joinable())thread_.join();finished_=true;failed_=!code_.empty();layout();SetFocus(cancel_);return 0;
     case WM_CLOSE:if(!worker_||finished_)DestroyWindow(window_);return 0;
     case WM_SIZE:if(accept_)layout();return 0;
     case WM_DPICHANGED:{const auto* r=reinterpret_cast<RECT*>(lp);if(!r||HIWORD(wp)<48)return 0;scale_=double(HIWORD(wp))/96.;SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);layout();return 0;}

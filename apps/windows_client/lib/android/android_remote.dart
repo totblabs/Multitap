@@ -474,6 +474,10 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   late final RelativeMouseControl _relativeMouse;
   bool _gameMouse = false, _mousePresent = false, _gameMouseDialogOpen = false;
 
+  /// Hand-overs waiting for the VM to confirm the virtual USB mouse (up to
+  /// 4 s each): said on the picture, where nothing moved meanwhile.
+  int _gameMouseWaits = 0;
+
   /// The mouse press that handed the mouse over: its release is used up too.
   int? _gameMousePress;
   UsbGameMouse? _gameMouseUsb;
@@ -2234,13 +2238,22 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     // The virtual USB mouse (what League of Legends reads) starts attaching
     // when the option goes on. A hand-over before the VM confirms it would
     // use injected movement for the whole capture: wait for it, at most 4 s.
-    for (
-      var waited = 0;
-      waited < 40 && _gameMouseUsb?.attaching == true;
-      waited++
-    ) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      if (!mounted || !_gameMouse || !identical(session, _session)) return;
+    final waits = _gameMouseUsb?.attaching == true;
+    if (waits) setState(() => _gameMouseWaits++);
+    try {
+      for (
+        var waited = 0;
+        waited < 40 && _gameMouseUsb?.attaching == true;
+        waited++
+      ) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        if (!mounted || !_gameMouse || !identical(session, _session)) return;
+      }
+    } finally {
+      if (waits) {
+        _gameMouseWaits--;
+        if (mounted) setState(() {});
+      }
     }
     _captureHold = false;
     if (!session.captured) await session.capture(true);
@@ -5019,6 +5032,15 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
                         child: _Chip(
                           busy: true,
                           label: l10n.fittingScreenSize,
+                          chrome: chrome,
+                        ),
+                      )
+                    else if (ready && _gameMouseWaits > 0)
+                      Center(
+                        child: _Chip(
+                          key: const Key('android-game-mouse-waiting'),
+                          busy: true,
+                          label: l10n.androidMouseLockConnecting,
                           chrome: chrome,
                         ),
                       ),

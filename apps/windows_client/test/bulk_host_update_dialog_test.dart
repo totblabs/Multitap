@@ -199,6 +199,20 @@ void main() {
       expect(api.calls.every((c) => c.disconnect), isTrue);
       expect(find.textContaining('연결이 끝나면 업데이트해요'), findsOneWidget);
       expect(find.textContaining('서버 접수됨'), findsOneWidget);
+      // The Host has the request and is at work on it: its row moves, with
+      // no share to show yet. Waiting for a connection to end is not work.
+      expect(
+        tester
+            .widget<LinearProgressIndicator>(
+              find.byKey(const ValueKey('bulk-host-progress-pve-170')),
+            )
+            .value,
+        isNull,
+      );
+      expect(
+        find.byKey(const ValueKey('bulk-host-progress-pve-149')),
+        findsNothing,
+      );
       expect(find.text('대기'), findsNWidgets(2));
       expect(find.text('진행 중 2대 · 완료 0대 · 실패 0대'), findsOneWidget);
       machines.value = [

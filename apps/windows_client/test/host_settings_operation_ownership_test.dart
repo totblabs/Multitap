@@ -7,6 +7,7 @@ import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/host_settings_screen.dart';
 
 import 'host_settings_test.dart' show FakeHostSettings, FakeCloseGuard;
+import 'helpers/pump_work.dart';
 
 class OwnedApi extends FakeHostSettings {
   OwnedApi({super.registered = true});
@@ -91,14 +92,14 @@ Future<void> openOwned(
     ),
   );
   if (settle) {
-    await t.pumpAndSettle();
+    await pumpWork(t);
   } else {
     await t.pump();
     await t.pump(const Duration(milliseconds: 400));
   }
   if (page != 0) {
     await t.tap(find.byKey(Key('host-nav-$page')));
-    await t.pumpAndSettle();
+    await pumpWork(t);
   }
 }
 
@@ -111,7 +112,7 @@ Future<void> clickOwned(
   await t.ensureVisible(f);
   await t.tap(f);
   if (settle) {
-    await t.pumpAndSettle();
+    await pumpWork(t);
   } else {
     await t.pump();
     await t.pump(const Duration(milliseconds: 400));
@@ -174,7 +175,7 @@ void main() {
       await t.pump(const Duration(seconds: 3));
       expect(api.requests.where((r) => r['action'] == 'status'), hasLength(2));
       fresh.complete(response);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(
         t
             .widget<TextField>(find.byKey(const Key('host-server-origin')))
@@ -263,7 +264,7 @@ void main() {
       expect(find.textContaining('작업 응답은 받았지만'), findsOneWidget);
       resumeOwned(t);
       await t.pump(const Duration(milliseconds: 3100));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(
         api.requests.where((r) => r['action'] == 'restartServiceV1'),
         hasLength(1),
@@ -287,7 +288,7 @@ void main() {
       await t.pump(const Duration(milliseconds: 400));
       resumeOwned(t);
       await t.pump(const Duration(milliseconds: 3100));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(api.requests.where((r) => r['action'] == 'status'), hasLength(2));
       expect(find.byKey(const Key('host-refresh')), findsOneWidget);
     },
@@ -387,7 +388,7 @@ void main() {
       await t.pump();
       expect(guard.closes, 0);
       api.restarting!.complete();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(api.requests.where((r) => r['action'] == 'service'), isEmpty);
     },
   );

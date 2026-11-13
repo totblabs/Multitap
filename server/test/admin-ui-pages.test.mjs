@@ -698,6 +698,8 @@ test('First setup asks for the one-time setup code from the server log and sends
   setup.dispatchEvent(new f.window.Event('submit')); await f.settle();
   assert.match(document.querySelector('#setup-error').textContent, /설정 코드가 맞지 않아요\..*multitap code/);
   assert.equal(document.querySelector('#setup').hidden, false);
+  // Only the code was wrong: the two passwords that were typed are still there.
+  assert.equal(setup.elements.password.value, 'Design-setup-password-10!'); assert.equal(setup.elements.confirmation.value, 'Design-setup-password-10!');
   reject = false; setup.elements.setupCode.value = '7KQ4-2F9M-XC3P'; setup.elements.password.value = setup.elements.confirmation.value = 'Design-setup-password-10!';
   setup.dispatchEvent(new f.window.Event('submit')); await f.settle();
   const sent = f.writes.filter(write => write.path.endsWith('/setup'));

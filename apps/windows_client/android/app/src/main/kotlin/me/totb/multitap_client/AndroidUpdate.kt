@@ -54,9 +54,11 @@ class AndroidUpdate(private val activity: MainActivity, engine: FlutterEngine) {
                 } else {
                     @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_INTENT)
                 }
+                var opened = false
                 try {
                     if (confirm == null) throw IllegalStateException()
                     activity.startActivity(confirm)
+                    opened = true
                 } catch (_: Exception) {
                     try {
                         if (ownership.abort(id) { activity.packageManager.packageInstaller.abandonSession(id) }) {
@@ -69,6 +71,8 @@ class AndroidUpdate(private val activity: MainActivity, engine: FlutterEngine) {
                         }
                     }
                 }
+                // A step, not a result: Android's confirmation is open and waits for the person.
+                if (opened && !disposed) channel.invokeMethod("installStatus", mapOf("status" to "confirm_opened"))
                 return
             }
             finish(id, AndroidUpdatePolicy.statusCode(status))
@@ -193,7 +197,19 @@ class AndroidUpdate(private val activity: MainActivity, engine: FlutterEngine) {
                     activeInstaller.openSession(id).use { open ->
                         val hashed = request.file.inputStream().use { input ->
                             open.openWrite("Multitap.apk", 0, request.size).use { output ->
-                                val value = AndroidUpdatePolicy.copyVerified(input, output, request.size)
+                                // The dialog's bar: bytes written of the known size, about once a
+                                // mebibyte and at the end. Nothing else in this hand-off has a measure.
+                                var reported = 0L
+                                val value = AndroidUpdatePolicy.copyVerified(input, output, request.size) { copied ->
+                                    if (copied - reported >= 1024 * 1024 || copied == request.size) {
+                                        reported = copied
+                                        main.post {
+                                            if (!disposed) {
+                                                channel.invokeMethod("installProgress", mapOf("copied" to copied, "size" to request.size))
+                                            }
+                                        }
+                                    }
+                                }
                                 open.fsync(output)
                                 value
                             }

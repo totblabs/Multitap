@@ -4,11 +4,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/data/usb_redirection.dart';
+import 'package:multitap_client/ui/app_progress.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/usb_panel.dart';
 
 import 'usb_redirection_test.dart'
     show started, shared, stick, FakeBackend, FakeSocket;
+import 'helpers/pump_work.dart';
 
 // The USB panel: what a person sees and can do. The session, relay and
 // capture are the fakes of usb_redirection_test.dart.
@@ -458,9 +460,22 @@ void main() {
       await tester.tap(move);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('usb-stop-confirm-yes')));
-      await tester.pumpAndSettle();
+      // The row moves while the device comes over: only the question's
+      // route is let finish (a full settle would run into the move's wait).
+      await pumpWork(tester, limit: const Duration(milliseconds: 400));
       expect(backend.handOverAsks, ['stick']);
       expect(find.text('Code2 창에서 가져오는 중…'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.ancestor(
+            of: find.byKey(const ValueKey('usb-status-stick')),
+            matching: find.byType(AppBusyLine),
+          ),
+          matching: find.byKey(const Key('app-busy-line-spinner')),
+        ),
+        findsOneWidget,
+        reason: 'being brought over is work under way',
+      );
       expect(find.text('옮기는 중'), findsOneWidget);
       expect(tester.widget<FilledButton>(move).onPressed, isNull);
       expect(socket.texts.where((m) => m['type'] == 'usb.attach'), isEmpty);
@@ -630,6 +645,120 @@ void main() {
       await tester.runAsync(usb.close);
     },
   );
+
+  // A wait says that it goes on: the line of a device on its way and of a
+  // panel getting ready moves, and the result takes the mark's place.
+  testWidgets(
+    'In-flight device rows and the waiting panel move; the result or a refusal replaces the mark',
+    (tester) async {
+      late UsbSession usb;
+      late FakeSocket socket;
+      await tester.runAsync(() async {
+        final result = await started(hostReady: false);
+        usb = result.$1;
+        socket = result.$2;
+      });
+      await tester.pumpWidget(host(usb));
+      await tester.pump();
+      // The spinner of the busy line whose sentence has this key.
+      Finder mark(Key text) => find.descendant(
+        of: find.ancestor(
+          of: find.byKey(text),
+          matching: find.byType(AppBusyLine),
+        ),
+        matching: find.byKey(const Key('app-busy-line-spinner')),
+      );
+      const row = ValueKey('usb-status-stick');
+      // The desktop is getting ready: the panel's line moves. The device
+      // itself is settled (its dot), nothing turns on its row.
+      expect(find.textContaining('준비를 하고 있어요'), findsOneWidget);
+      expect(mark(const Key('usb-status')), findsOneWidget);
+      expect(find.byKey(row), findsOneWidget);
+      expect(mark(row), findsNothing);
+
+      await tester.runAsync(() async {
+        socket.emit({'type': 'usb.status', 'state': 'ready'});
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      });
+      await tester.pump();
+      expect(find.byKey(const Key('usb-status')), findsNothing);
+      expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
+
+      // Being attached: the row's line moves until the desktop answers.
+      await tester.tap(find.byKey(const ValueKey('usb-share-stick')));
+      await tester.pump();
+      expect(find.text('데스크톱에 연결하는 중…'), findsOneWidget);
+      expect(mark(row), findsOneWidget);
+
+      // Refused: the reason takes the line, and nothing keeps turning.
+      await tester.runAsync(() async {
+        socket.emit({
+          'type': 'usb.rejected',
+          'device': socket.texts.lastWhere(
+            (m) => m['type'] == 'usb.attach',
+          )['device'],
+          'reason': 'usb_class_not_granted',
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      });
+      await tester.pump();
+      expect(usb.entries.single.state, UsbEntryState.refused);
+      expect(find.text('데스크톱에 연결하는 중…'), findsNothing);
+      expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
+      expect(find.byKey(row), findsOneWidget);
+
+      // Asked again and taken: connected, with its dot and no mark.
+      await tester.tap(find.byKey(const ValueKey('usb-share-stick')));
+      await tester.pump();
+      expect(mark(row), findsOneWidget);
+      await tester.runAsync(() async {
+        socket.emit({
+          'type': 'usb.attached',
+          'device': socket.texts.lastWhere(
+            (m) => m['type'] == 'usb.attach',
+          )['device'],
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      });
+      await tester.pump();
+      expect(find.textContaining('PC에서 쓸 수 없어요'), findsOneWidget);
+      expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.runAsync(usb.close);
+    },
+  );
+
+  testWidgets('Looking for devices moves; the empty list does not', (
+    tester,
+  ) async {
+    late UsbSession usb;
+    late FakeBackend backend;
+    final listed = Completer<void>();
+    await tester.runAsync(() async {
+      final result = await started(devices: []);
+      usb = result.$1;
+      backend = result.$3;
+    });
+    await tester.pumpWidget(host(usb));
+    await tester.pump();
+    expect(find.text('연결할 USB 장치가 없어요.'), findsOneWidget);
+    expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
+    // The list is being read again and has not answered.
+    backend.listGate = listed;
+    await tester.tap(find.byKey(const Key('usb-refresh')));
+    await tester.pump();
+    expect(usb.listing, isTrue);
+    expect(find.text('장치를 찾고 있어요…'), findsOneWidget);
+    expect(find.byKey(const Key('app-busy-line-spinner')), findsOneWidget);
+    await tester.runAsync(() async {
+      listed.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    });
+    await tester.pump();
+    expect(find.text('장치를 찾고 있어요…'), findsNothing);
+    expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
+    await tester.runAsync(usb.close);
+  });
 
   testWidgets('A finished session says so and offers nothing', (tester) async {
     late UsbSession usb;

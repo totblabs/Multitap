@@ -47,6 +47,26 @@
 .server-access-error{margin-top:12px;white-space:pre-line;overflow-wrap:anywhere}
 .server-access-operation{color:var(--muted)}
 .server-access-operation:empty{display:none}
+.server-access-operation.server-access-warning{color:var(--ink);white-space:pre-line}
+/* A save that was applied: a tick and the sentence, in the text colour. */
+.server-access-operation.is-done{display:flex;align-items:center;gap:6px;color:var(--ink)}
+.server-access-operation.is-done .icon{flex:none;width:15px;height:15px;color:var(--green)}
+/* Brought into view by the page (server-access.js reveal): a little air above and below. */
+.server-access-waiting,.server-access-results,.server-access-progress,.server-access-error{scroll-margin:12px 0}
+/* While a save is applied: the step the server reports, beside the buttons. */
+.server-access-progress{display:flex;align-items:center;color:var(--ink)}
+.server-access-steps{display:flex;flex-wrap:wrap;gap:4px 0;margin:0;padding:0;list-style:none;color:var(--muted);font-size:13px}
+.server-access-steps li+li::before{content:"→";margin:0 8px;color:var(--faint);font-weight:400}
+.server-access-steps .is-now{color:var(--ink);font-weight:600}
+.server-access-udp-switch{padding:0 var(--pad) 4px}
+.server-access-udp .field-hint{white-space:pre-line}
+.server-access-outside-list{margin:0 0 8px;padding:0;list-style:none}
+.server-access-outside-list li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:4px 0;overflow-wrap:anywhere}
+.server-access-outside-list small{color:var(--muted)}
+.server-access-outside-code{margin:0 0 8px;font-variant-numeric:tabular-nums}
+.server-access-outside-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px}
+.server-access-outside-offer{padding:9px var(--pad);border-top:1px solid var(--line-soft)}
+.server-access-outside-offer .field-hint{margin:0 0 8px;white-space:pre-line}
 .plain-tag{color:var(--muted);font-size:12.5px;font-weight:400}
 /* The buttons of the box: on the right at its bottom, the one that saves last. */
 .panel>.server-access-actions{justify-content:flex-end;gap:8px;margin:0;padding:12px var(--pad);border-top:1px solid var(--line);background:var(--surface-2)}
@@ -55,6 +75,9 @@
 .server-access-checks li:last-child{border-bottom:0}
 .server-access-checks .icon{flex:none;align-self:center;width:14px;height:14px;color:var(--muted)}
 .server-access-checks small{display:block;color:var(--muted)}
+/* An extra address the server did not reach from inside: said, and the save goes on. */
+.server-access-checks li[data-unreached] .icon{color:var(--warn)}
+.server-access-checks small[data-access-extra-unreached]{color:var(--ink)}
 .server-access-current .facts>div{grid-template-columns:118px minmax(0,1fr)}
 .server-access-current .facts dd{white-space:pre-line}
 .server-access-extra{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:end}
@@ -75,9 +98,10 @@
 .server-access-forward table th{overflow-wrap:normal;word-break:keep-all}
 .server-access-forward tbody th{background:var(--bar);border-bottom-color:var(--line-soft);color:var(--ink-2);font-weight:600}
 .server-access-forward tbody tr:last-child>*{border-bottom:0}
-@media(max-width:1000px){.server-access-layout{grid-template-columns:minmax(0,1fr)}}
+/* One column: 검사 결과 comes first below the form, right under the buttons that fill it. */
+@media(max-width:1000px){.server-access-layout{grid-template-columns:minmax(0,1fr)}.server-access-results{order:-1}}
 @media(max-width:640px){.server-access-bind{grid-template-columns:minmax(0,1fr)}.panel>.server-access-actions{align-items:stretch;flex-direction:column}.server-access-actions button{width:100%}}
-@container server-access (max-width:860px){.server-access-layout{grid-template-columns:minmax(0,1fr)}}
+@container server-access (max-width:860px){.server-access-layout{grid-template-columns:minmax(0,1fr)}.server-access-results{order:-1}}
 
 /* 집 밖에서 접속하려면: two ways, numbered steps (server-access.js outsideSteps). */
 .outside-ways{list-style:none;margin:0;padding:12px 16px;display:grid;gap:14px}

@@ -5,6 +5,7 @@ import 'package:multitap_client/data/broker_api.dart';
 import 'package:multitap_client/models/desktop_machine.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/workspace_shell.dart';
+import 'helpers/pump_work.dart';
 
 void main() {
   Future<void> show(
@@ -59,14 +60,14 @@ void main() {
     if (busy) {
       await tester.pump(const Duration(milliseconds: 200));
     } else {
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
     }
   }
 
   Future<void> openMenu(WidgetTester tester, {bool settle = true}) async {
     await tester.tap(find.byKey(const Key('desktop-power-pve-149')));
     if (settle) {
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
     } else {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
@@ -160,18 +161,18 @@ void main() {
     await show(tester, actions);
     await openMenu(tester);
     await tester.tap(find.byKey(const Key('power-shutdown-pve-149')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.text('데스크톱을 종료할까요?'), findsOneWidget);
     expect(find.textContaining('Windows를 정상적으로 끄도록 요청해요.'), findsOneWidget);
     expect(actions, isEmpty);
     await tester.tap(find.byKey(const Key('cancel-power-shutdown-pve-149')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(actions, isEmpty);
     await openMenu(tester);
     await tester.tap(find.byKey(const Key('power-shutdown-pve-149')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await tester.tap(find.widgetWithText(FilledButton, '종료'));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(actions, ['pve-149:shutdown']);
     expect(find.text('TESTER 종료 작업이 완료됐어요.'), findsOneWidget);
   });
@@ -183,7 +184,7 @@ void main() {
       await show(tester, actions);
       await openMenu(tester);
       await tester.tap(find.byKey(const Key('power-stop-pve-149')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.text('데스크톱을 정지할까요?'), findsOneWidget);
       expect(
         find.text(
@@ -201,14 +202,14 @@ void main() {
       final button = tester.widget<FilledButton>(confirm);
       expect(button.style?.backgroundColor?.resolve({}), palette.red);
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.text('데스크톱을 정지할까요?'), findsNothing);
       expect(actions, isEmpty);
       await openMenu(tester);
       await tester.tap(find.byKey(const Key('power-stop-pve-149')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.tap(find.byKey(const Key('confirm-power-stop-pve-149')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(actions, ['pve-149:stop']);
       expect(find.text('TESTER 정지 작업이 완료됐어요.'), findsOneWidget);
     },
@@ -233,12 +234,12 @@ void main() {
       expect(item(tester, action).onPressed, isNull, reason: action);
     }
     await tester.tap(find.byKey(const Key('power-start-pve-149')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     // 켜기 asks like the other power actions.
     expect(find.text('데스크톱을 켤까요?'), findsOneWidget);
     expect(actions, isEmpty);
     await tester.tap(find.byKey(const Key('confirm-power-start-pve-149')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(actions, ['pve-149:start']);
   });
 
@@ -253,7 +254,7 @@ void main() {
       expect(item(tester, action).onPressed, isNull, reason: action);
     }
     await tester.tapAt(const Offset(10, 990));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await show(tester, actions, busy: true);
     expect(find.text('전원 작업 중'), findsOneWidget);
     await openMenu(tester, settle: false);
@@ -339,9 +340,9 @@ void main() {
       );
       await openMenu(tester);
       await tester.tap(find.byKey(const Key('power-reboot-pve-149')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.tap(find.byKey(const Key('confirm-power-reboot-pve-149')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byType(SnackBar), findsNothing);
     },
   );

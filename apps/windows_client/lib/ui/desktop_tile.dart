@@ -7,6 +7,7 @@ import '../models/desktop_machine.dart';
 import '../models/session_display_mode.dart';
 import '../models/stream_options.dart'
     show audioDeviceMissingText, audioDevicePendingText;
+import 'app_progress.dart';
 import 'app_theme.dart';
 import 'desktop_art.dart';
 import 'desktop_menu.dart';
@@ -121,6 +122,84 @@ Color _phaseDot(AppPalette p, TilePhase phase) => switch (phase) {
   TilePhase.power => p.amber,
   _ => p.faint,
 };
+
+/// The moving mark of a tile whose work is under way (a power task, Windows
+/// starting, the Host connecting or updating, a window being opened): a small
+/// spinner in the slot a settled state's icon or dot has, [size] across. It
+/// only says that the work goes on; it never stands for how far it got.
+class TileBusyMark extends StatelessWidget {
+  const TileBusyMark({
+    super.key,
+    required this.size,
+    this.color,
+    this.track,
+    this.strokeWidth = 2,
+  });
+  final double size, strokeWidth;
+
+  /// The brand amber when null.
+  final Color? color;
+  final Color? track;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: size,
+    // Its own layer: the turning mark repaints this square, not the tile
+    // around it (a list of starting desktops would redraw every tile on
+    // every frame otherwise).
+    child: RepaintBoundary(
+      child: Padding(
+        // The stroke is drawn on the edge of its box: kept inside the slot.
+        padding: EdgeInsets.all(strokeWidth / 2),
+        child: CircularProgressIndicator(
+          strokeWidth: strokeWidth,
+          color: color ?? AppPalette.of(context).amber,
+          backgroundColor: track,
+        ),
+      ),
+    ),
+  );
+}
+
+/// The Host update of this desktop is being worked on now (sent, downloading,
+/// checking the file, installing). Waiting for a connection to end is not
+/// work, and neither is a finished or failed update.
+bool hostUpdateWorking(DesktopMachine machine) {
+  final op = machine.hostUpdate.operation;
+  return machine.hostUpdate.present &&
+      op != null &&
+      op.active &&
+      op.status != 'waiting';
+}
+
+/// The share of the installer the Host reports it has downloaded (0..1), or
+/// null in every other step: only this one is measured.
+double? hostUpdateFraction(DesktopMachine machine) {
+  final op = machine.hostUpdate.operation;
+  return hostUpdateWorking(machine) &&
+          op!.status == 'downloading' &&
+          op.progress != null
+      ? op.progress! / 100
+      : null;
+}
+
+/// How long this client's own power request has run ("경과 01:12"), shown
+/// only after the first seconds; nothing for a task it did not start.
+Widget? _powerElapsed(
+  DesktopMachine machine,
+  DateTime? since,
+  TextStyle style,
+) => since == null || !machine.powerBusy
+    ? null
+    : Padding(
+        key: Key('power-elapsed-${machine.id}'),
+        padding: const EdgeInsets.only(left: 8),
+        child: AppElapsedText(
+          elapsed: () => DateTime.now().difference(since),
+          after: const Duration(seconds: 3),
+          style: style,
+        ),
+      );
 
 /// One assigned desktop as a large tile. Only the main button and the ▶ on
 /// the picture connect (a click elsewhere on the tile does not); no key on
@@ -294,6 +373,7 @@ class _DesktopTileState extends State<DesktopTile> {
               progress: progress,
               preview: widget.preview,
               onDetails: a.details,
+              working: a.working,
               touch: touch,
             ),
             const Spacer(),
@@ -644,10 +724,16 @@ class DesktopStatusArea extends StatelessWidget {
     required this.preview,
     required this.onDetails,
     this.detailOverride,
+    this.working,
     this.touch = false,
   });
   final DesktopMachine machine;
   final DesktopReadiness readiness;
+
+  /// What this client is doing for the desktop right now
+  /// ([DesktopActions.working]): the second line says it and the sign turns
+  /// into a moving mark until it ends.
+  final String? working;
 
   /// The default connection mode named on a ready tile; null (Android, which
   /// has no window modes) leaves the readiness detail.
@@ -671,6 +757,7 @@ class DesktopStatusArea extends StatelessWidget {
     final progress = this.progress;
     final warn = progress == null && r.phase == TilePhase.attention;
     final id = machine.id;
+    final working = progress == null ? this.working : null;
     Widget lead;
     Color headColor;
     switch (progress == null ? r.phase : TilePhase.power) {
@@ -692,8 +779,21 @@ class DesktopStatusArea extends StatelessWidget {
         headColor = p.ink;
       case TilePhase.power:
       case TilePhase.waiting:
-        lead = Icon(Icons.hourglass_top_rounded, size: 14, color: p.muted);
+        // Work that is under way moves: a still sign here read as stopped
+        // through the minutes a start or an update takes.
+        lead = TileBusyMark(
+          key: Key('status-busy-$id'),
+          size: 14,
+          strokeWidth: 1.8,
+        );
         headColor = p.ink;
+    }
+    if (working != null) {
+      lead = TileBusyMark(
+        key: Key('status-busy-$id'),
+        size: 14,
+        strokeWidth: 1.8,
+      );
     }
     final Widget headline;
     final String detail;
@@ -757,6 +857,7 @@ class DesktopStatusArea extends StatelessWidget {
       // While the update keeps the Host away, the readiness line already
       // says how far it got; once the Host did not come back, what to check.
       detail =
+          working ??
           (r.hostUpdating || r.hostMissing
               ? r.detail
               : machine.hostUpdate.tileStatus()) ??
@@ -770,10 +871,20 @@ class DesktopStatusArea extends StatelessWidget {
     }
     final hostUpdateLine =
         progress == null &&
+        working == null &&
         !r.hostMissing &&
         machine.hostUpdate.tileStatus() != null;
+    // The Host's update at work: a thin bar on the card's lower edge, filled
+    // by the share the Host reports while it downloads and running back and
+    // forth in the steps that report none.
+    final updateBar =
+        progress == null &&
+        !r.hostMissing &&
+        (hostUpdateLine || r.hostUpdating) &&
+        hostUpdateWorking(machine);
     final use =
         progress == null &&
+            working == null &&
             !hostUpdateLine &&
             r.phase == TilePhase.ready &&
             !preview &&
@@ -783,6 +894,8 @@ class DesktopStatusArea extends StatelessWidget {
     final useColor = use == DesktopUse.other ? p.amberInk : p.blue;
     final detailColor = use.active
         ? useColor
+        : working != null
+        ? p.amberInk
         : !hostUpdateLine
         ? (warn ? p.ink.withValues(alpha: .85) : p.muted)
         : machine.hostUpdate.failed
@@ -844,78 +957,101 @@ class DesktopStatusArea extends StatelessWidget {
               18,
         ),
       ),
-      padding: EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: hostUpdateLine && machine.hostUpdate.failed ? 4 : 8,
-      ),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: warn ? p.warnSoft : p.tileWell,
         borderRadius: BorderRadius.circular(11),
         border: warn ? Border.all(color: p.warnLine) : null,
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      // The bar lies over the card's lower edge: the card keeps its height.
+      child: Stack(
+        fit: StackFit.passthrough,
         children: [
-          Row(
-            children: [
-              SizedBox(width: 16, child: Center(child: lead)),
-              const SizedBox(width: 6),
-              Expanded(child: headline),
-              ?details,
-            ],
-          ),
-          const SizedBox(height: 2),
-          Tooltip(
-            message: use.hintFor(machine.useAccount) ?? detail,
-            waitDuration: const Duration(milliseconds: 700),
-            child: Row(
+          Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: hostUpdateLine && machine.hostUpdate.failed ? 4 : 8,
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (use.active) ...[
-                  Icon(
-                    use == DesktopUse.mine
-                        ? Icons.person_rounded
-                        : Icons.people_alt_rounded,
-                    key: Key('desktop-in-use-$id'),
-                    size: 14,
-                    color: useColor,
-                  ),
-                  const SizedBox(width: 5),
-                ],
-                Expanded(
-                  child: KeepAllText(
-                    detail,
-                    key: Key(
-                      hostUpdateLine
-                          ? 'host-update-status-$id'
-                          : 'status-detail-$id',
-                    ),
-                    maxLines: scaler.scale(12.5) > 12.5 * 1.3 ? 2 : 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      height: 1.4,
-                      color: detailColor,
-                      fontWeight: use.active ? FontWeight.w600 : null,
-                    ),
+                Row(
+                  children: [
+                    SizedBox(width: 16, child: Center(child: lead)),
+                    const SizedBox(width: 6),
+                    Expanded(child: headline),
+                    ?details,
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Tooltip(
+                  message: use.hintFor(machine.useAccount) ?? detail,
+                  waitDuration: const Duration(milliseconds: 700),
+                  child: Row(
+                    children: [
+                      if (use.active) ...[
+                        Icon(
+                          use == DesktopUse.mine
+                              ? Icons.person_rounded
+                              : Icons.people_alt_rounded,
+                          key: Key('desktop-in-use-$id'),
+                          size: 14,
+                          color: useColor,
+                        ),
+                        const SizedBox(width: 5),
+                      ],
+                      Expanded(
+                        child: KeepAllText(
+                          detail,
+                          key: Key(
+                            working != null
+                                ? 'tile-working-$id'
+                                : hostUpdateLine
+                                ? 'host-update-status-$id'
+                                : 'status-detail-$id',
+                          ),
+                          maxLines: scaler.scale(12.5) > 12.5 * 1.3 ? 2 : 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            height: 1.4,
+                            color: detailColor,
+                            fontWeight: use.active ? FontWeight.w600 : null,
+                          ),
+                        ),
+                      ),
+                      if (hostUpdateLine && machine.hostUpdate.failed)
+                        TextButton(
+                          key: Key('host-update-diagnostics-$id'),
+                          onPressed: () =>
+                              showHostUpdateDiagnostics(context, machine),
+                          style: TextButton.styleFrom(
+                            foregroundColor: p.red,
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            minimumSize: const Size(0, 26),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: KeepAllText(l10n.diagnostics),
+                        ),
+                    ],
                   ),
                 ),
-                if (hostUpdateLine && machine.hostUpdate.failed)
-                  TextButton(
-                    key: Key('host-update-diagnostics-$id'),
-                    onPressed: () =>
-                        showHostUpdateDiagnostics(context, machine),
-                    style: TextButton.styleFrom(
-                      foregroundColor: p.red,
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      minimumSize: const Size(0, 26),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: KeepAllText(l10n.diagnostics),
-                  ),
               ],
             ),
           ),
+          if (updateBar)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: LinearProgressIndicator(
+                key: Key('host-update-progress-$id'),
+                value: hostUpdateFraction(machine),
+                minHeight: 3,
+                borderRadius: BorderRadius.zero,
+              ),
+            ),
         ],
       ),
     );
@@ -1082,6 +1218,9 @@ class _ActionRow extends StatelessWidget {
     final VoidCallback? onPressed;
     final String tooltip;
     final String keyName;
+    // The button's icon gives way to a moving mark while the state it names
+    // is work under way, or while this client opens what it was pressed for.
+    var moving = false;
     if (attention) {
       keyName = 'attention-';
       label = footerActionLabel(fix);
@@ -1098,7 +1237,8 @@ class _ActionRow extends StatelessWidget {
       keyName = 'open-';
       label =
           r.progressLabel ?? (r.phase == TilePhase.power ? l10n.working : l10n.preparing5);
-      icon = Icons.hourglass_top_rounded;
+      icon = Icons.more_horiz_rounded;
+      moving = true;
       onPressed = actions.primary;
       tooltip = r.headline;
     } else {
@@ -1116,7 +1256,10 @@ class _ActionRow extends StatelessWidget {
             };
       icon = off ? Icons.power_settings_new_rounded : Icons.play_arrow_rounded;
       onPressed = actions.primary;
-      tooltip = off
+      moving = actions.working != null && onPressed == null && !preview;
+      tooltip = moving
+          ? actions.working!
+          : off
           ? l10n.startsDesktopYouCanConnect
           : onPressed == null
           ? r.headline
@@ -1125,6 +1268,19 @@ class _ActionRow extends StatelessWidget {
           // The tip names what the button does, not the key.
           : l10n.streamingConnection2(streamModeLabel(mode));
     }
+    // A power task this client asked for: the wait is counted in the main
+    // button, beside "처리 중…" (the one slot wide enough on every card; a
+    // mini row's button is too short for it).
+    final elapsed = blocked && r.phase == TilePhase.power && !compact
+        ? _powerElapsed(
+            machine,
+            actions.powerSince,
+            uiText(size: 12.5, weight: FontWeight.w500, color: p.muted).copyWith(
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          )
+        : null;
+    final words = KeepAllText(label, maxLines: 1, overflow: TextOverflow.ellipsis);
     final more =
         actions.menu &&
         !off &&
@@ -1141,12 +1297,19 @@ class _ActionRow extends StatelessWidget {
           key: Key(keyName + id),
           onPressed: onPressed,
           style: focus(filled(emphasized, split: more)),
-          icon: Icon(icon, size: 18),
-          label: KeepAllText(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+          icon: moving
+              ? TileBusyMark(
+                  key: Key('action-busy-$id'),
+                  size: 18,
+                  color: emphasized ? p.onAmber : p.amber,
+                )
+              : Icon(icon, size: 18),
+          label: elapsed == null
+              ? words
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [Flexible(child: words), elapsed],
+                ),
         ),
       ),
     );
@@ -1318,12 +1481,16 @@ class DesktopThumbnailView extends StatelessWidget {
             color: Color(0xFFFFD24A),
           ),
         );
+      // Something is under way and the tile changes by itself: the sign
+      // moves (a still hourglass read as stopped).
       case TilePhase.waiting:
-        overlay = const _ThumbMessage(
-          icon: Icon(
-            Icons.hourglass_top_rounded,
-            size: 26,
-            color: Color(0xFFDFE5E9),
+        overlay = _ThumbMessage(
+          icon: TileBusyMark(
+            key: Key('thumb-busy-${machine.id}'),
+            size: 28,
+            strokeWidth: 2.5,
+            color: const Color(0xFFF5A623),
+            track: const Color(0x29FFFFFF),
           ),
         );
     }
@@ -1923,15 +2090,26 @@ class _DesktopRowState extends State<DesktopRow> {
     final scale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
     final hot = _hovered || _focused || _menu.isOpen;
     final phase = progress == null ? r.phase : TilePhase.power;
+    final working = progress == null ? a.working : null;
     final headline = progress != null
         ? '${progress.waiting} · ${progress.clock}'
         : r.phase == TilePhase.ready && !r.console
         ? m.use.shortFor(m.useAccount) ?? r.chip
         : r.headline;
+    // Work under way (a power task, Windows starting, the Host connecting or
+    // updating, a window this client opens): the dot's place holds a moving
+    // mark, since the words alone stood still for minutes.
+    final moving =
+        working != null ||
+        phase == TilePhase.power ||
+        phase == TilePhase.waiting ||
+        (progress == null && !r.hostMissing && hostUpdateWorking(m));
+
     final uptime = m.resourcesRunning
         ? m.resources.uptimeAt(DateTime.now())
         : null;
     final status = [
+      ?working,
       headline,
       if (uptime != null) uptimeText(uptime),
       if (!r.hostUpdating && !r.hostMissing) ?m.hostUpdate.tileStatus(),
@@ -1953,15 +2131,28 @@ class _DesktopRowState extends State<DesktopRow> {
         ),
         Row(
           children: [
-            Container(
-              width: 7,
-              height: 7,
-              decoration: BoxDecoration(
-                color: _phaseDot(p, phase),
-                shape: BoxShape.circle,
+            // One slot for the dot and the moving mark: the words keep
+            // their place when the state changes.
+            SizedBox(
+              width: 10,
+              child: Center(
+                child: moving
+                    ? TileBusyMark(
+                        key: Key('status-busy-${m.id}'),
+                        size: 10,
+                        strokeWidth: 1.6,
+                      )
+                    : Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: _phaseDot(p, phase),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
               ),
             ),
-            const SizedBox(width: 7),
+            const SizedBox(width: 4),
             Expanded(
               child: Tooltip(
                 message: '${r.headline} · ${r.detail}',

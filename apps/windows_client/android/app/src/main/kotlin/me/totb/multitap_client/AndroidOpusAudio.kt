@@ -153,8 +153,8 @@ internal data class PcmShape(val channels: Int, val float: Boolean)
  * order and wait (at most [MAX_PENDING], the oldest dropped), as packets wait
  * for a free input buffer; input buffers the decoder offers before it was
  * handed over are kept for it. The first burst then decodes at once and the
- * track's start cut (AndroidAudioTrim) cuts it like any start, so the pause
- * and concealment rules of [AndroidOpusStream] are unchanged.
+ * jitter buffer (AudioJitterBuffer) cuts it to its target like any backlog,
+ * so the pause and concealment rules of [AndroidOpusStream] are unchanged.
  *
  * A decoder that fails (an error, a refused input, none could be made) is
  * replaced at the next packet; one whose output format cannot be played
@@ -351,13 +351,18 @@ internal class AndroidOpusPipe<C : Any>(
  * - [decoded] takes the decoder's PCM for one packet and gives [decoded]'s
  *   `emit` what plays, in order: the concealment of the packets lost before
  *   it, then that PCM. MediaCodec has no packet-loss concealment (Opus PLC),
- *   so a lost packet is the last decoded 10 ms repeated, fading linearly to
- *   silence by the end of [MAX_CONCEALED] frames (60 ms); the next decoded
- *   frame fades in from there over [FADE_IN_SAMPLES].
+ *   so the first lost packet is the last decoded 10 ms played backwards in
+ *   time under a fade to silence (PcmFade.mirrorFadeOut: it goes on from the
+ *   last sample without an edge), any further lost packet up to
+ *   [MAX_CONCEALED] is silence, and the next decoded frame fades in from
+ *   silence over [FADE_IN_SAMPLES]. A frame is never played more than twice:
+ *   repeating it at full level, six times over, was a 100 Hz buzz.
+ *   (Real Opus PLC would need libopus in the APK through JNI: the platform
+ *   decoder cannot be asked to conceal.)
  *
  * Concealed frames carry the PTS right before the packet that showed the gap,
- * so AndroidAudioTrim's pause rule measures from real sound. Not thread-safe
- * (the media worker).
+ * so the jitter buffer's pause rule (AudioJitterBuffer) measures from real
+ * sound. Not thread-safe (the media worker).
  */
 internal class AndroidOpusStream {
     companion object {
@@ -375,7 +380,7 @@ internal class AndroidOpusStream {
 
     var packets = 0L
         private set
-    /** Frames concealed (repeated and faded). */
+    /** Frames concealed (one mirrored fade-out, then silence). */
     var concealed = 0L
         private set
     /** Lost frames left unfilled (a long gap, or one across a pause). */
@@ -458,15 +463,12 @@ internal class AndroidOpusStream {
         var gain = 1f
         if (conceal > 0 && haveLast) {
             for (k in 0 until conceal) {
-                val from = 1f - k.toFloat() / MAX_CONCEALED
-                val to = 1f - (k + 1).toFloat() / MAX_CONCEALED
-                for (n in 0 until AndroidOpus.FRAME_SAMPLES) {
-                    val g = from + (to - from) * (n + 1) / AndroidOpus.FRAME_SAMPLES
-                    scale(last, frame, n, g)
-                }
+                // The first lost frame: the last decoded one backwards in time, faded out (it goes on from
+                // the last sample, so no edge); the rest silence, so nothing is ever repeated twice.
+                if (k == 0) PcmFade.mirrorFadeOut(last, AndroidOpus.FRAME_SAMPLES, frame) else frame.fill(0)
                 concealed++
                 emit(frame, AndroidOpus.FRAME_BYTES, (packetPts - (conceal - k) * AndroidOpus.FRAME_US).coerceAtLeast(0), accepted)
-                gain = to
+                gain = 0f
             }
         } else if (conceal > 0) unfilled += conceal
         // The repeated frame is the decoded one, before any fade-in.

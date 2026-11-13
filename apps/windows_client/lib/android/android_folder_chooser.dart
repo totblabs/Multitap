@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../data/drive_files.dart';
 import '../ui/app_dialog.dart';
+import '../ui/app_progress.dart';
 import '../ui/app_theme.dart';
 import '../ui/korean_text.dart';
 import 'android_drive.dart';
@@ -75,6 +76,11 @@ class _AndroidFolderChooserState extends State<AndroidFolderChooser> {
   AndroidFolderList? _list;
   String? _error;
   bool _loading = true, _single = false;
+
+  /// The read has run long enough to be said in the list's place. A folder
+  /// that opens at once keeps the folders on screen: no flash of a line.
+  bool _slow = false;
+  Timer? _slowTimer;
   int _asked = 0;
 
   @override
@@ -83,10 +89,21 @@ class _AndroidFolderChooserState extends State<AndroidFolderChooser> {
     unawaited(_go(null));
   }
 
+  @override
+  void dispose() {
+    _slowTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _go(String? path) async {
     final asked = ++_asked;
+    _slowTimer?.cancel();
+    _slowTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted && _loading && asked == _asked) setState(() => _slow = true);
+    });
     setState(() {
       _loading = true;
+      _slow = false;
       _error = null;
     });
     try {
@@ -100,12 +117,14 @@ class _AndroidFolderChooserState extends State<AndroidFolderChooser> {
         }
       }
       if (!mounted || asked != _asked) return;
+      _slowTimer?.cancel();
       setState(() {
         _list = list;
         _loading = false;
       });
     } on DriveFileException catch (failure) {
       if (!mounted || asked != _asked) return;
+      _slowTimer?.cancel();
       setState(() {
         _loading = false;
         _error = failure.code == 'drive_denied'
@@ -183,7 +202,24 @@ class _AndroidFolderChooserState extends State<AndroidFolderChooser> {
           ),
         SizedBox(
           height: 260,
-          child: list == null
+          // Reading (the first list, or a folder that takes a while: a big
+          // one, a slow card): said where the folders will be. Its result
+          // or the reason above then takes its place.
+          child: _loading && (list == null || _slow)
+              ? Align(
+                  alignment: Alignment.topLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: AppBusyLine(
+                      l10n.androidReadingFolder,
+                      textKey: const Key('android-folder-reading'),
+                      trailing: const AppElapsedText(
+                        after: Duration(seconds: 3),
+                      ),
+                    ),
+                  ),
+                )
+              : list == null
               ? const SizedBox.shrink()
               : rows.isEmpty || (path != null && list.folders.isEmpty)
               ? Column(

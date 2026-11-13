@@ -34,6 +34,8 @@ body:has(#console:not([hidden])){height:100svh;overflow:hidden}
 #console .server-chip{display:flex;align-items:center;gap:6px;min-width:0}
 #console .server-chip>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #console .dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--green)}
+/* The server does not answer (app.js serverDown): the same state as the banner "서버가 응답하지 않아요". */
+#console .server-chip[data-server-down] .dot{background:var(--red)}
 #console .workspace-label .version{color:inherit;font-size:inherit}
 .nav-scrim{position:fixed;inset:0;z-index:44;background:var(--backdrop)}
 

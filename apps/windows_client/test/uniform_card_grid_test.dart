@@ -6,6 +6,7 @@ import 'package:multitap_client/models/stream_options.dart';
 import 'package:multitap_client/models/vm_resources.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/workspace_shell.dart';
+import 'helpers/pump_work.dart';
 
 void main() {
   testWidgets(
@@ -73,7 +74,7 @@ void main() {
               ),
             ),
           );
-          await tester.pumpAndSettle();
+          await pumpWork(tester);
           tester.widget<CustomScrollView>(
             find.byKey(const Key('workspace-scroll')),
           ).controller!.jumpTo(0);

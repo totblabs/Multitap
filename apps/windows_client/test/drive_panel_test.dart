@@ -10,12 +10,14 @@ import 'package:multitap_client/data/drive_memory.dart';
 import 'package:multitap_client/data/drive_rules.dart';
 import 'package:multitap_client/data/drive_session.dart';
 import 'package:multitap_client/data/product_log.dart';
+import 'package:multitap_client/ui/app_progress.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/drive_panel.dart';
 import 'package:multitap_client/ui/session_menu.dart' show SessionPopups;
 
 import 'drive_session_test.dart'
     show DriveSocket, FakeFiles, driveUrl, flush, ready, sessionId;
+import 'helpers/pump_work.dart';
 
 void main() {
   late DriveSocket socket;
@@ -150,7 +152,7 @@ void main() {
     files.pick = const DrivePick(r'C:\Music', 'Music');
     await tester.tap(find.byKey(const Key('drive-add')));
     await tester.runAsync(flush);
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.byKey(const Key('drive-notice')), findsNothing);
     expect(find.text('Music'), findsOneWidget);
   });
@@ -286,7 +288,7 @@ void main() {
       files.pick = DrivePick(path, 'x');
       await tester.tap(find.byKey(const Key('drive-add')));
       await tester.runAsync(flush);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       if (warning == null) {
         // An ordinary folder asks nothing more.
         expect(
@@ -322,7 +324,7 @@ void main() {
       files.pick = const DrivePick(r'C:\Music', 'Music');
       await tester.tap(find.byKey(const Key('drive-add')));
       await tester.runAsync(flush);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byKey(const Key('drive-add-confirm')), findsNothing);
       expect(drive.shares.single.path, r'C:\Music');
       expect(drive.shares.single.readOnly, isFalse);
@@ -394,7 +396,7 @@ void main() {
     await show(tester, drive);
     final id = drive.shares.single.id;
     await tester.tap(find.byKey(ValueKey('drive-remove-$id')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.text('공유를 끝낼까요?'), findsOneWidget);
     expect(find.textContaining('저장하지 못할 수 있어요'), findsOneWidget);
     // The row's own button and the question's confirm button both say it.
@@ -405,12 +407,12 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('drive-remove-confirm-no')));
     await tester.runAsync(flush);
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(drive.shares, hasLength(1));
     expect(find.text('Data'), findsOneWidget);
 
     await tester.tap(find.byKey(ValueKey('drive-remove-$id')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await tester.tap(find.byKey(const Key('drive-remove-confirm-yes')));
     await tester.runAsync(flush);
     await tester.pumpAndSettle();
@@ -469,6 +471,106 @@ void main() {
     drive.recovering = false;
     await tester.pump();
     expect(find.textContaining('폴더를 다시 고르세요'), findsOneWidget);
+  });
+
+  // A wait says that it goes on: the line of a folder on its way moves, and
+  // the result (connected, or why not) takes the mark's place.
+  testWidgets(
+    'a folder being connected moves; connected, refused or cut off it stands still',
+    (tester) async {
+      files.failOpen[r'C:\Gone'] = 'drive_not_found';
+      final drive = await open(tester, const [
+        DriveFolder(path: r'C:\Data', label: 'Data'),
+        DriveFolder(path: r'C:\Gone', label: 'Gone'),
+      ]);
+      await show(tester, drive);
+      final data = drive.shares[0], gone = drive.shares[1];
+      // The spinner of the busy line whose sentence has this key.
+      Finder mark(Key text) => find.descendant(
+        of: find.ancestor(
+          of: find.byKey(text),
+          matching: find.byType(AppBusyLine),
+        ),
+        matching: find.byKey(const Key('app-busy-line-spinner')),
+      );
+      final dataLine = ValueKey('drive-status-${data.id}');
+      final goneLine = ValueKey('drive-status-${gone.id}');
+      // Being connected: it moves. The folder that is not there says why,
+      // with its dot and nothing turning.
+      expect(tester.widget<Text>(find.byKey(dataLine)).data, '연결 중…');
+      expect(mark(dataLine), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(goneLine)).data,
+        driveMessage('drive_not_found'),
+      );
+      expect(mark(goneLine), findsNothing);
+
+      await tester.runAsync(() async {
+        socket.emit({
+          'type': 'drive.mounted',
+          'shares': [
+            {'id': data.id, 'state': 'mapped', 'letter': 'Z'},
+          ],
+        });
+        await flush();
+      });
+      await tester.pump();
+      expect(find.text('Z: 연결됨'), findsOneWidget);
+      expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
+
+      // The channel dropped and is coming back by itself: the panel's line
+      // moves while it does.
+      await tester.runAsync(() async {
+        socket.emit({'type': 'drive.error', 'reason': 'drive_transport_closed'});
+        await flush();
+      });
+      drive.recovering = true;
+      await tester.pump();
+      expect(mark(const Key('drive-reconnecting')), findsOneWidget);
+
+      // It did not come back: said, and nothing keeps turning.
+      drive.recovering = false;
+      await tester.pump();
+      expect(find.byKey(const Key('drive-reconnecting')), findsNothing);
+      expect(find.textContaining('폴더를 다시 고르세요'), findsOneWidget);
+      expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('getting ready moves; the empty panel does not', (tester) async {
+    late DriveSession drive;
+    await tester.runAsync(() async {
+      drive = DriveSession(
+        url: driveUrl,
+        token: 'not-persisted',
+        sessionId: sessionId,
+        files: files,
+        memory: memory,
+        server: 'https://fixture.invalid',
+        desktopId: 'pve-149',
+        dialer: (_, _) async => socket,
+        log: ProductLog(),
+      );
+      await drive.start();
+      await flush();
+    });
+    await show(tester, drive);
+    // The desktop has not answered yet.
+    expect(drive.ready, isFalse);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('drive-empty'))).data,
+      '공유 폴더를 준비하고 있어요…',
+    );
+    expect(find.byKey(const Key('app-busy-line-spinner')), findsOneWidget);
+    await tester.runAsync(() async {
+      socket.emit(ready);
+      await flush();
+    });
+    await tester.pump();
+    expect(drive.ready, isTrue);
+    expect(find.text('아직 공유한 폴더가 없어요.'), findsOneWidget);
+    expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
   });
 
   testWidgets('eight folders: 폴더 추가… is disabled and says why', (tester) async {

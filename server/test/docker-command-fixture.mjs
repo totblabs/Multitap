@@ -37,6 +37,8 @@ url='' out=''
 while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift 2 ;; -w|-H|--max-time) shift 2 ;; -*) shift ;; *) url=$1; shift ;; esac; done
 case "$url" in
   https://1.1.1.1/cdn-cgi/trace) [ -n "\${FAKE_PUBLIC_IP:-}" ] || exit 7; printf 'fl=1\\nip=%s\\nts=1\\n' "$FAKE_PUBLIC_IP" ;;
+  # The newest public release, as the redirect of releases/latest names it.
+  https://github.com/*/releases/latest) [ -n "\${FAKE_LATEST:-}" ] || exit 7; printf 'https://github.com/totblabs/Multitap/releases/tag/v%s' "$FAKE_LATEST" ;;
   https://raw.githubusercontent.com/*/compose.yaml) if [ -f "$FAKE_ROOT/release-compose.yaml" ]; then cp "$FAKE_ROOT/release-compose.yaml" "$out"; elif [ -n "\${FAKE_RELEASE_FILES:-}" ]; then cp "$FAKE_ROOT/compose.yaml" "$out"; else exit 22; fi ;;
   # The other files of a release only for the install test, which sends them into its own folder.
   https://raw.githubusercontent.com/*) [ -n "\${FAKE_RELEASE_FILES:-}" ] && [ -f "$FAKE_ROOT/\${url##*/}" ] || exit 22; cp "$FAKE_ROOT/\${url##*/}" "$out" ;;

@@ -171,21 +171,31 @@ fun main(args: Array<String>) {
 
     // --- one packet lost -------------------------------------------------
     fun lose(vararg lost: Int, keep: Int = 0) = Run(fixture, keep = keep).apply { for (i in 0 until n) if (i !in lost) packet(i, i, pts(i)) }.finish()
-    fun gain(k: Int, s: Int) = (1f - k.toFloat() / 6) + ((1f - (k + 1).toFloat() / 6) - (1f - k.toFloat() / 6)) * (s + 1) / 480
+    // The first lost frame: the last decoded one backwards in time under a half-cosine fade to
+    // silence (computed here, independently of PcmFade); any further lost frame is silence.
+    fun mirrored(from: ByteArray, s: Int): Int {
+        val frame = s / 2
+        val gain = 0.5 * (1 + Math.cos(Math.PI * (frame + 1) / 480))
+        return Math.round(sample(from, (479 - frame) * 2 + s % 2) * gain).toInt()
+    }
     fun concealment(frame: ByteArray, from: ByteArray, k: Int) =
-        (0 until 960).all { abs(sample(frame, it) - Math.round(sample(from, it) * gain(k, it / 2))) <= 1 }
+        if (k > 0) frame.all { it.toInt() == 0 } else (0 until 960).all { abs(sample(frame, it) - mirrored(from, it)) <= 1 }
     val one = lose(5)
     verify(one.out.size == n && one.stream.concealed == 1L && one.stream.unfilled == 0L, "a lost packet is concealed: still 20 frames")
-    verify(one.out[5].pts == pts(5) && concealment(one.out[5].pcm, ref[4], 0), "packet 4 repeated at its time, fading 1 -> 5/6")
-    verify(abs(sample(one.out[6].pcm, 0) - Math.round(sample(ref[6], 0) * 5f / 6)) <= 1 &&
-        one.out[6].pcm.copyOfRange(480, 1920).contentEquals(ref[6].copyOfRange(480, 1920)), "the next packet fades in from 5/6 over 2.5 ms")
+    verify(one.out[5].pts == pts(5) && concealment(one.out[5].pcm, ref[4], 0), "packet 4 mirrored at its time, fading 1 -> 0")
+    verify(abs(sample(one.out[5].pcm, 0) - sample(ref[4], 958)) <= 1 && abs(sample(one.out[5].pcm, 1) - sample(ref[4], 959)) <= 1 &&
+        sample(one.out[5].pcm, 958) == 0 && sample(one.out[5].pcm, 959) == 0, "it starts where the sound was (no edge) and ends silent")
+    verify(!one.out[5].pcm.contentEquals(ref[4]), "the lost frame is not a copy of the one before it")
+    verify(sample(one.out[6].pcm, 0) == 0 && sample(one.out[6].pcm, 1) == 0 &&
+        one.out[6].pcm.copyOfRange(480, 1920).contentEquals(ref[6].copyOfRange(480, 1920)), "the next packet fades in from silence over 2.5 ms")
     verify((7 until n).all { one.out[it].pcm.contentEquals(ref[it]) }, "and the rest is unchanged")
     verify(lose(5, keep = 2).out.map { it.pcm.toList() } == one.out.map { it.pcm.toList() }, "the same with the decoder two packets behind")
 
     // --- 60 ms lost: concealed to silence; 70 ms: left unfilled ------------
     val six = lose(5, 6, 7, 8, 9, 10)
     verify(six.out.size == n && six.stream.concealed == 6L, "six lost packets are concealed")
-    verify((0 until 6).all { k -> concealment(six.out[5 + k].pcm, ref[4], k) && six.out[5 + k].pts == pts(5 + k) }, "repeated, fading over 60 ms")
+    verify((0 until 6).all { k -> concealment(six.out[5 + k].pcm, ref[4], k) && six.out[5 + k].pts == pts(5 + k) }, "one mirrored fade-out, then silence over 60 ms")
+    verify((5 until 11).count { k -> six.out[k].pcm.any { it.toInt() != 0 } } == 1, "no frame is played more than twice: one made-up frame has sound")
     verify(sample(six.out[10].pcm, 958) == 0 && sample(six.out[10].pcm, 959) == 0, "silent at the end of the 60 ms")
     verify(sample(six.out[11].pcm, 0) == 0 && six.out[11].pcm.copyOfRange(480, 1920).contentEquals(ref[11].copyOfRange(480, 1920)), "sound fades in from silence")
     val seven = lose(5, 6, 7, 8, 9, 10, 11)

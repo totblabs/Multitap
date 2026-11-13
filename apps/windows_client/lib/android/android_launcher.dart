@@ -621,8 +621,8 @@ class AndroidSignInView extends StatelessWidget {
   final TextEditingController id, password;
   final bool remember, busy;
 
-  /// [busy] because a sign-out is being sent: the button waits as it is,
-  /// without the spinner and "로그인 중…" of a sign-in.
+  /// [busy] because a sign-out is being sent: the button turns its spinner
+  /// and says so, never the "로그인 중…" of a sign-in.
   final bool signingOut;
   final String? version, error;
 
@@ -901,7 +901,7 @@ class AndroidSignInView extends StatelessWidget {
                   ),
                 ),
               ),
-              child: busy && !signingOut
+              child: busy
                   ? Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -913,7 +913,14 @@ class AndroidSignInView extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 10),
-                        Text(l10n.signing),
+                        Flexible(
+                          child: Text(
+                            signingOut ? l10n.androidSigningOut : l10n.signing,
+                            key: signingOut
+                                ? const Key('login-signing-out')
+                                : null,
+                          ),
+                        ),
                       ],
                     )
                   : KeepAllText(configured ? l10n.sign : l10n.serverSettings),

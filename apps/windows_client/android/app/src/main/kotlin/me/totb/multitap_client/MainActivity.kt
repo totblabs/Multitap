@@ -374,6 +374,8 @@ class MainActivity : FlutterActivity() {
         // A fold, unfold or rotation can move the window to another display or
         // surface: the stream's refresh request is made again if it no longer holds.
         if (hasFocus) media?.refreshChanged()
+        // The user back in the app asks back an audio focus another player took (AndroidAudioFocus).
+        media?.windowFocus(hasFocus)
     }
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)

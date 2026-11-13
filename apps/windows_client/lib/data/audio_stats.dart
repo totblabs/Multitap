@@ -1,6 +1,7 @@
 /// audio-stats-v1: the sound path's fixed numbers for the `streamStats`
 /// diagnostic row. Client side: the native engine's jitter buffer (Windows
-/// runner AudioJitterBuffer, Android AndroidAudioTrim). Host side: the
+/// runner AudioJitterBuffer, Android its port AudioJitterBuffer in
+/// AndroidAudioJitter.kt). Host side: the
 /// stream.stats members `audioCapture` (Host worker: WASAPI capture -> packet,
 /// per packet) and `audioSend` (Host service: packets handed on and dropped,
 /// and the WebSocket send queue wait of each audio packet written).
@@ -19,7 +20,8 @@ const audioStatsFields = <String>{
   'audioOverruns', 'audioInserted', 'audioTrimmed', 'audioAvLagMs',
   'audioAvLeadMs',
   // audio-opus-v1 only: 10 ms frames this client made up for lost or late
-  // packets (Windows: Opus PLC; Android: the last frame repeated and faded).
+  // packets (Windows: Opus PLC; Android: one mirrored fade-out, then silence,
+  // and fade-out tails where its jitter buffer ran dry).
   'audioConcealed',
   // The Host: capture -> packet mean/max (us), packets handed on / dropped,
   // WebSocket send-queue wait mean/max (us) of the audio written there.
@@ -136,7 +138,7 @@ int? _count(Object? value) =>
     value is int && value >= 0 && value <= 0xffffffff ? value : null;
 
 /// A media engine whose native audio counters outlive one session: Android's
-/// AndroidAudioTrim counts for the whole app (AndroidMedia.kt keeps one). The
+/// jitter buffer counts for the whole app (AndroidMedia.kt keeps one). The
 /// sessions of such an engine share [audioCounterBaselines], so a new session
 /// reports what happened since the previous session's last reading instead of
 /// the app's totals again (otherwise the first window of every phone session
@@ -259,7 +261,7 @@ class AudioStatsTracker {
   }
 
   /// A new stream or engine: the Host members collected so far are dropped.
-  /// The native baselines stay. Android's AndroidAudioTrim counts for the whole
+  /// The native baselines stay. Android's jitter buffer counts for the whole
   /// app, across sessions and picture changes, so forgetting them would
   /// re-report the app's total at every session start and resize (several
   /// times the real count). An engine that really restarted

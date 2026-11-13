@@ -76,6 +76,27 @@ curl -fsSL https://raw.githubusercontent.com/totblabs/Multitap/main/deploy/docke
 
 Docker가 없으면 설치하고 서버를 시작한 뒤, 열 주소와 처음 로그인, 일회용 설정 코드를 보여 줍니다. 그다음은 관리자 페이지의 **시작하기**가 Proxmox 연결, 데스크톱마다 Host 설치, 사용자 배정까지 안내합니다. 앱과 Host는 설치한 서버에서 받거나 [Releases](https://github.com/totblabs/Multitap/releases)에서 받습니다.
 
+### 이 명령이 하는 일
+
+[`install.sh`](deploy/docker/install.sh)는 먼저 root인지, Debian·Ubuntu(x86_64)인지, CT라면 nesting이 켜졌는지 확인하고, 아니면 아무것도 설치하지 않고 멈춥니다. 그다음:
+
+- `docker compose`가 없으면 Docker를 설치합니다. Docker 공식 저장소(`download.docker.com`)에서, 안 되면 배포판의 `docker.io` 패키지로 설치합니다.
+- 최신 릴리스 태그에서 `compose.yaml`, `.env.example`, `multitap` 명령을 받고, 이미지 `ghcr.io/totblabs/multitap-broker`는 GitHub 컨테이너 저장소에서 받습니다.
+- `/opt/multitap`, `/usr/local/bin/multitap`, Docker 볼륨 `multitap-broker-data`, 기록 `/var/log/multitap-install.log`를 만듭니다.
+- Docker가 TCP 18480과 UDP 18481을 열고, 두 가지를 묻습니다: 같은 네트워크 주소(Enter는 예), 밖에서 오는 HTTP(Enter는 아니요). 둘째 질문을 위해 `1.1.1.1`에 공인 IP를 한 번 묻습니다.
+
+Docker와 서버 컨테이너 말고는 서비스를 만들지 않고, 로그인 계정이나 SSH 키를 만들지 않으며, 사용 통계를 보내지 않습니다. `multitap uninstall`은 컨테이너와 명령을 지우고, 데이터 볼륨과 `/opt/multitap`, Docker는 남깁니다.
+
+실행하기 전에 읽어 보려면:
+
+```sh
+curl -fsSLo install.sh https://raw.githubusercontent.com/totblabs/Multitap/main/deploy/docker/install.sh
+less install.sh
+MULTITAP_LANG=ko bash install.sh
+```
+
+서버 이미지는 공개된 [이미지 작업](.github/workflows/broker-image.yml)이 릴리스 태그의 소스로 만들고, 이미지의 `org.opencontainers.image.revision` 라벨에 만든 커밋이 적힙니다. 컨테이너는 root가 아닌 사용자로, 읽기 전용으로, 모든 권한(capability)을 뺀 채 돕니다([compose.yaml](compose.yaml)). 모든 코드가 AGPL-3.0 오픈 소스이므로 실행하기 전에 한 줄씩 읽어 볼 수 있습니다.
+
 ## 문서
 
 - **[홈페이지의 가이드](https://multitap.me/ko/guide/)**: 여기서 시작하세요. 설치부터 첫 연결까지 짧은 아홉 장입니다.

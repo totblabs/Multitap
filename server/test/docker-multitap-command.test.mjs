@@ -279,6 +279,22 @@ test('going back to a release from before the saved policy gives it the saved ad
   assert.doesNotMatch(again.out, /Removed an old server image/); assert.deepEqual(s.read('images').split('\n').filter(Boolean), ['1.0.0', VERSION]);
 });
 
+test('update without a version never takes the server back: a release newer than the latest public one stays as it is', { skip }, t => {
+  // Seen on a real install: on a pre-release, a plain `update` followed releases/latest down to the release before.
+  const m = commandMachine(t, { version: VERSION, env: seeded() });
+  writeFileSync(join(m.fake, 'images'), ['1.0.9', VERSION, ''].join('\n'));
+  const stays = m.run(['update'], { FAKE_LATEST: '1.0.9' });
+  assert.equal(stays.status, 0, stays.out); assert.equal(stays.state, 'running');
+  assert.match(stays.out, /newer than the latest public release \(1\.0\.9\)\. Nothing was changed\./); assert.match(stays.out, /multitap update 1\.0\.9/);
+  assert.equal(m.dotenv().MULTITAP_VERSION ?? VERSION, VERSION); assert.doesNotMatch(stays.out, /backed up|Updated to/); assert.doesNotMatch(stays.calls, /\bup -d\b|\bpull\b/);
+  // The same release as the latest one: nothing to do either.
+  const same = m.run(['update'], { FAKE_LATEST: VERSION });
+  assert.equal(same.status, 0, same.out); assert.ok(same.out.includes('Already on ' + VERSION), same.out);
+  // Named, the earlier release is still the deliberate way back.
+  const back = m.run(['update', '1.0.9'], { FAKE_LATEST: '1.0.9', FAKE_NO_ACCESS_CLI: '1.0.9' });
+  assert.equal(back.status, 0, back.out); assert.equal(m.dotenv().MULTITAP_VERSION, '1.0.9');
+});
+
 test('saved access settings the server could not use: status, address and every wait say that it runs without addresses, where the console opens and the way out', { skip }, t => {
   const m = commandMachine(t, { version: VERSION, env: seeded() });
   assert.equal(m.run(['address', lan, publicAddress]).status, 0);

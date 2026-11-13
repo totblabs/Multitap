@@ -13,6 +13,7 @@ import 'package:multitap_client/ui/host_settings_screen.dart';
 import 'package:multitap_client/ui/themed_app.dart';
 
 import 'host_prerequisites_test.dart' show FreshHost;
+import 'helpers/pump_work.dart';
 import 'host_settings_test.dart'
     show FakeCloseGuard, FakeHostSettings, isReadOnlyHostRequest;
 
@@ -84,7 +85,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
   }
 
   // The readiness beside the desktop's name: plain words, said once.
@@ -180,7 +181,7 @@ void main() {
       findsOneWidget,
     );
     await t.tap(find.byKey(const Key('host-problem-action')));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(text(t, 'host-selected-section'), 'Windows 로그인');
     expect(api.requests.every(isReadOnlyHostRequest), isTrue);
     expect(t.takeException(), isNull);
@@ -236,7 +237,7 @@ void main() {
     expect(row(t, 'host-open-server'), HostSetupState.approval);
     await t.ensureVisible(find.byKey(const Key('host-open-request')));
     await t.tap(find.byKey(const Key('host-open-request')));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     // The server page holds the full request: code, cancel, edit.
     expect(find.byKey(const Key('host-approval-heading')), findsOneWidget);
     expect(find.byKey(const Key('host-verification-code')), findsOneWidget);
@@ -256,7 +257,7 @@ void main() {
     expect(ask, findsOneWidget);
     expect(find.text('가상 화면 드라이버의 서명을 신뢰할까요?'), findsOneWidget);
     await t.tap(find.text('취소'));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(ask, findsNothing);
     expect(api.requests.every(isReadOnlyHostRequest), isTrue);
     // The unfinished install outranks the missing registration.
@@ -275,10 +276,10 @@ void main() {
     );
     // The banner's one action is the same finish.
     await t.tap(find.byKey(const Key('host-finish-install')));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(ask, findsOneWidget);
     await t.tap(find.text('취소'));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(api.of('installNativeDisplay'), isEmpty);
     expect(t.takeException(), isNull);
   });
@@ -333,7 +334,7 @@ void main() {
   ) async {
     Future<void> open(int page) async {
       await t.tap(find.byKey(Key('host-nav-$page')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
     }
 
     const id = 'pc-0a1b2c3d-1111-4222-8333-444455556666';
@@ -400,17 +401,17 @@ void main() {
     expect(pill(t).label, 'Host 서비스 꺼짐');
     expect(find.byType(HostProblemBanner), findsOneWidget);
     await t.tap(find.widgetWithText(FilledButton, '서비스 시작'));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(find.text('Host 서비스를 시작할까요?'), findsOneWidget);
     expect(api.requests.where((r) => r['action'] == 'service'), isEmpty);
     await t.tap(find.byKey(const Key('host-confirm')));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(api.requests.where((r) => r['action'] == 'service').single, {
       'action': 'service',
       'command': 'start',
     });
     await t.tap(find.byKey(const Key('host-result-close')));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     // Started: the next problem takes the one banner.
     expect(pill(t).label, 'Windows 로그인 필요');
     expect(find.byType(HostProblemBanner), findsOneWidget);
@@ -445,7 +446,7 @@ void main() {
     expect(pill(t).label, '장치 확인 필요');
     expect(dots(t), {6});
     await t.tap(find.widgetWithText(FilledButton, '장치 보기'));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(find.byKey(const Key('host-device-usb-action')), findsOneWidget);
     expect(t.takeException(), isNull);
   });
@@ -469,16 +470,16 @@ void main() {
     expect(dots(t), {1, 2, 5});
     api.rebootRequired = false;
     await t.tap(find.byKey(const Key('host-refresh')));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(pill(t).label, '서버 연결 안 됨');
     expect(find.byType(HostProblemBanner), findsOneWidget);
     api.statusOverrides = {..._desktop(), 'interactiveSession': false};
     await t.tap(find.byKey(const Key('host-refresh')));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(pill(t).label, 'Windows 로그인 필요');
     api.statusOverrides = _desktop();
     await t.tap(find.byKey(const Key('host-refresh')));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(pill(t).label, '스트리밍 가능');
     expect(find.byType(HostProblemBanner), findsNothing);
     expect(api.requests.every(isReadOnlyHostRequest), isTrue);
@@ -496,7 +497,7 @@ void main() {
     expect(find.text('정상'), findsNothing);
     api.failStatus = false;
     await t.tap(find.widgetWithText(FilledButton, '새로고침'));
-    await t.pumpAndSettle();
+    await pumpWork(t);
     expect(pill(t).label, isNot('상태 읽기 실패'));
     expect(t.takeException(), isNull);
   });
@@ -545,12 +546,12 @@ void main() {
                 final item = find.byKey(Key('host-nav-$page'));
                 await t.ensureVisible(item);
                 await t.tap(item);
-                await t.pumpAndSettle();
+                await pumpWork(t);
                 expect(t.takeException(), isNull, reason: '$where page $page');
               }
               expect(api.requests.every(isReadOnlyHostRequest), isTrue);
               await t.pumpWidget(const SizedBox.shrink());
-              await t.pumpAndSettle();
+              await pumpWork(t);
             }
           }
         }

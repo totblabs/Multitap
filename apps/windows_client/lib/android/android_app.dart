@@ -50,6 +50,8 @@ import '../data/console_browser.dart';
 import '../ui/readiness_dialog.dart';
 import '../ui/product_log_dialog.dart';
 import 'android_launcher.dart';
+import 'android_launcher_progress.dart';
+import '../ui/app_progress.dart';
 import 'android_application.dart';
 import 'android_media.dart' show AndroidRemoteMedia;
 import 'android_diagnostics.dart';
@@ -432,9 +434,38 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   DateTime? _checkedAt;
   bool _loading = true, _busy = false, _remember = false;
 
-  /// [_busy] because a sign-out is being sent: the sign-in button waits
-  /// without saying "로그인 중…".
+  /// A sign-out is under way, from the press on: first over the list while
+  /// open Consoles close, then ([_busy]) on the sign-in button, which says
+  /// "로그아웃하는 중이에요" and never "로그인 중…".
   bool _signingOut = false;
+
+  /// What a press on the list is doing before its own screen is there (the
+  /// checks before a stream, Console 열기, Console 끊기): the connection
+  /// intent that owns it and the sentence. Shown by [AndroidLauncherActivity]
+  /// only while that intent is still the current one.
+  ({int intent, String text})? _activity;
+
+  String? get _activityText {
+    final activity = _activity;
+    return activity != null && activity.intent == _connectionIntent
+        ? activity.text
+        : null;
+  }
+
+  void _showActivity(int intent, String desktop, String step) {
+    if (!mounted || intent != _connectionIntent) return;
+    setState(() => _activity = (intent: intent, text: '$desktop · $step'));
+  }
+
+  /// The step ended, with a result or an error (which then takes its place).
+  void _endActivity(int intent) {
+    if (_activity?.intent != intent) return;
+    if (mounted) {
+      setState(() => _activity = null);
+    } else {
+      _activity = null;
+    }
+  }
   bool _refreshing = false, _streaming = false, _foreground = true;
   bool _refreshFailed = false;
   String? _error, _listError, _openingDesktop, _version;
@@ -769,6 +800,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     HardwareKeyboard.instance.addHandler(_searchKey);
     unawaited(_restore());
     _installStatus = _updatePlatform.statuses.listen((code) {
+      // Android's confirmation opened: a step of the update dialog, not a
+      // result.
+      if (code == androidUpdateConfirmOpened) return;
       if (mounted) {
         _notice(
           code == 'installed' ? l10n.updateInstalled : androidUpdateMessage(code),
@@ -1744,6 +1778,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     _stopUpdateChecks();
     setState(() {
       _openingDesktop = null;
+      _activity = null;
       _streaming = false;
       _session = null;
       _desktops = [];
@@ -2035,11 +2070,22 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   /// (the sign-in is over here either way).
   Future<void> _endSignIn(BrokerSession session, {Duration? limit}) async {
     _mfa.retire();
+    // Said from the press on: closing the open Consoles comes first and can
+    // take seconds, and until now nothing on the list moved meanwhile.
+    if (mounted) setState(() => _signingOut = true);
     await const ConsoleBrowser.android().closeAll(
       api: _api,
       token: session.token,
     );
-    if (!mounted || _session != session) return;
+    if (!mounted || _session != session) {
+      // The sign-in ended another way meanwhile: that path owns the screen.
+      if (mounted) {
+        setState(() => _signingOut = false);
+      } else {
+        _signingOut = false;
+      }
+      return;
+    }
     final request = ++_loginRequestRevision;
     final api = _api, origin = _origin;
     ++_loginRestoreRevision;
@@ -2048,6 +2094,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       _session = null;
       _desktops = [];
       _flows.clear();
+      _activity = null;
       _busy = true;
       _signingOut = true;
     });
@@ -2230,12 +2277,16 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       _streamConnectPromptOpen = false;
     }
     if (!accepted || !current()) return;
+    // The request itself shows nothing on the tile: the wait is said here
+    // until the tile's own step line takes over.
+    _showActivity(intent, desktop.name, l10n.androidEndingConsole);
     try {
       await (api as ConsoleTakeoverBrokerApi).endConsoles(
         login.token,
         desktop.id,
       );
     } catch (error) {
+      _endActivity(intent);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2248,6 +2299,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       }
       return;
     }
+    _endActivity(intent);
     if (!current() || _flows.containsKey(desktop.id)) return;
     setState(() => _flows[desktop.id] = _StartFlow()..powered = true);
     _syncTicker();
@@ -2288,6 +2340,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         cancelKey: const Key('cancel-console-connect'),
       );
       if (!confirmed || !current()) return;
+      // Reading the desktop, asking for the Console and opening it: one wait
+      // to the person, said until the Console or the reason is on screen.
+      _showActivity(intent, desktop.name, l10n.androidOpeningConsole);
       final assigned = await api.desktops(login.token);
       if (!current()) return;
       final matches = assigned.where((item) => item.id == desktop.id).toList();
@@ -2323,6 +2378,8 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     } catch (_) {
       if (current()) _notice(l10n.couldntOpenConsoleCheckNetwork);
     } finally {
+      // With the result: the notice above takes the line's place.
+      _endActivity(intent);
       if (owner()) {
         setState(() => _openingDesktop = null);
         if (_session == login && _api == api) await _refresh(quiet: true);
@@ -2586,14 +2643,30 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       var occupied = false;
       if (_handOverNeeded(_machine(desktop)) &&
           api is StreamTakeoverPreflightBrokerApi) {
+        // Up to the preparation's own limit with only the tile's buttons
+        // greyed: the list says what it is waiting for.
+        _showActivity(
+          intent,
+          desktop.name,
+          l10n.androidCheckingOtherConnection,
+        );
         try {
           await AndroidStreamPreparation(
             api: api,
             authorized: authorized,
           ).checkTakeover(session.token, desktop.id);
         } on BrokerException catch (error) {
-          if (error.status != 409 || error.code != 'desktop_busy') rethrow;
+          if (error.status != 409 || error.code != 'desktop_busy') {
+            // The reason takes the line's place (it used to end silently).
+            if (current()) {
+              _notice(error.message);
+              if (error.status == 401) _expired(error);
+            }
+            return;
+          }
           occupied = true;
+        } finally {
+          _endActivity(intent);
         }
         if (!mounted || !current()) return;
       }
@@ -2605,11 +2678,13 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         // The modal may have stayed open while access or the Windows state
         // changed. Re-read before the one console-transfer POST.
         final List<BrokerDesktop> listed;
+        _showActivity(intent, desktop.name, l10n.androidCheckingDesktopAgain);
         try {
           listed = await api
               .desktops(session.token)
               .timeout(const Duration(seconds: 15));
         } catch (error) {
+          _endActivity(intent);
           if (current()) {
             _notice(_message(error));
             if (error is BrokerException && error.status == 401) {
@@ -2618,6 +2693,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
           }
           return;
         }
+        _endActivity(intent);
         if (!mounted || !current()) return;
         final matches = listed.where((item) => item.id == desktop.id).toList();
         if (matches.length != 1 || matches.single.kind != desktop.kind) {
@@ -3125,7 +3201,14 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
           latest?.latestVersion == update.latestVersion;
     }
 
-    final release = await showDialog<ProductRelease>(
+    // The request is sent while the dialog is still open and says so: the
+    // server may take most of a minute to answer, and a closed dialog over
+    // an unchanged list looked like nothing had happened. Closed early, the
+    // request goes on and its result is the notice below either way.
+    HostUpdateState? result;
+    Object? failure;
+    Future<void>? sending;
+    await showDialog<ProductRelease>(
       context: context,
       builder: (_) => AndroidHostUpdateDialog(
         origin: origin,
@@ -3136,27 +3219,35 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         sessionActive: update.sessionActive,
         isCurrent: current,
         confirmKey: Key('confirm-host-update-${desktop.id}'),
+        request: (release) => sending ??= () async {
+          try {
+            result = await (api as HostUpdateBrokerApi).requestHostUpdate(
+              session.token,
+              desktop.id,
+              release.version,
+            );
+          } catch (error) {
+            failure = error;
+          }
+        }(),
       ),
     );
-    if (release == null || !current()) return;
-    try {
-      final result = await (api as HostUpdateBrokerApi).requestHostUpdate(
-        session.token,
-        desktop.id,
-        release.version,
-      );
+    final sent = sending;
+    if (sent == null) return;
+    await sent;
+    final reply = result;
+    if (reply == null) {
+      if (owner()) _notice(_message(failure ?? const Object()));
+    } else {
       final listed = _find(desktop.id);
       if (!owner() || listed == null) return;
-      final choice = androidHostUpdateReply(
-        _machine(listed).hostUpdate,
-        result,
-      );
+      final choice = androidHostUpdateReply(_machine(listed).hostUpdate, reply);
       if (choice.apply) {
         setState(
           () => _hostUpdateReplies[desktop.id] = (
             session,
             api,
-            result,
+            reply,
             DateTime.now(),
             server,
           ),
@@ -3164,8 +3255,6 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         _revision.value++;
       }
       _notice('${desktop.name}: ${choice.message}');
-    } catch (error) {
-      if (owner()) _notice(_message(error));
     }
     if (owner()) await _refresh(quiet: true);
   }
@@ -3427,7 +3516,32 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       child: Scaffold(
         body: AnnotatedRegion<SystemUiOverlayStyle>(
           value: androidSystemBars(p.dark),
-          child: SceneBackground(child: SafeArea(child: _workspace())),
+          child: SceneBackground(
+            child: SafeArea(
+              child: Stack(
+                children: [
+                  // While signing out the list takes no touch and no focus.
+                  Positioned.fill(
+                    child: ExcludeFocus(
+                      excluding: _signingOut,
+                      child: _workspace(),
+                    ),
+                  ),
+                  if (_signingOut)
+                    AndroidLauncherActivity(
+                      l10n.androidSigningOut,
+                      key: const Key('android-signing-out'),
+                      blocking: true,
+                    )
+                  else if (_activityText case final text?)
+                    AndroidLauncherActivity(
+                      text,
+                      key: const Key('android-launcher-activity'),
+                    ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -4354,6 +4468,16 @@ class _AndroidServerDialogState extends State<AndroidServerDialog> {
               label: Text(l10n.testConnection),
             ),
           ),
+          // Where the result will be: the test while it runs (a test clears
+          // the last result first; a save keeps it on screen).
+          if (message == null && _busy && !_confirmingHttp)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: AppBusyLine(
+                l10n.androidTestingServer,
+                textKey: const Key('server-test-running'),
+              ),
+            ),
           if (message != null)
             Container(
               key: const Key('server-test-result'),
@@ -4748,7 +4872,14 @@ class _AndroidPasswordDialogState extends State<AndroidPasswordDialog> {
                 ),
               ),
             ),
-          if (_error != null)
+          // One line for what is going on: the request while it is sent,
+          // then the reason when it failed.
+          if (_busy)
+            AppBusyLine(
+              l10n.androidChangingPassword,
+              textKey: const Key('android-password-saving'),
+            )
+          else if (_error != null)
             KeepAllText(
               _error!,
               style: uiText(size: 13, height: 1.5, color: p.red),

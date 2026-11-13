@@ -252,12 +252,29 @@ void main() {
         await t.tap(find.byKey(ValueKey('drive-open-$id')));
         await t.pump();
         expect(socket.lastOf('drive.open')['share'], id);
+        // Explorer is being asked: the button waits and moves.
+        final busy = find.descendant(
+          of: find.byKey(ValueKey('drive-open-$id')),
+          matching: find.byKey(ValueKey('drive-open-busy-$id')),
+        );
+        expect(busy, findsOneWidget);
+        expect(find.text('확인 중…'), findsOneWidget);
+        expect(
+          t
+              .widget<FilledButton>(find.byKey(ValueKey('drive-open-$id')))
+              .onPressed,
+          isNull,
+        );
         await receive(t, socket, {
           'type': 'drive.opened',
           'id': 1,
           'share': id,
           'ok': true,
         });
+        // Opened: the button is 열기 again and nothing turns.
+        expect(busy, findsNothing);
+        expect(find.text('열기'), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
       });
     },
   );

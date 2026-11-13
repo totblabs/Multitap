@@ -11,6 +11,7 @@ import 'package:multitap_client/ui/workspace_shell.dart';
 import 'auth_flow_test.dart' show TestBroker;
 import 'display_api_test.dart' show displayResponse;
 import 'power_api_test.dart' show taskId;
+import 'helpers/pump_work.dart';
 
 VirtualDisplayState state({
   String status = 'pending',
@@ -249,7 +250,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await operation;
       expect(api.connects, 0);
       expect(workspace(tester).machines.single.display.stale, isTrue);

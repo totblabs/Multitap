@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../data/session_activity.dart';
 import '../data/broker_api.dart';
 import 'app_dialog.dart';
+import 'app_progress.dart';
 import 'app_theme.dart';
 import 'korean_text.dart';
 import '../l10n/l10n.dart';
@@ -253,7 +254,20 @@ class _SessionAccessBoundaryState extends State<SessionAccessBoundary> {
                     title: l10n.signedOutMultitap,
                     body: [
                       Text(pcLoginTerminalMessage(reason)),
-                      if (state.retirementFailed)
+                      // 확인 waits until the open connections are closed (up
+                      // to half a minute): said, with a moving mark. What
+                      // could not be confirmed takes its place.
+                      if (state.retirementRecovering ||
+                          (!state.retirementFinished &&
+                              !state.retirementFailed))
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: AppBusyLine(
+                            l10n.sessionEndClosingConnections,
+                            textKey: const Key('session-end-busy'),
+                          ),
+                        )
+                      else if (state.retirementFailed)
                         Text(state.retirementRecoveryAvailable
                             ? l10n.notYetConfirmedAllConnections
                             : l10n.couldntConfirmAllConnectionsClosed),

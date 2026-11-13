@@ -14,7 +14,8 @@ import android.os.Handler
  * stops for focus; only the track's volume follows it:
  *  - a transient loss (a call rings, a voice call app, an exclusive prompt) mutes it until focus returns;
  *  - ducking is left to the platform (willPauseWhenDucked false: Android lowers the track itself);
- *  - a permanent loss (the user started another player) mutes it, and the app asks again when it is shown;
+ *  - a permanent loss (the user started another player) mutes it, and the app asks again when the user is back
+ *    in it: shown again, its window focused again, or new VM sound while its window has focus (askAgain);
  *  - a refused request leaves the sound playing without focus (never silent for a refusal alone).
  * A session restart (a resize, a reconnect) releases and takes the track again within moments; focus is given up
  * only [RELEASE_DELAY_MS] after the last track went, so another player does not resume for a moment in between.
@@ -52,6 +53,18 @@ internal class AudioFocusPolicy {
 
     /** Not held and not promised: a request (again) may take it. */
     val shouldRequest: Boolean get() = state == State.NONE || state == State.LOST
+
+    /**
+     * After a permanent loss (another player took focus): ask again only
+     * while the stream wants sound ([wanted]) and the user is in this app
+     * ([userHere]: it was shown again, its window regained input focus, or
+     * new VM sound started while its window has focus). Android's rule is
+     * that a player resumes after a permanent loss only on the user's
+     * action; using the remote desktop in front of them is that action,
+     * while sound that starts while the user is in another window is not.
+     * A transient loss (a call) is never asked back: the platform returns it.
+     */
+    fun askAgain(wanted: Boolean, userHere: Boolean): Boolean = wanted && userHere && state == State.LOST
 
     companion object {
         // AudioManager's values (fixed platform constants), so the policy is a plain JVM class.
@@ -111,7 +124,19 @@ internal class AndroidAudioFocus(context: Context, private val main: Handler, pr
     }
 
     /** The app is visible again: a focus another player took is asked for again. */
-    fun foreground() { if (wanted && policy.state == AudioFocusPolicy.State.LOST) acquire() }
+    fun foreground() { if (policy.askAgain(wanted, userHere = true)) acquire() }
+
+    // The Activity's window has input focus (the user is in the app, not in another window of split screen).
+    private var windowFocused = true
+
+    /** The Activity's window gained or lost input focus; gaining it is the user coming back. */
+    fun windowFocus(focused: Boolean) {
+        windowFocused = focused
+        if (policy.askAgain(wanted, userHere = focused)) acquire()
+    }
+
+    /** The VM's sound started (the stream's first, or after a silence): asked again only while the user is here. */
+    fun soundStarted() { if (policy.askAgain(wanted, userHere = windowFocused)) acquire() }
 
     /** audio-path-v1 diagnostics (any thread): AudioFocusPolicy.State's ordinal (0 none .. 4 lost). */
     @Volatile var stateCode = 0

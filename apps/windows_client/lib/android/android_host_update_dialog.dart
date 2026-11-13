@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../data/product_updates.dart';
 import '../ui/app_dialog.dart';
+import '../ui/app_progress.dart';
 import '../ui/app_theme.dart';
 import '../ui/korean_text.dart';
 import '../ui/release_notes.dart';
@@ -78,9 +79,16 @@ class AndroidHostUpdateDialog extends StatefulWidget {
     required this.sessionActive,
     required this.isCurrent,
     this.loadRelease,
+    this.request,
     this.pc = false,
     this.confirmKey = const Key('android-host-update-confirm'),
   });
+
+  /// Sends the update request for the confirmed release. With it the dialog
+  /// stays open while the request is sent, says so, and closes (with the
+  /// release) when it was answered; it must not throw. Null: the dialog
+  /// closes with the release at once.
+  final Future<void> Function(ProductRelease release)? request;
   final Key confirmKey;
   final Uri origin;
   final String machine, currentVersion, targetVersion;
@@ -100,6 +108,12 @@ class _AndroidHostUpdateDialogState extends State<AndroidHostUpdateDialog> {
   ProductRelease? _release;
   String? _failure;
   bool _loading = true;
+
+  /// The request is on its way ([AndroidHostUpdateDialog.request]).
+  bool _requesting = false;
+
+  /// The person left the dialog; an answered request closes nothing then.
+  bool _left = false;
   int _request = 0;
   String get _kind =>
       widget.pc ? l10n.localPcInSentence : l10n.desktopInSentence;
@@ -162,12 +176,53 @@ class _AndroidHostUpdateDialogState extends State<AndroidHostUpdateDialog> {
     }
   }
 
+  void _confirm() {
+    final release = _release;
+    if (release == null || _requesting) return;
+    if (!widget.isCurrent()) {
+      setState(() {
+        _release = null;
+        _failure = _changed;
+      });
+      return;
+    }
+    final request = widget.request;
+    if (request == null) {
+      Navigator.pop(context, release);
+      return;
+    }
+    setState(() => _requesting = true);
+    unawaited(
+      request(release).whenComplete(() {
+        if (!mounted || _left) return;
+        final route = ModalRoute.of(context);
+        if (route == null || !route.isActive) return;
+        // Its own route only, also when something else is above it.
+        if (route.isCurrent) {
+          Navigator.pop(context, release);
+        } else {
+          Navigator.removeRoute(context, route);
+        }
+      }),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = AppPalette.of(context);
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) _left = true;
+      },
+      child: _dialog(context, p),
+    );
+  }
+
+  Widget _dialog(BuildContext context, AppPalette p) {
     return AppDialog(
       key: const Key('android-host-update-dialog'),
       icon: Icons.system_update_alt_rounded,
+      busy: _loading || _requesting,
       title: l10n.hostUpdate,
       subtitle: widget.machine,
       body: [
@@ -183,8 +238,17 @@ class _AndroidHostUpdateDialogState extends State<AndroidHostUpdateDialog> {
               : l10n.updatesOnlyHostProgramYou(_kind),
         ),
         const SizedBox(height: 12),
-        if (_loading)
-          const Center(child: CircularProgressIndicator())
+        if (_requesting)
+          AppBusyLine(
+            l10n.androidHostUpdateRequesting,
+            textKey: const Key('android-host-update-requesting'),
+            trailing: const AppElapsedText(after: Duration(seconds: 3)),
+          )
+        else if (_loading)
+          AppBusyLine(
+            l10n.androidHostUpdateReading,
+            textKey: const Key('android-host-update-loading'),
+          )
         else if (_failure != null)
           KeepAllText(
             _failure!,
@@ -219,9 +283,11 @@ class _AndroidHostUpdateDialogState extends State<AndroidHostUpdateDialog> {
       // The product's three button looks (AppButtons), as every dialog.
       actions: [
         TextButton(
+          key: const Key('android-host-update-cancel'),
           onPressed: () => Navigator.pop(context),
           style: AndroidTvFocus.style(context, AppButtons.quiet(p)),
-          child: Text(l10n.cancel),
+          // A request already sent is not taken back by leaving: 닫기.
+          child: Text(_requesting ? l10n.close : l10n.cancel),
         ),
         if (!_loading && _failure != null)
           OutlinedButton(
@@ -233,17 +299,12 @@ class _AndroidHostUpdateDialogState extends State<AndroidHostUpdateDialog> {
         FilledButton(
           key: widget.confirmKey,
           style: AndroidTvFocus.style(context, AppButtons.filled(p)),
-          onPressed: !_loading && _release != null && widget.isCurrent()
-              ? () {
-                  if (widget.isCurrent()) {
-                    Navigator.pop(context, _release);
-                  } else {
-                    setState(() {
-                      _release = null;
-                      _failure = _changed;
-                    });
-                  }
-                }
+          onPressed:
+              !_loading &&
+                  !_requesting &&
+                  _release != null &&
+                  widget.isCurrent()
+              ? _confirm
               : null,
           child: Text(l10n.update),
         ),

@@ -7,6 +7,7 @@ import '../data/drive_session.dart';
 import 'app_dialog.dart';
 import 'app_form.dart';
 import 'app_menu.dart';
+import 'app_progress.dart';
 import 'app_theme.dart';
 import 'korean_text.dart';
 import 'session_menu.dart' show SessionPopups;
@@ -358,18 +359,25 @@ class _DrivePanelState extends State<DrivePanel> {
               ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-              child: KeepAllText(
-                drive.closed
-                    ? drive.error == 'drive_policy_changed'
-                          ? l10n.administratorTurnedOffSharedFolder
-                          // Coming back by itself with the same folders:
-                          // nothing to reconnect or pick again.
-                          : drive.recovering
-                          ? l10n.sharedFoldersReconnectingWait
-                          : l10n.sharedFolderWasDisconnectedConnect
-                    : l10n.onlyFoldersYouChooseShared,
-                style: uiText(size: 12.5, height: 1.45, color: p.muted),
-              ),
+              // Coming back by itself with the same folders: nothing to
+              // reconnect or pick again, and the line moves while it does.
+              child:
+                  drive.closed &&
+                      drive.error != 'drive_policy_changed' &&
+                      drive.recovering
+                  ? AppBusyLine(
+                      l10n.sharedFoldersReconnectingWait,
+                      textKey: const Key('drive-reconnecting'),
+                      size: 12.5,
+                    )
+                  : KeepAllText(
+                      drive.closed
+                          ? drive.error == 'drive_policy_changed'
+                                ? l10n.administratorTurnedOffSharedFolder
+                                : l10n.sharedFolderWasDisconnectedConnect
+                          : l10n.onlyFoldersYouChooseShared,
+                      style: uiText(size: 12.5, height: 1.45, color: p.muted),
+                    ),
             ),
             Flexible(
               child: shares.isEmpty
@@ -379,13 +387,18 @@ class _DrivePanelState extends State<DrivePanel> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          KeepAllText(
-                            key: const Key('drive-empty'),
-                            drive.ready || drive.closed
-                                ? l10n.noSharedFoldersYet
-                                : l10n.preparingSharedFolders2,
-                            style: uiText(size: 13, color: p.muted),
-                          ),
+                          // Getting ready is work under way: it moves.
+                          if (drive.ready || drive.closed)
+                            KeepAllText(
+                              key: const Key('drive-empty'),
+                              l10n.noSharedFoldersYet,
+                              style: uiText(size: 13, color: p.muted),
+                            )
+                          else
+                            AppBusyLine(
+                              l10n.preparingSharedFolders2,
+                              textKey: const Key('drive-empty'),
+                            ),
                           const SizedBox(height: 8),
                           consequence,
                         ],
@@ -489,18 +502,20 @@ class _DrivePanelState extends State<DrivePanel> {
             if (_notice != null || drive.openError != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                // The colour is the icon's; the sentence is ordinary text.
-                child: AppStatusLine(
-                  _notice ??
-                      (drive.openingShare != null
-                          ? l10n.openingFolderTakingWhilePlease
-                          : widget.wording.message(drive.openError)),
-                  textKey: const Key('drive-notice'),
-                  // Still opening is a wait, not a failure.
-                  tone: _notice == null && drive.openingShare != null
-                      ? AppTone.info
-                      : AppTone.danger,
-                ),
+                // Still opening is a wait, not a failure: it moves. A notice
+                // or the failure takes its place with the icon's colour (the
+                // sentence is ordinary text).
+                child: _notice == null && drive.openingShare != null
+                    ? AppBusyLine(
+                        l10n.openingFolderTakingWhilePlease,
+                        textKey: const Key('drive-notice'),
+                        color: p.ink,
+                      )
+                    : AppStatusLine(
+                        _notice ?? widget.wording.message(drive.openError),
+                        textKey: const Key('drive-notice'),
+                        tone: AppTone.danger,
+                      ),
               ),
             if (_notice != null && _fix != null)
               Padding(
@@ -587,6 +602,13 @@ class _ShareRow extends StatelessWidget {
             ),
           };
     final unavailable = share.state == DriveShareState.unavailable;
+    // Under way for this row now (being checked, being connected, coming
+    // back with the channel): its line moves until the result takes it.
+    final inFlight = closed
+        ? recovering
+        : !share.offline &&
+              (share.state == DriveShareState.opening ||
+                  share.state == DriveShareState.pending);
     // The same row as a USB device — kind icon, name, a second
     // line, the status line with its dot, and text buttons on the right
     // (stacked under the text when the panel is narrow).
@@ -598,12 +620,28 @@ class _ShareRow extends StatelessWidget {
               : share.offline || share.state != DriveShareState.mapped
               ? l10n.youCanOpenOnceShared
               : l10n.opensSharedFolderExplorerDesktop,
-          child: FilledButton(
-            key: ValueKey('drive-open-${share.id}'),
-            onPressed: onOpen,
-            style: AppButtons.tonal(p),
-            child: KeepAllText(opening ? l10n.checking2 : l10n.open),
-          ),
+          child: opening
+              // Explorer is being asked to open it: the button moves.
+              ? FilledButton.icon(
+                  key: ValueKey('drive-open-${share.id}'),
+                  onPressed: onOpen,
+                  style: AppButtons.tonal(p),
+                  icon: SizedBox.square(
+                    key: ValueKey('drive-open-busy-${share.id}'),
+                    dimension: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.8,
+                      color: p.amber,
+                    ),
+                  ),
+                  label: KeepAllText(l10n.checking2),
+                )
+              : FilledButton(
+                  key: ValueKey('drive-open-${share.id}'),
+                  onPressed: onOpen,
+                  style: AppButtons.tonal(p),
+                  child: KeepAllText(l10n.open),
+                ),
         ),
       if ((unavailable || share.offline) && !closed)
         FilledButton(
@@ -642,14 +680,21 @@ class _ShareRow extends StatelessWidget {
         ),
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: AppStatusLine(
-            text,
-            textKey: ValueKey('drive-status-${share.id}'),
-            tone: tone,
-            size: 12,
-            dot: true,
-            maxLines: 3,
-          ),
+          child: inFlight
+              ? AppBusyLine(
+                  text,
+                  textKey: ValueKey('drive-status-${share.id}'),
+                  size: 12,
+                  maxLines: 3,
+                )
+              : AppStatusLine(
+                  text,
+                  textKey: ValueKey('drive-status-${share.id}'),
+                  tone: tone,
+                  size: 12,
+                  dot: true,
+                  maxLines: 3,
+                ),
         ),
       ],
     );

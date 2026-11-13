@@ -74,6 +74,11 @@ void main() {
           expect(access.retirementFailed, isTrue);
           expect(access.retirementFinished, isFalse);
           expect(access.retirementAttempts, hasLength(1));
+          // What could not be confirmed is said in the wait's place: no
+          // mark keeps turning beside it.
+          expect(find.byKey(const Key('session-end-busy')), findsNothing);
+          expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
+          expect(find.textContaining('아직 확인하지 못했어요'), findsOneWidget);
           final originalOutcome = access.retirementAttempts.single;
           expect(originalOutcome.verified, isFalse);
           expect(closeOwners, [retiredOwner]);
@@ -110,8 +115,19 @@ void main() {
             isNull,
             reason: 'One recovery attempt is already pending',
           );
+          // Checking again is a wait once more: it moves, and the earlier
+          // result is not left standing beside it.
+          expect(
+            tester
+                .widget<Text>(find.byKey(const Key('session-end-busy')))
+                .data,
+            '열린 연결을 닫는 중이에요',
+          );
+          expect(find.byKey(const Key('app-busy-line-spinner')), findsOneWidget);
+          expect(find.textContaining('아직 확인하지 못했어요'), findsNothing);
           retry.complete();
           await tester.pumpAndSettle();
+          expect(find.byKey(const Key('session-end-busy')), findsNothing);
           expect(access.retirementFinished, isTrue);
           expect(access.retirementAttempts, hasLength(2));
           expect(identical(access.retirementAttempts.first, originalOutcome), isTrue);

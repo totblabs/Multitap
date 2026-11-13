@@ -57,7 +57,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         // When using split APKs, 1000 * ABI_VERSION is added automatically by Flutter.
         // (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        versionName = "1.1.2"
+        versionName = "1.1.3"
         versionCode = androidVersionCode(versionName!!)
     }
 

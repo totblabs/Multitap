@@ -34,7 +34,7 @@ function expectedAccountId(input) {
   return value;
 }
 
-export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests, notices = null, resources = null, login, mfaRoutes = null, passwordJob, body, backup = null, stream = () => { throw new HttpError(503, 'backup_unavailable'); }, publicOrigin, setupScriptSha256 = () => null, cookieScope = null, legacyCookieOrigin = null, accessRuntime = null, hostRemovalActivity = null, serverInfo, serverUpdate, restartServer = null, initialSetup, certificates = null, agentAccess = { denied: () => false, reset: () => {} }, audioInventory = null, consoleAccess = { state: () => null, record: () => {} }, relocation = null }) {
+export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests, notices = null, resources = null, login, mfaRoutes = null, passwordJob, body, backup = null, stream = () => { throw new HttpError(503, 'backup_unavailable'); }, publicOrigin, setupScriptSha256 = () => null, cookieScope = null, legacyCookieOrigin = null, accessRuntime = null, accessAdmitted = null, hostRemovalActivity = null, serverInfo, serverUpdate, restartServer = null, initialSetup, certificates = null, agentAccess = { denied: () => false, reset: () => {} }, audioInventory = null, consoleAccess = { state: () => null, record: () => {} }, relocation = null }) {
   // The public installation scheme owns cookie policy, never the backend hop.
   const secureCookie = publicOrigin === undefined || new URL(publicOrigin).protocol === 'https:';
   const legacyCookieName = secureCookie ? '__Secure-multitap-admin' : 'multitap-admin-http';
@@ -101,6 +101,9 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
         send(200, { user: publicUser(session.user), csrfToken: vault.csrf(session.token), onboarding: store.onboarding(session.user) }); return true;
       } finally { input.challengeToken = ''; input.code = ''; input.recoveryCode = ''; }
     }
+    // Whether the first administrator setup is still to be done, for the sign-in page's one line on how to begin it.
+    // Only this boolean, never the code; the root address already leads a browser to the console while it is pending.
+    if (path === '/api/v1/admin/first-setup' && req.method === 'GET') { send(200, { pending: initialSetup?.pending?.() === true }); return true; }
     const cookies = (req.headers.cookie ?? '').split(';').map(v => v.trim());
     let values = cookies.filter(v => v.startsWith(cookieName + '='));
     if (cookieScope && publicOrigin === legacyCookieOrigin && values.length === 0) values = cookies.filter(v => v.startsWith(legacyCookieName + '=')).map(v => cookieName + v.slice(legacyCookieName.length));
@@ -235,7 +238,7 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
         throw new HttpError(404, 'not_found');
       }
       if (user.must_change_credentials) throw new HttpError(428, 'credentials_change_required');
-      if (path === '/api/v1/admin/server-access' || path === '/api/v1/admin/server-access/test' || path === '/api/v1/admin/server-access/save' || path === '/api/v1/admin/server-access/cancel') {
+      if (path === '/api/v1/admin/server-access' || path === '/api/v1/admin/server-access/test' || path === '/api/v1/admin/server-access/save' || path === '/api/v1/admin/server-access/cancel' || path === '/api/v1/admin/server-access/confirm') {
         if (!accessRuntime) throw new HttpError(503, 'server_access_unavailable');
         const context = { managementOrigin: publicOrigin };
         let result;
@@ -251,15 +254,25 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
           if (typeof input.operationId !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(input.operationId)) throw new HttpError(400, 'server_access_command_invalid');
           result = await accessRuntime.cancel(input.operationId);
           store.audit('server_access_cancelled', actor, input.operationId);
+        } else if (path.endsWith('/confirm')) {
+          // The administrator's proof of an address a save is waiting for,
+          // made from that address (self-access.mjs records it).
+          if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
+          const input = await body(req, 1024); fields(input, ['operationId', 'code']);
+          currentAdmin();
+          result = await accessRuntime.confirm(input, context, { actor, admitted: accessAdmitted });
         } else {
           if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
           const saving = path.endsWith('/save'), input = await body(req, 16384);
-          fields(input, saving ? ['config', 'testId', 'baseRevision', 'confirm'] : ['config', 'baseRevision']);
+          // `outside`: a save with the administrator's own proof of an address, where the install can take one.
+          const outside = saving && accessRuntime.outsideSupported === true && input?.outside !== undefined;
+          fields(input, saving ? ['config', 'testId', 'baseRevision', 'confirm', ...(outside ? ['outside'] : [])] : ['config', 'baseRevision']);
           currentAdmin();
           if (saving && input.confirm !== true) throw new HttpError(400, 'server_access_confirmation_required');
           // The trusted origin comes from listener admission, never the body.
-          result = await (saving ? accessRuntime.save(input, context, { actor }) : accessRuntime.test(input, context));
-          store.audit(saving ? 'server_access_saved' : 'server_access_tested', actor, saving ? result.operationId ?? '' : '');
+          result = await (saving ? accessRuntime.save(input, context, { actor, admitted: accessAdmitted }) : accessRuntime.test(input, context));
+          // A save that waits for its proof is recorded as that (self-access.mjs), not as saved.
+          if (!outside) store.audit(saving ? 'server_access_saved' : 'server_access_tested', actor, saving ? result.operationId ?? '' : '');
         }
         currentAdmin(); send(path.endsWith('/save') ? 202 : 200, result); return true;
       }

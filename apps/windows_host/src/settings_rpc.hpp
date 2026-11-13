@@ -15,6 +15,7 @@
 #include "display_adapter_inventory.hpp"
 #include "host_service_restart.hpp"
 #include "host_prerequisites_native.hpp"
+#include "settings_progress.hpp"
 #include <mmdeviceapi.h>
 #include <iostream>
 #include "desktop_name.hpp"
@@ -175,6 +176,13 @@ inline AdapterCleanupAccess nativeAdapterCleanupAccess() {
   };
   return access;
 }
+// replaceUsbController tells its two long steps (settings_progress.hpp): the other
+// controllers are removed, then this Host's own is installed. The access is the same.
+inline usb::ReplaceAccess withUsbSteps(usb::ReplaceAccess access) {
+  if(access.removeOthers){const auto remove=access.removeOthers;access.removeOthers=[remove](bool& restart){settings_progress::step("usb_remove");return remove(restart);};}
+  if(access.install){const auto install=access.install;access.install=[install](bool& restart){settings_progress::step("usb_install");return install(restart);};}
+  return access;
+}
 inline std::string replaceUsbControllerResult(const usb::ReplaceAccess& access,bool confirmed) {
   if(!confirmed)return "{\"error\":\"confirmation_required\",\"restart\":false,\"removed\":0}";
   const auto result=usb::replaceController(access);
@@ -239,6 +247,11 @@ inline int settingsRpc() {
   {wchar_t chosen[4]{};const DWORD length=GetEnvironmentVariableW(L"MULTITAP_LANG",chosen,DWORD(std::size(chosen)));
    if(length==2&&chosen[0]==L'k'&&chosen[1]==L'o')multitap::ui::forceLanguageForTest(multitap::ui::Language::korean);
    else if(length==2&&chosen[0]==L'e'&&chosen[1]==L'n')multitap::ui::forceLanguageForTest(multitap::ui::Language::english);}
+  // settings-progress-v1 (settings_progress.hpp): only when this window asked for it, one
+  // line per step before the reply, each written out at once (a pipe is not a terminal).
+  {wchar_t asked[4]{};const DWORD length=GetEnvironmentVariableW(L"MULTITAP_SETTINGS_PROGRESS",asked,DWORD(std::size(asked)));
+   if(length==1&&asked[0]==L'1')settings_progress::sink()=[](const std::string& line){std::cout<<line<<'\n';std::cout.flush();};
+   else settings_progress::sink()=nullptr;}
   std::string bytes; Json request; SettingsScrubber scrubber{request};
   try {
     for (char byte; std::cin.get(byte);) { if (bytes.size() >= 8192) throw std::runtime_error(ui_text::utf8(ui_text::Id::RpcTooLarge)); bytes += byte; }
@@ -344,7 +357,7 @@ inline int settingsRpc() {
       }
       else if(action=="replaceUsbController"){
         const auto* confirmed=std::get_if<bool>(&request.get("confirmed").value);
-        const auto result=replaceUsbControllerResult(usb::nativeReplaceAccess(),confirmed&&*confirmed);const auto parsed=JsonParser::parse(result);
+        const auto result=replaceUsbControllerResult(withUsbSteps(usb::nativeReplaceAccess()),confirmed&&*confirmed);const auto parsed=JsonParser::parse(result);
         recordUsbEvent(UsbStage::controllerReplaced,parsed.get("error").string().empty(),0,uint32_t(parsed.get("removed").number()));
         std::cout<<deviceChangeRpc("usb",result,requestHostCapabilitiesRefresh)<<'\n';return 0;
       }

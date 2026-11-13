@@ -318,14 +318,17 @@ void main() {
     AppLanguageController.debugSystemLanguage = 'en';
     expect(NativeHostSettingsApi.hostToolEnvironment(), {
       'MULTITAP_LANG': 'en',
+      'MULTITAP_SETTINGS_PROGRESS': '1',
     });
     AppLanguageController.debugSystemLanguage = 'ko';
     expect(NativeHostSettingsApi.hostToolEnvironment(), {
       'MULTITAP_LANG': 'ko',
+      'MULTITAP_SETTINGS_PROGRESS': '1',
     });
     AppLanguageController.instance.debugReset(AppLanguage.en);
     expect(NativeHostSettingsApi.hostToolEnvironment(), {
       'MULTITAP_LANG': 'en',
+      'MULTITAP_SETTINGS_PROGRESS': '1',
     });
   });
 

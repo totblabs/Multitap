@@ -88,9 +88,13 @@ export class UdpRelay {
     }
     return list;
   }
-  // For the administration console: what is configured, not what a session got.
+  // For the administration console: what is configured, and how many of the
+  // sessions that were given the relay's address reach it right now
+  // (`sessions` with a grant, `bindings` legs bound: one per side of a
+  // single-picture session). Not which path a session's media takes.
   describe() {
     return { running: this.running, port: this.limits.port, derivedPort: this.derivedPort, media: this.media === true ? 'on' : this.media instanceof Set ? 'desktops' : 'off',
+      sessions: this.grants.size, bindings: this.running ? Math.max(0, this.counts[BINDINGS]) : 0,
       relays: { host: this.relays.host.map(row => ({ ...row })), client: this.relays.client.map(row => ({ ...row })) }, hostRoute: this.derivedPort !== null ? this.hostRoute : null };
   }
   // A failed check must neither keep a binding nor throw into a timer.

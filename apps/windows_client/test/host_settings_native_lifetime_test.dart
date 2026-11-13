@@ -146,4 +146,141 @@ void main() {
       expect(process.kills, 0);
     },
   );
+  // settings-progress-v1: the helper's step lines reach the window while the
+  // request runs, in order; the reply is the last line and is read as before.
+  test('A progress line is read strictly; anything else belongs to the reply', () {
+    HostSettingsProgress? read(String line) =>
+        HostSettingsProgress.parseLine('installWinfsp', line);
+    final step = read('{"progress":{"step":"winfsp_package"}}')!;
+    expect((step.action, step.step, step.done, step.total, step.fraction), (
+      'installWinfsp',
+      'winfsp_package',
+      null,
+      null,
+      null,
+    ));
+    final measured = read(
+      '{"progress":{"step":"winfsp_install","done":50,"total":200}}',
+    )!;
+    expect((measured.done, measured.total, measured.fraction), (50, 200, .25));
+    // A measure that is not one is dropped; the step stays.
+    for (final bad in [
+      '{"progress":{"step":"winfsp_install","done":201,"total":200}}',
+      '{"progress":{"step":"winfsp_install","done":-1,"total":200}}',
+      '{"progress":{"step":"winfsp_install","done":1,"total":0}}',
+      '{"progress":{"step":"winfsp_install","done":"1","total":2}}',
+      '{"progress":{"step":"winfsp_install","done":1}}',
+    ]) {
+      final value = read(bad)!;
+      expect(value.fraction, isNull, reason: bad);
+      expect(value.step, 'winfsp_install');
+    }
+    // Not a progress line: the reply, another shape, free text as a step.
+    for (final other in [
+      '{"ok":true}',
+      '{"ok":true,"progress":{"step":"winfsp_install"}}',
+      '{"progress":{"step":"winfsp_install"},"ok":true}',
+      '{"progress":"winfsp_install"}',
+      '{"progress":{"step":"C:\\Users\\name"}}',
+      '{"progress":{"step":"Winfsp Install"}}',
+      '{"progress":{"step":""}}',
+      '{"progress":{"step":42}}',
+      '{"progress":{"step":"winfsp_install"}',
+      ' {"progress":{"step":"winfsp_install"}}',
+      '',
+    ]) {
+      expect(read(other), isNull, reason: other);
+    }
+  });
+  testWidgets('Step lines arrive while the request runs; the reply is the last line', (
+    t,
+  ) async {
+    final process = _RpcProcess();
+    final api = NativeHostSettingsApi(processStarter: (_) async => process);
+    final told = <String>[];
+    api.progress.listen(
+      (p) => told.add('${p.action}:${p.step}:${p.done}/${p.total}'),
+    );
+    Map<String, dynamic>? reply;
+    unawaited(api.request('installWinfsp', {'confirmed': true}).then((r) => reply = r));
+    await t.pump();
+    void line(String text) => process.outgoing.add(utf8.encode('$text\n'));
+    line('{"progress":{"step":"winfsp_package"}}');
+    await t.pump();
+    // Shown at once, long before the reply.
+    expect(told, ['installWinfsp:winfsp_package:null/null']);
+    expect(reply, isNull);
+    // A line split across two reads is still one line.
+    process.outgoing.add(utf8.encode('{"progress":{"step":"winfsp_ins'));
+    await t.pump();
+    expect(told, hasLength(1));
+    process.outgoing.add(utf8.encode('tall","done":1,"total":4}}\r\n'));
+    await t.pump();
+    expect(told.last, 'installWinfsp:winfsp_install:1/4');
+    line('{"progress":{"step":"winfsp_check"}}');
+    process.finish({
+      'ok': true,
+      'winfsp': {'action': 'installed', 'restart': false, 'error': ''},
+    });
+    await t.pump();
+    await t.pump();
+    expect(told, [
+      'installWinfsp:winfsp_package:null/null',
+      'installWinfsp:winfsp_install:1/4',
+      'installWinfsp:winfsp_check:null/null',
+    ]);
+    expect(reply, {
+      'ok': true,
+      'winfsp': {'action': 'installed', 'restart': false, 'error': ''},
+    });
+    expect(process.kills, 0);
+  });
+  testWidgets('A helper that tells nothing is read as before, and step lines never hide a failure', (
+    t,
+  ) async {
+    final silent = _RpcProcess();
+    final api = NativeHostSettingsApi(processStarter: (_) async => silent);
+    final told = <HostSettingsProgress>[];
+    api.progress.listen(told.add);
+    Map<String, dynamic>? reply;
+    unawaited(api.request('status').then((r) => reply = r));
+    await t.pump();
+    silent.finish({'ok': true, 'status': <String, dynamic>{}});
+    await t.pump();
+    await t.pump();
+    expect(reply, {'ok': true, 'status': <String, dynamic>{}});
+    expect(told, isEmpty);
+
+    final failing = _RpcProcess();
+    final second = NativeHostSettingsApi(processStarter: (_) async => failing);
+    Object? failure;
+    unawaited(
+      second
+          .request('installWinfsp', {'confirmed': true})
+          .then<void>((_) {}, onError: (Object e) => failure = e),
+    );
+    await t.pump();
+    failing.outgoing.add(utf8.encode('{"progress":{"step":"winfsp_install"}}\n'));
+    failing.finish({'ok': false, 'error': '관리자 권한이 필요해요.'}, 1);
+    await t.pump();
+    await t.pump();
+    expect('$failure', '관리자 권한이 필요해요.');
+
+    // Only step lines and no reply at all is not a reply.
+    final cut = _RpcProcess();
+    final third = NativeHostSettingsApi(processStarter: (_) async => cut);
+    Object? unread;
+    unawaited(
+      third
+          .request('installWinfsp', {'confirmed': true})
+          .then<void>((_) {}, onError: (Object e) => unread = e),
+    );
+    await t.pump();
+    cut.outgoing.add(utf8.encode('{"progress":{"step":"winfsp_install"}}\n'));
+    unawaited(cut.outgoing.close());
+    cut.ended.complete(1);
+    await t.pump();
+    await t.pump();
+    expect(unread, isA<HostSettingsException>());
+  });
 }

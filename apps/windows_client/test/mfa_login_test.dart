@@ -9,6 +9,7 @@ import 'package:multitap_client/data/broker_api.dart';
 import 'package:multitap_client/data/login_memory.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/mfa_login_dialog.dart';
+import 'package:multitap_client/ui/app_dialog.dart';
 
 import 'auth_flow_test.dart' show TestBroker, TestLoginMemory;
 
@@ -161,6 +162,59 @@ void main() {
       expect(broker.logouts, 1);
       expect(broker.inventoryTokens, isEmpty);
       expect(find.byKey(const Key('sign-in-id')), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'the dialog icon turns while the code is checked; the refusal takes its place',
+    (tester) async {
+      final broker = MfaFixtureBroker()..held = Completer<BrokerSession>();
+      await windows(tester, broker, remembered());
+      AppToneIcon icon() => tester.widget<AppToneIcon>(
+        find.descendant(
+          of: find.byType(AppDialog),
+          matching: find.byType(AppToneIcon),
+        ),
+      );
+      expect(icon().busy, isFalse);
+      await tester.enterText(find.byKey(const Key('mfa-code')), '123456');
+      await tester.tap(find.byKey(const Key('mfa-submit')));
+      await tester.pump();
+      // The code is with the server: the icon turns and the button waits.
+      expect(icon().busy, isTrue);
+      expect(
+        find.descendant(
+          of: find.byType(AppToneIcon),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('mfa-submit')))
+            .onPressed,
+        isNull,
+      );
+      broker.held!.completeError(
+        const BrokerException('mfa_invalid_code', 400),
+      );
+      await waitFor(tester, find.byKey(const Key('mfa-error')));
+      // Refused: the reason is shown and nothing keeps turning.
+      expect(icon().busy, isFalse);
+      expect(
+        find.descendant(
+          of: find.byType(AppDialog),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsNothing,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('mfa-submit')))
+            .onPressed,
+        isNotNull,
+      );
+      await tester.tap(find.byKey(const Key('mfa-cancel')));
+      await tester.pumpAndSettle();
     },
   );
   testWidgets(

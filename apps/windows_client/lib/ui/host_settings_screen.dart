@@ -16,6 +16,7 @@ import '../data/window_close_guard.dart';
 import '../data/client_build_version.dart';
 import 'app_dialog.dart';
 import 'app_info_dialog.dart';
+import 'app_progress.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
 import 'appearance_switch.dart';
@@ -113,6 +114,16 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   String? _approvalIdentity;
   DateTime? _approvalDeadline;
   String _operation = l10n.checkingHostStatus, _phase = l10n.waitingWindowsRespond;
+  // What the running request says it is doing (settings-progress-v1), when the
+  // backend tells: the step replaces the request's own sentence, and its bar
+  // is filled only when the step comes with a measure. [_runningAction] is the
+  // request the panel belongs to; a line of any other request is not shown.
+  StreamSubscription<HostSettingsProgress>? _progressSubscription;
+  HostSettingsProgress? _progressNow;
+  String? _runningAction;
+  // The finish of a first install is a fixed row of requests (driver, WinFsp,
+  // the check afterwards): which one of how many is under way.
+  int? _chainIndex, _chainCount;
   bool _busy = true,
       _error = false,
       _editRegistration = false,
@@ -336,8 +347,36 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     _accountUsername.addListener(_draftsChanged);
     _accountPassword.addListener(_draftsChanged);
     _accountPasswordConfirmation.addListener(_draftsChanged);
+    final api = _api;
+    if (api is HostSettingsProgressSource) {
+      _progressSubscription = (api as HostSettingsProgressSource).progress
+          .listen(_progressReported);
+    }
     unawaited(_refresh(initial: true));
   }
+
+  void _progressReported(HostSettingsProgress progress) {
+    if (!mounted || !_busy || progress.action != _runningAction) return;
+    setState(() => _progressNow = progress);
+  }
+
+  /// The sentence for a step the helper named, or null for a code this
+  /// window does not know (the request's own sentence stays then).
+  static String? _progressStepText(String step) => switch (step) {
+    'display_package' => l10n.hostStepDisplayPackage,
+    'display_trust' => l10n.hostStepDisplayTrust,
+    'display_device' => l10n.hostStepDisplayDevice,
+    'display_service' => l10n.hostStepDisplayService,
+    'display_restart' => l10n.hostStepDisplayRestart,
+    'winfsp_package' => l10n.hostStepWinfspPackage,
+    'winfsp_install' => l10n.hostStepWinfspInstall,
+    'winfsp_rollback' => l10n.hostStepWinfspRollback,
+    'winfsp_waiting' => l10n.hostStepWinfspWaiting,
+    'winfsp_check' => l10n.hostStepWinfspCheck,
+    'usb_remove' => l10n.hostStepUsbRemove,
+    'usb_install' => l10n.hostStepUsbInstall,
+    _ => null,
+  };
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -691,17 +730,36 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   // reply can show the moment in between, and the areas would keep "확인 필요"
   // from it. So the status is read again until it has settled, at most ten
   // times two seconds apart, under the progress panel.
-  Future<void> _settleStatus() async {
-    if (!mounted || _busy || _statusSettled) return;
+  //
+  // [afterInstall]: the last step of a first install's finish. What the
+  // installation left is read first (prerequisiteStatus, up to 15 seconds),
+  // under the same panel: no part of the finish runs with nothing on screen.
+  Future<void> _settleStatus({bool afterInstall = false}) async {
+    if (!mounted || _busy) return;
+    if (!afterInstall && _statusSettled) return;
     final owner = ++_operationGeneration;
     _statusGeneration++;
     _approvalTimer?.cancel();
     setState(() {
       _busy = true;
-      _operation = l10n.checkingHostStatus;
-      _phase = l10n.hostServicePreparingVirtualDisplay;
+      _progressNow = null;
+      _operation = afterInstall
+          ? l10n.hostCheckingInstallResult
+          : l10n.checkingHostStatus;
+      _phase = afterInstall
+          ? l10n.hostPhaseCheckingInstallResult
+          : l10n.hostServicePreparingVirtualDisplay;
     });
     try {
+      if (afterInstall) {
+        await _readPrerequisites();
+        if (!mounted || owner != _operationGeneration) return;
+        if (_statusSettled) return;
+        setState(() {
+          _operation = l10n.checkingHostStatus;
+          _phase = l10n.hostServicePreparingVirtualDisplay;
+        });
+      }
       for (var attempt = 0; attempt < 10; attempt++) {
         await Future<void>.delayed(const Duration(seconds: 2));
         if (!mounted || owner != _operationGeneration) return;
@@ -737,41 +795,22 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     final ask = hostFinishConfirmation(trust: trust, winfsp: winfsp);
     if (!await _confirm(ask.title, ask.message, accept: ask.accept)) return;
     ({bool ok, String message})? driver, drives;
-    await _action(
-      'installNativeDisplay',
-      {'confirmed': true, if (trust) 'trustConfirmed': true},
-      l10n.installingVirtualDisplayDriver,
-      '',
-      outcome: (reply) => driver = hostNativeDisplayInstallResult(
-        reply,
-        remoteSession: remote,
-      ),
-      quiet: true,
-      phase: l10n.checkingSignatureInstallingDriverScreen,
-    );
-    if (!mounted) return;
-    driver ??= (
-      ok: false,
-      message: _notice ?? l10n.couldntConfirmVirtualDisplayDriver,
-    );
-    if (_winfspMissing && !_busy) {
-      await _action(
-        'installWinfsp',
-        {'confirmed': true},
-        l10n.installingWinfsp,
-        '',
-        outcome: (reply) => drives = hostWinfspInstallResult(reply),
-        quiet: true,
-        phase: l10n.installingWinfspMayTake1,
+    // The row of steps, known before the first one starts: the driver, WinFsp
+    // when it is missing, and the check afterwards.
+    var steps = winfsp ? 3 : 2;
+    _chainIndex = 1;
+    _chainCount = steps;
+    try {
+      await _finishSteps(
+        trust: trust,
+        remote: remote,
+        steps: steps,
+        driver: (value) => driver = value,
+        drives: (value) => drives = value,
       );
-      if (!mounted) return;
-      drives ??= (
-        ok: false,
-        message: _notice ?? l10n.couldNotCheckWinfspInstall,
-      );
+    } finally {
+      _chainIndex = _chainCount = null;
     }
-    await _readPrerequisites();
-    await _settleStatus();
     if (!mounted) return;
     final present = _state['devices'];
     final summary = hostFinishSummary(
@@ -796,6 +835,69 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       dialogKey: const Key('host-result-dialog'),
       closeKey: const Key('host-result-close'),
     );
+  }
+
+  Future<void> _finishSteps({
+    required bool trust,
+    required bool remote,
+    required int steps,
+    required void Function(({bool ok, String message})) driver,
+    required void Function(({bool ok, String message})) drives,
+  }) async {
+    var driverReported = false, drivesReported = false;
+    await _action(
+      'installNativeDisplay',
+      {'confirmed': true, if (trust) 'trustConfirmed': true},
+      l10n.installingVirtualDisplayDriver,
+      '',
+      outcome: (reply) {
+        driverReported = true;
+        final result = hostNativeDisplayInstallResult(
+          reply,
+          remoteSession: remote,
+        );
+        driver(result);
+        return result;
+      },
+      quiet: true,
+      phase: l10n.checkingSignatureInstallingDriverScreen,
+    );
+    if (!mounted) return;
+    if (!driverReported) {
+      driver((
+        ok: false,
+        message: _notice ?? l10n.couldntConfirmVirtualDisplayDriver,
+      ));
+    }
+    if (_winfspMissing && !_busy) {
+      _chainIndex = 2;
+      await _action(
+        'installWinfsp',
+        {'confirmed': true},
+        l10n.installingWinfsp,
+        '',
+        outcome: (reply) {
+          drivesReported = true;
+          final result = hostWinfspInstallResult(reply);
+          drives(result);
+          return result;
+        },
+        quiet: true,
+        phase: l10n.installingWinfspMayTake1,
+      );
+      if (!mounted) return;
+      if (!drivesReported) {
+        drives((
+          ok: false,
+          message: _notice ?? l10n.couldNotCheckWinfspInstall,
+        ));
+      }
+    } else if (steps == 3) {
+      // WinFsp turned out to be there already: the row is one step shorter.
+      _chainCount = steps = 2;
+    }
+    _chainIndex = steps;
+    await _settleStatus(afterInstall: true);
   }
 
   Future<bool> _confirm(
@@ -830,7 +932,16 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     bool Function()? current,
     String? phase,
   }) async {
-    final shownPhase = phase ?? l10n.requestSentWaitingWindowsRespond;
+    // What the request waits for: the server for the three that go to it,
+    // Windows for the rest.
+    final shownPhase =
+        phase ??
+        switch (action) {
+          'testBroker' => l10n.hostPhaseTestingServer,
+          'requestConnection' => l10n.hostPhaseRequestingServer,
+          'restartServiceV1' => l10n.hostPhaseRestartingService,
+          _ => l10n.requestSentWaitingWindowsRespond,
+        };
     if (_busy) return false;
     final owner = ++_operationGeneration;
     bool owns() =>
@@ -843,6 +954,8 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       _error = false;
       _operation = title;
       _phase = shownPhase;
+      _runningAction = action;
+      _progressNow = null;
     });
     var accepted = false;
     try {
@@ -859,7 +972,12 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       final reported = outcome?.call(response);
       if (action != 'testBroker' && action != 'elevate') {
         if (mounted) {
-          setState(() => _phase = l10n.checkingChangedStatus);
+          setState(() {
+            _phase = l10n.checkingChangedStatus;
+            // The request has answered: its last step is over.
+            _runningAction = null;
+            _progressNow = null;
+          });
         }
         if (!await _load()) {
           throw HostSettingsException(l10n.statusCheckStoppedRefreshCurrent);
@@ -896,7 +1014,11 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     } finally {
       if (owner == _operationGeneration) _mutating = false;
       if (mounted && owner == _operationGeneration) {
-        setState(() => _busy = false);
+        setState(() {
+          _busy = false;
+          _runningAction = null;
+          _progressNow = null;
+        });
         unawaited(_syncClose());
         _scheduleApprovalPoll();
       }
@@ -2075,6 +2197,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     WidgetsBinding.instance.removeObserver(this);
     _statusGeneration++;
     _approvalTimer?.cancel();
+    unawaited(_progressSubscription?.cancel());
     _statusAge.stop();
     _closeGuard.dispose();
     _origin.dispose();
@@ -2486,34 +2609,48 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     },
   );
 
-  // What a running operation is doing: its name, a progress line and the
-  // current step.
-  Widget _operationPanel() => Padding(
-    padding: const EdgeInsets.only(bottom: 20),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        KeepAllText(
-          _operation,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: _palette.ink,
+  // What a running operation is doing: its name, the bar, the step it is at
+  // and how long it has run. The step is the one the helper named when it
+  // names one, else the request's own sentence. The bar is filled only when
+  // that step comes with a measure (Windows Installer's count while WinFsp
+  // installs); otherwise it runs back and forth. "2/3단계" only inside the
+  // finish of a first install, whose steps are known before it starts.
+  Widget _operationPanel() {
+    final progress = _progressNow;
+    final step = progress == null ? null : _progressStepText(progress.step);
+    final fraction = step == null ? null : progress!.fraction;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          KeepAllText(
+            _operation,
+            key: const Key('host-operation-title'),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: _palette.ink,
+            ),
           ),
-        ),
-        const SizedBox(height: 10),
-        const LinearProgressIndicator(
-          key: Key('host-operation-progress'),
-          minHeight: 4,
-        ),
-        const SizedBox(height: 8),
-        KeepAllText(
-          _phase,
-          style: TextStyle(color: _palette.muted, fontSize: 12, height: 1.5),
-        ),
-      ],
-    ),
-  );
+          const SizedBox(height: 10),
+          AppProgressBlock(
+            step: step ?? _phase,
+            value: fraction,
+            stepIndex: _chainIndex,
+            stepCount: _chainCount,
+            detail: fraction == null
+                ? null
+                : l10n.hostProgressPercent((fraction * 100).floor()),
+            // One clock per operation: a new title starts it again.
+            restartOn: _operation,
+            barKey: const Key('host-operation-progress'),
+            stepKey: const Key('host-operation-step'),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// The VM's name from the broker, or null (an older Host or server): the
   /// desktop id stays the title then.
@@ -3182,6 +3319,19 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
               : l10n.adminConsoleApproveConnectionRequest,
           style: const TextStyle(fontSize: 13, height: 1.6),
         ),
+        // The window asks the Host every three seconds while it waits: a mark
+        // that moves for exactly as long as it does.
+        if (!_cancellingConnection &&
+            !_approvalDeadlineReached &&
+            _requestStatus == 'pending' &&
+            !_approvalReadError &&
+            _foreground) ...[
+          const SizedBox(height: 10),
+          AppBusyLine(
+            l10n.hostApprovalWaitingLine,
+            key: const Key('host-approval-waiting'),
+          ),
+        ],
         const SizedBox(height: 8),
         KeepAllText(
           _section('service')['running'] == true
@@ -4008,7 +4158,12 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     if (_busy || id == null || !_admin) {
       return;
     }
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _progressNow = null;
+      _operation = l10n.hostCheckingRequestResult;
+      _phase = l10n.hostPhaseCheckingRequestResult;
+    });
     try {
       await _finishWindowsReceipt(
         await _api.request('windowsAutologonStatus', {'operationId': id}),

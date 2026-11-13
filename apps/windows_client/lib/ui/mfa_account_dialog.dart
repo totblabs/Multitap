@@ -179,7 +179,8 @@ class _MfaAccountDialogState extends State<MfaAccountDialog> {
   Widget build(BuildContext context) {
     final p = AppPalette.of(context), editing = c.phase == MfaAccountPhase.proof || c.phase == MfaAccountPhase.enrollment;
     return PopScope(canPop: false, onPopInvokedWithResult: (didPop, result) { if (!didPop) { _close(); } },
-      child: AppDialog(icon: Icons.security_rounded, busy: c.busy, title: l10n.twoStepVerification,
+      // Reading the setup status is a wait too: the icon turns for it.
+      child: AppDialog(icon: Icons.security_rounded, busy: c.busy || c.reading, title: l10n.twoStepVerification,
         subtitle: c.owner.username, maxWidth: 420,
         body: [..._body(), if (c.error != null) Padding(padding: const EdgeInsets.only(top: 12),
           child: AppStatusLine(c.error!, textKey: const Key('mfa-account-error')))],

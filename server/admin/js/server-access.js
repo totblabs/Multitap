@@ -6,7 +6,34 @@ import { t } from './i18n.js';
 
 const protocol = 'server-access-v1';
 const pendingStates = new Set(['waiting_idle', 'applying', 'health_check']);
-const operationStates = new Set([...pendingStates, 'applied', 'failed_rolled_back']);
+// A save that waits for the administrator's own proof of an address (src/self-access.mjs): nothing has been changed yet.
+const provingState = 'awaiting_confirmation';
+const inFlight = state => pendingStates.has(state) || state === provingState;
+const operationStates = new Set([...pendingStates, provingState, 'applied', 'failed_rolled_back']);
+// A save that waits for nothing ends its connections, restarts, checks the new
+// address and, when that fails, goes back and restarts again: well within this.
+// Past it the page stops saying "wait" and says how to look at the result.
+export const saveOverdueMs = 180000;
+// Why the server did not reach an address at 연결 테스트 (src/self-access.mjs reach()).
+const addressReasons = { server_access_address_reached: 'server-access.addressReached', server_access_address_name_unknown: 'server-access.addressNameUnknown',
+  server_access_address_unchecked: 'server-access.addressUnchecked', server_access_address_closed: 'server-access.addressClosed', server_access_address_no_answer: 'server-access.addressNoAnswer',
+  server_access_address_not_https: 'server-access.addressNotHttps', server_access_address_certificate: 'server-access.addressCertificate', server_access_address_other_server: 'server-access.addressOtherServer',
+  server_access_address_proxy_untrusted: 'server-access.addressProxyUntrusted', server_access_address_proxy_headers: 'server-access.addressProxyHeaders', server_access_address_not_admitted: 'server-access.addressNotAdmitted' };
+// The proof a save is waiting for, as the server reports it: the addresses, the time left, and (where the save can
+// be watched) the code to bring to them.
+function outsideOf(snapshot) {
+  const value = snapshot.outside;
+  if (!value || !Array.isArray(value.origins) || !value.origins.length || value.origins.length > 4 || value.origins.some(row => !row || !bounded(row.origin, 2048) || !row.origin || typeof row.confirmed !== 'boolean') ||
+    !Number.isFinite(value.remainingMs) || value.remainingMs < 0 || value.remainingMs > 3600000 || (value.code != null && !/^\d{6}$/.test(String(value.code)))) return null;
+  return { origins: value.origins, remainingMs: value.remainingMs, code: value.code ?? null };
+}
+const minutes = ms => { const seconds = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0'); };
+// The link that proves an address: its console, with the code after the page's name (app.js keeps it through the sign-in).
+export const outsideLink = (origin, code) => origin + '/admin/#/server-access/confirm-' + code;
+function addressReason(check) {
+  const code = check.code === 'server_access_address_proxy_untrusted' && !check.peer ? 'server_access_address_not_admitted' : check.code;
+  return t(addressReasons[code] ?? 'server-access.addressNoAnswer', { peer: check.peer ?? '' });
+}
 const clone = value => JSON.parse(JSON.stringify(value));
 const revision = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const bounded = (value, max = 2048) => typeof value === 'string' && value.length <= max;
@@ -84,7 +111,7 @@ function draftOf(config, { listener = null, fixed = null, managementOrigin = nul
     const here = fixed.httpsMode === 'proxy' && !loopbackOnly(fixed) ? origin(managementOrigin ?? '', 'http')?.origin ?? '' : '';
     const listenHost = fixed.listenHost, listenPort = String(fixed.listenPort);
     return { primaryOrigin: here, fixed, https: { enabled: !here, origin: '', extraOrigins: [], mode: fixed.httpsMode, listenHost, listenPort, certFile: '', keyFile: '' },
-      http: { enabled: !!here, origin: here, extraOrigins: [], listenHost, listenPort, follow: false, followed: '' }, trustedProxies: '' };
+      http: { enabled: !!here, origin: here, extraOrigins: [], listenHost, listenPort, follow: false, followed: '' }, trustedProxies: '', udpMedia: false };
   }
   if (!config) {
     // What the server reports of the listener this request came in on (src/http.mjs serverInfo.listener):
@@ -104,7 +131,8 @@ function draftOf(config, { listener = null, fixed = null, managementOrigin = nul
     certFile: config.https.certFile ?? '', keyFile: config.https.keyFile ?? '',
   }, http: { enabled: config.http.enabled, origin: config.http.origin ?? '', extraOrigins: extras,
     listenHost: config.http.listenHost, listenPort: String(config.http.listenPort), follow, followed },
-  trustedProxies: config.trustedProxies.join('\n') };
+  // Media over UDP, a switch a Docker Compose install saves with its addresses (src/self-access.mjs).
+  trustedProxies: config.trustedProxies.join('\n'), ...(fixed ? { udpMedia: config.udpMedia === true } : {}) };
 }
 // Only these canonical fields cross the API. NAT help inputs stay local.
 export function draftConfig(draft) {
@@ -126,7 +154,8 @@ export function draftConfig(draft) {
   return { protocol, primaryOrigin: primary, https: { ...endpoint('https'), mode: fixed ? fixed.httpsMode : draft.https.mode,
     certFile: fixed ? (direct ? fixed.certFile ?? null : null) : draft.https.enabled && direct ? draft.https.certFile.trim() || null : null,
     keyFile: fixed ? (direct ? fixed.keyFile ?? null : null) : draft.https.enabled && direct ? draft.https.keyFile.trim() || null : null },
-  http: { ...endpoint('http'), ...(following ? { followPublicIp: true } : {}) }, trustedProxies: draft.trustedProxies.split(/\r?\n/).map(ip => ip.trim()).filter(Boolean) };
+  http: { ...endpoint('http'), ...(following ? { followPublicIp: true } : {}) }, trustedProxies: draft.trustedProxies.split(/\r?\n/).map(ip => ip.trim()).filter(Boolean),
+  ...(fixed && draft.udpMedia === true ? { udpMedia: true } : {}) };
 }
 function validation(config) {
   const errors = [];
@@ -141,7 +170,10 @@ function validation(config) {
   const enabledOrigins = ['https', 'http'].filter(kind => config[kind].enabled).flatMap(kind => listOf(config[kind]));
   if (!enabledOrigins.includes(config.primaryOrigin)) errors.push(t('server-access.6'));
   if (config.https.enabled && config.https.mode === 'direct' && (!config.https.certFile || !config.https.keyFile)) errors.push(t('server-access.7'));
-  if (config.trustedProxies.some(ip => !exactIp(ip)) || new Set(config.trustedProxies).size !== config.trustedProxies.length) errors.push(t('server-access.8'));
+  // A range (10.0.0.0/8) is named as that: the server takes exact addresses only (update/server-access-policy.mjs).
+  const range = config.trustedProxies.find(ip => ip.includes('/'));
+  if (range) errors.push(t('server-access.proxyRange', { value: range }));
+  else if (config.trustedProxies.some(ip => !exactIp(ip)) || new Set(config.trustedProxies).size !== config.trustedProxies.length) errors.push(t('server-access.8'));
   return errors;
 }
 // HTTP has no hop of its own: it listens on its external address's port and
@@ -220,12 +252,26 @@ export function saveDescription(config, snapshot) {
 function stateFor(ctx, snapshot) {
   let model = ctx.state.ui.serverAccess;
   if (!model || model.owner !== ctx.state.user) {
+    // The router forwards to the server's own address: where the install knows it (a Docker Compose install), it is filled in.
+    const ownAddress = fixedOf(snapshot)?.serverAddress;
     model = { owner: ctx.state.user, baseRevision: snapshot.revision, applied: clone(snapshot.applied),
       draft: draftFor(snapshot), edits: 0, dirty: false, conflict: false, receipt: null,
       lastTest: null, testing: false, saving: false, cancelling: false, operation: null, error: '', validation: [],
-      assist: { targetIp: '', proxyPort: '' }, expiryTimer: null };
+      assist: { targetIp: exactIp(ownAddress) ? ownAddress : '', proxyPort: '' }, expiryTimer: null, overdueTimer: null, ticker: null, poller: null, reveal: null, resultSaid: null,
+      proving: false, proved: null, provingError: '', provingCode: '', linkTried: false };
     // A first setup that already names its own address can be saved as it is.
     model.prefilled = snapshot.applied === null && !!model.draft.primaryOrigin;
+    // What this administrator had typed and not saved when the last sign-in ended (app.js keepDrafts). Against
+    // other settings saved since, it is the edit of an older version: said as a conflict below, as for any edit.
+    const kept = ctx.takeDraft?.('serverAccess');
+    if (kept?.draft && typeof kept.draft === 'object') {
+      try {
+        draftConfig(kept.draft);
+        model.draft = kept.draft;
+        if (revision(kept.baseRevision) && kept.baseRevision !== snapshot.revision) { model.baseRevision = kept.baseRevision; model.applied = kept.applied ?? model.applied; }
+        model.dirty = !same(draftConfig(model.draft), model.applied); model.prefilled = false;
+      } catch { /* Not a draft this page can read: the saved settings are shown. */ }
+    }
     ctx.state.ui.serverAccess = model;
   }
   const appliedChanged = snapshot.revision !== model.baseRevision;
@@ -248,13 +294,37 @@ function stateFor(ctx, snapshot) {
   // A save that did not happen leaves the form's edits unsaved again (saveDraft cleared the mark when it was accepted).
   if (matchingOperation && ['failed_rolled_back', 'failed'].includes(snapshot.state)) model.dirty = !same(draftConfig(model.draft), model.applied);
   else if (model.operation?.state === 'failed' && snapshot.operationId && !matchingOperation) model.operation = null;
+  // This page's save is not the change the server reports any more (another change took its place, or the record is
+  // gone), in an answer newer than the save: it will never be reported as ended, so the page stops waiting and the
+  // form opens. With the saved settings in use there is nothing to add (only the save's own result is said as
+  // "applied"); otherwise the result is unknown and said so.
+  let own = model.operation;
+  // The proof arrived: from here the save ends connections and restarts, and its time is counted from now.
+  if (own?.state === provingState && matchingOperation && pendingStates.has(snapshot.pending?.state)) { own = model.operation = { ...own, state: snapshot.pending.state, acceptedAt: now(ctx) }; armOverdue(ctx, model); }
+  if (own && inFlight(own.state)) {
+    // An answer asked for before the save can still arrive once after it: without having seen the save reported, only the second one counts.
+    const raw = ctx.value('serverAccess');
+    if (matchingOperation) own.seen = true;
+    else if (!snapshot.pending && raw !== own.from && raw !== own.last) { own.last = raw; own.misses = (own.misses ?? 0) + 1; }
+    if (!matchingOperation && !snapshot.pending && (own.seen === true ? raw !== own.from : own.misses >= 2)) {
+      clearTimeout(model.overdueTimer);
+      if (own.config && same(draftConfig(draftFor(snapshot)), own.config)) model.operation = { ...own, state: 'settled' };
+      else { model.operation = null; model.error = t('server-access.resultUnknown'); model.dirty = !same(draftConfig(model.draft), model.applied); }
+    }
+  }
+  if (!pendingStates.has(model.operation?.state)) clearTimeout(model.overdueTimer);
   return model;
 }
 const current = (ctx, model) => ctx.state.user === model.owner && ctx.state.ui.serverAccess === model;
 const unsaved = model => model.dirty || model.prefilled === true;
-const locked = (model, snapshot) => snapshot.applySupported === false || model.saving || pendingStates.has(model.operation?.state) || !!snapshot.pending && snapshot.pending.state !== 'failed_rolled_back';
+const locked = (model, snapshot) => snapshot.applySupported === false || model.saving || inFlight(model.operation?.state) || !!snapshot.pending && snapshot.pending.state !== 'failed_rolled_back';
+function armOverdue(ctx, model) {
+  clearTimeout(model.overdueTimer);
+  model.overdueTimer = setTimeout(() => { if (current(ctx, model)) ctx.render(); }, saveOverdueMs + 50);
+  model.overdueTimer.unref?.();
+}
 function invalidate(model) {
-  model.edits++; model.dirty = !same(draftConfig(model.draft), model.applied); model.receipt = null; model.lastTest = null;
+  model.edits++; model.dirty = !same(draftConfig(model.draft), model.applied); model.receipt = null; model.lastTest = null; model.reveal = null;
   model.error = ''; model.validation = []; clearTimeout(model.expiryTimer);
 }
 function testCurrent(ctx, model, snapshot) {
@@ -274,43 +344,74 @@ async function testDraft(ctx, model, snapshot) {
     const legacy = result?.revision === baseRevision && typeof result.ok === 'boolean';
     if ((!modern && !legacy) || !Array.isArray(result.checks) || result.checks.some(check =>
       !bounded(modern ? check.name : check.id, 100) || (check.code != null && (!bounded(check.code, 100) || !/^[a-z0-9_.-]+$/i.test(check.code))) ||
-      (modern ? !['passed', 'pending', 'failed'].includes(check.status) : typeof check.ok !== 'boolean'))) throw Error(t('server-access.38'));
-    const checks = result.checks.map(check => modern ? { id: check.name, status: check.status, ok: check.status === 'passed', code: check.code } : { ...check, status: check.ok ? 'passed' : 'failed' });
+      (check.origin != null && !bounded(check.origin, 2048)) || (check.peer != null && (!bounded(check.peer, 64) || !/^[0-9a-f.:]+$/i.test(check.peer))) ||
+      (modern ? !['passed', 'pending', 'failed', 'unreached'].includes(check.status) || (check.status === 'unreached' && check.extra !== true) : typeof check.ok !== 'boolean'))) throw Error(t('server-access.38'));
+    // `origin`, `peer`: the address the server tried, and where that request arrived from. `extra`: an extra address;
+    // 'unreached' is one the server did not reach from where it runs, which does not stop the save (src/self-access.mjs reach()).
+    const checks = result.checks.map(check => modern ? { id: check.name, status: check.status, ok: check.status === 'passed', code: check.code, origin: check.origin ?? null, peer: check.peer ?? null, extra: check.extra === true } : { ...check, status: check.ok ? 'passed' : 'failed' });
     const admitted = modern ? checks.length > 0 && checks.every(check => check.status !== 'failed') : result.ok;
+    // Addresses the server could not reach from where it runs, which the administrator may prove from outside instead:
+    // that test can be saved in that way only.
+    const unreachedOnly = checks.filter(check => check.status === 'failed'), outside = modern && result.confirmation === 'outside' && unreachedOnly.length > 0 && unreachedOnly.every(check => check.id === 'address' && check.origin)
+      ? unreachedOnly.map(check => check.origin) : null;
     model.lastTest = { ...result, checks, ok: admitted, scope: 'preflight' };
-    if (admitted) {
+    if (admitted || outside) {
       const until = expires(result.expiresAt);
-      if (!bounded(result.testId, 200) || !result.testId || !Number.isFinite(until) || until <= now(ctx) || !checks.length || checks.some(check => check.status === 'failed')) throw Error(t('server-access.38'));
-      model.receipt = { testId: result.testId, revision: baseRevision, expires: until, fingerprint: JSON.stringify(config) };
+      if (!bounded(result.testId, 200) || !result.testId || !Number.isFinite(until) || until <= now(ctx) || !checks.length || (!outside && checks.some(check => check.status === 'failed'))) throw Error(t('server-access.38'));
+      model.receipt = { testId: result.testId, revision: baseRevision, expires: until, fingerprint: JSON.stringify(config), outside };
       model.expiryTimer = setTimeout(() => { if (current(ctx, model)) { model.receipt = null; ctx.render(); } }, Math.min(2147483647, until - now(ctx) + 1));
       model.expiryTimer.unref?.();
     }
   } catch (error) { if (current(ctx, model) && model.edits === edits) model.error = errorText(error, config); }
-  finally { if (current(ctx, model)) { model.testing = false; ctx.render(); } }
+  // The result is shown where it can be read: in a narrow window 검사 결과 is below the buttons.
+  finally { if (current(ctx, model)) { model.testing = false; model.reveal = model.error ? '.server-access-error' : '.server-access-results'; ctx.render(); } }
 }
-function saveDraft(ctx, model, snapshot) {
-  if (!current(ctx, model) || !unsaved(model) || locked(model, snapshot) || !testCurrent(ctx, model, snapshot)) return;
+// `outside`: the save that first waits for the administrator's own proof of the addresses the server did not reach.
+function saveDraft(ctx, model, snapshot, { outside = false } = {}) {
+  if (!current(ctx, model) || !unsaved(model) || locked(model, snapshot) || !testCurrent(ctx, model, snapshot) || !!model.receipt.outside !== outside) return;
   const edits = model.edits, config = draftConfig(model.draft), receipt = model.receipt;
-  const description = saveDescription(config, snapshot);
+  // Only a switch changes and the addresses stay (the test said so): nothing restarts and nobody is disconnected.
+  const quiet = !outside && model.lastTest?.addressesUnchanged === true;
+  const description = outside ? t('server-access.outsideDescription', { origins: receipt.outside.join(', ') }) : quiet ? t('server-access.saveSwitchOnly') : saveDescription(config, snapshot);
   // 먼저 알리기 (js/notices.js): a save ends every connection.
-  const announce = announceFirst(ctx, { audience: everyoneAudience(ctx), text: announcements.serverAccess });
-  ctx.modal(t('server-access.39'), announce ? [{ node: announce.node }] : [], (announce ? announce.wrap : run => run)(async () => {
+  const announce = quiet ? null : announceFirst(ctx, { audience: everyoneAudience(ctx), text: announcements.serverAccess });
+  // The test could not try the address itself: said before the connections are ended.
+  const unverified = model.lastTest?.checks.some(check => check.status === 'pending')
+    ? [{ node: el('p', { class: 'server-access-warning', 'data-access-save-unverified': '' }, t('server-access.saveUnverified')) }] : [];
+  ctx.modal(outside ? t('server-access.outsideTitle') : t('server-access.39'), [...unverified, ...(announce ? [{ node: announce.node }] : [])], (announce ? announce.wrap : run => run)(async () => {
     const latest = normalized(ctx.value('serverAccess'));
-    if (!current(ctx, model) || !unsaved(model) || model.edits !== edits || !validResponse(latest) || !testCurrent(ctx, model, latest) || locked(model, latest)) throw Error(t('server-access.40'));
+    if (!current(ctx, model) || !unsaved(model) || model.edits !== edits || !validResponse(latest) || !testCurrent(ctx, model, latest) || locked(model, latest) || model.receipt !== receipt) throw Error(t('server-access.40'));
     model.saving = true; model.error = ''; model.receipt = null; clearTimeout(model.expiryTimer); ctx.render();
     try {
-      const result = await ctx.api('/server-access/save', 'POST', { config, testId: receipt.testId, baseRevision: receipt.revision, confirm: true });
+      const result = await ctx.api('/server-access/save', 'POST', { config, testId: receipt.testId, baseRevision: receipt.revision, confirm: true, ...(outside ? { outside: true } : {}) });
       if (!current(ctx, model)) return;
       if (!result || !operationStates.has(result.state) || !bounded(result.operationId, 128) || !result.operationId) throw Error(t('server-access.41'));
       // `origins`: the addresses that will answer once it is applied (the browser's own may not be one of them).
+      // `from`: the status this page had when the save was accepted; `config`: what was saved (stateFor, above).
       model.operation = { operationId: result.operationId, state: result.state === 'applied' ? 'applying' : result.state, errorCode: result.errorCode,
-        primaryOrigin: config.primaryOrigin, origins: ['https', 'http'].filter(kind => config[kind].enabled).flatMap(kind => listOf(config[kind])) };
+        primaryOrigin: config.primaryOrigin, origins: ['https', 'http'].filter(kind => config[kind].enabled).flatMap(kind => listOf(config[kind])),
+        acceptedAt: now(ctx), from: ctx.value('serverAccess'), config, seen: false, quiet };
+      // While it waits for the proof nothing is on its way yet: the time a save may take starts with the proof (stateFor).
+      if (model.operation.state === provingState) clearTimeout(model.overdueTimer); else armOverdue(ctx, model);
+      // What happens next is said at the top of the form (the code and the link, or the steps): brought into view.
+      model.reveal = model.operation.state === provingState ? '[data-access-outside-wait]' : '[data-access-progress]';
       // The edits are with the server now: leaving the page no longer asks about unsaved changes (app.js).
       model.receipt = null; model.dirty = false; model.prefilled = false; clearTimeout(model.expiryTimer);
       void ctx.load('serverAccess', { force: true });
     } catch (error) { if (current(ctx, model)) model.error = errorText(error, config); throw error; }
     finally { if (current(ctx, model)) { model.saving = false; ctx.render(); } }
-  }), { save: t('server-access.42'), description, reload: false, danger: config.http.enabled });
+  }), { save: outside ? t('server-access.outsideSave') : t('server-access.42'), description, reload: false, danger: !outside && !quiet && config.http.enabled });
+}
+// The proof itself, sent from the address under proof with the code shown where the save was made.
+async function proveOutside(ctx, model, operationId, code) {
+  if (!current(ctx, model) || model.proving) return;
+  if (!/^\d{6}$/.test(code)) { model.provingError = t('server-access.outsideCodeShape'); ctx.render(); return; }
+  model.proving = true; model.provingError = ''; ctx.render();
+  try { await ctx.api('/server-access/confirm', 'POST', { operationId, code }); if (current(ctx, model)) { model.proved = operationId; model.provingCode = ''; } }
+  catch (error) {
+    if (current(ctx, model)) model.provingError = { server_access_confirmation_code: t('server-access.outsideCodeWrong'), server_access_confirmation_unavailable: t('server-access.outsideGone'),
+      server_access_confirmation_origin: t('server-access.outsideWrongAddress') }[error?.code] ?? errorText(error);
+  } finally { if (current(ctx, model)) { model.proving = false; ctx.render(); void ctx.load('serverAccess', { force: true }); } }
 }
 // Withdraws a save that is still waiting. The server answers once it has
 // confirmed nothing changed; the next status read opens the form again.
@@ -324,29 +425,42 @@ async function cancelPending(ctx, model, operationId) {
   }
 }
 
-function statusText(model, snapshot) {
+// A save that ended this long ago at most is still said to a page that did not make it (the screen an address was
+// proven on, or the same screen after a reload): "what happened to my save" has an answer there too.
+const recentSaveMs = 600000;
+function statusText(model, snapshot, at = Date.now()) {
   if (snapshot.state === 'recovery_required') return snapshot.currentObserved === false
     ? t('server-access.43')
     : t('server-access.44');
   const state = snapshot.pending?.state ?? model.operation?.state ?? snapshot.state;
-  if (state === 'waiting_idle') return blockersOf(snapshot).length ? t('server-access.45') : t('server-access.46');
+  // Said in full by the notice above the form.
+  if (state === provingState) return '';
+  if (state === 'waiting_idle') return blockersOf(snapshot).length ? t('server-access.45') : model.operation?.quiet === true ? t('server-access.51') : t('server-access.46');
   // Ended before anything was written, and the server confirmed that.
   if (state === 'failed' && snapshot.state === 'failed' && snapshot.unchangedVerified === true && !snapshot.pending) {
     if (snapshot.errorCode === 'server_access_cancelled') return t('server-access.47');
     if (snapshot.errorCode === 'server_access_idle_timeout') return [...(blockersOf(snapshot).length ? blockerLines(blockersOf(snapshot), true) : [t('server-access.48')]), t('server-access.49')].join('\n');
+    if (snapshot.errorCode === 'server_access_connections_busy') return t('server-access.connectionsBusy');
+    if (snapshot.errorCode === 'server_access_confirmation_timeout') return bounded(snapshot.failedOrigin, 2048) && snapshot.failedOrigin ? t('server-access.outsideTimeout', { origin: snapshot.failedOrigin }) : t('server-access.50');
+    if (snapshot.errorCode === 'server_access_interrupted') return t('server-access.interrupted');
     return t('server-access.50');
   }
   if (state === 'applying') return t('server-access.51');
   if (state === 'health_check') return t('server-access.52');
+  // The address the server could not reach itself at after the restart, when it said which.
   if (state === 'failed_rolled_back') return (snapshot.pending?.errorCode ?? model.operation?.errorCode ?? snapshot.errorCode) === 'server_access_health_failed'
-    ? t('server-access.53')
+    ? bounded(snapshot.failedOrigin, 2048) && snapshot.failedOrigin ? t('server-access.rolledBackAt', { origin: snapshot.failedOrigin }) : t('server-access.53')
     : t('server-access.54');
   // Said after a save made in this visit only: what the server applied before is simply the current setting.
   if (state === 'applied' && model.operation?.state === 'applied') return t('server-access.55');
   if (state === 'failed' || state === 'recovery_required') return t('server-access.56');
   if (snapshot.pending) return t('server-access.57');
   if (snapshot.applied === null) return t('server-access.58');
-  return model.dirty ? t('server-access.59') : '';
+  if (model.dirty) return t('server-access.59');
+  const ended = Date.parse(snapshot.completedAt ?? '');
+  // The time is the server's and `at` this browser's: two clocks that need not agree to the second.
+  return state === 'applied' && bounded(snapshot.operationId, 128) && snapshot.operationId && Number.isFinite(ended) && ended - at < 300000 && at - ended < recentSaveMs && clock(ended)
+    ? t('server-access.appliedAt', { time: clock(ended) }) : '';
 }
 const portOf = (value, kind) => { const url = origin(withScheme(value, kind), kind); return url ? url.port || (kind === 'https' ? '443' : '80') : t('server-access.61'); };
 function dockerMapping(ports, kind, containerPort) {
@@ -416,24 +530,42 @@ const forwardedUdpPort = snapshot => portNumber(snapshot.udpMedia?.derivedPort) 
 const gatewayOf = snapshot => fixedOf(snapshot) && typeof snapshot.gateway === 'string' && exactIp(snapshot.gateway) ? snapshot.gateway : null;
 // UDP media of a Docker Compose install, as the server runs it (src/udp-relay.mjs describe()). Read-only:
 // with no relay list in .env each app and Host is given the address it connects to, on the published UDP port.
-function udpPanel(snapshot) {
+// The switch for media over UDP as the server reports it: what is saved, and the value .env fixes instead (null: none).
+function udpSwitchOf(snapshot) {
+  const value = snapshot.udpSwitch;
+  return value && typeof value.saved === 'boolean' && value.relay === true && [null, 'on', 'off', 'desktops'].includes(value.env ?? null) ? { saved: value.saved, env: value.env ?? null } : null;
+}
+function udpPanel(ctx, model, snapshot, disabled, repaint) {
   const udp = snapshot.udpMedia, running = udp?.running === true, derivedPort = running ? portNumber(udp.derivedPort) : null;
   const rows = list => Array.isArray(list) ? list.filter(row => row && bounded(row.host, 253) && row.host && portNumber(row.port)).map(row => row.host + ':' + row.port) : [];
   const host = running ? rows(udp.relays?.host) : [], client = running ? rows(udp.relays?.client) : [];
   const configured = !derivedPort && host.length > 0 && client.length > 0, used = !!derivedPort || configured;
-  // Off by MULTITAP_UDP_MEDIA: with derived endpoints that is the explicit `off`; with lists from .env it may also be unset.
-  const off = used && udp.media !== 'on' && udp.media !== 'desktops';
+  // Off: by the saved switch, or by MULTITAP_UDP_MEDIA=off in .env. The relay answers either way, so what reaches it shows below.
+  const off = used && udp.media !== 'on' && udp.media !== 'desktops', choice = used ? udpSwitchOf(snapshot) : null;
   const text = !used ? t('server-access.udpOff') : udp.media === 'on' ? (derivedPort ? t('server-access.udpDerived', { port: derivedPort }) : t('server-access.udpConfigured'))
-    : udp.media === 'desktops' ? t('server-access.udpDesktops') : derivedPort ? t('server-access.udpMediaOff') : t('server-access.udpProbe');
+    : udp.media === 'desktops' ? t('server-access.udpDesktops') : choice?.env === 'off' ? t('server-access.udpMediaOff') : choice ? t('server-access.udpSwitchOff') : t('server-access.udpProbe');
+  // How many of the sessions that were told the relay's address reach it now: seen before media is turned on.
+  const sessions = Number.isInteger(udp?.sessions) && udp.sessions >= 0 ? udp.sessions : null, bindings = Number.isInteger(udp?.bindings) && udp.bindings >= 0 ? udp.bindings : null;
+  const reach = !used || sessions === null || bindings === null ? null : sessions > 0 ? t('server-access.udpReach', { sessions, bindings }) : t('server-access.udpReachNone');
   // One endpoint per address in use; an IPv6 address has none (the relay is IPv4).
   const names = snapshot.applied ? [...new Set(['https', 'http'].filter(kind => snapshot.applied[kind].enabled).flatMap(kind => listOf(snapshot.applied[kind]))
     .map(value => (origin(value, 'https') ?? origin(value, 'http'))?.hostname).filter(name => name && !name.startsWith('[')))] : [];
-  const endpoints = derivedPort && off ? null : derivedPort ? (names.length ? t('server-access.udpEndpoints', { list: names.map(name => name + ':' + derivedPort).join(', ') }) : null)
+  const endpoints = derivedPort ? (names.length ? t('server-access.udpEndpoints', { list: names.map(name => name + ':' + derivedPort).join(', ') }) : null)
     : configured ? t('server-access.udpEndpointsBoth', { host: host.join(', '), client: client.join(', ') }) : null;
+  // The switch: saved with the addresses by 연결 테스트 and 변경 저장. Fixed, with its value, where .env decides.
+  const fixedBy = choice?.env ?? null, on = fixedBy ? fixedBy !== 'off' : model.draft.udpMedia === true;
+  const control = !choice ? null : el('div', { class: 'server-access-udp-switch' },
+    el('label', { class: 'server-access-switch' }, el('input', { type: 'checkbox', role: 'switch', name: 'udpMedia', checked: on, disabled: disabled || !!fixedBy, 'aria-label': t('server-access.udpSwitch'), 'data-focus': 'access-udp-media',
+      onchange: event => { if (disabled || fixedBy || !current(ctx, model)) return; model.draft.udpMedia = event.target.checked === true; invalidate(model); repaint(); } }), el('span', {}, t('server-access.udpSwitch'))),
+    fixedBy ? el('p', { class: 'field-hint', 'data-access-udp-fixed': fixedBy }, t('server-access.udpSwitchEnv', { value: fixedBy === 'desktops' ? t('server-access.udpSwitchEnvList') : fixedBy })) : null,
+    el('p', { class: 'field-hint', 'data-access-udp-help': '' }, t('server-access.udpSwitchHelp')),
+    fixedBy ? null : el('p', { class: 'field-hint', 'data-access-udp-effect': '' }, t('server-access.udpSwitchEffect')));
   return panel({ title: t('server-access.udpTitle'), className: 'server-access-udp' },
     el('p', { role: 'status', 'data-access-udp': used ? (derivedPort ? 'derived' : 'configured') : 'off' }, text),
+    control,
     endpoints ? el('p', { class: 'field-hint', 'data-access-udp-endpoints': '' }, endpoints) : null,
-    derivedPort && !off ? el('p', { class: 'field-hint', 'data-access-udp-router': '' }, t('server-access.udpRouter', { port: derivedPort })) : null);
+    derivedPort ? el('p', { class: 'field-hint', 'data-access-udp-router': '' }, t('server-access.udpRouter', { port: derivedPort })) : null,
+    reach ? el('p', { class: 'field-hint', 'data-access-udp-reach': '' }, reach) : null);
 }
 function endpointCard(ctx, model, snapshot, kind, edit, redraw, disabled, { editExtra, settle }) {
   const draft = model.draft[kind], secure = kind === 'https', placeholder = secure ? t('server-access.88') : t('server-access.89');
@@ -546,7 +678,9 @@ export function render(ctx) {
     root.querySelector('[name="primaryOrigin"]')?.replaceChildren(...primaryOptions());
     const save = root.querySelector('[data-access-save]'); if (save) save.disabled = true;
     const result = root.querySelector('[data-access-test-status]'); if (result) result.textContent = t('server-access.153');
-    const status = root.querySelector('[data-access-draft-status]'); if (status) status.textContent = model.dirty ? t('server-access.59') : '';
+    // Why the last save did not stay is kept in view while the address is corrected.
+    const status = root.querySelector('[data-access-draft-status]'); if (status && !status.classList.contains('server-access-warning')) status.textContent = model.dirty ? t('server-access.59') : '';
+    root.querySelector('[data-access-https-needs]')?.remove(); root.querySelector('[data-access-outside-offer]')?.remove();
     root.querySelector('.server-access-checks')?.remove(); root.querySelector('.server-access-error')?.remove();
     const outside = root.querySelector('[data-access-console-outside]'); if (outside) { outside.textContent = consoleOutside(); outside.hidden = !outside.textContent; }
     root.querySelector('[data-access-outside-steps]')?.replaceChildren(...outsideSteps(helpPorts()));
@@ -590,7 +724,18 @@ export function render(ctx) {
   // A save of this page is on its way (waiting, applying or being checked). The server restarts meanwhile.
   const applyingNow = !recovering && pendingStates.has(snapshot.pending?.state ?? model.operation?.state);
   // While it is applied the tested checks stay; "test, then save" is not said over them.
-  const testStatus = model.testing ? t('server-access.161') : testCurrent(ctx, model, snapshot) ? t('server-access.162') : model.lastTest?.ok === false ? t('server-access.163') : applyingNow ? '' : t('server-access.164');
+  // An install that tries the addresses at the test says so: reached, or not reached and nothing saved.
+  const tried = (model.lastTest?.checks ?? []).filter(check => check.id === 'address'), unreached = tried.filter(check => check.status === 'failed');
+  // An extra address is typically a router forward the server cannot reach from where it runs (no NAT loopback): one
+  // it did not reach is said as that, and the save goes on (the check after the restart does not ask it either).
+  const extraUnreached = tried.filter(check => check.status === 'unreached');
+  // The save waits for the administrator's own proof: said here too, instead of "not saved".
+  const provingNow = !recovering && (snapshot.pending?.state ?? model.operation?.state) === provingState;
+  // The server no longer answers at this address (the save it was to prove is over): nothing is said of a test here.
+  const refusedHere = stale && resource?.code === 'origin_not_allowed';
+  const testStatus = refusedHere ? '' : model.testing ? t('server-access.161') : provingNow ? t('server-access.testProving')
+    : testCurrent(ctx, model, snapshot) ? model.receipt.outside ? t('server-access.testOutside') : model.lastTest.addressesUnchanged === true ? t('server-access.testSwitchOnly') : tried.length && !model.lastTest.checks.some(check => check.status === 'pending') ? extraUnreached.length ? t('server-access.testReachedExtras') : t('server-access.testReached') : t('server-access.162')
+    : model.lastTest?.ok === false ? unreached.length ? t('server-access.testUnreached') : t('server-access.163') : applyingNow ? '' : t('server-access.164');
   // The names the preflight really returns (update/server-access-deployment.mjs preflight()), then the earlier ones.
   const checkNames = { configuration: t('server-access.165'), managed_installation: t('server-access.checkInstallationF2'), listeners: t('server-access.166'), certificate_identity_and_key: t('server-access.167'), external_origin_tls_and_identity: t('server-access.172'),
     certificate: t('server-access.167'), tls: t('server-access.168'), proxy: t('server-access.169'), management: t('server-access.170'), primary_origin: t('server-access.171'), external_route: t('server-access.172'), idle: t('server-access.173') };
@@ -598,11 +743,74 @@ export function render(ctx) {
   const here = snapshot.managementOrigin, moved = typeof here === 'string' && !!here && Array.isArray(model.operation?.origins) && model.operation.origins.length > 0 && !model.operation.origins.includes(here) &&
     !['failed', 'failed_rolled_back'].includes(model.operation.state) && !!(origin(model.operation.primaryOrigin, 'https') ?? origin(model.operation.primaryOrigin, 'http'));
   const testPanel = panel({ title: t('server-access.174'), className: 'server-access-results' },
-    el('p', { role: 'status', 'data-access-test-status': '', hidden: !testStatus }, testStatus),
-    model.lastTest ? el('ul', { class: 'server-access-checks' }, model.lastTest.checks.map(check => el('li', {},
-      icon(check.status === 'pending' ? 'clock' : check.ok ? 'check' : 'alert'), el('span', {}, (checkNames[check.id] ?? t('server-access.175')) + (check.status === 'pending' ? t('server-access.176') : ''),
-        bounded(check.message, 400) && check.message ? el('small', {}, check.message) : check.code && check.status !== 'pending' ? el('small', {}, check.code) : null)))) : null);
-  const reloadDisabled = disabled && !recovering;
+    el('p', { role: 'status', 'data-access-test-status': '', hidden: !testStatus }, model.testing ? el('span', { class: 'loading-dot is-inline', 'aria-hidden': 'true' }) : null, testStatus),
+    model.lastTest ? el('ul', { class: 'server-access-checks' }, model.lastTest.checks.map(check => el('li', check.status === 'unreached' ? { 'data-unreached': '' } : {},
+      icon(check.status === 'pending' ? 'clock' : check.ok ? 'check' : 'alert'),
+      // An address the server tried is named, with what it found there; an extra one it did not reach, with what to do.
+      check.id === 'address' && check.origin ? el('span', { 'data-access-address-check': check.status }, check.origin,
+        check.status === 'unreached' ? el('small', { 'data-access-extra-unreached': '' }, t('server-access.addressExtraUnreached')) : null, el('small', {}, addressReason(check)))
+        : el('span', {}, (checkNames[check.id] ?? t('server-access.175')) + (check.status === 'pending' ? t('server-access.176') : ''),
+          bounded(check.message, 400) && check.message ? el('small', {}, check.message) : check.code && check.status !== 'pending' ? el('small', {}, check.code) : null)))) : null,
+    unreached.some(check => check.origin?.startsWith('https://')) ? el('p', { class: 'field-hint', 'data-access-https-needs': '' }, t('server-access.httpsNeeds')) : null,
+    // The server asks from where it runs: an address that opens from outside can look like this from inside (a router
+    // that does not loop its public address back). The administrator may prove it from outside and save.
+    testCurrent(ctx, model, snapshot) && model.receipt.outside ? el('div', { class: 'server-access-outside-offer', 'data-access-outside-offer': '' },
+      el('p', { class: 'field-hint' }, t('server-access.outsideOffer')),
+      disable(button(t('server-access.outsideSave'), () => saveDraft(ctx, model, snapshot, { outside: true }), 'secondary', null, { 'data-access-save-outside': '' }), disabled || stale || !unsaved(model) ? t('server-access.199') : null)) : null);
+  // This page's save has been on its way for longer than a save can take.
+  const overdue = applyingNow && pendingStates.has(model.operation?.state) && !blockersOf(snapshot).length && now(ctx) - model.operation.acceptedAt >= saveOverdueMs;
+  // A save waits for the administrator's own proof of an address. Where it can be watched (the code is given here):
+  // the addresses to open, the code and the time left. At an address under proof: the field for that code.
+  const outside = !recovering && (snapshot.pending?.state ?? model.operation?.state) === provingState ? outsideOf(snapshot) : null;
+  const provingOperation = outside ? snapshot.pending?.operationId ?? model.operation?.operationId : null;
+  const provingHere = !!outside && !outside.code && outside.origins.some(row => row.origin === snapshot.managementOrigin && !row.confirmed);
+  // The save this address was to prove has ended (time up, withdrawn): the server no longer answers here at all.
+  // The last thing it said would still show the code field: said as over instead.
+  const provingOver = provingHere && stale && resource?.code === 'origin_not_allowed';
+  // The time left is the server's, counted on from the moment its answer arrived.
+  const raw = ctx.value('serverAccess');
+  if (outside && model.outsideStamp?.raw !== raw) model.outsideStamp = { raw, at: now(ctx) };
+  const left = () => outside ? outside.remainingMs - (now(ctx) - model.outsideStamp.at) : 0;
+  clearInterval(model.ticker); model.ticker = null;
+  if (outside) {
+    model.ticker = setInterval(() => {
+      if (!current(ctx, model)) { clearInterval(model.ticker); return; }
+      // The page was left: the next time it is drawn it counts again.
+      const node = globalThis.document?.querySelector('[data-access-outside-left]');
+      if (!node) { clearInterval(model.ticker); model.ticker = null; return; }
+      node.textContent = t('server-access.outsideLeft', { time: minutes(left()) });
+      // Time is up: ask the server how it ended instead of waiting for the next look.
+      if (left() <= 0 && model.outsideStamp.asked !== true) { model.outsideStamp.asked = true; void ctx.load('serverAccess', { force: true }); }
+    }, 1000);
+    model.ticker.unref?.();
+  }
+  // Opened by the link the other page shows: the code came with it, and is sent once.
+  if (provingHere && !model.linkTried && /^\d{6}$/.test(ctx.state.ui.accessConfirmCode ?? '')) {
+    model.linkTried = true; const code = ctx.state.ui.accessConfirmCode; ctx.state.ui.accessConfirmCode = null;
+    queueMicrotask(() => { void proveOutside(ctx, model, provingOperation, code); });
+  }
+  const outsidePanel = !outside ? null : el('div', { class: 'server-access-waiting', 'data-access-outside-wait': '' },
+    outside.code ? [
+      el('p', { class: 'server-access-warning', role: 'status' }, t('server-access.outsideWait')),
+      el('ul', { class: 'server-access-outside-list' }, outside.origins.map(row => el('li', { 'data-access-outside-origin': row.confirmed ? 'confirmed' : 'waiting' },
+        row.confirmed ? el('span', {}, row.origin) : el('a', { href: outsideLink(row.origin, outside.code), target: '_blank', rel: 'noopener noreferrer' }, row.origin),
+        el('small', {}, row.confirmed ? t('server-access.outsideDone') : t('server-access.outsidePending'))))),
+      el('p', { class: 'server-access-outside-code' }, el('strong', { 'data-access-outside-code': '' }, t('server-access.outsideCode', { code: outside.code })), ' · ', el('span', { 'data-access-outside-left': '', role: 'timer' }, t('server-access.outsideLeft', { time: minutes(left()) }))),
+      disable(button(model.cancelling ? t('server-access.190') : t('common.135'), () => cancelPending(ctx, model, provingOperation), 'secondary', null, { 'data-access-cancel': '' }), model.cancelling ? t('server-access.191') : null),
+    ] : provingOver ? [
+      el('p', { class: 'server-access-warning', role: 'alert', 'data-access-outside-over': '' }, t('server-access.outsideOver')),
+    ] : provingHere ? [
+      el('p', { class: 'server-access-warning', role: 'status' }, t('server-access.outsideHere')),
+      el('form', { class: 'server-access-outside-form', onsubmit: event => { event.preventDefault(); void proveOutside(ctx, model, provingOperation, model.provingCode.trim()); } },
+        el('label', { class: 'server-access-field' }, el('span', {}, t('server-access.outsideCodeLabel')),
+          el('input', { name: 'outsideCode', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, 'data-focus': 'access-outside-code', value: model.provingCode, disabled: model.proving, oninput: event => { model.provingCode = event.target.value; } })),
+        disable(button(t('server-access.outsideConfirm'), () => proveOutside(ctx, model, provingOperation, model.provingCode.trim()), 'primary', 'check', { 'data-access-outside-confirm': '' }), model.proving ? t('server-access.96') : null)),
+      model.provingError ? el('p', { class: 'is-error', role: 'alert', 'data-access-outside-error': '' }, model.provingError) : null,
+    ] : [
+      // An address that is proven, or not one under proof, without the code: only what is going on.
+      el('p', { class: 'server-access-warning', role: 'status' }, model.proved === provingOperation ? t('server-access.outsideProved') : t('server-access.outsideElsewhere')),
+    ]);
+  const reloadDisabled = disabled && !recovering && !overdue;
   const reset = async ({ confirmed = false } = {}) => {
     if (reloadDisabled || !current(ctx, model)) return;
     // Unsaved edits are thrown away only after the operator says so.
@@ -630,8 +838,41 @@ export function render(ctx) {
         model.draft.trustedProxies = [...proxyList(), gateway].join('\n'); invalidate(model); repaint();
       }, 'quiet', 'plus', { 'data-access-proxy-here': '' }), disabled ? t('server-access.96') : proxyList().includes(gateway) ? t('server-access.proxyHereListed') : null),
       el('small', { class: 'field-hint' }, t('server-access.proxyHereHint', { ip: gateway }))) : null);
-  const operation = el('p', { class: 'server-access-operation', role: 'status', 'data-access-draft-status': '' }, statusText(model, snapshot));
-  const waiting = !recovering && (snapshot.pending?.state ?? model.operation?.state ?? snapshot.state) === 'waiting_idle';
+  // A save that did not stay is said where the page begins, as a notice: after a reload it is all that is left of it.
+  // Not one the administrator withdrew, and not a result older than a day (that one stays as the plain line below).
+  const shown = snapshot.pending?.state ?? model.operation?.state ?? snapshot.state, operationText = overdue ? '' : statusText(model, snapshot, now(ctx));
+  const ended = Date.parse(snapshot.completedAt ?? ''), lately = !!model.operation || Number.isFinite(ended) && now(ctx) - ended < 86400000;
+  const undone = !recovering && ['failed', 'failed_rolled_back'].includes(shown) && !!operationText && lately && !(shown === 'failed' && snapshot.errorCode === 'server_access_cancelled');
+  // The save is applied (this page's own, or one that ended a moment ago): said with a tick, not as one more grey line.
+  const done = !undone && !applyingNow && shown === 'applied' && !!operationText && !model.dirty;
+  const operation = el('p', { class: 'server-access-operation' + (undone ? ' server-access-warning' : done ? ' is-done' : ''), role: undone ? 'alert' : 'status', 'data-access-draft-status': '' }, done ? icon('check') : null, operationText);
+  // While a save is applied: the step the server reports (ending connections, restarting, checking the new address)
+  // with something that moves, beside the buttons that were pressed. The page asks every second meanwhile, so the
+  // result is shown when it is there and not at the next slow look.
+  const stepAt = ['waiting_idle', 'applying', 'health_check'].indexOf(shown);
+  const progress = applyingNow && !overdue && stepAt >= 0 ? el('div', { class: 'server-access-progress', role: 'status', 'data-access-progress': shown },
+    el('span', { class: 'loading-dot is-inline', 'aria-hidden': 'true' }),
+    el('ol', { class: 'server-access-steps' }, [t('server-access.stepEnd'), t('server-access.stepRestart'), t('server-access.stepCheck')].map((label, index) =>
+      el('li', { class: index < stepAt ? 'is-done' : index === stepAt ? 'is-now' : null, 'aria-current': index === stepAt ? 'step' : null }, label)))) : null;
+  clearInterval(model.poller); model.poller = null;
+  if (applyingNow && !overdue) {
+    model.poller = setInterval(() => {
+      // The page was left, or the session ended: the ordinary look every few seconds is enough again.
+      if (!current(ctx, model) || !globalThis.document?.querySelector?.('[data-access-progress]')) { clearInterval(model.poller); model.poller = null; return; }
+      void ctx.load('serverAccess', { force: true });
+    }, 1000);
+    model.poller.unref?.();
+  }
+  // How this page's save ended is also said where it cannot be missed (the toast), once: a success goes away by
+  // itself, a save that did not stay is kept until it is closed.
+  if (model.operation?.operationId && model.resultSaid !== model.operation.operationId && ['applied', 'failed', 'failed_rolled_back'].includes(model.operation.state) && operationText &&
+      !(model.operation.state === 'failed' && snapshot.errorCode === 'server_access_cancelled')) {
+    model.resultSaid = model.operation.operationId;
+    const failed = model.operation.state !== 'applied';
+    queueMicrotask(() => { if (current(ctx, model)) ctx.notice?.(operationText, failed); });
+  }
+  // A save of a switch alone ends nobody's connection: it is not said to.
+  const waiting = !recovering && !overdue && shown === 'waiting_idle' && !(model.operation?.quiet === true && !blockersOf(snapshot).length);
   // While it waits the page says for what and until when, and offers 취소.
   // Without a reason the server is already ending connections and applying.
   const blockers = waiting ? blockersOf(snapshot) : [], until = blockers.length ? clock(snapshot.waitUntil) : null;
@@ -643,6 +884,9 @@ export function render(ctx) {
     waiting ? el('div', { class: 'server-access-waiting' },
       el('p', { class: 'server-access-warning', role: 'status', 'data-access-waiting': '' }, waitingText),
       blockers.length ? disable(button(model.cancelling ? t('server-access.190') : t('common.135'), () => cancelPending(ctx, model, pendingOperation), 'secondary', null, { 'data-access-cancel': '' }), model.cancelling ? t('server-access.191') : null) : null) : null,
+    outsidePanel,
+    overdue ? el('p', { class: 'server-access-warning', role: 'alert', 'data-access-overdue': '' }, t('server-access.overdue')) : null,
+    undone ? operation : null,
     endpointCard(ctx, model, snapshot, 'https', edit, repaint, disabled, { editExtra, settle }), endpointCard(ctx, model, snapshot, 'http', edit, repaint, disabled, { editExtra, settle }), primary,
     el('p', { class: 'server-access-warning', role: 'status', 'data-access-console-outside': '', hidden: !consoleOutside() }, consoleOutside()), proxies,
     // The server started without its saved policy (src/config.mjs): why this page is empty, and what to do.
@@ -652,13 +896,29 @@ export function render(ctx) {
     model.conflict ? el('p', { class: 'server-access-warning', role: 'alert' }, t('server-access.192')) : null,
     snapshot.applySupported === false ? el('p', { class: 'server-access-warning' }, recovering ? t('server-access.193') : t('server-access.194')) : null,
     // No answer while a save is applied is the restart it causes, not a failure to report in red.
-    stale ? applyingNow ? el('p', { class: 'field-hint', role: 'status', 'data-access-restarting': '' }, t('server-access.restartingF2')) : el('p', { class: 'is-error', role: 'alert' }, t('server-access.195')) : null,
+    stale ? applyingNow ? overdue ? null : el('p', { class: 'field-hint', role: 'status', 'data-access-restarting': '' }, t('server-access.restartingF2')) : provingOver ? null : el('p', { class: 'is-error', role: 'alert' }, t('server-access.195')) : null,
     model.validation.length || model.error ? el('div', { class: 'server-access-error is-error', role: 'alert' }, model.error || model.validation.join('\n')) : null,
-    operation,
+    undone ? null : operation,
+    progress,
     el('div', { class: 'actions server-access-actions' },
       disable(button(t('server-access.196'), reset, 'quiet', 'refresh'), reloadDisabled ? t('server-access.197') : null),
-      disable(button(model.testing ? t('server-access.161') : t('server-access.198'), () => testDraft(ctx, model, snapshot), 'secondary', 'check', { 'data-access-test': '' }), disabled || stale || model.conflict || model.testing ? t('server-access.96') : null),
-      disable(button(t('server-access.42'), () => saveDraft(ctx, model, snapshot), 'primary', null, { 'data-access-save': '' }), disabled || stale || !unsaved(model) || !testCurrent(ctx, model, snapshot) ? t('server-access.199') : null)));
+      disable(button(model.testing ? t('server-access.161') : t('server-access.198'), () => testDraft(ctx, model, snapshot), 'secondary', 'check', { 'data-access-test': '' }), model.conflict ? t('server-access.14') : disabled || stale || model.testing ? t('server-access.96') : null),
+      // Why it cannot be pressed: a test that found a fault, or addresses only the administrator can prove, is not "test first".
+      disable(button(t('server-access.42'), () => saveDraft(ctx, model, snapshot), 'primary', null, { 'data-access-save': '' }),
+        model.conflict ? t('server-access.14') : disabled || stale || !unsaved(model) || !testCurrent(ctx, model, snapshot) ? (!disabled && !stale && unsaved(model) && model.lastTest?.ok === false ? t('server-access.saveBlocked') : t('server-access.199'))
+          : model.receipt.outside ? t('server-access.saveNeedsOutside') : null)));
+  // What an action just produced is brought into view once it is drawn.
+  if (model.reveal) {
+    // Kept until it is there: what a save produces (the code to bring, the steps) comes with the server's next answer.
+    const selector = model.reveal;
+    const timer = setTimeout(() => {
+      const node = current(ctx, model) ? globalThis.document?.querySelector?.(selector) : null;
+      if (!node) return;
+      if (model.reveal === selector) model.reveal = null;
+      node.scrollIntoView?.({ block: 'nearest' });
+    }, 0);
+    timer.unref?.();
+  }
   const assistEdit = (key, value) => { model.assist[key] = value; const table = root.querySelector('[data-access-forward-rows]'); if (table) table.replaceChildren(...forwardRows()); };
   const forwardRows = () => forwardingRows(draftConfig(model.draft), model.assist, portMetadata()).map(row => el('tr', {}, el('th', { scope: 'row' }, row.kind), el('td', {}, 'TCP ' + row.external), el('td', {}, row.destination), el('td', {}, row.proxy ? t('server-access.200') : row.mapping || t('server-access.201'))));
   const forwarding = el('details', { class: 'server-access-forward panel', 'data-keep-open': 'access-forwarding' },
@@ -667,6 +927,6 @@ export function render(ctx) {
       model.draft.https.enabled && model.draft.https.mode === 'proxy' ? addressField(t('server-access.205'), 'assist.proxyPort', model.assist.proxyPort, value => assistEdit('proxyPort', value), { type: 'number', max: 5 }) : null),
     el('div', { class: 'server-access-table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, [t('server-access.206'), t('server-access.207'), t('server-access.208'), t('server-access.listenColumnF2')].map(text => el('th', { scope: 'col' }, text)))), el('tbody', { 'data-access-forward-rows': '' }, forwardRows()))),
     config.https.enabled && config.https.mode === 'proxy' ? el('p', { class: 'field-hint', 'data-access-upstream': '' }, upstreamText()) : null);
-  root.append(el('div', { class: 'server-access-layout' }, form, el('aside', { class: 'server-access-side' }, currentInfo, testPanel, model.draft.fixed ? udpPanel(snapshot) : null)), outsideHelp(helpPorts()), forwarding);
+  root.append(el('div', { class: 'server-access-layout' }, form, el('aside', { class: 'server-access-side' }, currentInfo, testPanel, model.draft.fixed ? udpPanel(ctx, model, snapshot, disabled, repaint) : null)), outsideHelp(helpPorts()), forwarding);
   return [header, root];
 }

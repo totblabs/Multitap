@@ -38,6 +38,19 @@ export function t(id, params) {
 }
 export const has = id => table[id] !== undefined;
 
+// Release notes are written as a title line, the Korean lines, then the same lines in English, each part after a
+// blank line (.artifacts/s112-notes.txt). Only the part in the console's language is shown, under the title; notes
+// that are not cleanly Korean-then-English are shown whole.
+const hangul = /[ᄀ-ᇿ㄰-㆏가-힯]/, latin = /[A-Za-z]/;
+export function localNotes(text, language = lang) {
+  if (typeof text !== 'string' || !text.trim()) return text;
+  const blocks = text.replace(/\r\n?/g, '\n').trim().split(/\n[ \t]*\n+/).map(block => block.replace(/\s+$/, ''));
+  const head = blocks.length > 2 && !hangul.test(blocks[0]) && !blocks[0].includes('\n') && !/^\s*[-*•]/.test(blocks[0]) ? blocks.shift() : null;
+  const korean = blocks.map(block => hangul.test(block)), split = korean.indexOf(false);
+  if (split <= 0 || korean.slice(split).includes(true) || blocks.slice(split).some(block => !latin.test(block))) return text;
+  return [head, ...(language === 'ko' ? blocks.slice(0, split) : blocks.slice(split))].filter(Boolean).join('\n\n');
+}
+
 // The static markup of a page (index.html): data-i18n replaces the element's
 // one text node (or its whole text), data-i18n-html its inner markup (the
 // catalog's own fixed markup, never data), data-i18n-attr="name:id ...".

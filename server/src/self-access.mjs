@@ -7,7 +7,8 @@
 //
 // Files, all in <data>/access and owned by the broker's own account:
 //   policy.json            the saved policy: the shape of server-access.json,
-//                          plus `publicIp` while the public IP is followed
+//                          plus `publicIp` while the public IP is followed,
+//                          `udpMedia` while picture and sound may go over UDP,
 //                          and `envSeed`, the .env address lines it was saved beside
 //   identity               this installation's ID, made with the first policy
 //   journal.json           the save in flight, then its result
@@ -21,6 +22,37 @@
 // port> as the last extra HTTP address, replacing it when the IP changes. It
 // asks only while following is on, and an answer it cannot use changes nothing.
 //
+// Picture and sound over UDP (`udpMedia`): off unless an administrator turns it
+// on, here or with MULTITAP_UDP_MEDIA in .env, which wins where it is set
+// (config.mjs). The relay runs and measures whether its port is reached either
+// way; the switch only decides whether a session is given keys to send media
+// through it. It does not touch the addresses, so saving it restarts nothing
+// and disconnects nobody: the running server takes the new value at once
+// (hooks.udpMedia), for sessions that connect from then on.
+//
+// 연결 테스트 reaches the addresses before anything is saved: for each main
+// address of the change the server asks itself, at that address, for a
+// one-time value (answerProbe below answers it, judged by the policy that
+// would apply). Only the server's own answer counts, and it is the same road
+// the check after the restart takes. A change whose main address does not lead
+// here is therefore refused at the test, with the reason, instead of ending
+// everyone's connection first and going back afterwards.
+//
+// An address that works from outside can still be out of this server's own
+// reach: a router that does not loop its public address back inside, or a name
+// only the outside resolves. For the reasons that look like that from here
+// (no answer, nothing listening, no such name, could not be tried) the change
+// can be saved with the administrator's own proof instead (saveOutside): for a
+// fixed window the address under proof leads to the console and nothing else
+// (provisionalAccess, judged by the policy being saved), and a signed-in
+// administrator's request let in at that address, carrying the code shown where
+// the save was made, is the proof (confirmOutside). Until then nothing is
+// written, fenced or ended; the policy in use stays in use and every way in
+// stays open. With the proof it is the save any other is. Without it in time,
+// or after a restart of the server in between, nothing has changed. A reason
+// that shows a real fault (a certificate, another server answering, a proxy
+// this server does not trust) is never offered this way.
+//
 // The files may also change under a running server: access-cli.mjs writes them
 // from another container. The server looks again every few seconds
 // (reconcile): what does not touch the addresses in use (whether the public IP
@@ -31,16 +63,24 @@ import { isIP, isIPv4 } from 'node:net';
 import { join, dirname } from 'node:path';
 import { open, rename, unlink, mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { randomBytes, randomUUID, randomInt, createHash, timingSafeEqual } from 'node:crypto';
 import { HttpError } from './errors.mjs';
 import { deploymentTransport, normalizeBrokerOrigin } from './transport-policy.mjs';
+import { resolveRequestAccess } from './request-origin.mjs';
 import { normalizeServerAccess, serverAccessHash, serverAccessProtocol, serverAccessUnconfiguredRevision, decodeServerAccessState, allowedServerOrigins, probedServerOrigins, endpointOrigins, maxExtraOrigins } from '../update/server-access-policy.mjs';
 import { serverAccessQuiescence } from '../update/server-access-engine.mjs';
 import { publicAccessRequest, validAccessHealth } from '../update/server-access-health.mjs';
 
 // The broker exits with this code to be started again in the same container.
 export const selfAccessRestartCode = 75;
-export const selfAccessActiveStates = new Set(['waiting_idle', 'applying', 'health_check', 'rolling_back']);
+export const selfAccessActiveStates = new Set(['awaiting_confirmation', 'waiting_idle', 'applying', 'health_check', 'rolling_back']);
+// How long a save waits for the administrator's own proof of an address.
+export const outsideConfirmationMs = 300000;
+// What an address that works from outside can look like from inside. Every
+// other reason is something answering wrongly, which no proof from outside mends.
+const outsideReasons = new Set(['server_access_address_no_answer', 'server_access_address_closed', 'server_access_address_name_unknown', 'server_access_address_unchecked']);
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/, hex = /^[a-f0-9]{64}$/;
 const journalMaximum = 131072;
 // The listen port a disabled endpoint carries, as the .env settings give it.
@@ -51,7 +91,7 @@ const exact = (value, keys) => record(value) && Object.keys(value).length === ke
 const fail = code => { throw Error('server_access_' + code); };
 const codeOf = error => error instanceof HttpError ? error.code : /^server_access_[a-z_]{1,80}$/.test(error?.message) ? error.message : 'server_access_failed';
 // The answers the updater's control socket gives for the same codes.
-const statusOf = code => /_(busy|revision_changed|test_required|fence_lost|management_origin_changed|operation_reused|cancel_unavailable|cancel_too_late)$/.test(code) ? 409
+const statusOf = code => /_(busy|revision_changed|test_required|fence_lost|management_origin_changed|operation_reused|cancel_unavailable|cancel_too_late|confirmation_unavailable|confirmation_origin|confirmation_code)$/.test(code) ? 409
   : /_(invalid|required|conflict)$/.test(code) && !/_storage_invalid$/.test(code) ? 400 : 503;
 const httpError = error => { const code = codeOf(error); return new HttpError(statusOf(code), code); };
 const enabledOrigins = row => row.enabled ? endpointOrigins(row) : [];
@@ -155,6 +195,48 @@ export async function lookupPublicIp({ fetcher = fetch, timeoutMs = 5000 } = {})
   } catch { return null; }
 }
 
+// The address a request would be let in at under `config`, as http.mjs judges it.
+const admittedOrigin = (admitted, config) => { try { const origin = typeof admitted === 'function' ? admitted(config) : null; return typeof origin === 'string' ? origin : null; } catch { return null; } };
+
+// ---- reaching an address before it is saved ---------------------------------
+export const accessProbeProtocol = 'server-access-probe-v1';
+export const accessProbePath = nonce => '/api/v1/access-probe/' + nonce;
+// One GET of the probe path at `origin`: no redirect, cookie or certificate
+// exception. Resolves { answer } with the JSON that came back (null when it
+// was none), or { error } with the reason nothing came back:
+//   name_unknown  the name has no address
+//   unchecked     this server could not try (its name lookup or network failed)
+//   closed        nothing accepts a connection there
+//   no_answer     no answer in time
+//   not_https     an https address that does not speak TLS
+//   certificate   the certificate is not valid for the name
+export function probeAddress(origin, nonce, { http = httpRequest, https = httpsRequest, timeoutMs = 4000 } = {}) {
+  return new Promise(resolve => {
+    let settled = false, timer, request;
+    const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
+    const failed = error => {
+      const code = String(error?.code ?? '');
+      finish({ error: ['ENOTFOUND', 'EAI_NONAME', 'EAI_NODATA'].includes(code) ? 'name_unknown'
+        : ['EAI_AGAIN', 'EAI_FAIL', 'ENETUNREACH', 'ENETDOWN', 'EADDRNOTAVAIL'].includes(code) ? 'unchecked'
+        : ['ECONNREFUSED', 'EHOSTUNREACH', 'ECONNRESET', 'EPIPE'].includes(code) ? 'closed'
+        : code === 'EPROTO' || /^ERR_SSL_/.test(code) ? 'not_https'
+        : /^(?:CERT_|ERR_TLS_|DEPTH_ZERO_|SELF_SIGNED_|UNABLE_TO_|HOSTNAME_MISMATCH)/.test(code) ? 'certificate' : 'no_answer' });
+    };
+    try {
+      const target = new URL(accessProbePath(nonce), origin), secure = target.protocol === 'https:';
+      request = (secure ? https : http)({ protocol: target.protocol, hostname: target.hostname.replace(/^\[|\]$/g, ''), port: Number(target.port || (secure ? 443 : 80)), path: target.pathname, method: 'GET', timeout: timeoutMs - 500,
+        headers: { Host: target.host, Accept: 'application/json', 'User-Agent': 'Multitap-Access-Verification/1' }, ...(secure ? { rejectUnauthorized: true } : {}) }, response => {
+        let size = 0; const chunks = [];
+        response.on('data', chunk => { size += chunk.length; if (size > 4096) { response.destroy(); finish({ answer: null }); } else chunks.push(chunk); });
+        response.once('error', () => finish({ answer: null })); response.once('aborted', () => finish({ answer: null }));
+        response.once('end', () => { let answer = null; if (response.statusCode === 200) { try { answer = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { answer = null; } } finish({ answer }); });
+      });
+      timer = setTimeout(() => { request.destroy(); finish({ error: 'no_answer' }); }, timeoutMs); timer.unref?.();
+      request.once('error', failed); request.once('timeout', () => { request.destroy(); finish({ error: 'no_answer' }); }); request.end();
+    } catch { finish({ error: 'no_answer' }); }
+  });
+}
+
 // ---- the files -------------------------------------------------------------
 async function writeText(path, text) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -167,9 +249,10 @@ async function writeText(path, text) {
 async function remove(path) { try { await unlink(path); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
 // The revision the console and the journal compare: the policy's own hash,
 // and another value while the public IP is followed.
-export function selfPolicyRevision(config, publicIp = notFollowing) {
+export function selfPolicyRevision(config, publicIp = notFollowing, udpMedia = false) {
   const base = config ? serverAccessHash(config) : serverAccessUnconfiguredRevision;
-  return publicIp.follow ? createHash('sha256').update(base + ':public-ip:' + (publicIp.origin ?? '')).digest('hex') : base;
+  const followed = publicIp.follow ? createHash('sha256').update(base + ':public-ip:' + (publicIp.origin ?? '')).digest('hex') : base;
+  return udpMedia ? createHash('sha256').update(followed + ':udp-media').digest('hex') : followed;
 }
 // The .env address lines as one value, null when there are none. A policy
 // keeps the value an administrator's save was made beside: lines that are
@@ -179,21 +262,21 @@ export function selfEnvSeed(env) {
   const lines = [env.MULTITAP_PUBLIC_ORIGIN ?? '', env.MULTITAP_HTTP_ORIGIN ?? ''];
   return lines.some(Boolean) ? createHash('sha256').update(JSON.stringify(lines)).digest('hex') : null;
 }
-export function selfPolicyText(config, publicIp = notFollowing, now = Date.now, envSeed = null) {
+export function selfPolicyText(config, publicIp = notFollowing, now = Date.now, envSeed = null, udpMedia = false) {
   const normalized = normalizeServerAccess(config);
   return JSON.stringify({ schema: 1, protocol: serverAccessProtocol, revision: serverAccessHash(normalized), config: normalized, updatedAt: new Date(now()).toISOString(),
-    ...(publicIp.follow ? { publicIp: { follow: true, origin: followedOrigin(normalized, publicIp) } } : {}), ...(envSeed ? { envSeed } : {}) });
+    ...(publicIp.follow ? { publicIp: { follow: true, origin: followedOrigin(normalized, publicIp) } } : {}), ...(udpMedia ? { udpMedia: true } : {}), ...(envSeed ? { envSeed } : {}) });
 }
 // A policy file as this container runs it.
 export function decodeSelfPolicy(text, fixed) {
-  let state, follow, seed;
+  let state, follow, seed, udp;
   try {
-    const { publicIp, envSeed = null, ...rest } = JSON.parse(text);
-    if (envSeed !== null && !hex.test(envSeed)) throw Error();
-    state = decodeServerAccessState(rest); follow = publicIp; seed = envSeed;
+    const { publicIp, envSeed = null, udpMedia = false, ...rest } = JSON.parse(text);
+    if ((envSeed !== null && !hex.test(envSeed)) || typeof udpMedia !== 'boolean') throw Error();
+    state = decodeServerAccessState(rest); follow = publicIp; seed = envSeed; udp = udpMedia;
   } catch { fail('state_invalid'); }
   const config = conformSelfAccess(state.config, fixed);
-  return { config, updatedAt: state.updatedAt, publicIp: decodeFollow(follow, config), envSeed: seed };
+  return { config, updatedAt: state.updatedAt, publicIp: decodeFollow(follow, config), envSeed: seed, udpMedia: udp };
 }
 // `text` is a policy file's exact content; null means no saved policy.
 export async function putSelfPolicy(paths, text) { if (text === null) await remove(paths.policy); else await writeText(paths.policy, text); }
@@ -239,10 +322,11 @@ export async function revertUnloadableSelfPolicy(paths, read) {
 }
 
 // A change as this container would run it: the policy, whether the public IP
-// is followed, and the revision of both. `current` is what runs now; its
+// is followed, whether media may go over UDP (as it is now, unless said), and
+// the revision of them all. `current` is what runs now; its
 // registered public address, when the new list still has it, stays the last
 // extra HTTP address.
-export function selfAccessCandidate(value, follow, { fixed, current }) {
+export function selfAccessCandidate(value, follow, { fixed, current }, udpMedia = current.udpMedia === true) {
   if (fixed.httpsMode === 'direct' && value?.http?.enabled === true) fail('direct_tls_http_conflict');
   let config = conformSelfAccess(value, fixed), origin = null;
   selfAccessRules(config, fixed, current.config);
@@ -256,17 +340,25 @@ export function selfAccessCandidate(value, follow, { fixed, current }) {
     }
   }
   const publicIp = follow ? { follow: true, origin } : notFollowing;
-  return { config, publicIp, revision: selfPolicyRevision(config, publicIp) };
+  return { config, publicIp, udpMedia, revision: selfPolicyRevision(config, publicIp, udpMedia) };
 }
 
 // The policy as the console edits it: the HTTP section says whether the
-// public IP is followed.
-const shown = (config, publicIp) => config && publicIp?.follow ? { ...config, http: { ...config.http, followPublicIp: true } } : config ?? null;
+// public IP is followed, and `udpMedia` whether media may go over UDP. Each is
+// there only while it is on.
+const shown = (config, publicIp, udpMedia = false) => !config ? null
+  : { ...(publicIp?.follow ? { ...config, http: { ...config.http, followPublicIp: true } } : config), ...(udpMedia ? { udpMedia: true } : {}) };
+// `udpMedia` is undefined where the console did not say: like the follow flag, a switch that is not there is off.
 function splitFollow(value) {
-  if (!record(value) || !record(value.http) || !Object.hasOwn(value.http, 'followPublicIp')) return { config: value, follow: false };
-  const { followPublicIp, ...http } = value.http;
-  if (typeof followPublicIp !== 'boolean') fail('invalid');
-  return { config: { ...value, http }, follow: followPublicIp };
+  if (!record(value)) return { config: value, follow: false };
+  let { udpMedia, ...config } = value, follow = false;
+  if (udpMedia !== undefined && typeof udpMedia !== 'boolean') fail('invalid');
+  if (record(config.http) && Object.hasOwn(config.http, 'followPublicIp')) {
+    const { followPublicIp, ...http } = config.http;
+    if (typeof followPublicIp !== 'boolean') fail('invalid');
+    config = { ...config, http }; follow = followPublicIp;
+  }
+  return { config, follow, udpMedia };
 }
 
 // The same four calls the updater's control socket answers
@@ -276,35 +368,52 @@ export class SelfAccess {
   // `configuration` is config.mjs's result for a self-managed install.
   // What a process runs, from what config.mjs loaded.
   static currentOf(configuration) {
-    const { saved, revision, publicIp } = configuration.selfAccess;
-    return { config: configuration.accessConfig, healthRevision: configuration.accessRevision, revision, saved, publicIp, installationId: configuration.accessInstallationId };
+    const { saved, revision, publicIp, udpMedia } = configuration.selfAccess;
+    return { config: configuration.accessConfig, healthRevision: configuration.accessRevision, revision, saved, publicIp, udpMedia: udpMedia === true, installationId: configuration.accessInstallationId };
   }
   // `load` loads the configuration again (reconcile).
   static from(configuration, options) {
-    const { paths, fixed, read, envAddressesIgnored, envSeed, savedEnvSeed, unreadable } = configuration.selfAccess;
-    return new SelfAccess({ paths, fixed, read, envAddressesIgnored, envSeed, savedEnvSeed, unreadable, current: SelfAccess.currentOf(configuration), ...options });
+    const { paths, fixed, read, envAddressesIgnored, envSeed, savedEnvSeed, unreadable, udpSwitch } = configuration.selfAccess;
+    return new SelfAccess({ paths, fixed, read, envAddressesIgnored, envSeed, savedEnvSeed, unreadable, udpSwitch, current: SelfAccess.currentOf(configuration), ...options });
   }
-  constructor({ paths, fixed, read, current, exit, load = null, envAddressesIgnored = false, envSeed = null, savedEnvSeed = null, unreadable = null, gateway = defaultGateway, publicRequest = publicAccessRequest, lookup = lookupPublicIp, log = line => console.log(JSON.stringify(line)), now = Date.now,
+  // `udpSwitch`: whether this container runs the UDP relay at all, and the value .env fixes for media over it (config.mjs).
+  constructor({ paths, fixed, read, current, exit, load = null, envAddressesIgnored = false, envSeed = null, savedEnvSeed = null, unreadable = null, udpSwitch = { relay: false, env: null }, gateway = defaultGateway, probeRequest = probeAddress, publicRequest = publicAccessRequest, lookup = lookupPublicIp, log = line => console.log(JSON.stringify(line)), now = Date.now,
     sleep = ms => new Promise(resolve => { const timer = setTimeout(resolve, ms); timer.unref?.(); }),
-    testTtlMs = 300000, maxWaitMs = 300000, endWaitMs = 15000, pollMs = 1000, verifyAttempts = 12, verifyDelayMs = 1000, maxStarts = 3, followIntervalMs = 600000, followFirstDelayMs = 30000, followRetryMs = 3000, reconcileIntervalMs = 15000 }) {
-    Object.assign(this, { paths, fixed, read, current, load, envAddressesIgnored, envSeed, savedEnvSeed, unreadable, publicRequest, lookup, log, now, sleep, verifyAttempts, verifyDelayMs, maxStarts, followIntervalMs, followFirstDelayMs, followRetryMs, reconcileIntervalMs });
+    testTtlMs = 300000, maxWaitMs = 300000, endWaitMs = 15000, pollMs = 1000, confirmWindowMs = outsideConfirmationMs, verifyAttempts = 12, verifyDelayMs = 1000, maxStarts = 3, followIntervalMs = 600000, followFirstDelayMs = 30000, followRetryMs = 3000, reconcileIntervalMs = 15000 }) {
+    Object.assign(this, { paths, fixed, read, current, load, envAddressesIgnored, envSeed, savedEnvSeed, unreadable, probeRequest, publicRequest, lookup, log, now, sleep, verifyAttempts, verifyDelayMs, maxStarts, followIntervalMs, followFirstDelayMs, followRetryMs, reconcileIntervalMs });
     // Once this process has asked to be started again, its rounds are over.
     this.ending = false; this.exit = () => { this.ending = true; exit(); };
     this.testTtlMs = Math.min(testTtlMs, 300000); this.maxWaitMs = Math.min(maxWaitMs, 300000); this.endWaitMs = Math.min(endWaitMs, 60000); this.pollMs = Math.max(1, pollMs);
+    this.confirmWindowMs = Math.min(confirmWindowMs, outsideConfirmationMs); this.records = []; this.written = Promise.resolve(); this.udpSwitch = udpSwitch;
     this.tests = new Map(); this.busy = false; this.testing = false; this.task = Promise.resolve(); this.state = { state: 'idle' };
     this.hooks = null; this.pendingVerify = false; this.cancelRequested = false; this.committed = false; this.wake = null;
-    this.round = null; this.followError = null; this.timers = []; this.followDue = false; this.retry = null;
+    this.round = null; this.followError = null; this.timers = []; this.followDue = false; this.retry = null; this.probes = new Map();
     // Offered to the console only on the network compose makes (it names the published port).
     this.gateway = fixed.published ? gateway() : null;
   }
-  // The server's own activity report, its "end the connections" and its
-  // admission fence (http.mjs).
-  attach(hooks) { this.hooks = hooks; }
+  // The server's own activity report, its "end the connections", its admission
+  // fence and its activity log (http.mjs).
+  attach(hooks) { this.hooks = hooks; for (const row of this.records.splice(0)) this.record(...row); }
+  // The saved switch reaches the running relay, unless .env decides.
+  applyUdpMedia() { if (this.udpSwitch.env === null) { try { this.hooks?.udpMedia?.(this.current.udpMedia === true); } catch { /* The next start takes it from the policy. */ } } }
+  // One row of the activity log. What happened before the server could write
+  // (the result a start found in the journal) is kept until it can.
+  record(event, actor, detail) {
+    if (!this.hooks) { if (this.records.length < 16) this.records.push([event, actor, detail]); return; }
+    try { this.hooks.record?.(event, actor ?? 'server', detail); } catch { /* The log cannot change what was done. */ }
+  }
   close() { for (const timer of [...this.timers, this.retry]) clearTimeout(timer); this.timers = []; this.retry = null; }
   // Set once a restarted process still has to reach its new addresses:
   // admission stays closed for this operation until the result is known.
   get startupOperationId() { return this.pendingVerify ? this.state.operationId : null; }
-  async set(values) { this.state = { ...this.state, ...values }; await writeText(this.paths.journal, JSON.stringify(this.state)); }
+  // One write of the journal at a time, in the order the state changed: a
+  // proof that arrives while its window is being closed must not leave an
+  // earlier state on the disk.
+  set(values) {
+    this.state = { ...this.state, ...values };
+    const text = JSON.stringify(this.state), write = () => writeText(this.paths.journal, text);
+    return this.written = this.written.then(write, write);
+  }
   finish(values) { return this.set({ idleReasons: [], blockers: [], waitUntil: null, ...values, previous: null, previousConfig: null, completedAt: new Date(this.now()).toISOString() }); }
 
   // What the journal says of the start that is running now.
@@ -316,7 +425,8 @@ export class SelfAccess {
     this.state = journal;
     const applied = this.current.revision === journal.revision, previous = this.current.revision === journal.previousRevision;
     try {
-      if (journal.state === 'waiting_idle') {
+      // Nothing had been written yet, also while a save waited for its proof from outside.
+      if (journal.state === 'waiting_idle' || journal.state === 'awaiting_confirmation') {
         if (previous) await this.finish({ state: 'failed', errorCode: 'server_access_interrupted', unchangedVerified: true, rollbackVerified: false });
         else this.state = { state: 'idle' };
       } else if (journal.state === 'applying' || journal.state === 'health_check') {
@@ -327,7 +437,10 @@ export class SelfAccess {
         } else if (previous) await this.finish({ state: 'failed', errorCode: 'server_access_interrupted', unchangedVerified: true, rollbackVerified: false });
         else await this.set({ state: 'recovery_required', errorCode: 'server_access_recovery_required' });
       } else if (journal.state === 'rolling_back') {
-        if (previous) await this.finish({ state: 'rolled_back', rollbackVerified: true, unchangedVerified: false, errorCode: journal.errorCode ?? 'server_access_health_failed' });
+        if (previous) {
+          await this.finish({ state: 'rolled_back', rollbackVerified: true, unchangedVerified: false, errorCode: journal.errorCode ?? 'server_access_health_failed' });
+          this.record('server_access_rolled_back', 'server', journal.operationId + ':' + (journal.failedOrigin ?? ''));
+        }
         else if (applied) await this.rollBack(journal.errorCode ?? 'server_access_health_failed');
         else await this.set({ state: 'recovery_required', errorCode: 'server_access_recovery_required' });
       // A result whose policy is no longer the one in use says nothing now.
@@ -335,27 +448,30 @@ export class SelfAccess {
     } catch { this.state = { ...this.state, state: 'recovery_required', errorCode: 'server_access_recovery_required' }; this.pendingVerify = false; this.busy = false; }
   }
   // Puts the previous policy back and asks for the restart that loads it.
-  async rollBack(errorCode) {
+  async rollBack(errorCode, failedOrigin = this.state.failedOrigin ?? null) {
     this.pendingVerify = false;
-    await this.set({ state: 'rolling_back', errorCode });
+    await this.set({ state: 'rolling_back', errorCode, failedOrigin });
     await putSelfPolicy(this.paths, this.state.previous ?? null);
     this.exit();
   }
   // After the listeners are up: every main address must answer as this
   // installation with this policy (the check the updater makes after its
   // restart). Extra addresses are not asked: a router may not loop them back.
+  // Nor is a main address the administrator proved from outside before the
+  // save: this server cannot reach it, and the same listener answers it now.
   async resume() {
     if (!this.pendingVerify) return;
-    const { config, healthRevision: revision, installationId } = this.current;
+    const { config, healthRevision: revision, installationId } = this.current, proven = this.state.outside?.confirmed ?? [];
     try {
-      let passed = false;
+      // `unreached`: the address that did not answer as this installation, for the page to name.
+      let passed = false, unreached = null;
       for (let attempt = 0; attempt < this.verifyAttempts && !passed; attempt++) {
         if (attempt) await this.sleep(this.verifyDelayMs);
         passed = true;
-        for (const origin of probedServerOrigins(config)) if (!validAccessHealth(await this.publicRequest(config, origin), { config, revision, installationId, origin })) { passed = false; break; }
+        for (const origin of probedServerOrigins(config).filter(item => !proven.includes(item))) if (!validAccessHealth(await this.publicRequest(config, origin), { config, revision, installationId, origin })) { passed = false; unreached = origin; break; }
       }
       if (passed) { this.pendingVerify = false; await this.finish({ state: 'succeeded', errorCode: null, rollbackVerified: false, unchangedVerified: false }); }
-      else await this.rollBack('server_access_health_failed');
+      else await this.rollBack('server_access_health_failed', unreached);
     } catch { this.pendingVerify = false; this.state = { ...this.state, state: 'recovery_required', errorCode: 'server_access_recovery_required' }; }
     finally { this.busy = false; }
   }
@@ -363,13 +479,16 @@ export class SelfAccess {
   dockerPorts() {
     return this.fixed.published ? ['https', 'http'].map(scheme => ({ hostPort: this.fixed.published.port, containerPort: this.fixed.listenPort, protocol: 'tcp', scheme })) : [];
   }
-  status() {
+  // `context.managementOrigin`: the address the asking console is open at.
+  status(context = null) {
     const state = this.state, unverified = state.state === 'recovery_required', { config, publicIp } = this.current;
     // While a new policy is being checked the previous one is still "applied".
     const checking = ['health_check', 'rolling_back'].includes(state.state);
     const result = { protocol: serverAccessProtocol, managed: true, applySupported: !unverified, deploymentKind: 'docker', selfManaged: true,
-      revision: checking ? state.previousRevision : this.current.revision, config: checking ? shown(state.previousConfig, state.previousPublicIp) : shown(config, publicIp),
-      pendingConfig: selfAccessActiveStates.has(state.state) || unverified ? shown(state.config, state.publicIp) : null,
+      revision: checking ? state.previousRevision : this.current.revision, config: checking ? shown(state.previousConfig, state.previousPublicIp, state.previousUdpMedia === true) : shown(config, publicIp, this.current.udpMedia),
+      pendingConfig: selfAccessActiveStates.has(state.state) || unverified ? shown(state.config, state.publicIp, state.udpMedia === true) : null,
+      // Media over UDP: what is saved, whether this container runs the relay at all, and the value .env fixes (null: the saved one decides).
+      udpSwitch: { saved: this.current.udpMedia === true, relay: this.udpSwitch.relay === true, env: this.udpSwitch.env ?? null },
       state: state.state === 'rolling_back' ? 'health_check' : state.state, legacy: !this.current.saved,
       scope: unverified ? 'unverified' : state.state === 'succeeded' ? 'applied' : 'preflight', testing: this.testing,
       dockerPorts: this.dockerPorts(), plannedDockerPorts: [], rollbackVerified: state.rollbackVerified === true, unchangedVerified: state.unchangedVerified === true,
@@ -382,7 +501,15 @@ export class SelfAccess {
       // beyond loopback). `origin`: the address registered from the lookup.
       publicIp: { offered: this.fixed.httpsMode === 'proxy' && this.fixed.published !== null && !loopbackPublished(this.fixed), follow: publicIp.follow, origin: followedOrigin(config, publicIp), ...(this.followError ? { errorCode: this.followError } : {}) } };
     if (unverified) { result.currentObserved = true; result.currentRevision = this.current.revision; }
-    for (const key of ['operationId', 'errorCode', 'checks', 'idleReasons', 'blockers', 'waitUntil', 'completedAt']) if (state[key] !== undefined && state[key] !== null) result[key] = state[key];
+    for (const key of ['operationId', 'errorCode', 'failedOrigin', 'checks', 'idleReasons', 'blockers', 'waitUntil', 'completedAt']) if (state[key] !== undefined && state[key] !== null) result[key] = state[key];
+    // A save that waits for its proof from outside: which addresses, how long
+    // still, and the code to bring there. The code is given where the save can
+    // be watched, never at an address still under proof: it has to be brought.
+    if (state.state === 'awaiting_confirmation' && state.outside) {
+      const { origins, confirmed, code, until } = state.outside, here = context?.managementOrigin ?? null;
+      result.outside = { origins: origins.map(origin => ({ origin, confirmed: confirmed.includes(origin) })), remainingMs: Math.max(0, Date.parse(until) - this.now()), windowMs: this.confirmWindowMs,
+        ...(typeof here === 'string' && (!origins.includes(here) || confirmed.includes(here)) ? { code } : {}) };
+    }
     return result;
   }
   context(value, { save = false } = {}) {
@@ -394,9 +521,10 @@ export class SelfAccess {
     return { managementOrigin, ...(save ? { fence: value.fence } : {}) };
   }
   // What the console sent, as this container would run it.
+  // The switch for media over UDP is the console's to change only where it decides anything.
   candidate(value) {
-    const { config, follow } = splitFollow(value);
-    return selfAccessCandidate(config, follow, this);
+    const { config, follow, udpMedia } = splitFollow(value), open = this.udpSwitch.relay === true && this.udpSwitch.env === null;
+    return selfAccessCandidate(config, follow, this, open ? udpMedia === true : this.current.udpMedia === true);
   }
   enter() {
     if (this.busy) fail('busy');
@@ -412,24 +540,84 @@ export class SelfAccess {
     try {
       const trusted = this.context(context);
       if (input.baseRevision !== this.current.revision) fail('revision_changed');
-      const { revision: configHash } = this.candidate(input.config), expires = this.now() + this.testTtlMs;
-      // The addresses themselves are reached only after the restart.
-      const checks = [{ name: 'configuration', status: 'passed' }, { name: 'managed_installation', status: 'passed' }, { name: 'external_origin_tls_and_identity', status: 'pending', code: 'server_access_pending_until_apply' }];
+      const { config, revision: configHash } = this.candidate(input.config), expires = this.now() + this.testTtlMs;
+      // The addresses in use stay as they are (only a switch changes): nothing is asked of them, nothing restarts.
+      const addressesUnchanged = !!this.current.config && serverAccessHash(config) === this.current.healthRevision;
+      const checks = [{ name: 'configuration', status: 'passed' }, { name: 'managed_installation', status: 'passed' }, ...(addressesUnchanged ? [] : await this.reach(config))];
+      // A main address that does not lead here: no test to save with (the save
+      // would end every connection and then go back), unless every such address
+      // only looks the way one that works from outside can. That test can be
+      // saved with the administrator's own proof, and in no other way. An extra
+      // address this server did not reach is 'unreached', not failed (reach()).
+      const failed = checks.filter(check => check.status === 'failed'), outside = failed.every(check => outsideReasons.has(check.code)) ? failed.map(check => check.origin) : null;
+      if (failed.length && !outside) return { baseRevision: this.current.revision, configHash, scope: 'preflight', checks, plannedDockerPorts: this.dockerPorts(), requiresRestart: true };
       for (const [id, test] of this.tests) if (test.expires <= this.now()) this.tests.delete(id);
       while (this.tests.size >= 8) this.tests.delete(this.tests.keys().next().value);
       const testId = createHash('sha256').update(JSON.stringify({ configHash, baseRevision: this.current.revision, expires, nonce: randomBytes(32).toString('hex') })).digest('hex');
-      this.tests.set(testId, { configHash, baseRevision: this.current.revision, expires, managementOrigin: trusted.managementOrigin, checks });
-      return { testId, baseRevision: this.current.revision, configHash, expiresAt: new Date(expires).toISOString(), scope: 'preflight', checks, plannedDockerPorts: this.dockerPorts(), requiresRestart: true };
+      this.tests.set(testId, { configHash, baseRevision: this.current.revision, expires, managementOrigin: trusted.managementOrigin, checks, outside: outside ?? [] });
+      return { testId, baseRevision: this.current.revision, configHash, expiresAt: new Date(expires).toISOString(), scope: 'preflight', checks, plannedDockerPorts: this.dockerPorts(), requiresRestart: true,
+        ...(addressesUnchanged ? { addressesUnchanged: true } : {}), ...(outside?.length ? { confirmation: 'outside', confirmationWindowMs: this.confirmWindowMs } : {}) };
     } catch (error) { throw httpError(error); }
     finally { this.testing = false; this.busy = false; }
   }
+  // One check per address of `config`, the main ones first: does it lead to
+  // this server, and would the request be let in under that policy? `peer` is
+  // where the request arrived from (the reverse proxy, when one is in between).
+  // A failed check carries the reason as its code: one of probeAddress's, or
+  //   other_server     something else answers there
+  //   proxy_untrusted  it arrived here from `peer`, which is not a trusted proxy
+  //   proxy_headers    a trusted proxy that did not pass the scheme and the name on
+  //   not_admitted     it arrived here but is not this address
+  // An extra address (`extra: true`) is typically a router forward that this
+  // server may not reach from inside (no NAT loopback): one that only looks
+  // like that (outsideReasons) is 'unreached', said and saved without a proof,
+  // as the check after the restart does not ask extra addresses either. A
+  // fault on it (a certificate, another server, an untrusted proxy, not HTTPS)
+  // fails like one on a main address.
+  async reach(config) {
+    const main = probedServerOrigins(config), extras = allowedServerOrigins(config).filter(origin => !main.includes(origin));
+    return Promise.all([...main.map(origin => [origin, false]), ...extras.map(origin => [origin, true])].map(async ([origin, extra]) => {
+      const found = await this.probe(config, origin);
+      return { name: 'address', origin, ...(extra ? { extra: true } : {}), ...found, ...(extra && found.status === 'failed' && outsideReasons.has(found.code) ? { status: 'unreached' } : {}) };
+    }));
+  }
+  async probe(config, origin) {
+    const nonce = randomBytes(32).toString('hex');
+    this.probes.set(nonce, { config, origin });
+    try {
+      const result = await this.probeRequest(origin, nonce);
+      if (result?.error) return { status: 'failed', code: 'server_access_address_' + (['name_unknown', 'unchecked', 'closed', 'not_https', 'certificate'].includes(result.error) ? result.error : 'no_answer') };
+      const answer = result?.answer;
+      if (!record(answer) || answer.protocol !== accessProbeProtocol || answer.nonce !== nonce) return { status: 'failed', code: 'server_access_address_other_server' };
+      const peer = typeof answer.peer === 'string' && isIP(answer.peer) ? { peer: answer.peer } : {};
+      return answer.admitted === true ? { status: 'passed', code: 'server_access_address_reached' }
+        : { ...peer, status: 'failed', code: 'server_access_address_' + (['proxy_untrusted', 'proxy_headers'].includes(answer.reason) ? answer.reason : 'not_admitted') };
+    } catch { return { status: 'failed', code: 'server_access_address_no_answer' }; }
+    finally { this.probes.delete(nonce); }
+  }
+  // http.mjs, for GET /api/v1/access-probe/<value> on any address: the answer
+  // to this server's own question, or null for anything else. It says whether
+  // this very request would be let in at the asked address by the policy under
+  // test (the scheme, a trusted proxy's forwarded headers, the listener).
+  answerProbe(nonce, req) {
+    const probe = this.probes.get(nonce);
+    if (!probe) return null;
+    let admitted = false;
+    try { const access = resolveRequestAccess(req, probe.config); admitted = access.origin === probe.origin && access.bootstrapOnly !== true; } catch { admitted = false; }
+    const peer = String(req.socket?.remoteAddress ?? '').replace(/^::ffff:(?=\d{1,3}(?:\.\d{1,3}){3}$)/i, '');
+    // An HTTPS address behind a reverse proxy is let in only from a trusted
+    // proxy that says the scheme and the name it was asked for.
+    const viaProxy = !admitted && probe.origin.startsWith('https://') && probe.config.https.mode === 'proxy' && req.socket?.encrypted !== true;
+    const reason = !viaProxy ? null : !probe.config.trustedProxies.includes(peer) ? 'proxy_untrusted' : 'proxy_headers';
+    return { protocol: accessProbeProtocol, nonce, admitted, ...(reason ? { reason } : {}), ...(isIP(peer) ? { peer } : {}) };
+  }
   // The journal of a change, written before anything else happens.
-  begin({ operationId, config, publicIp, revision, checks = [], kind = 'save' }) {
+  begin({ operationId, config, publicIp, udpMedia = this.current.udpMedia === true, revision, checks = [], kind = 'save', state = 'waiting_idle', outside = null }) {
     this.cancelRequested = false; this.committed = false;
     const previous = this.read(this.paths.policy, 32768);
     this.state = {};
-    return this.set({ schema: 1, operationId, kind, state: 'waiting_idle', revision, config, publicIp, previousRevision: this.current.revision, previousConfig: this.current.config, previousPublicIp: this.current.publicIp, previous,
-      checks, errorCode: null, rollbackVerified: false, unchangedVerified: false, idleReasons: [], blockers: [], waitUntil: null, starts: 0 });
+    return this.set({ schema: 1, operationId, kind, state, revision, config, publicIp, udpMedia, previousRevision: this.current.revision, previousConfig: this.current.config, previousPublicIp: this.current.publicIp, previousUdpMedia: this.current.udpMedia === true, previous,
+      checks, errorCode: null, rollbackVerified: false, unchangedVerified: false, idleReasons: [], blockers: [], waitUntil: null, starts: 0, ...(outside ? { outside } : {}) });
   }
   async save(input, context) {
     let next, trusted;
@@ -444,6 +632,8 @@ export class SelfAccess {
       next = this.candidate(input.config);
       const test = this.tests.get(input.testId);
       if (!test || test.expires <= this.now() || test.baseRevision !== this.current.revision || test.configHash !== next.revision || test.managementOrigin !== trusted.managementOrigin) fail('test_required');
+      // A test with an address this server did not reach is saved only with the proof from outside (saveOutside).
+      if (test.outside.length) fail('test_required');
       if (next.revision === this.current.revision) fail('change_required');
       if (trusted.fence.operationId === this.state.operationId) fail('operation_reused');
       this.tests.clear();
@@ -459,12 +649,100 @@ export class SelfAccess {
     this.task = this.perform(next).finally(() => { this.busy = false; });
     return { accepted: true, operationId: trusted.fence.operationId, state: 'waiting_idle' };
   }
-  // Withdraws a save that still waits for the server's own work: nothing has
-  // been ended or written yet.
+  // A save with the administrator's own proof of the addresses this server
+  // could not reach (see the top of this file). Accepted here, it only opens
+  // the window; `admitted(config)` is the address this very request would be
+  // let in at under `config` (http.mjs), and `actor` who asked.
+  async saveOutside(input, context, { actor = null, admitted = null } = {}) {
+    let next, operationId, awaited;
+    try {
+      if (!exact(input, ['config', 'testId', 'baseRevision', 'confirm', 'outside']) || input.confirm !== true || input.outside !== true || !hex.test(input.testId ?? '')) fail('confirmation_required');
+      if (!this.hooks?.hold) fail('unavailable');
+      this.enter();
+    } catch (error) { throw httpError(error); }
+    try {
+      const trusted = this.context(context);
+      if (input.baseRevision !== this.current.revision) fail('revision_changed');
+      next = this.candidate(input.config);
+      const test = this.tests.get(input.testId);
+      if (!test || !test.outside.length || test.expires <= this.now() || test.baseRevision !== this.current.revision || test.configHash !== next.revision || test.managementOrigin !== trusted.managementOrigin) fail('test_required');
+      if (next.revision === this.current.revision) fail('change_required');
+      this.tests.clear();
+      operationId = randomUUID(); awaited = test.outside;
+      // The request that saves it is the proof for the address it came in on.
+      const here = admittedOrigin(admitted, next.config), confirmed = awaited.filter(origin => origin === here && origin === trusted.managementOrigin);
+      await this.begin({ operationId, ...next, checks: test.checks, state: 'awaiting_confirmation',
+        outside: { origins: awaited, confirmed, code: String(randomInt(0, 1000000)).padStart(6, '0'), until: new Date(this.now() + this.confirmWindowMs).toISOString(), actor } });
+    } catch (error) { this.busy = false; throw httpError(error); }
+    this.record('server_access_outside_started', actor, operationId + ':' + awaited.join(' '));
+    this.task = this.performOutside(next).finally(() => { this.busy = false; });
+    return { accepted: true, operationId, state: 'awaiting_confirmation' };
+  }
+  // True while that save still waits for its proof (AccessRuntime: it holds no fence yet, and can be withdrawn).
+  awaiting(operationId) { return this.busy && this.state.state === 'awaiting_confirmation' && this.state.operationId === operationId; }
+  // The proof: a signed-in administrator's request that this server lets in at
+  // an address under proof, by the policy being saved, with the code shown
+  // where the save was made. The same request at any other address, or
+  // without that code, proves nothing about this one.
+  async confirmOutside(input, context, { actor = null, admitted = null } = {}) {
+    try {
+      if (!exact(input, ['operationId', 'code']) || !uuid.test(input.operationId ?? '') || typeof input.code !== 'string' || !/^\d{6}$/.test(input.code)) fail('command_invalid');
+      const state = this.state, outside = state.outside;
+      if (state.state !== 'awaiting_confirmation' || state.operationId !== input.operationId || !outside || this.now() >= Date.parse(outside.until)) fail('confirmation_unavailable');
+      const origin = admittedOrigin(admitted, state.config);
+      if (!origin || origin !== context?.managementOrigin || !outside.origins.includes(origin)) fail('confirmation_origin');
+      if (!timingSafeEqual(Buffer.from(input.code), Buffer.from(outside.code))) fail('confirmation_code');
+      if (!outside.confirmed.includes(origin)) {
+        await this.set({ outside: { ...outside, confirmed: [...outside.confirmed, origin] } });
+        this.record('server_access_outside_confirmed', actor, state.operationId + ':' + origin);
+      }
+      this.wake?.();
+      return { accepted: true, operationId: state.operationId, origin, remaining: this.state.outside.origins.filter(item => !this.state.outside.confirmed.includes(item)) };
+    } catch (error) { throw httpError(error); }
+  }
+  // http.mjs, for a request the policy in use does not let in: while a save
+  // waits for its proof, and until that save has ended, an address under proof
+  // is let in as the policy being saved would let it in. http.mjs serves such
+  // a request the console and nothing else.
+  provisionalAccess(req) {
+    const state = this.state;
+    if (!state.outside || !['awaiting_confirmation', 'waiting_idle', 'applying'].includes(state.state)) return null;
+    if (state.state === 'awaiting_confirmation' && this.now() >= Date.parse(state.outside.until)) return null;
+    try {
+      const access = resolveRequestAccess(req, state.config);
+      return state.outside.origins.includes(access.origin) && access.bootstrapOnly !== true ? { ...access, provisional: true } : null;
+    } catch { return null; }
+  }
+  // The window: until every address is proven, the save is withdrawn or the
+  // time is up. Nothing is ended, written or fenced meanwhile.
+  async performOutside(next) {
+    const { operationId, outside } = this.state, until = Date.parse(outside.until);
+    try {
+      while (this.state.outside.confirmed.length < outside.origins.length) {
+        if (this.cancelRequested) fail('cancelled');
+        if (this.now() >= until) fail('confirmation_timeout');
+        await this.pause(Math.max(1, Math.min(this.pollMs, until - this.now())));
+      }
+      // Proven: from here it is the save any other is, behind the same fence.
+      try { this.hooks.hold({ operationId, actor: outside.actor, event: 'server_access_connections_ended', observe: () => this.state.operationId !== operationId || ['succeeded', 'failed', 'rolled_back'].includes(this.state.state) }); }
+      catch { fail('busy'); }
+      await this.set({ state: 'waiting_idle', outside: { ...this.state.outside, code: null } });
+    } catch (error) {
+      const errorCode = codeOf(error), unproven = this.state.outside.origins.filter(origin => !this.state.outside.confirmed.includes(origin));
+      try {
+        await this.finish({ state: 'failed', errorCode, unchangedVerified: true, rollbackVerified: false, outside: { ...this.state.outside, code: null }, ...(errorCode === 'server_access_confirmation_timeout' ? { failedOrigin: unproven[0] ?? null } : {}) });
+        if (errorCode === 'server_access_confirmation_timeout') this.record('server_access_outside_expired', outside.actor, operationId + ':' + unproven.join(' '));
+      } catch { this.state = { ...this.state, state: 'recovery_required', errorCode: 'server_access_recovery_required' }; }
+      return;
+    }
+    await this.perform(next);
+  }
+  // Withdraws a save that still waits, for its proof from outside or for the
+  // server's own work: nothing has been ended or written yet.
   async cancel(input) {
     try {
       if (!exact(input, ['operationId']) || !uuid.test(input.operationId ?? '')) fail('command_invalid');
-      if (!this.busy || this.state.state !== 'waiting_idle' || this.state.operationId !== input.operationId) fail('cancel_unavailable');
+      if (!this.busy || !['waiting_idle', 'awaiting_confirmation'].includes(this.state.state) || this.state.operationId !== input.operationId) fail('cancel_unavailable');
       if (this.committed) fail('cancel_too_late');
     } catch (error) { throw httpError(error); }
     this.cancelRequested = true; this.wake?.();
@@ -510,21 +788,22 @@ export class SelfAccess {
       await this.sleep(Math.min(250, this.pollMs));
     }
   }
-  async perform({ config, publicIp, revision }) {
+  async perform({ config, publicIp, udpMedia = this.current.udpMedia === true, revision }) {
     let written = false;
     try {
       // An administrator's save is made beside the .env lines of now; the
       // server's own change of the public address keeps what was remembered.
       const saving = this.state.kind !== 'public-ip', envSeed = saving ? this.envSeed : this.savedEnvSeed;
-      const text = selfPolicyText(config, publicIp, this.now, envSeed);
-      // Only whether the public IP is followed changes: the addresses in use
-      // stay, so nobody is disconnected and nothing restarts.
+      const text = selfPolicyText(config, publicIp, this.now, envSeed, udpMedia);
+      // Only a switch changes (the public IP followed or not, media over UDP or
+      // not): the addresses in use stay, so nobody is disconnected and nothing restarts.
       if (this.current.config && serverAccessHash(config) === this.current.healthRevision) {
         await ensureSelfIdentity(this.paths, this.read);
         written = true;
         await putSelfPolicy(this.paths, text);
         await this.finish({ state: 'succeeded', errorCode: null });
-        this.current = { ...this.current, publicIp, revision, saved: true };
+        this.current = { ...this.current, publicIp, udpMedia, revision, saved: true };
+        this.applyUdpMedia();
         if (saving) { this.savedEnvSeed = envSeed; this.envAddressesIgnored = false; }
         // Turned on by a save: the first round is due now. The save's own fence
         // is given back first (the runtime reads this result), or that round
@@ -598,6 +877,7 @@ export class SelfAccess {
       // Also "nothing to serve" on both sides: an unreadable policy that
       // `access-cli.mjs reset` removed is no longer the reason for it.
       this.current = next; this.savedEnvSeed = self.savedEnvSeed; this.envAddressesIgnored = self.envAddressesIgnored; this.unreadable = self.unreadable ?? null;
+      this.applyUdpMedia();
       return;
     }
     try {
@@ -638,8 +918,8 @@ export class SelfAccess {
       if (!others.length || config.primaryOrigin === origin) { this.followError = 'server_access_public_ip_conflict'; return; }
       if (others.length > maxExtraOrigins) { this.followError = 'server_access_http_addresses_full'; return; }
       this.followError = null;
-      const next = { config: selfAccessPolicy({ primaryOrigin: config.primaryOrigin, https: enabledOrigins(config.https), http: [...others, origin], trustedProxies: config.trustedProxies }, this.fixed), publicIp: { follow: true, origin } };
-      next.revision = selfPolicyRevision(next.config, next.publicIp);
+      const next = { config: selfAccessPolicy({ primaryOrigin: config.primaryOrigin, https: enabledOrigins(config.https), http: [...others, origin], trustedProxies: config.trustedProxies }, this.fixed), publicIp: { follow: true, origin }, udpMedia: this.current.udpMedia === true };
+      next.revision = selfPolicyRevision(next.config, next.publicIp, next.udpMedia);
       const operationId = randomUUID();
       // The fence a save holds; it opens here once this process knows the end,
       // and in the restarted process by its own status.

@@ -182,6 +182,15 @@ test('over http there is one sentence and 닫기: no failure title, no retry', (
   assert.doesNotMatch(f.view.element.textContent, /확인하지 못했어요|보안 연결에서만/);
   assert.equal(f.q('[data-action=refresh]'), null); assert.equal(f.q('[data-view-message]').hidden, true);
   assert.ok(f.q('[data-close-security-button]'));
+  // Not a dead end: where an HTTPS address is added, and where the account's own password is changed (a link each).
+  const https = f.q('[data-security-https-link]'), password = f.q('[data-security-password-link]');
+  assert.equal(https.parentNode.textContent, 'HTTPS 주소는 서버 접속 설정에서 추가해요.'); assert.equal(https.getAttribute('href'), '#/server-access');
+  assert.equal(password.parentNode.textContent, '비밀번호는 사용자 › SYNTHETIC-ADMIN의 ‘비밀번호 재설정’에서 바꿔요.'); assert.equal(password.getAttribute('href'), '#/users/SYNTHETIC-ADMIN');
+  // Following one closes the dialog and goes there.
+  const saved = globalThis.location; globalThis.location = new URL('https://console.fixture.example/admin/#/desktops');
+  try { f.click('[data-security-password-link]'); assert.equal(globalThis.location.hash, '#/users/SYNTHETIC-ADMIN'); assert.equal(f.closed, 1); assert.equal(f.view.element.childNodes.length, 0); }
+  finally { globalThis.location = saved; }
+  f.view.open();
   // Any other failed read keeps its title, its reason and 다시 확인.
   f.view.render({ stage: 'uncertain', message: '응답을 받지 못했어요.' });
   assert.equal(f.q('h2').textContent, '상태를 확인하지 못했어요'); assert.ok(f.q('[data-action=refresh]')); assert.equal(f.q('[data-view-message]').hidden, false);

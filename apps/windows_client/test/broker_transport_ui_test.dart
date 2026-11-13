@@ -9,6 +9,7 @@ import 'package:multitap_client/ui/server_settings_dialog.dart';
 import 'package:multitap_client/ui/host_settings_screen.dart';
 import 'package:multitap_client/android/android_app.dart';
 
+import 'helpers/pump_work.dart';
 import 'host_settings_test.dart' as host;
 
 BrokerProbeResult _verified(Uri origin) {
@@ -237,7 +238,9 @@ void main() {
       expect(tested['origin'], 'http://example.test:18400');
       expect(tested['httpConsentOrigin'], tested['origin']);
       await tester.tap(find.byKey(const Key('host-request-connection')));
-      await tester.pumpAndSettle();
+      // The request is now waiting for approval, and that wait shows a mark
+      // that keeps moving: the screen does not settle.
+      await pumpWork(tester);
       final requested = api.requests.singleWhere(
         (v) => v['action'] == 'requestConnection',
       );

@@ -10,6 +10,9 @@
 //   public-ip on [--address <ipv4>]   follow it; --address names the public IP
 //                                whose HTTP address is already registered
 //   public-ip off                stop following; the registered address stays
+//   udp-media status             whether picture and sound may go over UDP
+//   udp-media on | off           turn that on or off (MULTITAP_UDP_MEDIA in .env
+//                                wins where it is set: udpMediaEnv in the output)
 //   revert                       put back what the last set / public-ip replaced
 //   reset                        remove the saved policy: the .env lines apply again.
 //                                It removes what cannot be used, whoever wrote it,
@@ -19,7 +22,7 @@
 // with the server stopped).
 //
 // A running server looks at the volume every few seconds (self-access.mjs
-// reconcile): it takes over `public-ip on|off` and a first policy of the
+// reconcile): it takes over `public-ip on|off`, `udp-media on|off` and a first policy of the
 // addresses it already serves without disconnecting anybody, and for other
 // addresses it ends the connections and starts again by itself. Starting it
 // again right after a change only makes that sooner.
@@ -34,7 +37,7 @@ import { endpointOrigins, legacyServerAccess } from '../update/server-access-pol
 import { selfAccessCandidate, selfAccessPolicy, selfPolicyText, putSelfPolicy, ensureSelfIdentity, readSelfJournal, clearSelfJournal, selfAccessActiveStates,
   writeSelfBeforeCli, readSelfBeforeCli, clearSelfBeforeCli, removeSelfIdentity, publicIpOffered, followedOrigin, publicIpv4 } from './self-access.mjs';
 
-const usage = 'usage: access-cli.mjs show\n       access-cli.mjs set <url>... [--primary <url>] [--trusted-proxies <ip,ip|none>] [--follow on|off] [--force]\n       access-cli.mjs public-ip status | on [--address <ipv4>] [--force] | off [--force]\n       access-cli.mjs revert [--force]\n       access-cli.mjs reset\n';
+const usage = 'usage: access-cli.mjs show\n       access-cli.mjs set <url>... [--primary <url>] [--trusted-proxies <ip,ip|none>] [--follow on|off] [--force]\n       access-cli.mjs public-ip status | on [--address <ipv4>] [--force] | off [--force]\n       access-cli.mjs udp-media status | on [--force] | off [--force]\n       access-cli.mjs revert [--force]\n       access-cli.mjs reset\n';
 const fail = code => { throw Error('server_access_' + code); };
 // A reason is a fixed code: the server's own, or the one its settings fail to load with.
 const codeOf = error => /^[a-z][a-z_]{1,80}$/.test(error?.message ?? '') ? error.message : 'server_access_failed';
@@ -48,7 +51,9 @@ function describe(config) {
   return [['source', self.saved ? 'saved' : access ? 'env' : 'none'], ['revision', self.revision], ['primary', access?.primaryOrigin], ['https', origins(access?.https).join(',')], ['http', origins(access?.http).join(',')],
     ['trustedProxies', (access?.trustedProxies ?? []).join(',')], ['follow', self.publicIp.follow ? 1 : 0], ['followed', followedOrigin(access, self.publicIp)], ['followOffered', publicIpOffered(access, self.fixed) ? 1 : 0],
     ['tlsMode', self.fixed.httpsMode], ['publishedHost', self.fixed.published?.host], ['publishedPort', self.fixed.published?.port], ['serverAddress', self.fixed.serverAddress],
-    ['pending', pending], ['envAddressesIgnored', self.envAddressesIgnored ? 1 : 0]];
+    ['pending', pending], ['envAddressesIgnored', self.envAddressesIgnored ? 1 : 0],
+    // The saved switch for media over UDP, the value .env fixes instead (empty: none), and what a start of the server uses.
+    ['udpMedia', self.udpMedia ? 1 : 0], ['udpMediaEnv', self.udpSwitch.env ?? ''], ['udpMediaInUse', !config.udp ? 'off' : config.udp.media === true ? 'on' : config.udp.media ? 'desktops' : 'off']];
 }
 const format = rows => rows.map(([key, value]) => key + '=' + line(value)).join('\n') + '\n';
 
@@ -64,7 +69,7 @@ async function write(self, next) {
   await writeSelfBeforeCli(self.paths, self.read(self.paths.policy));
   await ensureSelfIdentity(self.paths, self.read);
   // Saved beside the .env address lines of now (config.mjs: only lines edited after a save are "ignored").
-  await putSelfPolicy(self.paths, selfPolicyText(next.config, next.publicIp, Date.now, self.envSeed));
+  await putSelfPolicy(self.paths, selfPolicyText(next.config, next.publicIp, Date.now, self.envSeed, next.udpMedia));
   await clearSelfJournal(self.paths);
 }
 
@@ -79,7 +84,7 @@ function requested(config, urls, flags, env) {
   const trustedProxies = flags.trustedProxies === undefined ? access?.trustedProxies ?? legacyServerAccess({ MULTITAP_PUBLIC_ORIGIN: 'https://localhost', MULTITAP_TRUSTED_PROXIES: env.MULTITAP_TRUSTED_PROXIES }).trustedProxies
     : flags.trustedProxies === 'none' ? [] : flags.trustedProxies.split(',').map(value => value.trim());
   const policy = selfAccessPolicy({ primaryOrigin, https: list.filter(value => value.startsWith('https://')), http: list.filter(value => value.startsWith('http://')), trustedProxies }, self.fixed);
-  return selfAccessCandidate(policy, flags.follow === undefined ? self.publicIp.follow : flags.follow === 'on', { fixed: self.fixed, current: { config: access, publicIp: self.publicIp } });
+  return selfAccessCandidate(policy, flags.follow === undefined ? self.publicIp.follow : flags.follow === 'on', { fixed: self.fixed, current: { config: access, publicIp: self.publicIp, udpMedia: self.udpMedia } });
 }
 function following(config, on, flags) {
   const self = config.selfAccess, access = config.accessConfig;
@@ -91,7 +96,13 @@ function following(config, on, flags) {
     const registered = 'http://' + ip + ':' + self.fixed.published.port;
     if (origins(access.http).includes(registered)) publicIp = { follow: true, origin: registered };
   }
-  return selfAccessCandidate(access, on, { fixed: self.fixed, current: { config: access, publicIp } });
+  return selfAccessCandidate(access, on, { fixed: self.fixed, current: { config: access, publicIp, udpMedia: self.udpMedia } });
+}
+// The switch is kept with the addresses: there have to be some.
+function udpMedia(config, on) {
+  const self = config.selfAccess, access = config.accessConfig;
+  if (!access) { if (on) fail('udp_media_unavailable'); return null; }
+  return selfAccessCandidate(access, self.publicIp.follow, { fixed: self.fixed, current: { config: access, publicIp: self.publicIp, udpMedia: self.udpMedia } }, on);
 }
 
 export async function main(argv, { stdout = process.stdout, env = process.env, configure = configuration, storage = selfAccessStorage } = {}) {
@@ -107,6 +118,7 @@ export async function main(argv, { stdout = process.stdout, env = process.env, c
   const valid = command === 'show' ? !values.length && only([])
     : command === 'set' ? values.length > 0 && only(['primary', 'trustedProxies', 'follow', 'force']) && [undefined, 'on', 'off'].includes(flags.follow)
     : command === 'public-ip' ? values.length === 1 && (values[0] === 'status' ? only([]) : values[0] === 'on' ? only(['address', 'force']) : values[0] === 'off' && only(['force']))
+    : command === 'udp-media' ? values.length === 1 && (values[0] === 'status' ? only([]) : ['on', 'off'].includes(values[0]) && only(['force']))
     : command === 'revert' ? !values.length && only(['force']) : command === 'reset' && !values.length && only([]);
   if (!valid) { stdout.write(usage); return 64; }
   const load = () => {
@@ -142,10 +154,10 @@ export async function main(argv, { stdout = process.stdout, env = process.env, c
       if (!before) fail('revert_unavailable');
       await putSelfPolicy(self.paths, before.previous); await clearSelfJournal(self.paths); await clearSelfBeforeCli(self.paths);
       changed = true;
-    } else if (command === 'set' || (command === 'public-ip' && values[0] !== 'status')) {
+    } else if (command === 'set' || (['public-ip', 'udp-media'].includes(command) && values[0] !== 'status')) {
       const config = load(), self = config.selfAccess;
       guard(self, flags.force);
-      const next = command === 'set' ? requested(config, values, flags, env) : following(config, values[0] === 'on', flags);
+      const next = command === 'set' ? requested(config, values, flags, env) : command === 'udp-media' ? udpMedia(config, values[0] === 'on') : following(config, values[0] === 'on', flags);
       changed = next !== null && next.revision !== self.revision;
       // `set` also makes the .env addresses the saved policy when they are the same.
       if (changed || (command === 'set' && !self.saved)) await write(self, next);

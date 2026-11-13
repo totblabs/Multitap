@@ -6,12 +6,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/app.dart';
 import 'package:multitap_client/data/broker_api.dart';
 import 'package:multitap_client/data/login_memory.dart';
+import 'package:multitap_client/ui/app_progress.dart';
 import 'package:multitap_client/ui/sign_in_screen.dart';
 import 'package:multitap_client/ui/remote_view.dart';
 import 'package:multitap_client/ui/session_preview.dart';
 import 'package:multitap_client/models/stream_options.dart';
 
 import 'helpers/stream_connect_consent.dart';
+import 'helpers/pump_work.dart';
 
 final fixtureOrigin = Uri.parse('https://cloud.example.com');
 
@@ -195,9 +197,12 @@ class TestBroker implements BrokerApi {
     return assigned;
   }
 
+  /// Holds the server's answer to a sign-out back while set.
+  Completer<void>? logoutAnswer;
   @override
   Future<void> logout(String token) async {
     logouts++;
+    await logoutAnswer?.future;
     if (rejectLogout) throw const BrokerException('network_error');
   }
 
@@ -270,7 +275,7 @@ void main() {
       'test-password',
     );
     await tester.tap(find.byKey(const Key('login-submit')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
   }
 
   testWidgets(
@@ -620,7 +625,7 @@ void main() {
         expect(tester.widget<FilledButton>(button).onPressed, isNull);
         await tester.tap(button);
       }
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(api.connects, 0);
       expect(find.byType(RemoteView), findsNothing);
     },
@@ -908,6 +913,62 @@ void main() {
             .text,
         isEmpty,
       );
+    },
+  );
+
+  testWidgets(
+    'Signing out says so in words until the server answers; a failure takes its place and the next try ends on the sign-in screen',
+    (tester) async {
+      final api = TestBroker()
+        ..logoutAnswer = Completer<void>()
+        ..rejectLogout = true;
+      await start(tester, api);
+      await login(tester);
+      const line = Key('workspace-signing-out');
+      expect(find.byKey(line), findsNothing);
+      await tester.tap(find.byKey(const Key('workspace-account')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('sign-out')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-sign-out')));
+      // The sign-out is on its way: the page moves, so it never settles.
+      await pumpWork(tester);
+      expect(api.logouts, 1);
+      expect(tester.widget<Text>(find.byKey(line)).data, '로그아웃하는 중이에요');
+      expect(
+        find.descendant(
+          of: find.ancestor(
+            of: find.byKey(line),
+            matching: find.byType(AppBusyLine),
+          ),
+          matching: find.byKey(const Key('app-busy-line-spinner')),
+        ),
+        findsOneWidget,
+      );
+      // Not a list refresh: the button under the pointer says what runs.
+      expect(find.byTooltip('목록을 새로고침하는 중이에요'), findsNothing);
+      expect(find.byTooltip('로그아웃하는 중이에요'), findsWidgets);
+
+      // It failed: its error line, and nothing keeps turning.
+      api.logoutAnswer!.complete();
+      await tester.pumpAndSettle();
+      expect(find.byKey(line), findsNothing);
+      expect(find.byKey(const Key('workspace-sign-out-error')), findsOneWidget);
+      expect(find.byKey(const Key('header-button-busy')), findsNothing);
+
+      // Tried again and answered: the sign-in screen, no sentence left.
+      api
+        ..rejectLogout = false
+        ..logoutAnswer = Completer<void>();
+      await tester.tap(find.byKey(const Key('workspace-sign-out-retry')));
+      await pumpWork(tester);
+      expect(find.byKey(line), findsOneWidget);
+      expect(find.byKey(const Key('workspace-sign-out-error')), findsNothing);
+      api.logoutAnswer!.complete();
+      await tester.pumpAndSettle();
+      expect(api.logouts, 2);
+      expect(find.byKey(line), findsNothing);
+      expect(find.byKey(const Key('login-submit')), findsOneWidget);
     },
   );
 

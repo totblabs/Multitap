@@ -211,6 +211,8 @@ summary::-webkit-details-marker{display:none}
 /* Loading: a spinner for actions, shimmering placeholders for content. */
 .loading-dot{display:block;width:20px;height:20px;border:2px solid var(--line);border-top-color:var(--amber);border-radius:50%;animation:multitap-spin .8s linear infinite;flex:none}
 @keyframes multitap-spin{to{transform:rotate(360deg)}}
+/* Beside a sentence that says what is going on. */
+.loading-dot.is-inline{display:inline-block;width:14px;height:14px;margin-right:8px;vertical-align:-2px}
 .bone{display:block;height:12px;border-radius:6px;background:linear-gradient(90deg,var(--skeleton) 0%,var(--skeleton-hi) 50%,var(--skeleton) 100%) 0 0/200% 100%;animation:multitap-shimmer 1.4s ease-in-out infinite}
 @keyframes multitap-shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}

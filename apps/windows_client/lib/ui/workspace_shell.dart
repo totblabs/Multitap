@@ -13,6 +13,7 @@ import '../data/launcher_memory.dart';
 import 'launcher_view_menu.dart';
 import 'launcher_scenes.dart';
 import '../models/desktop_machine.dart';
+import 'app_progress.dart';
 import 'app_theme.dart';
 import 'components.dart';
 import 'session_preview.dart';
@@ -64,6 +65,10 @@ class _StartFlow {
   bool settle = false;
 }
 
+/// What this client is doing for one desktop right now: its tile says so
+/// beside a moving mark until the work ends ([DesktopActions.working]).
+enum _TileWork { console, window, hostUpdate }
+
 /// Assigned desktops in the user's saved launcher view. Connections
 /// start only from their explicit controls or the focused desktop's Enter.
 class WorkspaceShell extends StatefulWidget {
@@ -77,6 +82,8 @@ class WorkspaceShell extends StatefulWidget {
     this.guideAccountKey,
     this.sessionGuideEnabled = true,
     this.busy = false,
+    this.signingOut = false,
+    this.powerStarted = const {},
     this.error,
     this.signOutError,
     this.notice,
@@ -156,6 +163,14 @@ class WorkspaceShell extends StatefulWidget {
   final VoidCallback onRefresh;
   final List<DesktopMachine> machines;
   final bool isDemo, busy;
+
+  /// [busy] because the account is being signed out (remote windows close
+  /// first): the page says so in words, not as a list refresh.
+  final bool signingOut;
+
+  /// When this client asked for each desktop's running power task (desktop
+  /// id to its own clock's time): the tile counts the wait from it.
+  final Map<String, DateTime> powerStarted;
   final String displayName;
   final String? error;
 
@@ -266,6 +281,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   final _desktopScroll = ScrollController();
   final _focus = <String, FocusNode>{};
   final _flows = <String, _StartFlow>{};
+  final _working = <String, _TileWork>{};
   Timer? _ticker;
   final _thumbnails = <String, DesktopThumbnail>{};
   StreamSubscription<String>? _thumbnailUpdates;
@@ -1007,6 +1023,34 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     });
   }
 
+  /// Marks [id]'s tile as at work on [work] until [run] ends, however it
+  /// ends: its failure is shown by the caller in place of the mark.
+  Future<T> _whileWorking<T>(
+    String id,
+    _TileWork work,
+    Future<T> Function() run,
+  ) async {
+    if (mounted) setState(() => _working[id] = work);
+    try {
+      return await run();
+    } finally {
+      if (_working[id] == work) {
+        if (mounted) {
+          setState(() => _working.remove(id));
+        } else {
+          _working.remove(id);
+        }
+      }
+    }
+  }
+
+  String? _workingText(String id) => switch (_working[id]) {
+    _TileWork.console => l10n.tileOpeningConsole,
+    _TileWork.window => l10n.tileOpeningWindow,
+    _TileWork.hostUpdate => l10n.tileRequestingHostUpdate,
+    null => null,
+  };
+
   Future<void> _openConsole(DesktopMachine machine) async {
     if (_confirming ||
         widget.isDemo ||
@@ -1031,7 +1075,13 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
           .where((m) => m.id == machine.id)
           .firstOrNull;
       if (current == null || current.kind != MachineKind.vm) return;
-      final result = await widget.onOpenConsole!(current);
+      // Nothing else shows between the question and the Console window.
+      final open = widget.onOpenConsole!;
+      final result = await _whileWorking(
+        current.id,
+        _TileWork.console,
+        () => open(current),
+      );
       if (mounted && result?.opened == false) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1291,7 +1341,13 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     StreamOptions options,
   ) async {
     try {
-      await widget.onOpenWindow!(machine, mode, options);
+      // Until the remote window is there the launcher shows nothing else.
+      final open = widget.onOpenWindow!;
+      await _whileWorking(
+        machine.id,
+        _TileWork.window,
+        () => open(machine, mode, options),
+      );
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1422,10 +1478,16 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await onHostUpdate(
+      // The broker's answer brings the tile's own update line; until then
+      // the tile says the request is on its way.
+      await _whileWorking(
         machine.id,
-        update.latestVersion!,
-        disconnectSessions: choice == HostUpdateChoice.disconnect,
+        _TileWork.hostUpdate,
+        () => onHostUpdate(
+          machine.id,
+          update.latestVersion!,
+          disconnectSessions: choice == HostUpdateChoice.disconnect,
+        ),
       );
       if (messenger.mounted) {
         messenger.showSnackBar(
@@ -1823,14 +1885,19 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         available &&
         r.settling &&
         (widget.onConnect != null || widget.onOpenWindow != null);
+    // Its remote window is being opened: a second press would only ask for
+    // the same window again.
+    final opening = _working[m.id] == _TileWork.window;
     return DesktopActions(
+      working: isDemo ? null : _workingText(m.id),
+      powerSince: isDemo ? null : widget.powerStarted[m.id],
       console:
           !isDemo && m.kind == MachineKind.vm && widget.onOpenConsole != null
           ? () => unawaited(_openConsole(m))
           : null,
       // Main controls and menu choices recheck current assignment/readiness
       // before starting, without a second ordinary-connect confirmation.
-      primary: flow != null
+      primary: flow != null || opening
           ? null
           : r.settling
           ? (settleOk
@@ -2041,7 +2108,11 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       onManageMfa: !widget.isDemo && widget.onManageMfa != null
           ? () => unawaited(widget.onManageMfa!(context)) : null,
       onSignOut: widget.busy ? null : () => unawaited(_signOut()),
-      signOutReason: widget.busy ? l10n.refreshingListTryAgainMoment : null,
+      signOutReason: widget.signingOut
+          ? l10n.signingOutNow
+          : widget.busy
+          ? l10n.refreshingListTryAgainMoment
+          : null,
     );
   }
 
@@ -2110,7 +2181,11 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     compactChrome: true,
     icon: Icons.refresh_rounded,
     label: compact ? null : l10n.refresh,
-    tooltip: widget.busy ? l10n.refreshingList2 : l10n.refreshList,
+    tooltip: widget.signingOut
+        ? l10n.signingOutNow
+        : widget.busy
+        ? l10n.refreshingList2
+        : l10n.refreshList,
     busy: widget.busy,
     onPressed: _refreshList,
   );
@@ -2531,6 +2606,39 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     );
   }
 
+  /// Work the whole page waits for (signing out), in the notice line's
+  /// place and shape: a moving mark and what is being done.
+  Widget _busyNotice(BuildContext context, String message, Key textKey) {
+    final p = AppPalette.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(p.amber.withValues(alpha: .10), p.tileGlass),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: p.amber.withValues(alpha: .32)),
+      ),
+      child: AppBusyLine(message, textKey: textKey, color: p.ink),
+    );
+  }
+
+  /// The first read of the list: the page is empty until it answers, so it
+  /// says what it waits for (the thin bar above runs for every read).
+  Widget _loading(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 24),
+    child: Center(
+      child: IntrinsicWidth(
+        child: AppBusyLine(
+          l10n.loadingDesktopList,
+          key: const Key('workspace-loading'),
+          textKey: const Key('workspace-loading-text'),
+          size: 14,
+          color: AppPalette.of(context).ink,
+        ),
+      ),
+    ),
+  );
+
   Widget _desktopSliver(
     BuildContext context,
     List<DesktopMachine> shown,
@@ -2747,6 +2855,12 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                                       )
                                     : null,
                               ),
+                              if (widget.signingOut)
+                                _busyNotice(
+                                  context,
+                                  l10n.signingOutNow,
+                                  const Key('workspace-signing-out'),
+                                ),
                               if (widget.notice != null)
                                 _notice(context, widget.notice!),
                               if (widget.signOutError != null)
@@ -2763,6 +2877,13 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                                 ),
                               if (widget.error != null)
                                 _error(context, widget.error!),
+                              if (widget.busy &&
+                                  !widget.signingOut &&
+                                  !widget.isDemo &&
+                                  widget.error == null &&
+                                  widget.notice == null &&
+                                  widget.machines.isEmpty)
+                                _loading(context),
                               if (!widget.busy &&
                                   widget.error == null &&
                                   widget.notice == null &&

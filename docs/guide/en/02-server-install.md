@@ -70,6 +70,8 @@ If you see `curl: command not found`, install it with `apt update && apt install
 
 `MULTITAP_LANG=en` shows the messages in English (`ko` for Korean). Without it, the install follows the Linux language setting: Korean when it is Korean, English otherwise.
 
+What the command does, and how to read it before you run it, is in [What this command does](#what-this-command-does) below.
+
 The install runs in four steps: **[1/4] Checking the system → [2/4] Docker → [3/4] Server files and image → [4/4] Starting the server**.
 On the way it asks two questions. Pressing Enter means **yes** to the first and **no** to the second.
 
@@ -110,9 +112,8 @@ Running the same command again is safe. A finished install is left unchanged, an
 </details>
 
 <details>
-<summary>Details: what the install command does, and options</summary>
+<summary>Details: install options</summary>
 
-- It writes `compose.yaml` and the settings file `.env` to `/opt/multitap` and starts the server container.
 - It installs the server command `multitap`. The language of the messages is kept in `.env`, and `multitap` answers in the same language.
 - The data (accounts, assignments, Host registrations, secret key, downloads) is in the Docker volume `multitap-broker-data`.
 
@@ -127,6 +128,39 @@ Settings you can put in front of `bash` (like `MULTITAP_LANG=en`):
 To use Docker Compose yourself, or to install on another Linux, see the [Docker deployment guide](../../docker-deployment.md).
 
 </details>
+
+#### What this command does
+
+The install command downloads one file, [`deploy/docker/install.sh`](../../../deploy/docker/install.sh), and runs it with bash. This is everything that file does.
+
+- **It checks first.** It runs as root, on Debian or Ubuntu, on x86_64; in a CT, nesting is on. If any of these fails, it stops before installing anything. On a server that is already installed, it changes nothing and ends.
+- **It prepares Docker.** If `docker compose` works, the Docker you have is used as it is. Otherwise it adds Docker's own repository (`download.docker.com`) to apt and installs from there, or from the Debian or Ubuntu `docker.io` package when that repository cannot be used. It also installs `ca-certificates`, `curl` and `gnupg`, and sets Docker to start at boot.
+- **It downloads.** It looks up the newest release on GitHub, then downloads `compose.yaml`, `.env.example` and the `multitap` command from that release's tag (`v<version>`). The server image, `ghcr.io/totblabs/multitap-broker`, comes from GitHub's container registry.
+- **It creates** `/opt/multitap` (`compose.yaml`, `.env` and a `backups` folder), `/usr/local/bin/multitap`, the Docker volume `multitap-broker-data`, one server container, and the install log `/var/log/multitap-install.log` (readable by root only). If Docker came from Docker's repository, that repository's apt settings (`/etc/apt/sources.list.d/docker.list` and its key) stay too.
+- **It opens ports.** Docker opens TCP 18480 (admin console, apps, Hosts) and UDP 18481 (screen stream).
+- **It asks two questions**, the two in the table above. If you answer yes to the first, it asks `1.1.1.1` (Cloudflare) once for the server's public IP, for the second question.
+- **What it does not do.** It creates no service or scheduled job other than Docker and the server container. It does not touch login accounts, SSH keys or SSH settings. It sends no usage data, and neither does the server it installs. Where the server connects on its own is in [What the server contacts on its own](#what-the-server-contacts-on-its-own) below.
+- **Removing it.** `sudo multitap uninstall` removes the server container and the `multitap` command. The data volume, `/opt/multitap`, Docker and the downloaded server image stay.
+
+#### Read it first
+
+The one-line command runs the script as soon as it arrives. To read it first, download it to a file, read it, then run it. It installs the same way and asks the same two questions.
+
+```sh
+curl -fsSLo install.sh https://raw.githubusercontent.com/totblabs/Multitap/main/deploy/docker/install.sh
+less install.sh
+MULTITAP_LANG=en bash install.sh
+```
+
+If you are not root, run the last line as `sudo env MULTITAP_LANG=en bash install.sh`. Press `q` to close `less`.
+The script itself comes from `main`; the files it downloads come from the tag of the release it installs. All of its work starts from the script's last line, so if the one-line command is cut off while downloading, nothing is installed.
+
+Multitap is open source under AGPL-3.0, and the install script, the server, the apps and the Host can all be read in this repository.
+
+- The server image is built from the source at the release tag by a public [GitHub Actions workflow](../../../.github/workflows/broker-image.yml) and pushed to `ghcr.io`. The app and Host installers inside the image are the files attached to that release. To see which commit an image was built from: `docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' ghcr.io/totblabs/multitap-broker:<version>`.
+- The server container runs as a user other than root, on a read-only file system, with every Linux capability dropped (`compose.yaml`).
+- The new-version notice in the admin console is signed with the project's Ed25519 key, and the server checks the signature before showing it. `sudo multitap update` pulls the server image by its version; the image itself carries no signature.
+- The Windows installers are not signed with a purchased code signing certificate, so Windows asks you to confirm ([Troubleshooting](09-troubleshooting.md#defender-or-smartscreen-blocks-the-install)).
 
 | Server command | What it does |
 | --- | --- |

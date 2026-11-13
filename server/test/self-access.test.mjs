@@ -4,7 +4,8 @@
 // back, and following the public IP. Real files in a temporary data folder and
 // the real configuration loader; a "restart" is a new load of that folder.
 // No Docker, no listener and no network: the reach of an address and the
-// public IP lookup are answers given here.
+// public IP lookup are answers given here (the tests named "the real server"
+// listen on loopback and ask that listener).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, readdir, unlink } from 'node:fs/promises';
@@ -13,8 +14,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
+import { createServer as createTlsServer } from 'node:https';
+import { spawnSync } from 'node:child_process';
 import { configuration, revertUnloadableSelfAccess, readProtectedAccessFile } from '../src/config.mjs';
-import { SelfAccess, selfAccessRestartCode, publicIpv4, lookupPublicIp, defaultGateway } from '../src/self-access.mjs';
+import { SelfAccess, selfAccessRestartCode, publicIpv4, lookupPublicIp, defaultGateway, probeAddress, accessProbeProtocol } from '../src/self-access.mjs';
 import { buildServer, VERSION } from '../src/http.mjs';
 import { main as accessCli } from '../src/access-cli.mjs';
 import { selfAccessStorage } from '../src/config.mjs';
@@ -22,6 +25,7 @@ import { localAccessRequest, validAccessHealth } from '../update/server-access-h
 import { validBootstrapLocalHealth, bootstrapHealthOrigin } from '../update/deployment-health.mjs';
 import { serverAccessTransport } from '../update/server-access-policy.mjs';
 import { AccessRuntime } from '../src/access-runtime.mjs';
+import { resolveRequestAccess } from '../src/request-origin.mjs';
 import { Store } from '../src/store.mjs';
 import { Vault } from '../src/vault.mjs';
 import { serverAccessHash, serverAccessUnconfiguredRevision } from '../update/server-access-policy.mjs';
@@ -45,18 +49,22 @@ async function volume(t) {
 }
 // One process of the broker on that data folder: its configuration and the
 // access client index.mjs makes from it. `exits` counts the restarts it asks for.
-function start(directory, { env = {}, healthy = true, lookup = async () => null, activity = quiet, ...options } = {}) {
+function start(directory, { env = {}, healthy = true, reach = true, lookup = async () => null, activity = quiet, ...options } = {}) {
   const settings = { MULTITAP_HOST: '0.0.0.0', MULTITAP_PORT: '18480', MULTITAP_DEPLOYMENT_KIND: 'docker', MULTITAP_DATA_DIR: directory, MULTITAP_PUBLISHED_PORT: '0.0.0.0:18480', MULTITAP_SERVER_ADDRESS: '192.0.2.10',
     MULTITAP_HTTP_ORIGIN: lan, MULTITAP_ALLOW_INSECURE_HTTP: '1', ...env };
   const config = configuration(settings, { readAccessFile });
-  const run = { settings, config, exits: 0, probes: [], lookups: 0, ended: 0, logs: [], held: [], released: [] };
+  const run = { settings, config, exits: 0, probes: [], tried: [], lookups: 0, ended: 0, logs: [], held: [], released: [], records: [] };
+  // What 연결 테스트 finds at a main address: this server's own answer, or what `reach` says instead.
+  const probeRequest = async (origin, nonce) => { run.tried.push(origin);
+    const found = typeof reach === 'function' ? reach(origin, nonce) : reach;
+    return found === true ? { answer: { protocol: accessProbeProtocol, nonce, admitted: true } } : found; };
   // What the address answers after the restart: this installation's own health, or nothing.
   const publicRequest = async (current, origin) => { run.probes.push(origin);
     return (typeof healthy === 'function' ? healthy(origin) : healthy) ? { service: 'multitap-broker', status: 'ok', authentication: 'id-password', version: '1.1.1',
       access: { protocol: 'server-access-v1', revision: serverAccessHash(current), installationId: config.accessInstallationId, bootstrapOnly: false, origin } } : null; };
-  run.access = SelfAccess.from(config, { exit: () => { run.exits++; }, load: () => configuration(settings, { readAccessFile }), publicRequest, lookup: async () => { run.lookups++; return lookup(); }, log: line => run.logs.push(line), sleep: async () => {}, pollMs: 1, verifyAttempts: 2, verifyDelayMs: 1, ...options });
+  run.access = SelfAccess.from(config, { exit: () => { run.exits++; }, load: () => configuration(settings, { readAccessFile }), publicRequest, probeRequest, lookup: async () => { run.lookups++; return lookup(); }, log: line => run.logs.push(line), sleep: async () => {}, pollMs: 1, verifyAttempts: 2, verifyDelayMs: 1, ...options });
   run.access.attach({ activity, endConnections: () => { run.ended++; return { protocol: 'server-access-connections-v1', fence: true, ended: { people: 0, sessions: 0, consoles: 0 } }; },
-    hold: lease => { run.held.push(lease); return lease; }, release: lease => run.released.push(lease) });
+    hold: lease => { run.held.push(lease); return lease; }, release: lease => run.released.push(lease), record: (...row) => run.records.push(row) });
   run.context = { managementOrigin: config.accessConfig?.primaryOrigin ?? lan };
   // The console's 연결 테스트 and 변경 저장, as AccessRuntime passes them on.
   run.change = async config => {
@@ -143,6 +151,13 @@ test('an address that does not answer as this installation puts the previous pol
   await third.access.initialize();
   const result = third.access.status();
   assert.equal(result.state, 'rolled_back'); assert.equal(result.rollbackVerified, true); assert.equal(result.errorCode, 'server_access_health_failed');
+  assert.equal(result.failedOrigin, 'http://192.0.2.99:18480', 'the address that did not answer is named');
+  assert.deepEqual(third.records, [['server_access_rolled_back', 'server', result.operationId + ':http://192.0.2.99:18480']], 'and the way back is in the activity log');
+  // index.mjs reads the journal before the server exists: what a start found is recorded once the server can write.
+  const early = SelfAccess.from(third.config, { exit: () => {}, load: () => third.config }), written = [];
+  early.record('server_access_rolled_back', 'server', 'found at the start');
+  early.attach({ record: (...row) => written.push(row) });
+  assert.deepEqual(written, [['server_access_rolled_back', 'server', 'found at the start']]);
   assert.equal(result.revision, revision); assert.equal(result.pendingConfig, null); assert.equal(third.access.startupOperationId, null);
   // A saved policy goes back to its exact earlier content.
   await third.change(policy({ http: [lan, extra] }));
@@ -155,6 +170,7 @@ test('an address that does not answer as this installation puts the previous pol
   assert.equal(await readFile(join(directory, 'access', 'policy.json'), 'utf8'), kept);
   const sixth = start(directory); await sixth.access.initialize();
   assert.equal(sixth.access.status().state, 'rolled_back'); assert.deepEqual(sixth.config.allowedOrigins, [lan, extra]);
+  assert.equal(sixth.access.status().failedOrigin, secure, 'of two main addresses, the one that did not answer');
 });
 
 test('a process that ends between the journal and the policy changed nothing; a policy that does not load, or a process that keeps ending, goes back', async t => {
@@ -198,7 +214,7 @@ test('a save waits for the server\'s own work, can be withdrawn meanwhile, and a
   await first.access.initialize();
   const base = first.access.status().revision, next = policy({ http: [lan, extra] });
   const tested = await first.access.test({ config: next, baseRevision: base }, first.context);
-  assert.deepEqual(tested.checks.map(check => [check.name, check.status]), [['configuration', 'passed'], ['managed_installation', 'passed'], ['external_origin_tls_and_identity', 'pending']]);
+  assert.deepEqual(tested.checks.map(check => [check.name, check.status]), [['configuration', 'passed'], ['managed_installation', 'passed'], ['address', 'passed'], ['address', 'passed']], 'the main and the extra address');
   assert.equal(tested.scope, 'preflight'); assert.equal(tested.requiresRestart, true); assert.equal(tested.baseRevision, base);
   const fence = { token: randomBytes(32).toString('hex'), operationId: randomUUID() };
   const accepted = await first.access.save({ config: next, testId: tested.testId, baseRevision: base, confirm: true }, { ...first.context, fence });
@@ -811,4 +827,359 @@ test('an unreadable policy removed from the command line, with no address lines 
   await f.server.accessRuntime.save({ config: next, testId: tested.testId, baseRevision: status.revision, confirm: true }, { managementOrigin: f.here }, { actor: 'owner' });
   await f.access.task;
   assert.equal(f.run.exits, 1); assert.equal((await journal(directory)).previous, null, 'nothing unreadable to put back');
+});
+
+// ---- 연결 테스트 reaches the addresses before anything is saved ----------------
+test('연결 테스트 tries every main address before anything is saved: one that does not lead to this server gives its reason, and no test an ordinary save can name', async t => {
+  const directory = await volume(t);
+  let found = true;
+  const run = start(directory, { reach: (origin, nonce) => origin !== secure ? true : typeof found === 'function' ? found(nonce) : found });
+  await run.access.initialize();
+  const next = policy({ http: [lan], https: [secure], primaryOrigin: secure }), base = run.access.status().revision;
+  const tryIt = () => run.access.test({ config: next, baseRevision: base }, run.context);
+  const reached = await tryIt();
+  assert.deepEqual(run.tried, [secure, lan], 'the main address of each card, never an extra one');
+  assert.deepEqual(reached.checks, [{ name: 'configuration', status: 'passed' }, { name: 'managed_installation', status: 'passed' },
+    { name: 'address', origin: secure, status: 'passed', code: 'server_access_address_reached' }, { name: 'address', origin: lan, status: 'passed', code: 'server_access_address_reached' }]);
+  assert.match(reached.testId, /^[a-f0-9]{64}$/); assert.ok(!reached.checks.some(check => check.status === 'pending'), 'nothing is left "to be checked after applying"');
+
+  // `outside`: the reason is also what an address that works from outside looks like from in here, so the
+  // administrator may prove it from outside (the tests further down); every other reason is a fault no proof mends.
+  const failing = async (answer, expected, { outside = false } = {}) => {
+    found = answer;
+    const result = await tryIt(), check = result.checks.find(row => row.origin === secure);
+    assert.deepEqual(check, { name: 'address', origin: secure, status: 'failed', ...expected }, JSON.stringify(answer));
+    assert.equal(result.checks.find(row => row.origin === lan).status, 'passed', 'the other address is still told apart');
+    assert.equal(result.scope, 'preflight'); assert.equal(result.baseRevision, base); assert.match(result.configHash, /^[a-f0-9]{64}$/);
+    if (!outside) { assert.equal(result.testId, undefined, 'no test to save with'); assert.equal(result.expiresAt, undefined); assert.equal(result.confirmation, undefined, 'and nothing to prove from outside'); return; }
+    assert.equal(result.confirmation, 'outside'); assert.equal(result.confirmationWindowMs, 300000); assert.match(result.testId, /^[a-f0-9]{64}$/);
+    await assert.rejects(run.access.save({ config: next, testId: result.testId, baseRevision: base, confirm: true }, { ...run.context, fence: { token: randomBytes(32).toString('hex'), operationId: randomUUID() } }), refused(409, 'server_access_test_required'), 'an ordinary save cannot name it');
+  };
+  for (const reason of ['name_unknown', 'unchecked', 'closed', 'no_answer']) await failing({ error: reason }, { code: 'server_access_address_' + reason }, { outside: true });
+  for (const reason of ['not_https', 'certificate']) await failing({ error: reason }, { code: 'server_access_address_' + reason });
+  await failing({ error: 'anything_else' }, { code: 'server_access_address_no_answer' }, { outside: true });
+  await failing(() => { throw Error('offline'); }, { code: 'server_access_address_no_answer' }, { outside: true });
+  // Something answers there, but it is not this server answering this test.
+  await failing({ answer: null }, { code: 'server_access_address_other_server' });
+  await failing({ answer: { service: 'multitap-broker', status: 'ok' } }, { code: 'server_access_address_other_server' });
+  await failing({ answer: { protocol: accessProbeProtocol, nonce: 'f'.repeat(64), admitted: true } }, { code: 'server_access_address_other_server' });
+  // This server answered, and would not let that request in.
+  await failing(nonce => ({ answer: { protocol: accessProbeProtocol, nonce, admitted: false, reason: 'proxy_untrusted', peer: '172.18.0.1' } }), { peer: '172.18.0.1', code: 'server_access_address_proxy_untrusted' });
+  await failing(nonce => ({ answer: { protocol: accessProbeProtocol, nonce, admitted: false, reason: 'proxy_headers', peer: '127.0.0.1' } }), { peer: '127.0.0.1', code: 'server_access_address_proxy_headers' });
+  await failing(nonce => ({ answer: { protocol: accessProbeProtocol, nonce, admitted: false, reason: 'made up', peer: 'not an address' } }), { code: 'server_access_address_not_admitted' });
+  await failing(nonce => ({ answer: { protocol: accessProbeProtocol, nonce, admitted: 'yes' } }), { code: 'server_access_address_not_admitted' });
+
+  // Nothing happened to the server or to anybody connected to it.
+  assert.equal(run.exits, 0); assert.equal(run.ended, 0); assert.equal(run.access.status().state, 'idle'); assert.equal(run.access.status().revision, base);
+  assert.deepEqual(await readdir(directory), [], 'nothing was written');
+  await assert.rejects(run.access.save({ config: next, testId: 'e'.repeat(64), baseRevision: base, confirm: true }, { ...run.context, fence: { token: randomBytes(32).toString('hex'), operationId: randomUUID() } }), refused(409, 'server_access_test_required'));
+  // A test that reached it is the one an ordinary save may name.
+  found = true;
+  await run.access.save({ config: next, testId: (await tryIt()).testId, baseRevision: base, confirm: true }, { ...run.context, fence: { token: randomBytes(32).toString('hex'), operationId: randomUUID() } });
+  await run.access.task;
+  assert.equal(run.exits, 1);
+});
+
+// Round 2 of the browser check: a wrong extra address was saved silently. It is tried now, with the same reasons.
+test('연결 테스트 tries every extra address too: out of reach from inside is said and saved without a proof, a fault on it blocks like on a main address', async t => {
+  const directory = await volume(t), forward = 'http://203.0.113.7:18480';
+  let atForward = { error: 'no_answer' };
+  const run = start(directory, { reach: (origin, nonce) => origin !== forward ? true : typeof atForward === 'function' ? atForward(nonce) : atForward });
+  await run.access.initialize();
+  const next = policy({ http: [lan, forward] }), base = run.access.status().revision;
+  const tryIt = () => run.access.test({ config: next, baseRevision: base }, run.context);
+  const first = await tryIt();
+  assert.deepEqual(run.tried, [lan, forward], 'the main address first, then the extra one');
+  assert.deepEqual(first.checks.slice(2), [{ name: 'address', origin: lan, status: 'passed', code: 'server_access_address_reached' },
+    { name: 'address', origin: forward, extra: true, status: 'unreached', code: 'server_access_address_no_answer' }]);
+  assert.match(first.testId, /^[a-f0-9]{64}$/, 'a test an ordinary save can name'); assert.equal(first.confirmation, undefined, 'no proof from outside is asked for an extra address');
+  for (const reason of ['name_unknown', 'unchecked', 'closed']) {
+    atForward = { error: reason };
+    const result = await tryIt();
+    assert.deepEqual(result.checks.at(-1), { name: 'address', origin: forward, extra: true, status: 'unreached', code: 'server_access_address_' + reason });
+    assert.match(result.testId, /^[a-f0-9]{64}$/, reason);
+  }
+  // A fault: something answers wrongly there. No test to save with, as for a main address.
+  for (const [answer, code, peer] of [[{ error: 'not_https' }, 'not_https'], [{ error: 'certificate' }, 'certificate'], [{ answer: null }, 'other_server'],
+    [nonce => ({ answer: { protocol: accessProbeProtocol, nonce, admitted: false, reason: 'proxy_untrusted', peer: '172.18.0.1' } }), 'proxy_untrusted', '172.18.0.1'],
+    [nonce => ({ answer: { protocol: accessProbeProtocol, nonce, admitted: false } }), 'not_admitted']]) {
+    atForward = answer;
+    const result = await tryIt();
+    assert.deepEqual(result.checks.at(-1), { name: 'address', origin: forward, extra: true, ...(peer ? { peer } : {}), status: 'failed', code: 'server_access_address_' + code });
+    assert.equal(result.testId, undefined, code); assert.equal(result.confirmation, undefined, code);
+  }
+  // Out of reach again: saved, and after the restart only the main address is asked.
+  atForward = { error: 'no_answer' };
+  await run.access.save({ config: next, testId: (await tryIt()).testId, baseRevision: base, confirm: true }, { ...run.context, fence: { token: randomBytes(32).toString('hex'), operationId: randomUUID() } });
+  await run.access.task;
+  assert.equal(run.exits, 1);
+  const second = start(directory); await second.access.initialize(); await second.access.resume();
+  assert.deepEqual(second.probes, [lan]); assert.equal(second.access.status().state, 'succeeded');
+});
+
+// The request 연결 테스트 really sends, at a listener of this test.
+test('the request of 연결 테스트: one GET without a redirect, and why nothing came back', { timeout: 20000 }, async t => {
+  const nonce = 'a'.repeat(64), seen = [];
+  let reply = (req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ protocol: accessProbeProtocol, nonce, admitted: true })); };
+  const other = createServer((req, res) => { seen.push({ method: req.method, url: req.url, host: req.headers.host, cookie: req.headers.cookie, authorization: req.headers.authorization }); reply(req, res); });
+  await new Promise(resolve => other.listen(0, '127.0.0.1', resolve));
+  t.after(() => { other.closeAllConnections(); other.close(); });
+  const port = other.address().port, there = 'http://127.0.0.1:' + port;
+  assert.deepEqual(await probeAddress(there, nonce), { answer: { protocol: accessProbeProtocol, nonce, admitted: true } });
+  assert.deepEqual(seen, [{ method: 'GET', url: '/api/v1/access-probe/' + nonce, host: '127.0.0.1:' + port, cookie: undefined, authorization: undefined }]);
+  reply = (req, res) => { res.writeHead(302, { Location: there + '/elsewhere' }); res.end(); };
+  assert.deepEqual(await probeAddress(there, nonce), { answer: null }, 'a redirect is not followed');
+  assert.equal(seen.length, 2);
+  reply = (req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html>router</html>'); };
+  assert.deepEqual(await probeAddress(there, nonce), { answer: null }, 'another web page');
+  reply = (req, res) => { res.writeHead(200); res.end('x'.repeat(8192)); };
+  assert.deepEqual(await probeAddress(there, nonce), { answer: null }, 'a long answer is not read to its end');
+  reply = () => {};
+  assert.deepEqual(await probeAddress(there, nonce, { timeoutMs: 700 }), { error: 'no_answer' }, 'accepted, never answered');
+  // TLS asked of a listener that speaks plain HTTP: an https address pointed straight at the server's port.
+  assert.deepEqual(await probeAddress('https://127.0.0.1:' + port, nonce), { error: 'not_https' });
+  const closed = await freePort();
+  assert.deepEqual(await probeAddress('http://127.0.0.1:' + closed, nonce), { error: 'closed' });
+  // What the system says of the name and the network, without asking either here.
+  const failing = code => (options, callback) => { const request = httpRequest({ ...options, hostname: '127.0.0.1', port: closed }, callback); request.once('socket', socket => socket.destroy(Object.assign(Error(code), { code }))); return request; };
+  for (const [code, reason] of [['ENOTFOUND', 'name_unknown'], ['EAI_AGAIN', 'unchecked'], ['ENETUNREACH', 'unchecked'], ['EHOSTUNREACH', 'closed'], ['ECONNRESET', 'closed'], ['CERT_HAS_EXPIRED', 'certificate'],
+    ['DEPTH_ZERO_SELF_SIGNED_CERT', 'certificate'], ['ERR_TLS_CERT_ALTNAME_INVALID', 'certificate'], ['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'certificate'], ['ERR_SSL_WRONG_VERSION_NUMBER', 'not_https'], ['ETIMEDOUT', 'no_answer']])
+    assert.deepEqual(await probeAddress('http://name.example:1', nonce, { http: failing(code) }), { error: reason }, code);
+});
+
+// The test's request to an address, sent to this test's listener instead: as
+// itself, or as a reverse proxy on this machine would pass it on.
+const loopbackProbe = (port, { proxy = null } = {}) => (origin, nonce) => {
+  const ask = (options, callback) => httpRequest({ ...options, protocol: 'http:', hostname: '127.0.0.1', port, rejectUnauthorized: undefined,
+    headers: { ...options.headers, ...(origin.startsWith('https://') && proxy ? proxy(new URL(origin)) : {}) } }, callback);
+  return probeAddress(origin, nonce, { http: ask, https: ask });
+};
+
+test('the real server: 연결 테스트 asks this server at the address under test, which answers by the policy that would apply', { timeout: 30000 }, async t => {
+  const directory = await volume(t), port = await freePort();
+  let proxy = url => ({ 'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': url.host });
+  const f = await running(t, directory, port, { probeRequest: (origin, nonce) => loopbackProbe(port, { proxy })(origin, nonce) });
+  const context = { managementOrigin: f.here }, runtime = f.server.accessRuntime, base = (await f.status()).revision;
+  const named = 'http://vdi.example.com:' + port, checkOf = (result, origin) => result.checks.find(check => check.origin === origin);
+  const get = (path, host) => new Promise((resolve, reject) => { const req = httpRequest({ hostname: '127.0.0.1', port, path, headers: { Host: host } }, res => { res.resume(); res.once('end', () => resolve(res.statusCode)); }); req.on('error', reject); req.end(); });
+
+  // A new main address, not one the server lets in today: the test's own question is answered there, and only that.
+  assert.equal(await get('/healthz', 'vdi.example.com:' + port), 403, 'not an address of this server yet');
+  const moved = await runtime.test({ config: policy({ http: [named, f.here], primaryOrigin: named, listenPort: port }), baseRevision: base }, context);
+  assert.deepEqual(checkOf(moved, named), { name: 'address', origin: named, status: 'passed', code: 'server_access_address_reached' });
+  assert.match(moved.testId, /^[a-f0-9]{64}$/);
+  assert.equal(await get('/healthz', 'vdi.example.com:' + port), 403, 'the test opened nothing');
+  assert.equal(await get('/api/v1/access-probe/' + 'c'.repeat(64), 'vdi.example.com:' + port), 403, 'a value no test is waiting for is an ordinary refused request');
+  assert.equal(await get('/api/v1/access-probe/' + 'c'.repeat(64), '192.0.2.10:' + port), 401, 'and at an address of this server, a path like any other that needs a login');
+
+  // HTTPS behind a reverse proxy: reached when a trusted proxy passes the scheme and the name on.
+  const https = trustedProxies => policy({ http: [f.here], https: [secure], primaryOrigin: secure, listenPort: port, trustedProxies });
+  const behind = await runtime.test({ config: https(['127.0.0.1']), baseRevision: base }, context);
+  assert.deepEqual(checkOf(behind, secure), { name: 'address', origin: secure, status: 'passed', code: 'server_access_address_reached' });
+  // The proxy is not one this server would trust: said with where the request came from.
+  const untrusted = await runtime.test({ config: https([]), baseRevision: base }, context);
+  assert.deepEqual(checkOf(untrusted, secure), { name: 'address', origin: secure, peer: '127.0.0.1', status: 'failed', code: 'server_access_address_proxy_untrusted' });
+  assert.equal(untrusted.testId, undefined); assert.equal(checkOf(untrusted, f.here).status, 'passed');
+  // A trusted proxy that does not say the request was HTTPS, or passes another name on.
+  proxy = () => ({});
+  assert.equal(checkOf(await runtime.test({ config: https(['127.0.0.1']), baseRevision: base }, context), secure).code, 'server_access_address_proxy_headers');
+  proxy = () => ({ 'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': 'other.example.com' });
+  assert.equal(checkOf(await runtime.test({ config: https(['127.0.0.1']), baseRevision: base }, context), secure).code, 'server_access_address_proxy_headers');
+  // Nothing was saved, ended or restarted by any of it.
+  assert.equal(f.run.exits, 0); assert.equal(runtime.blocked, false); assert.equal((await f.status()).revision, base); assert.equal((await f.status()).state, 'idle');
+});
+
+test('the request of 연결 테스트 over real TLS: a certificate nobody vouches for is not an answer', { timeout: 30000 }, async t => {
+  if (spawnSync('openssl', ['version']).error?.code === 'ENOENT') { t.skip('OpenSSL unavailable'); return; }
+  const directory = await volume(t), certPath = join(directory, 'cert.pem'), keyPath = join(directory, 'key.pem');
+  assert.equal(spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyPath, '-out', certPath, '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'], { encoding: 'utf8' }).status, 0);
+  const nonce = 'b'.repeat(64);
+  let asked = 0;
+  const proxy = createTlsServer({ cert: await readFile(certPath), key: await readFile(keyPath) }, (req, res) => { asked++; res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ protocol: accessProbeProtocol, nonce, admitted: true })); });
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
+  t.after(() => { proxy.closeAllConnections(); proxy.close(); });
+  assert.deepEqual(await probeAddress('https://127.0.0.1:' + proxy.address().port, nonce), { error: 'certificate' });
+  assert.equal(asked, 0, 'the request was never sent past the certificate');
+});
+
+// ---- an address this server cannot reach, proven by the administrator from outside ----
+// A request as http.mjs would judge it: `origin` asked of this container's listener, an https one through a proxy on this machine.
+const requestAt = origin => { const url = new URL(origin), secured = url.protocol === 'https:';
+  return { rawHeaders: ['Host', url.host], headers: { host: url.host, ...(secured ? { 'x-forwarded-proto': 'https' } : {}) }, socket: { remoteAddress: '127.0.0.1', localPort: 18480, encrypted: false } }; };
+const admittedAt = origin => config => { try { return resolveRequestAccess(requestAt(origin), config).origin; } catch { return null; } };
+// One process whose 연결 테스트 cannot reach `unreached` from inside, with a clock the test moves.
+function outsideRun(directory, { unreached = [secure], reason = 'no_answer', ...options } = {}) {
+  // `end()`: the process is gone, and whatever it was waiting for is never continued.
+  const clock = { now: Date.parse('2026-01-01T00:00:00Z') }, life = { over: false };
+  const run = start(directory, { reach: origin => unreached.includes(origin) ? { error: reason } : true, now: () => clock.now, sleep: () => life.over ? new Promise(() => {}) : new Promise(resolve => setImmediate(resolve)), ...options });
+  run.clock = clock; run.end = () => { life.over = true; };
+  run.outside = async (config, context = run.context, more = {}) => {
+    const base = run.access.status().revision, tested = await run.access.test({ config, baseRevision: base }, context);
+    return run.access.saveOutside({ config, testId: tested.testId, baseRevision: base, confirm: true, outside: true }, context, { actor: 'owner', ...more });
+  };
+  return run;
+}
+const withHttps = policy({ http: [lan], https: [secure], primaryOrigin: secure });
+
+test('a save with the administrator\'s own proof: nothing changes while it waits, the proof counts only from that address with the code, then it is the save any other is', async t => {
+  const directory = await volume(t), run = outsideRun(directory);
+  await run.access.initialize();
+  const before = run.access.status().revision;
+  const accepted = await run.outside(withHttps);
+  assert.equal(accepted.state, 'awaiting_confirmation'); assert.match(accepted.operationId, /^[a-f0-9-]{36}$/);
+  // Nothing was ended, fenced or written, and the policy in use is the one in use.
+  assert.equal(run.exits, 0); assert.equal(run.ended, 0); assert.deepEqual(run.held, []);
+  assert.deepEqual(await readdir(join(directory, 'access')), ['journal.json']); assert.equal((await journal(directory)).state, 'awaiting_confirmation');
+  const watching = run.access.status({ managementOrigin: lan });
+  assert.equal(watching.state, 'awaiting_confirmation'); assert.equal(watching.revision, before); assert.equal(watching.pendingConfig.https.origin, secure);
+  assert.deepEqual(watching.outside.origins, [{ origin: secure, confirmed: false }]); assert.equal(watching.outside.remainingMs, 300000); assert.equal(watching.outside.windowMs, 300000);
+  assert.match(watching.outside.code, /^\d{6}$/);
+  // The code is given where the save can be watched, never at the address it has to be brought to, nor to a status nobody asked.
+  assert.equal(run.access.status({ managementOrigin: secure }).outside.code, undefined); assert.equal(run.access.status().outside.code, undefined);
+  // The address under proof leads to the console meanwhile, by the policy being saved; nothing else does.
+  assert.deepEqual(run.access.provisionalAccess(requestAt(secure)), { origin: secure, bootstrapOnly: false, proxied: true, provisional: true });
+  assert.equal(run.access.provisionalAccess(requestAt('https://other.example.com')), null);
+  assert.equal(run.access.provisionalAccess(requestAt(lan)), null, 'an address of the policy in use needs no such door');
+  assert.equal(run.access.provisionalAccess({ ...requestAt(secure), headers: { host: 'vdi.example.com' } }), null, 'not as plain HTTP: the policy being saved would not let that in either');
+  assert.equal(run.access.provisionalAccess({ ...requestAt(secure), socket: { remoteAddress: '203.0.113.9', localPort: 18480, encrypted: false } }), null, 'nor from a proxy it does not trust');
+  // Another test or save waits its turn, and the command line sees a save in flight.
+  await assert.rejects(run.access.test({ config: withHttps, baseRevision: before }, run.context), refused(409, 'server_access_busy'));
+  const code = watching.outside.code, operationId = accepted.operationId, wrong = code === '000000' ? '000001' : '000000';
+  const prove = (input, origin, context = { managementOrigin: origin }) => run.access.confirmOutside(input, context, { actor: 'owner', admitted: admittedAt(origin) });
+  // What does not count: the old address, the right address without the code, another save, a made-up shape.
+  await assert.rejects(prove({ operationId, code }, lan), refused(409, 'server_access_confirmation_origin'));
+  await assert.rejects(prove({ operationId, code }, secure, { managementOrigin: lan }), refused(409, 'server_access_confirmation_origin'));
+  await assert.rejects(run.access.confirmOutside({ operationId, code }, { managementOrigin: secure }, { actor: 'owner' }), refused(409, 'server_access_confirmation_origin'), 'an address only claimed, not one the request was let in at');
+  await assert.rejects(prove({ operationId, code: wrong }, secure), refused(409, 'server_access_confirmation_code'));
+  await assert.rejects(prove({ operationId: randomUUID(), code }, secure), refused(409, 'server_access_confirmation_unavailable'));
+  for (const input of [{ operationId }, { operationId, code: '12345' }, { operationId, code: 123456 }, { operationId, code, extra: true }, { code }]) await assert.rejects(prove(input, secure), refused(400, 'server_access_command_invalid'));
+  assert.deepEqual(run.access.status({ managementOrigin: lan }).outside.origins, [{ origin: secure, confirmed: false }]); assert.equal(run.exits, 0);
+  // The proof.
+  run.clock.now += 120000;
+  assert.equal(run.access.status({ managementOrigin: lan }).outside.remainingMs, 180000);
+  assert.deepEqual(await prove({ operationId, code }, secure), { accepted: true, operationId, origin: secure, remaining: [] });
+  await run.access.task;
+  assert.equal(run.exits, 1, 'the restart of a save');
+  assert.equal(run.held.length, 1); assert.equal(run.held[0].operationId, operationId); assert.equal(run.held[0].actor, 'owner'); assert.equal(run.held[0].event, 'server_access_connections_ended');
+  const written = await journal(directory);
+  assert.equal(written.state, 'applying'); assert.deepEqual(written.outside.confirmed, [secure]); assert.equal(written.outside.code, null, 'the code is gone with the window');
+  assert.equal(JSON.parse(await readFile(join(directory, 'access', 'policy.json'), 'utf8')).config.https.origin, secure);
+  assert.equal(run.access.status({ managementOrigin: lan }).outside, undefined);
+  assert.deepEqual(run.records, [['server_access_outside_started', 'owner', operationId + ':' + secure], ['server_access_outside_confirmed', 'owner', operationId + ':' + secure]]);
+  await assert.rejects(prove({ operationId, code }, secure), refused(409, 'server_access_confirmation_unavailable'));
+  // The restarted server asks itself at the address it can reach, and takes the proven one as proven.
+  const second = start(directory, { healthy: origin => origin !== secure });
+  await second.access.initialize(); await second.access.resume();
+  assert.deepEqual(second.probes, [lan]); assert.equal(second.exits, 0);
+  assert.equal(second.access.status().state, 'succeeded'); assert.equal(second.config.accessConfig.primaryOrigin, secure);
+  assert.equal(second.access.provisionalAccess(requestAt(secure)), null);
+});
+
+test('a proof that does not come in time, and a save withdrawn while it waits: nothing changed, nobody was disconnected, and the door is shut again', async t => {
+  const directory = await volume(t), run = outsideRun(directory);
+  await run.access.initialize();
+  const before = run.access.status().revision, accepted = await run.outside(withHttps), code = run.access.status({ managementOrigin: lan }).outside.code;
+  run.clock.now += 299999; await new Promise(resolve => setImmediate(resolve));
+  assert.equal(run.access.status().state, 'awaiting_confirmation'); assert.ok(run.access.provisionalAccess(requestAt(secure)));
+  run.clock.now += 1;
+  assert.equal(run.access.provisionalAccess(requestAt(secure)), null, 'shut at the minute, not at the next look');
+  await assert.rejects(run.access.confirmOutside({ operationId: accepted.operationId, code }, { managementOrigin: secure }, { admitted: admittedAt(secure) }), refused(409, 'server_access_confirmation_unavailable'));
+  await run.access.task;
+  const ended = run.access.status({ managementOrigin: lan });
+  assert.equal(ended.state, 'failed'); assert.equal(ended.errorCode, 'server_access_confirmation_timeout'); assert.equal(ended.failedOrigin, secure, 'the address that was not proven is named');
+  assert.equal(ended.unchangedVerified, true); assert.equal(ended.revision, before); assert.equal(ended.pendingConfig, null); assert.equal(ended.outside, undefined);
+  assert.equal(run.exits, 0); assert.equal(run.ended, 0); assert.deepEqual(run.held, []);
+  assert.deepEqual(await readdir(join(directory, 'access')), ['journal.json'], 'no policy was written');
+  assert.deepEqual(run.records.map(row => row[0]), ['server_access_outside_started', 'server_access_outside_expired']); assert.equal(run.records[1][2], accepted.operationId + ':' + secure);
+  // The form is free again: the same change, withdrawn this time.
+  const again = await run.outside(withHttps);
+  assert.equal(run.access.awaiting(again.operationId), true);
+  const withdrawn = await run.access.cancel({ operationId: again.operationId });
+  assert.equal(withdrawn.cancelled, true);
+  const cancelled = run.access.status({ managementOrigin: lan });
+  assert.equal(cancelled.state, 'failed'); assert.equal(cancelled.errorCode, 'server_access_cancelled'); assert.equal(cancelled.unchangedVerified, true); assert.equal(cancelled.failedOrigin, undefined);
+  assert.equal(run.access.provisionalAccess(requestAt(secure)), null); assert.equal(run.access.awaiting(again.operationId), false);
+  assert.equal(run.exits, 0); assert.deepEqual(run.held, []);
+});
+
+test('a restart of the server while a save waits for its proof, or after the proof and before anything was written: nothing changed and it says so', async t => {
+  const directory = await volume(t), first = outsideRun(directory);
+  await first.access.initialize();
+  const before = first.access.status().revision, accepted = await first.outside(withHttps);
+  // The process ends here. The next one finds the save still waiting.
+  first.end();
+  const second = outsideRun(directory);
+  await second.access.initialize();
+  const interrupted = second.access.status({ managementOrigin: lan });
+  assert.equal(interrupted.state, 'failed'); assert.equal(interrupted.errorCode, 'server_access_interrupted'); assert.equal(interrupted.unchangedVerified, true);
+  assert.equal(interrupted.operationId, accepted.operationId); assert.equal(interrupted.revision, before); assert.equal(interrupted.outside, undefined);
+  assert.equal(second.access.startupOperationId, null); assert.equal(second.access.provisionalAccess(requestAt(secure)), null);
+  assert.equal(second.config.accessConfig.https.enabled, false);
+  // Proven, and then held by the server's own unfinished work: a restart there has written nothing either.
+  const third = outsideRun(directory, { activity: () => { const report = quiet(); report.activity.operations.hostUpdates = 1; return report; } });
+  await third.access.initialize();
+  const waiting = await third.outside(withHttps), code = third.access.status({ managementOrigin: lan }).outside.code;
+  await third.access.confirmOutside({ operationId: waiting.operationId, code }, { managementOrigin: secure }, { actor: 'owner', admitted: admittedAt(secure) });
+  await eventually(() => third.access.status().state === 'waiting_idle' && third.access.status().blockers?.length === 1);
+  assert.deepEqual(third.access.status().blockers, [{ code: 'server_access_host_updates_busy', count: 1 }]); assert.equal(third.held.length, 1, 'behind the fence from the proof on');
+  assert.ok(third.access.provisionalAccess(requestAt(secure)), 'the proven address keeps its console until the save ends');
+  third.end();
+  const fourth = outsideRun(directory);
+  await fourth.access.initialize();
+  assert.equal(fourth.access.status().state, 'failed'); assert.equal(fourth.access.status().errorCode, 'server_access_interrupted'); assert.equal(fourth.access.status().unchangedVerified, true);
+  assert.deepEqual(await readdir(join(directory, 'access')), ['journal.json']);
+});
+
+test('a save made at the very address under proof needs no second proof; with two addresses under proof each is proven on its own', async t => {
+  const directory = await volume(t), prepared = start(directory);
+  await prepared.access.initialize(); await prepared.change(withHttps);
+  const installed = start(directory); await installed.access.initialize(); await installed.access.resume();
+  assert.equal(installed.access.status().state, 'succeeded');
+  // The administrator works at the HTTPS address, which this server cannot reach from inside, and adds an address.
+  const run = outsideRun(directory);
+  await run.access.initialize();
+  const more = policy({ http: [lan, extra], https: [secure], primaryOrigin: secure });
+  const accepted = await run.outside(more, { managementOrigin: secure }, { admitted: admittedAt(secure) });
+  await run.access.task;
+  assert.equal(accepted.state, 'awaiting_confirmation'); assert.equal(run.exits, 1, 'the request that saved it was the proof');
+  assert.deepEqual((await journal(directory)).outside.confirmed, [secure]);
+  assert.deepEqual(run.records.map(row => row[0]), ['server_access_outside_started']);
+  // The same request without the proof that it was let in there is no proof.
+  const claimed = outsideRun(directory); await claimed.access.initialize(); await claimed.access.resume();
+  const still = policy({ http: [lan], https: [secure], primaryOrigin: secure });
+  await claimed.outside(still, { managementOrigin: secure });
+  assert.equal(claimed.access.status().state, 'awaiting_confirmation'); assert.deepEqual(claimed.access.status().outside.origins, [{ origin: secure, confirmed: false }]);
+  await claimed.access.cancel({ operationId: claimed.access.status().operationId });
+  // Both main addresses out of reach from inside: one proof each, and the save goes on with the second.
+  const outsideHttp = 'http://vdi.example.com:18480', both = policy({ http: [outsideHttp, lan], https: [secure], primaryOrigin: secure });
+  const two = outsideRun(directory, { unreached: [secure, outsideHttp] }); await two.access.initialize();
+  const pending = await two.outside(both, { managementOrigin: lan }), code = two.access.status({ managementOrigin: lan }).outside.code;
+  const first = await two.access.confirmOutside({ operationId: pending.operationId, code }, { managementOrigin: outsideHttp }, { actor: 'owner', admitted: admittedAt(outsideHttp) });
+  assert.deepEqual(first.remaining, [secure]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(two.exits, 0); assert.equal(two.access.status().state, 'awaiting_confirmation');
+  assert.deepEqual(two.access.status({ managementOrigin: lan }).outside.origins, [{ origin: secure, confirmed: false }, { origin: outsideHttp, confirmed: true }]);
+  assert.match(two.access.status({ managementOrigin: outsideHttp }).outside.code, /^\d{6}$/, 'a proven address may show the code for the other');
+  await two.access.confirmOutside({ operationId: pending.operationId, code }, { managementOrigin: secure }, { actor: 'owner', admitted: admittedAt(secure) });
+  await two.access.task;
+  assert.equal(two.exits, 1);
+});
+
+test('the proof from outside is not offered for a real fault, nor when a real fault sits beside an address that is merely out of reach', async t => {
+  const directory = await volume(t);
+  for (const reason of ['certificate', 'not_https']) {
+    const run = outsideRun(directory, { reason }); await run.access.initialize();
+    const base = run.access.status().revision, tested = await run.access.test({ config: withHttps, baseRevision: base }, run.context);
+    assert.equal(tested.confirmation, undefined, reason); assert.equal(tested.testId, undefined, reason);
+    await assert.rejects(run.access.saveOutside({ config: withHttps, testId: 'e'.repeat(64), baseRevision: base, confirm: true, outside: true }, run.context), refused(409, 'server_access_test_required'));
+  }
+  const mixed = start(directory, { reach: origin => origin === secure ? { answer: null } : { error: 'no_answer' } }); await mixed.access.initialize();
+  const tested = await mixed.access.test({ config: withHttps, baseRevision: mixed.access.status().revision }, mixed.context);
+  assert.deepEqual(tested.checks.filter(check => check.name === 'address').map(check => check.code), ['server_access_address_other_server', 'server_access_address_no_answer']);
+  assert.equal(tested.confirmation, undefined); assert.equal(tested.testId, undefined);
+  // A test every address of which was reached is saved the ordinary way, not this one.
+  const reached = start(directory); await reached.access.initialize();
+  const base = reached.access.status().revision, passed = await reached.access.test({ config: withHttps, baseRevision: base }, reached.context);
+  await assert.rejects(reached.access.saveOutside({ config: withHttps, testId: passed.testId, baseRevision: base, confirm: true, outside: true }, reached.context), refused(409, 'server_access_test_required'));
+  await assert.rejects(reached.access.saveOutside({ config: withHttps, testId: passed.testId, baseRevision: base, confirm: true }, reached.context), refused(400, 'server_access_confirmation_required'));
 });

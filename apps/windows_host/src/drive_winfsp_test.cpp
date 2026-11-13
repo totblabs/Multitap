@@ -1109,6 +1109,90 @@ void installer() {
     if (std::string(c.mode) == "current") CHECK(fake.hashes == 0);                                // an installed WinFsp is never re-verified against our MSI
   }
   { Fake current("current"); current.installedNow = false; const auto out = ensureInstalled(current, msi); CHECK(out.error.empty()); }
+  // The steps Host settings is told about (settings_progress.hpp), in the order the work is done,
+  // and only the ones that were really started.
+  {
+    using Steps = std::vector<std::string>;
+    { Fake fake(""); ensureInstalled(fake, msi); CHECK(fake.steps == (Steps{"winfsp_package", "winfsp_install", "winfsp_check"})); }
+    { Fake fake("old"); ensureInstalled(fake, msi); CHECK(fake.steps == (Steps{"winfsp_package", "winfsp_install", "winfsp_check"})); }
+    { Fake fake("current"); ensureInstalled(fake, msi); CHECK(fake.steps.empty()); }                 // nothing is installed: no step is claimed
+    { Fake fake("package-bad"); ensureInstalled(fake, msi); CHECK(fake.steps == (Steps{"winfsp_package"})); }
+    { Fake fake("install-fails"); ensureInstalled(fake, msi); CHECK(fake.steps == (Steps{"winfsp_package", "winfsp_install"})); }
+  }
+  // Windows Installer's progress messages (INSTALLMESSAGE_PROGRESS) as a position in a total.
+  {
+    using Phase = MsiProgress::Phase;
+    MsiProgress p; MsiProgressNotes notes; MsiProgressNote note;
+    CHECK(p.phase() == Phase::none && !p.measured() && !notes.next(p, note));
+    p.progress(2, 500, 0, 0); p.actionData();                         // nothing before the first reset counts
+    CHECK(p.phase() == Phase::none && p.done() == 0);
+    // Writing the script: Windows Installer's total is a guess, so no number is told.
+    p.progress(0, 1000, 0, 1); p.progress(2, 400, 0, 0);
+    CHECK(p.phase() == Phase::preparing && !p.measured());
+    CHECK(notes.next(p, note) && std::string(note.step) == "winfsp_install" && note.total == -1 && note.done == -1);
+    p.progress(2, 100, 0, 0); CHECK(!notes.next(p, note));           // still preparing: nothing new to tell
+    // The installation itself, forward: a real count.
+    p.progress(0, 2000, 0, 0);
+    CHECK(p.phase() == Phase::installing && p.measured() && p.done() == 0 && p.total() == 2000);
+    CHECK(notes.next(p, note) && std::string(note.step) == "winfsp_install" && note.done == 0 && note.total == 2000);
+    p.progress(2, 5, 0, 0); CHECK(p.done() == 5 && !notes.next(p, note));   // under a 200th: no line
+    p.progress(2, 495, 0, 0); CHECK(p.done() == 500 && notes.next(p, note) && note.done == 500 && note.total == 2000);
+    // Action data moves only after an action said how much each one is worth.
+    p.actionData(); CHECK(p.done() == 500);
+    p.progress(1, 50, 1, 0); p.actionData(); p.actionData(); CHECK(p.done() == 600);
+    p.progress(1, 50, 0, 0); p.actionData(); CHECK(p.done() == 600);
+    // The total can grow; the position never passes it and never goes below zero.
+    p.progress(3, 1000, 0, 0); CHECK(p.total() == 3000 && p.done() == 600);
+    p.progress(2, 99999, 0, 0); CHECK(p.done() == 3000 && notes.next(p, note) && note.done == 3000 && note.total == 3000);
+    // Absent fields (MSI_NULL_INTEGER) and negative ticks add nothing.
+    p.progress(0, 100, 0, 0); p.progress(2, int(0x80000000), 0, 0); p.progress(2, -7, 0, 0); p.progress(3, int(0x80000000), 0, 0);
+    CHECK(p.done() == 0 && p.total() == 100);
+    p.progress(9, 50, 0, 0); CHECK(p.done() == 0);                    // an unknown kind is ignored
+    // A rollback counts down: told as a phase, never as progress.
+    p.progress(0, 800, 1, 0); p.progress(2, 300, 0, 0);
+    CHECK(p.phase() == Phase::rollingBack && !p.measured() && p.done() == 500);
+    CHECK(notes.next(p, note) && std::string(note.step) == "winfsp_rollback" && note.total == -1);
+    p.progress(2, 300, 0, 0); CHECK(!notes.next(p, note));
+    // A total of zero is not a measure.
+    MsiProgress empty; empty.progress(0, 0, 0, 0); empty.progress(2, 10, 0, 0); CHECK(empty.phase() == Phase::installing && !empty.measured());
+    // One installation tells at most about 200 positions however many messages arrive.
+    MsiProgress many; MsiProgressNotes told; many.progress(0, 100000, 0, 0); int lines = 0;
+    for (int i = 0; i < 100000; ++i) { many.progress(2, 1, 0, 0); if (told.next(many, note)) ++lines; }
+    CHECK(lines >= 199 && lines <= 201 && many.done() == 100000);
+  }
+  // The real Windows Installer call, with a package that does not exist: Windows Installer
+  // refuses it at once, nothing is installed, no step line is invented for it, and this
+  // process's Windows Installer settings are what they were (the handler and the "no window"
+  // level are taken back). Its log has a name of its own and is removed again.
+  {
+    const std::wstring logName = L"Multitap-winfsp-fixture-" + std::to_wstring(GetCurrentProcessId()) + L".log";
+    wchar_t temp[MAX_PATH]{}; GetTempPathW(MAX_PATH, temp);
+    std::vector<std::string> written; host::settings_progress::sink() = [&](const std::string& text) { written.push_back(text); };
+    const INSTALLUILEVEL before = MsiSetInternalUI(INSTALLUILEVEL_NOCHANGE, nullptr);
+    Machine machine(logName);
+    const int code = machine.installMsi(std::wstring(temp) + L"multitap-no-such-package-" + std::to_wstring(GetCurrentProcessId()) + L".msi");
+    CHECK(code == 2 || code == 3 || code == 1619);                     // file / path not found, or "could not be opened"
+    CHECK(MsiSetInternalUI(INSTALLUILEVEL_NOCHANGE, nullptr) == before);
+    INSTALLUI_HANDLER_RECORD left = nullptr;
+    CHECK(MsiSetExternalUIRecord(nullptr, 0, nullptr, &left) == ERROR_SUCCESS && left == nullptr);
+    CHECK(written.empty());
+    host::settings_progress::sink() = nullptr;
+    DeleteFileW((std::wstring(temp) + logName).c_str());
+  }
+  // The lines themselves (settings-progress-v1): a fixed code, a measure only when it is one.
+  {
+    namespace sp = host::settings_progress;
+    CHECK(sp::line("winfsp_install") == R"({"progress":{"step":"winfsp_install"}})");
+    CHECK(sp::line("winfsp_install", 5, 20) == R"({"progress":{"step":"winfsp_install","done":5,"total":20}})");
+    CHECK(sp::line("winfsp_install", 21, 20) == R"({"progress":{"step":"winfsp_install"}})" && sp::line("winfsp_install", 0, 0) == R"({"progress":{"step":"winfsp_install"}})" && sp::line("winfsp_install", -1, 20) == R"({"progress":{"step":"winfsp_install"}})");
+    for (const char* bad : {"", "Winfsp", "a b", "a\"b", "c:\\path", "0123456789012345678901234567890123456789012345678"}) CHECK(sp::line(bad).empty());
+    std::vector<std::string> written; sp::sink() = [&](const std::string& text) { written.push_back(text); };
+    sp::step("winfsp_package"); sp::measure("winfsp_install", 1, 2); sp::step("not a code"); sp::step(nullptr);
+    CHECK(written.size() == 2 && written[0] == R"({"progress":{"step":"winfsp_package"}})" && written[1] == R"({"progress":{"step":"winfsp_install","done":1,"total":2}})");
+    sp::sink() = [](const std::string&) { throw std::runtime_error("the window is gone"); };
+    sp::step("winfsp_check");                                          // a sink that fails changes nothing
+    sp::sink() = nullptr; sp::step("winfsp_check"); CHECK(written.size() == 2);
+  }
   // The pins equal the provenance file (and so the file the build script bundles).
 #ifdef MULTITAP_WINFSP_PIN
   { std::ifstream file(MULTITAP_WINFSP_PIN, std::ios::binary); std::string text((std::istreambuf_iterator<char>(file)), {}); CHECK(!text.empty());

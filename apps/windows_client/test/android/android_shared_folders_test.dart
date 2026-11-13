@@ -31,6 +31,7 @@ import 'package:multitap_client/ui/session_panels.dart';
 import '../drive_session_test.dart' show DriveSocket, ready, sessionId;
 import '../remote_session_test.dart' show SessionMedia, SessionSocket;
 import 'android_session_contract_test.dart' show AndroidNativeFake;
+import '../helpers/pump_work.dart';
 
 const _sessionUrl = 'wss://fixture.invalid/api/v1/sessions/$sessionId';
 const _pen = MethodChannel('multitap/pen-input');
@@ -1012,7 +1013,7 @@ void main() {
       expect(tester.getSize(add).height, greaterThanOrEqualTo(48));
       expect(engine.count('pickFolder'), 0);
       await tester.tap(add);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(engine.count('pickFolder'), 1);
       expect(engine.count('open'), 1);
       // An ordinary folder is shared as picked, without another question.
@@ -1100,11 +1101,11 @@ void main() {
       await tester.tap(find.byKey(const Key('drive-add')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('drive-add-confirm-yes')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       final share = h.drive.shares.single;
 
       await tester.tap(find.byKey(ValueKey('drive-remove-${share.id}')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       final remove = find.byKey(const Key('drive-remove-confirm'));
       expect(
         find.descendant(
@@ -1118,7 +1119,7 @@ void main() {
         findsNothing,
       );
       await tester.tap(find.byKey(const Key('drive-remove-confirm-yes')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(h.drive.shares, isEmpty);
       expect(engine.open, isEmpty);
     } finally {

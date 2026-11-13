@@ -1,6 +1,8 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
 project(multitap_client LANGUAGES CXX)
+# No build-machine folder in the programs (__FILE__ in libopus, std::source_location); before any target.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../../native/cmake/msvc-source-paths.cmake")
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.

@@ -13,6 +13,7 @@ import 'package:multitap_client/data/session_windows.dart';
 import 'auth_flow_test.dart' show TestLoginMemory, fixtureOrigin;
 import 'remote_session_test.dart' show SessionSocket;
 import 'session_renewal_test.dart' show RenewingBroker, VirtualClock;
+import 'helpers/pump_work.dart';
 
 class ReplacedBroker extends RenewingBroker {
   ReplacedBroker(super.clock);
@@ -242,7 +243,9 @@ void main() {
       await t.pump();
       api.replaced = true;
       await clock.advance(t, const Duration(minutes: 5, seconds: 1));
-      await t.pumpAndSettle();
+      // The notice moves while the old windows close, so it never settles
+      // (a full settle would also run the clock into the close's time limit).
+      await pumpWork(t);
       expect(closes, 1);
       expect(
         t
@@ -250,9 +253,22 @@ void main() {
             .onPressed,
         isNull,
       );
+      // 확인 is greyed for a reason the notice says, beside a moving mark.
+      const waiting = Key('session-end-busy');
+      expect(t.widget<Text>(find.byKey(waiting)).data, '열린 연결을 닫는 중이에요');
+      expect(find.byKey(const Key('app-busy-line-spinner')), findsOneWidget);
       expect(api.manual, 1, reason: 'new owner must not race old native close');
       close.complete();
       await t.pumpAndSettle();
+      // Closed: the wait's line is gone and 확인 can be pressed.
+      expect(find.byKey(waiting), findsNothing);
+      expect(find.byKey(const Key('app-busy-line-spinner')), findsNothing);
+      expect(
+        t
+            .widget<FilledButton>(find.byKey(const ValueKey('session-end-ack')))
+            .onPressed,
+        isNotNull,
+      );
       await t.tap(find.byKey(const ValueKey('session-end-ack')));
       await t.pumpAndSettle();
       await t.enterText(

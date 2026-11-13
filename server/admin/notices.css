@@ -76,6 +76,13 @@
 /* While it counts down the only thing to do is its own 취소: the buttons of the dialog (disabled then) step aside. */
 #modal.is-announcing .modal-actions,#modal.is-announcing #modal-close{display:none}
 
+/* Up to here the board does not fit its box with every cell on one line (8 columns, one with a button): dates,
+   names and headings wrap and the cells are narrower, so nothing is cut off (a 1024 px window). */
+@media(max-width:1200px){
+  .notice-table :is(th,td){padding-left:8px;padding-right:8px;white-space:normal}
+  .notice-table td:first-child{white-space:normal}
+  .notice-cell{min-width:150px}
+}
 @media(max-width:900px){
   .notice-people{max-height:320px}
 }

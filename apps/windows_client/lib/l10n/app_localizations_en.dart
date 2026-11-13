@@ -6877,7 +6877,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get installingWinfspMayTake1 =>
-      'Installing WinFsp. This may take 1–2 minutes. Do not close this window.';
+      'Installing WinFsp. Do not close this window.';
 
   @override
   String get couldNotCheckWinfspInstall =>
@@ -8750,7 +8750,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get installsSharedFolderDriverWinfsp =>
-      'Installs the shared folder driver (WinFsp). This can take 1–2 minutes.\nIf Windows needs a restart, you are told. It does not restart automatically.';
+      'Installs the shared folder driver (WinFsp).\nIf Windows needs a restart, you are told. It does not restart automatically.';
 
   @override
   String get switchUsbConnectionMultitap =>
@@ -11825,6 +11825,159 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get proxmoxNoLongerListsVm =>
       'Proxmox no longer lists this desktop\'s VM. Let your administrator know.';
+
+  @override
+  String progressStepOf(Object index, Object count) {
+    return 'Step $index of $count';
+  }
+
+  @override
+  String get androidSigningOut => 'Signing out';
+
+  @override
+  String get androidHostUpdateRequesting => 'Requesting the update';
+
+  @override
+  String get androidHostUpdateReading =>
+      'Checking the Host release information';
+
+  @override
+  String get androidCheckingOtherConnection =>
+      'Checking for another connection';
+
+  @override
+  String get androidCheckingDesktopAgain => 'Checking the desktop again';
+
+  @override
+  String get androidOpeningConsole => 'Opening the Console';
+
+  @override
+  String get androidEndingConsole => 'Ending the Console connection';
+
+  @override
+  String get androidUpdateCheckingPackage =>
+      'Checking the setup file\'s signature';
+
+  @override
+  String get androidUpdatePreparingInstall => 'Preparing the installation';
+
+  @override
+  String get androidUpdateWaitingConfirm =>
+      'Waiting for your confirmation in the Android installer';
+
+  @override
+  String get androidUpdateInstallingNow =>
+      'Android is installing the update.\nThe app closes when it finishes. Open it again to start the new version.';
+
+  @override
+  String get androidReadingFolder => 'Reading the folder';
+
+  @override
+  String get androidChangingPassword => 'Changing the password';
+
+  @override
+  String get androidTestingServer => 'Testing the server connection';
+
+  @override
+  String get androidMouseLockConnecting =>
+      'Connecting the mouse to the desktop';
+
+  @override
+  String get tileOpeningConsole => 'Opening the Console';
+
+  @override
+  String get tileOpeningWindow => 'Opening the remote window';
+
+  @override
+  String get tileRequestingHostUpdate => 'Requesting the Host update';
+
+  @override
+  String get signingOutNow => 'Signing out';
+
+  @override
+  String get loadingDesktopList => 'Loading your desktops';
+
+  @override
+  String get updateClosingRemoteWindows => 'Closing open remote windows';
+
+  @override
+  String get sessionEndClosingConnections => 'Closing open connections';
+
+  @override
+  String get hostStepDisplayPackage =>
+      'Checking that the driver files are the originals';
+
+  @override
+  String get hostStepDisplayTrust => 'Checking the driver\'s signature';
+
+  @override
+  String get hostStepDisplayDevice =>
+      'Installing the virtual display driver. The screen may flicker briefly.';
+
+  @override
+  String get hostStepDisplayService =>
+      'Waiting for the Host service to open the virtual display';
+
+  @override
+  String get hostStepDisplayRestart => 'Restarting the Host service';
+
+  @override
+  String get hostStepWinfspPackage => 'Checking the WinFsp setup file';
+
+  @override
+  String get hostStepWinfspInstall => 'Installing WinFsp';
+
+  @override
+  String get hostStepWinfspRollback => 'Undoing the WinFsp installation';
+
+  @override
+  String get hostStepWinfspWaiting =>
+      'Waiting for another installation to finish';
+
+  @override
+  String get hostStepWinfspCheck => 'Checking the installed WinFsp';
+
+  @override
+  String get hostStepUsbRemove => 'Removing the other USB connection feature';
+
+  @override
+  String get hostStepUsbInstall =>
+      'Installing the Multitap USB connection feature';
+
+  @override
+  String get hostPhaseTestingServer =>
+      'Connecting to the server and waiting for its answer.';
+
+  @override
+  String get hostPhaseRequestingServer =>
+      'Sending the connection request to the server and waiting for its answer.';
+
+  @override
+  String get hostPhaseRestartingService =>
+      'Stopping the Host service and starting it again. Do not close this window.';
+
+  @override
+  String get hostCheckingInstallResult => 'Checking the installation';
+
+  @override
+  String get hostPhaseCheckingInstallResult =>
+      'Checking in Windows what was installed.';
+
+  @override
+  String get hostCheckingRequestResult => 'Checking the request\'s result';
+
+  @override
+  String get hostPhaseCheckingRequestResult =>
+      'Reading how the Windows auto sign-in request ended.';
+
+  @override
+  String get hostApprovalWaitingLine =>
+      'Waiting for approval. This window moves on as soon as it is approved.';
+
+  @override
+  String hostProgressPercent(Object percent) {
+    return '$percent%';
+  }
 
   @override
   String usbUnreadableDevices(Object count) {

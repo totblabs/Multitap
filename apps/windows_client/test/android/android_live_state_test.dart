@@ -8,6 +8,7 @@ import 'package:multitap_client/models/stream_preparation.dart';
 import '../workspace_live_state_test.dart' show LiveUpdates;
 import 'android_launcher_test.dart'
     show FakeBroker, MemoryStore, vm, mainButton;
+import '../helpers/pump_work.dart';
 
 BrokerDesktop state(String vmState, {String power = 'running'}) {
   final base = vm(power: power, stream: false);
@@ -51,13 +52,13 @@ void main() {
         desktopWatchFactory: updates == null ? null : (_, _) => updates,
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await tester.enterText(
       find.byKey(const Key('sign-in-password')),
       'secret-pass',
     );
     await tester.tap(find.byKey(const Key('login-submit')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     return broker;
   }
 

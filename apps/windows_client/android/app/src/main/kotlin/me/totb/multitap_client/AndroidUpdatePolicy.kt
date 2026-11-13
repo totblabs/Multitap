@@ -61,9 +61,16 @@ internal object AndroidUpdatePolicy {
     /**
      * Copies exactly [size] bytes and returns the SHA-256 (hex) of the bytes
      * written, or null when the source is shorter or longer. The installer
-     * receives precisely the bytes that were hashed.
+     * receives precisely the bytes that were hashed. [progress] hears the
+     * bytes written so far after each block (the measure the update dialog
+     * shows); it never changes what is copied.
      */
-    fun copyVerified(input: InputStream, output: OutputStream, size: Long): String? {
+    fun copyVerified(
+        input: InputStream,
+        output: OutputStream,
+        size: Long,
+        progress: ((Long) -> Unit)? = null,
+    ): String? {
         val sha = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(64 * 1024)
         var total = 0L
@@ -74,6 +81,7 @@ internal object AndroidUpdatePolicy {
             if (total > size) return null
             sha.update(buffer, 0, read)
             output.write(buffer, 0, read)
+            progress?.invoke(total)
         }
         if (total != size) return null
         return sha.digest().joinToString("") { "%02x".format(it) }

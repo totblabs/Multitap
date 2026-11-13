@@ -83,6 +83,14 @@ class Access {
   virtual void wait(unsigned long milliseconds)=0;
   // True when the Host service was observed running again as a new process.
   virtual bool restartService()=0;
+  // The step that starts now, for whoever shows it (settings_progress.hpp):
+  //   display_package  this Host's driver package is compared with the pinned original;
+  //   display_trust    the publisher's certificate and the catalog's signature;
+  //   display_device   Windows creates the device and installs the driver (the long one);
+  //   display_service  the running Host service is given time to open the device;
+  //   display_restart  it did not, and is restarted.
+  // It says what install() is about to do and changes nothing.
+  virtual void step(const char*){}
 };
 // How long the running service gets to take a newly selected device before it
 // is restarted (it normally opens the device about 2 s after the selection).
@@ -177,6 +185,7 @@ inline Result install(Access& access,bool confirmed,bool trustConfirmed){
   Result out;
   const auto fail=[&](const std::string& reason){out.error=reason.empty()?std::string("unknown"):reason;return out;};
   if(!confirmed)return fail("confirmation_required");
+  access.step("display_package");
   if(const auto package=access.package();!package.empty())return fail(package);
   const auto previous=access.selection();
   if(previous.present&&!previous.valid)return fail("native_selection_invalid");
@@ -192,6 +201,7 @@ inline Result install(Access& access,bool confirmed,bool trustConfirmed){
     // Unknown is never permission to create another root node.
     if(inspection.presence!="absent")return fail("native_selected_device_unverified");
   }
+  access.step("display_trust");
   std::vector<std::string> added;
   // Only the entries this run added; a certificate that was there stays.
   const auto distrust=[&]{for(const auto& store:added){access.removeCertificate(store);access.forgetTrust(store);}if(!added.empty())out.certificate="removed";added.clear();};
@@ -232,6 +242,7 @@ inline Result install(Access& access,bool confirmed,bool trustConfirmed){
     if(devices.inspect(recorded).presence=="present"&&access.boundInf(recorded)==multitap::pnp::Driver165InfSha){instance=recorded;break;}
   }
   if(instance.empty()){
+    access.step("display_device");
     const auto installed=devices.install(access.inf(),instance,restart);
     if(!installed.empty()){
       // Every code but pnp_install_failed is returned before Windows registered a
@@ -267,9 +278,12 @@ inline Result install(Access& access,bool confirmed,bool trustConfirmed){
       access.wait(AdoptionPollMs);
     }
   };
+  access.step("display_service");
   if(adopted()){out.service="adopted";return out;}
   out.restartAttempted=true;
+  access.step("display_restart");
   if(access.restartService()){out.service="restarted";return out;}
+  access.step("display_service");
   out.service=adopted()?"adopted":"unverified";
   return out;
 }

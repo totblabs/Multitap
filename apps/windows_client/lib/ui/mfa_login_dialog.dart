@@ -237,6 +237,8 @@ class _MfaLoginDialogState extends State<MfaLoginDialog> {
         titleKey: const Key('mfa-title'),
         subtitle: widget.challenge.origin.host,
         icon: Icons.verified_user_outlined,
+        // The code is with the server: the icon turns until it answers.
+        busy: _busy,
         onClose: _cancel,
         closeKey: const Key('mfa-close'),
         maxWidth: 440,

@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(MultitapDisplay VERSION 0.1.9 LANGUAGES CXX)
+# No build-machine folder in the program (__FILE__, std::source_location); before any target.
+include(../../native/cmake/msvc-source-paths.cmake)
 add_executable(MultitapDisplay display.cpp)
 target_compile_features(MultitapDisplay PRIVATE cxx_std_20)
 target_compile_definitions(MultitapDisplay PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)

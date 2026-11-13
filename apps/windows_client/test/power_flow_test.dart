@@ -10,6 +10,7 @@ import 'package:multitap_client/ui/workspace_shell.dart';
 
 import 'auth_flow_test.dart' show TestBroker;
 import 'power_api_test.dart' show taskId;
+import 'helpers/pump_work.dart';
 
 BrokerDesktop desktop({
   String state = 'stopped',
@@ -150,14 +151,14 @@ void main() {
         serverOrigin: Uri.parse('https://cloud.example.com'),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await tester.enterText(find.byKey(const Key('sign-in-id')), 'qa-user');
     await tester.enterText(
       find.byKey(const Key('sign-in-password')),
       'qa-password',
     );
     await tester.tap(find.byKey(const Key('login-submit')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
   }
 
   testWidgets(
@@ -218,7 +219,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       workspace = tester.widget<WorkspaceShell>(find.byType(WorkspaceShell));
       expect(api.actions, ['shutdown', 'stop']);
       expect(workspace.machines.single.powerState, 'stopped');
@@ -233,9 +234,9 @@ void main() {
         ..assigned = [desktop(state: 'running', canForceStop: true)];
       await login(tester, api);
       await tester.tap(find.byKey(const Key('desktop-power-qa-vm')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.tap(find.byKey(const Key('power-stop-qa-vm')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(api.submitted, 0, reason: '정지 asks first.');
       expect(find.text('데스크톱을 정지할까요?'), findsOneWidget);
       await tester.tap(find.byKey(const Key('confirm-power-stop-qa-vm')));
@@ -243,7 +244,7 @@ void main() {
       expect(api.submitted, 1);
       expect(api.action, 'stop');
       await tester.pump(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
     },
   );
   testWidgets(
@@ -287,20 +288,20 @@ void main() {
       final api = PowerBroker()..assigned = [desktop(state: 'running')];
       await login(tester, api);
       await tester.tap(find.byKey(const Key('desktop-power-qa-vm')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       final reboot = tester.widget<MenuItemButton>(
         find.byKey(const Key('power-reboot-qa-vm')),
       );
       expect(reboot.onPressed, isNotNull, reason: 'Reboot must be offered.');
       await tester.tap(find.byKey(const Key('power-reboot-qa-vm')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(api.submitted, 0, reason: 'Reboot asks first.');
       await tester.tap(find.byKey(const Key('confirm-power-reboot-qa-vm')));
       await tester.pump();
       expect(api.submitted, 1);
       expect(api.action, 'reboot');
       await tester.pump(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
     },
   );
   testWidgets(
@@ -309,7 +310,7 @@ void main() {
       final api = PowerBroker()..assigned = [desktop(state: 'running')];
       await login(tester, api);
       await tester.tap(find.byKey(const Key('desktop-power-qa-vm')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byKey(const Key('power-reboot-qa-vm')), findsOneWidget);
       final context = tester.element(find.byType(WorkspaceShell));
       unawaited(
@@ -318,14 +319,14 @@ void main() {
           builder: (_) => const AlertDialog(key: Key('fixture-dialog')),
         ),
       );
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byKey(const Key('fixture-dialog')), findsOneWidget);
       expect(find.byKey(const Key('power-reboot-qa-vm')), findsNothing);
       Navigator.of(tester.element(find.byKey(const Key('fixture-dialog')))).pop();
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       // The account menu is closed the same way.
       await tester.tap(find.byKey(const Key('workspace-account')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byKey(const Key('sign-out')), findsOneWidget);
       unawaited(
         showDialog<void>(
@@ -333,7 +334,7 @@ void main() {
           builder: (_) => const AlertDialog(key: Key('fixture-dialog')),
         ),
       );
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byKey(const Key('fixture-dialog')), findsOneWidget);
       expect(find.byKey(const Key('sign-out')), findsNothing);
       expect(tester.takeException(), isNull);
@@ -371,7 +372,7 @@ void main() {
         ];
       await login(tester, api);
       await tester.tap(find.byKey(const Key('desktop-power-qa-vm')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(
         tester
             .widget<MenuItemButton>(find.byKey(const Key('power-reboot-qa-vm')))
@@ -379,13 +380,13 @@ void main() {
         isNotNull,
       );
       await tester.tap(find.byKey(const Key('power-reboot-qa-vm')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.tap(find.byKey(const Key('confirm-power-reboot-qa-vm')));
       await tester.pump();
       expect(api.submitted, 1);
       expect(api.action, 'reboot');
       await tester.pump(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
     },
   );
   testWidgets(
@@ -396,7 +397,7 @@ void main() {
       expect(find.text('켜기'), findsWidgets);
       expect(find.text('켜고 연결'), findsNothing);
       await t.tap(find.byKey(const Key('start-qa-vm')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.text('데스크톱을 켤까요?'), findsOneWidget);
       expect(api.submitted, 0, reason: 'The main action asks once first.');
       await t.tap(find.byKey(const Key('confirm-power-start-qa-vm')));
@@ -404,7 +405,7 @@ void main() {
       expect(api.submitted, 1);
       expect(api.action, 'start');
       await t.pump(const Duration(seconds: 1));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(api.submitted, 1);
       expect(
         t
@@ -441,7 +442,7 @@ void main() {
         ),
       );
       await tester.pump(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await operation;
       workspace = tester.widget<WorkspaceShell>(find.byType(WorkspaceShell));
       expect(api.submitted, 1);
@@ -475,7 +476,7 @@ void main() {
       expect(api.submitted, 0);
       api.assigned = [desktop()];
       workspace.onRefresh();
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       workspace = tester.widget<WorkspaceShell>(find.byType(WorkspaceShell));
       api.failTask = true;
       final failed = expectLater(
@@ -490,7 +491,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await failed;
       expect(api.submitted, 1);
       expect(api.polls, 1);

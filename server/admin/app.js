@@ -32,7 +32,7 @@ for (const node of document.querySelectorAll('[data-icon]')) node.replaceChildre
 const state = { user: null, csrf: '', route: { page: 'overview', id: null }, data: null, loading: false, pveBusy: false, pveError: '', pveLoaded: false, onboarding: null,
   serverInfo: null, serverInfoLoading: false, serverInfoError: '', serverUpdatePending: false, serverUpdateSubmitting: false, serverRestart: null,
   resources: new Map(), ui: {}, expanded: new Map(), assignmentSaving: false };
-let modalRevision = 0, serverInfoRevision = 0, serverInfoAt = 0, serverApplyAt = 0, serverUpdateTimer = null, hostUpdateTimer = null, pollTimer = null, serverLost = false;
+let modalRevision = 0, serverInfoRevision = 0, serverInfoAt = 0, serverApplyAt = 0, serverUpdateTimer = null, hostUpdateTimer = null, pollTimer = null, serverLost = false, serverLostAt = 0;
 let modalDraftDirty = () => false;
 // One line for the sign-in page, set by what is about to end this sign-in on
 // purpose (a restore: the accounts become the backup's).
@@ -119,7 +119,9 @@ const resourceDef = name => { const index = name.indexOf(':'), kind = index < 0 
 // A notice with an action ({ label, run }) also stays until it is closed.
 let noticeTimer = null;
 function notice(text, error = false, action = null) {
+  // data-passing: a notice that goes away by itself lets the pointer through to what it covers (console.css).
   const node = $('#notice'); placeNotice(); node.hidden = !text; node.className = error ? 'is-error' : 'is-success';
+  if (text && !error && !action) node.setAttribute('data-passing', ''); else node.removeAttribute('data-passing');
   node.replaceChildren(...(text ? [icon(error ? 'alert' : 'check'), el('span', { class: 'notice-text' }, text), ...(action ? [el('button', { type: 'button', class: 'notice-action', onclick: action.run }, action.label)] : []), el('button', { type: 'button', class: 'icon-button notice-close', 'aria-label': t('app.2'), onclick: () => notice('') }, icon('x'))] : []));
   clearTimeout(noticeTimer); noticeTimer = null;
   if (text && !error && !action) {
@@ -132,6 +134,19 @@ function notice(text, error = false, action = null) {
     };
     noticeTimer = setTimeout(hide, 6000); noticeTimer.unref?.();
   }
+}
+// The server stopped answering. Said on every page once it has lasted (a save of 서버 접속 설정 or 서버 다시 시작
+// takes a second or two and says so itself); the pages keep asking and come back by themselves.
+const serverLostNoticeMs = 4000;
+function lostServer() { if (!serverLost) serverLostAt = Date.now(); serverLost = true; renderServerChip(); }
+// The server does not answer, and nothing this page asked for (a restart, an update) explains it: the sidebar's dot
+// and 업데이트 say so at once, the banner after serverLostNoticeMs (renderExpiryBanner).
+const serverDown = () => !!state.user && serverLost && !state.serverRestart && !state.serverUpdatePending;
+function renderServerChip() {
+  const chip = $('.server-chip'); if (!chip) return;
+  const down = serverDown();
+  if (down) { chip.setAttribute('data-server-down', ''); chip.setAttribute('title', t('app.serverLost')); }
+  else { chip.removeAttribute('data-server-down'); chip.removeAttribute('title'); }
 }
 const adminReadTimeoutMs = 15000;
 function readTimeoutError() {
@@ -161,13 +176,15 @@ async function api(path, method = 'GET', data, { accept } = {}) {
     };
     let response;
     try { response = await fetch('/api/v1/admin' + path, { method, credentials: 'same-origin', headers: { 'Accept-Language': lang, ...(data !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(state.csrf ? { 'X-CSRF-Token': state.csrf } : {}) }, body: data === undefined ? undefined : JSON.stringify(data), ...(signal ? { signal } : {}) }); }
-    catch { current(); serverLost = true; throw new Error(t('app.4')); }
+    catch { current(); lostServer(); throw new Error(t('app.4')); }
     current();
     // A restarting server (or its proxy) answers without JSON: recheck its version once it is back.
-    let body; try { body = await response.json(); } catch { current(); serverLost = true; throw new Error(t('app.5')); }
+    let body; try { body = await response.json(); } catch { current(); lostServer(); throw new Error(t('app.5')); }
     current();
     if (!response.ok) {
-      if (response.status === 401 && path !== '/login') showLogin();
+      // The sign-in ended under an open console (it ran out, or was ended elsewhere): the login screen says so, and
+      // what was typed and not saved is kept for the same administrator's next sign-in (keepDrafts).
+      if (response.status === 401 && path !== '/login') { const signedIn = !!state.user, kept = signedIn && keepDrafts(); showLogin(); if (signedIn) $('#login-error').textContent = kept ? t('app.signedOutKept') : t('app.signedOut'); }
       // A page that needs Proxmox goes to the Proxmox step; the other first-setup pages stay where they are.
       if (sessionCurrent(owner) && body.error?.code === 'proxmox_setup_required') { state.onboarding = { proxmoxRequired: true, complete: false }; if (!firstSetupPages.includes(state.route.page)) state.route = { page: 'proxmox', id: null }; if (state.data) render(); }
       const error = new Error((typeof body.error?.code === 'string' && Object.hasOwn(messages, body.error.code) ? messages[body.error.code] : null) || t('app.6')); error.code = body.error?.code; error.status = response.status; throw error;
@@ -178,7 +195,7 @@ async function api(path, method = 'GET', data, { accept } = {}) {
   catch (error) {
     if (error?.code === 'admin_read_timeout') {
       if (!sessionCurrent(owner)) throw sessionChanged();
-      serverLost = true;
+      lostServer();
     }
     throw error;
   }
@@ -205,7 +222,7 @@ async function load(name, { force = false, maxAge } = {}) {
   if (!state.user) return;
   const { kind, id } = resourceDef(name), def = resourceDefs[kind];
   if (!def) return;
-  const entry = state.resources.get(name) ?? { value: null, error: '', loading: false, at: 0 };
+  const entry = state.resources.get(name) ?? { value: null, error: '', code: null, loading: false, at: 0 };
   state.resources.set(name, entry);
   if (entry.loading || (!force && entry.at && Date.now() - entry.at < (maxAge ?? def.maxAge ?? 9000))) return;
   const owner = sessionOwner(); entry.loading = true;
@@ -216,8 +233,8 @@ async function load(name, { force = false, maxAge } = {}) {
     else result = await api(def.path(id));
     if (!sessionCurrent(owner)) return;
     if (!def.valid(result)) throw new Error(t('app.7'));
-    entry.value = result; entry.error = '';
-  } catch (error) { if (!sessionCurrent(owner)) return; entry.error = error.message || t('app.8'); }
+    entry.value = result; entry.error = ''; entry.code = null;
+  } catch (error) { if (!sessionCurrent(owner)) return; entry.error = error.message || t('app.8'); entry.code = typeof error.code === 'string' ? error.code : null; }
   finally { if (sessionCurrent(owner) && state.resources.get(name) === entry) { entry.loading = false; entry.at = Date.now(); } }
   // Redrawn when what the answer says changed; with nothing changed, once a minute, so "3분 전" keeps moving.
   const changed = resourceShape(entry) !== before;
@@ -294,7 +311,63 @@ function resetAdminMfa() {
   if ($('#admin-mfa-mode')) $('#admin-mfa-mode').textContent = t('app.9');
   if ($('#admin-mfa-error')) $('#admin-mfa-error').textContent = '';
 }
-function showLogin({ completedMfa } = {}) {
+// What a sign-in that ended would lose: the unsaved 서버 접속 설정, an open form's typed fields and a 공지 being
+// written. Kept in this tab (sessionStorage) for the same administrator and put back after signing in again; never
+// a password, a code or a typed confirmation. Storage that is refused keeps nothing.
+const draftKey = 'multitap-admin-drafts';
+const draftParts = ['serverAccess', 'dialog', 'notices'];
+const privateField = node => ['password', 'hidden', 'file'].includes(node.type) || /pass|code|secret|token|otp|recovery|confirm/i.test(node.name ?? '');
+let keptDrafts = null;
+let modalTyped = () => [];
+function keepDrafts() {
+  const user = state.user; if (!user) return false;
+  const kept = { user: user.id };
+  const access = state.ui.serverAccess;
+  if (access?.owner === user && access.dirty === true && access.draft && !access.saving) kept.serverAccess = { draft: access.draft, baseRevision: access.baseRevision, applied: access.applied ?? null };
+  const fields = modalTyped();
+  if (fields.length) kept.dialog = { title: $('#modal-title').textContent, fields };
+  const notices = state.ui.notices;
+  if (notices && (notices.title?.trim() || notices.body?.trim()) && !notices.sending) kept.notices = Object.fromEntries(['target', 'user', 'desktop', 'kind', 'title', 'body', 'when'].filter(key => typeof notices[key] === 'string').map(key => [key, notices[key]]).concat([['composing', notices.composing === true]]));
+  if (!draftParts.some(part => kept[part])) return false;
+  try { globalThis.sessionStorage.setItem(draftKey, JSON.stringify(kept)); return true; } catch { return false; }
+}
+function writeDrafts() {
+  try {
+    const store = globalThis.sessionStorage;
+    if (keptDrafts && draftParts.some(part => keptDrafts[part])) store.setItem(draftKey, JSON.stringify(keptDrafts));
+    else if (typeof store?.removeItem === 'function') store.removeItem(draftKey); else store?.setItem(draftKey, '');
+  } catch { /* Nothing is kept, nothing is put back. */ }
+}
+// At a sign-in: what this administrator kept. Another administrator's is dropped, not shown.
+function readDrafts(user) {
+  let kept = null;
+  try { const text = globalThis.sessionStorage.getItem(draftKey); kept = text ? JSON.parse(text) : null; } catch { kept = null; }
+  keptDrafts = kept && typeof kept === 'object' && kept.user === user.id ? kept : null;
+  if (!keptDrafts) writeDrafts();
+}
+// A page that puts a kept part back takes it (once) and the toast says so.
+function takeDraft(part) {
+  const value = keptDrafts?.[part];
+  if (!value || typeof value !== 'object') return null;
+  delete keptDrafts[part]; writeDrafts();
+  notice(t('app.draftsBack'));
+  return value;
+}
+function forgetDrafts() { keptDrafts = null; writeDrafts(); }
+// The sign-in page's one line on how to begin the first setup: only while the server says the setup is still to be
+// done (GET /api/v1/admin/first-setup, a boolean), so it is never shown after it.
+let firstSetupTicket = 0;
+function showFirstSetupLine(asked) {
+  const line = $('#login-first-setup'), ticket = ++firstSetupTicket;
+  if (!line) return;
+  line.hidden = true;
+  if (!asked) return;
+  void fetch('/api/v1/admin/first-setup', { credentials: 'omit', headers: { Accept: 'application/json' } })
+    .then(response => response.ok ? response.json() : null)
+    .then(answer => { if (ticket === firstSetupTicket && !state.user && globalThis.document === ownDocument && answer?.pending === true) line.hidden = false; })
+    .catch(() => {});
+}
+function showLogin({ completedMfa, entering = false } = {}) {
   accountSecurityController?.retire({ preserveResult: completedMfa });
   resetAdminMfa();
   sessionGeneration++; inventoryRevision++; refreshRevision++;
@@ -315,11 +388,13 @@ function showLogin({ completedMfa } = {}) {
   showSetupRestore(false);
   const announce = $('#login-notice'); if (announce) { announce.textContent = loginNotice; announce.hidden = !loginNotice; }
   if ($('#modal').open) $('#modal').close();
+  modalTyped = () => []; keptDrafts = null;
+  showFirstSetupLine(!entering);
 }
 async function enter(session) {
   // Retire every prior owner (including same-account re-login) before exposing
   // its replacement. The synchronous reset cannot run an old promise's finally.
-  showLogin();
+  showLogin({ entering: true });
   loginNotice = ''; if ($('#login-notice')) $('#login-notice').hidden = true;
   state.user = session.user; state.csrf = session.csrfToken;
   const owner = sessionOwner();
@@ -331,6 +406,14 @@ async function enter(session) {
   $('#current-user').textContent = session.user.username;
   $('#server-origin').textContent = globalThis.location.host;
   $('#login').hidden = true; $('#setup').hidden = true; $('#console').hidden = false;
+  // What this administrator typed before the last sign-in ended (keepDrafts): the pages put their part back; a form
+  // that was open is filled when it is opened again, which the toast says.
+  readDrafts(session.user);
+  if (keptDrafts?.dialog && typeof keptDrafts.dialog.title === 'string') notice(t('app.draftDialog', { title: keptDrafts.dialog.title }));
+  // A link 서버 접속 설정 gives out to prove an address from outside carries its code after the page's name
+  // (js/server-access.js outsideLink): kept for that page, and gone from the address bar with the line below.
+  const proving = /^#\/server-access\/confirm-(\d{6})$/.exec(globalThis.location.hash ?? '');
+  if (proving) state.ui.accessConfirmCode = proving[1];
   state.route = parseHash(globalThis.location.hash);
   if (setupRequired() && !firstSetupPages.includes(state.route.page)) state.route = { page: 'proxmox', id: null };
   // An older address (#/hosts, #/sessions, #/activity …) shows its new one.
@@ -339,6 +422,15 @@ async function enter(session) {
   startPolling();
   await refresh();
   if (!sessionCurrent(owner)) return;
+  // Opened by its bare address (typed on a phone, no link): the console is at an address a save of 서버 접속 설정 is
+  // waiting to have proven. The page that asks for the code is the one to show, not 홈.
+  if (!proving && state.route.page !== 'server-access') {
+    await load('serverAccess');
+    if (!sessionCurrent(owner)) return;
+    const access = value('serverAccess'), here = access?.managementOrigin;
+    renderExpiryBanner();
+    if ((access?.pending?.state ?? access?.state) === 'awaiting_confirmation' && typeof here === 'string' && Array.isArray(access.outside?.origins) && access.outside.origins.some(row => row?.origin === here && row.confirmed === false) && access.outside.code == null) navigate('server-access');
+  }
   loadPage();
   if (!setupRequired()) for (const name of ['hosts', 'hostRequests']) void load(name);
   if (hostUpdatesActive()) scheduleHostUpdatePoll();
@@ -358,7 +450,9 @@ async function loadServerInfo() {
     if (!sessionCurrent(owner) || revision !== serverInfoRevision) return;
     if (info.service !== 'multitap-broker' || typeof info.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(info.version) || !['unknown', 'docker', 'systemd', 'external'].includes(info.deployment?.kind) || typeof info.update?.feedConfigured !== 'boolean' || typeof info.update?.applySupported !== 'boolean' || !Number.isFinite(Date.parse(info.checkedAt))) throw Error(t('app.10'));
     state.serverInfo = info; state.serverInfoError = ''; $('#broker-version').textContent = info.version; $('#server-version-header').textContent = info.version;
-    serverUpdateBadge.update(info, badgeTicket); serverLost = false;
+    // It is back: a toast that only said it was gone goes with it.
+    if (serverLost && [t('app.4'), t('app.5')].includes($('#notice .notice-text')?.textContent)) notice('');
+    serverUpdateBadge.update(info, badgeTicket); serverLost = false; renderServerChip();
     // 서버 다시 시작: the server that answers now started after the one that was asked to end.
     if (state.serverRestart && info.startedAt !== state.serverRestart.startedAt) { state.serverRestart = null; notice(t('app.restarted')); }
     followServerVersion(info.version);
@@ -369,7 +463,9 @@ async function loadServerInfo() {
     if (!sessionCurrent(owner) || revision !== serverInfoRevision) return;
     serverUpdateBadge.fail(badgeTicket);
     if (!state.serverUpdatePending && !state.serverRestart) { state.serverInfo = null; $('#broker-version').textContent = '—'; $('#server-version-header').textContent = t('common.17'); }
-    state.serverInfoError = state.serverUpdatePending || state.serverRestart ? t('app.11') : t('app.12');
+    // A server that does not answer at all is said once, steadily, by serverDown() (업데이트, the sidebar, the banner);
+    // this error is for a server that answered wrongly.
+    state.serverInfoError = state.serverUpdatePending || state.serverRestart ? t('app.11') : serverDown() ? '' : t('app.12');
   } finally {
     if (sessionCurrent(owner) && revision === serverInfoRevision) {
       state.serverInfoLoading = false; if (usesServerInfo() && state.data) render(); else { renderExpiryBanner(); renderUpdateBadge(); }
@@ -633,6 +729,12 @@ function renderExpiryBanner() {
   const items = [], proxmox = state.data?.proxmox, tls = state.serverInfo?.tlsCertificate;
   const tokenDays = proxmox?.configured ? daysUntil(proxmox.expiresAt) : null, tlsDays = tls?.expiresAt ? daysUntil(tls.expiresAt) : null;
   const certificate = overview.proxmoxCertificateNotice(proxmox);
+  // The server started without its saved access settings (src/config.mjs): apps and Hosts are shut out until an
+  // address is saved again. Said on every page, first; 서버 접속 설정 is where it is mended.
+  const access = value('serverAccess');
+  if (typeof access?.policyUnreadable === 'string' && access.policyUnreadable) items.push(['bad', 'alert', t('app.accessUnreadable'), t('app.accessUnreadableFix'), 'server-access']);
+  if (state.data && serverDown() && Date.now() - serverLostAt >= serverLostNoticeMs) items.unshift(['bad', 'alert', t('app.serverLost'), t('app.serverLostFix'), null]);
+  renderServerChip();
   if (certificate) items.push([certificate.tone, 'shield', certificate.title, certificate.text, 'proxmox']);
   if (tokenDays !== null && tokenDays <= 30) items.push([tokenDays <= 7 ? 'bad' : 'warn', 'key', tokenDays <= 0 ? t('common.18') : t('common.19', { tokenDays }), t('app.20'), 'proxmox']);
   if (tlsDays !== null && tlsDays <= 14) items.push([tlsDays <= 3 ? 'bad' : 'warn', 'shield', tlsDays <= 0 ? t('app.21') : t('app.22', { tlsDays }), t('app.23'), null]);
@@ -912,6 +1014,26 @@ function modal(title, descriptors, action, { save = t('common.20'), description 
     .map(node => ({ node, value: node.value, checked: node.checked }));
   modalDraftDirty = () => dialog.open && initialFields.some(({ node, value, checked }) =>
     ['checkbox', 'radio'].includes(node.type) ? node.checked !== checked : node.value !== value);
+  // What a sign-in that ends would keep of this form (keepDrafts): the typed fields that are not private.
+  const ticked = node => ['checkbox', 'radio'].includes(node.type);
+  modalTyped = () => !(dialog.open && current()) ? [] : initialFields.filter(({ node, value, checked }) => node.name && !privateField(node) && (ticked(node) ? node.checked !== checked : node.value !== value))
+    .map(({ node }) => ticked(node) ? { name: node.name, value: node.value, checked: node.checked } : { name: node.name, value: node.value });
+  // The same form opened again after such a sign-in: what was typed is put back (once).
+  const kept = keptDrafts?.dialog;
+  if (kept && kept.title === title && Array.isArray(kept.fields)) {
+    let filled = 0;
+    for (const field of kept.fields) {
+      if (!field || typeof field.name !== 'string' || typeof field.value !== 'string') continue;
+      const node = initialFields.map(row => row.node).find(item => item.name === field.name && !privateField(item) && (item.type !== 'radio' || item.value === field.value));
+      if (!node) continue;
+      if (ticked(node)) node.checked = field.checked === true; else node.value = field.value;
+      const Event = node.ownerDocument?.defaultView?.Event ?? globalThis.Event;
+      for (const type of ['input', 'change']) try { node.dispatchEvent(new Event(type, { bubbles: true })); } catch { /* the value is in place */ }
+      filled++;
+    }
+    delete keptDrafts.dialog; writeDrafts();
+    if (filled) notice(t('app.draftsBack'));
+  }
   $('#modal-save').textContent = save; $('#modal-save').className = danger ? 'danger' : 'primary';
   const controls = [$('#modal-save'), $('#modal-close'), $('#modal-cancel'), ...submitControls];
   controls.forEach(node => node.disabled = false); gate();
@@ -969,7 +1091,7 @@ const desktopById = id => state.data?.desktops.find(d => d.id === id) ?? null;
 const userByName = name => state.data?.users.find(u => u.username === name) ?? null;
 const userById = id => state.data?.users.find(u => u.id === id) ?? null;
 const ctx = { state, api, render, navigate, link, hashFor, modal, confirmAction, modalCurrent, submitModal, pageAction, notice, change, refresh, syncProxmox, readProxmoxStatus, setupRequired, load, resource, value,
-  loadServerInfo, checkServerUpdate, applyServerUpdate, restartServer, scheduleHostUpdatePoll, searchInput, pageHeader, desktopById, userByName, userById, productRelease,
+  loadServerInfo, checkServerUpdate, applyServerUpdate, restartServer, serverDown, takeDraft, scheduleHostUpdatePoll, searchInput, pageHeader, desktopById, userByName, userById, productRelease,
   announceAtLogin: text => { loginNotice = typeof text === 'string' ? text : ''; },
   openAccountSecurity: () => { if (state.user && !setupRequired()) void accountSecurityController.open(); } };
 
@@ -1127,7 +1249,7 @@ $('#setup-form').addEventListener('submit', async event => {
     $('#login-form').elements.username.value = input.username;
     // A success message, so it uses the success tone rather than the error style of this field.
     $('#login-error').textContent = t('app.39'); $('#login-error').className = 'form-message is-success';
-  } catch (error) { if (sessionCurrent(owner)) { $('#setup-error').textContent = error.message; form.elements.password.value = ''; form.elements.confirmation.value = ''; if (/^(setup_code_|too_many_setup)/.test(error.code ?? '')) form.elements.setupCode.focus?.(); } }
+  } catch (error) { if (sessionCurrent(owner)) { $('#setup-error').textContent = error.message; const codeRefused = /^(setup_code_|too_many_setup)/.test(error.code ?? ''); /* Only the code was wrong: what else was typed stays. */ if (!codeRefused) { form.elements.password.value = ''; form.elements.confirmation.value = ''; } else form.elements.setupCode.focus?.(); } }
   finally { if (sessionCurrent(owner)) buttons.forEach(node => node.disabled = false); input.password = ''; input.confirmation = ''; input.setupCode = ''; }
 });
 $('#setup-restore-open')?.addEventListener('click', () => { if (state.user?.mustChangeCredentials) showSetupRestore(true); });
@@ -1140,7 +1262,7 @@ $('#nav-toggle').addEventListener('click', () => setNav(!$('#console').classList
 $('#nav-scrim').addEventListener('click', () => setNav(false, { restoreFocus: true }));
 $('#nav-close').addEventListener('click', () => setNav(false, { restoreFocus: true }));
 $('.skip-link').addEventListener('click', event => { event.preventDefault(); $('#content').focus?.(); });
-$('#logout').addEventListener('click', async () => { const owner = sessionOwner(); accountSecurityController.retire(); resetAdminMfa(); try { await api('/logout', 'POST'); if (sessionCurrent(owner)) showLogin(); } catch (error) { if (sessionCurrent(owner)) notice(error.message, true); } });
+$('#logout').addEventListener('click', async () => { const owner = sessionOwner(); accountSecurityController.retire(); resetAdminMfa(); try { await api('/logout', 'POST'); if (sessionCurrent(owner)) { forgetDrafts(); showLogin(); } } catch (error) { if (sessionCurrent(owner)) notice(error.message, true); } });
 $('#modal-close').onclick = $('#modal-cancel').onclick = () => { modalRevision++; $('#modal-form').reset(); $('#modal-fields').replaceChildren(); $('#modal').close(); };
 // Back/forward and edited addresses.
 const followHash = () => {

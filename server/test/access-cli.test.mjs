@@ -32,7 +32,9 @@ test('show prints the addresses in use and what the container fixes; set replace
   const shown = await f.run('show');
   assert.equal(shown.code, 0);
   assert.deepEqual(shown.values, { ok: '1', source: 'env', revision: f.load().accessRevision, primary: lan, https: '', http: lan, trustedProxies: '127.0.0.1,::1', follow: '0', followed: '', followOffered: '1',
-    tlsMode: 'proxy', publishedHost: '0.0.0.0', publishedPort: '18480', serverAddress: '192.0.2.10', pending: '', envAddressesIgnored: '0' });
+    tlsMode: 'proxy', publishedHost: '0.0.0.0', publishedPort: '18480', serverAddress: '192.0.2.10', pending: '', envAddressesIgnored: '0',
+    // Media over UDP: the saved switch, what .env fixes instead, and what a start uses (udp-derived-relays.test.mjs).
+    udpMedia: '0', udpMediaEnv: '', udpMediaInUse: 'off' });
   assert.deepEqual(await f.files(), [], 'reading writes nothing');
 
   // The HTTPS address is the primary one unless another is named, as the .env lines have it.

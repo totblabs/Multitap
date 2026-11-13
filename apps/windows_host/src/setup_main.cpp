@@ -698,7 +698,7 @@ bool unattendedSelfTests(){
   // No downgrade: the fixed code reaches the app as itself and the message is text in the person's language.
   expect(seamlessFailureCode("update_not_newer")=="update_not_newer"&&std::wstring(DowngradeMessage()).find(koreanUi()?L"낮은 버전":L"older than the installed")!=std::wstring::npos,"downgrade-code-and-message");
   expect(unattendedDowngradeRefusedAt(std::filesystem::path(),"0.0.1")==false,"downgrade-nothing-installed");
-  expect(!multitap::relaunch::ValidCode("C:\\Users\\secret")&&!multitap::relaunch::ValidCode("install failed"),"seamless-code-reject");
+  expect(!multitap::relaunch::ValidCode("C:\\Temp\\secret")&&!multitap::relaunch::ValidCode("install failed"),"seamless-code-reject");
   expect(koreanTo(L"0.4.62")==L"0.4.62로"&&koreanTo(L"0.2.60")==L"0.2.60으로"&&koreanTo(L"0.2.53")==L"0.2.53으로"&&koreanTo(L"1.0.1")==L"1.0.1로","korean-particle");
   std::printf("{\"kind\":\"unattended-update-decisions\",\"passed\":%s,\"installerExecuted\":false,\"windowsChanged\":false}\n",ok?"true":"false");
   return ok;

@@ -160,6 +160,117 @@ void main() {
     expect(tester.widget<FilledButton>(getConfirm()).onPressed, isNull);
     expect(find.textContaining('상태가 바뀌었어요'), findsOneWidget);
   });
+  testWidgets('reading the release says what it is doing, not a bare spinner', (
+    tester,
+  ) async {
+    final pending = Completer<ProductRelease?>();
+    await open(tester, () => pending.future);
+    await tester.pump();
+    const loading = Key('android-host-update-loading');
+    expect(
+      tester.widget<Text>(find.byKey(loading)).data,
+      'Host 배포 정보를 확인하는 중이에요',
+    );
+    expect(tester.widget<FilledButton>(getConfirm()).onPressed, isNull);
+    pending.complete(release('0.2.81'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(loading), findsNothing);
+    expect(find.text('이 버전의 Host 변경 내역'), findsOneWidget);
+  });
+
+  // The request used to be sent after the dialog had closed, with nothing on
+  // screen until the server answered.
+  group('the update request', () {
+    late Completer<void> answer;
+    late List<String> requested;
+    Object? result;
+    Future<void> ask(WidgetTester tester) async {
+      answer = Completer<void>();
+      requested = [];
+      result = 'open';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () async {
+                  result = await showDialog<ProductRelease>(
+                    context: context,
+                    builder: (_) => AndroidHostUpdateDialog(
+                      origin: Uri.parse('https://vdi.example'),
+                      machine: 'VM',
+                      currentVersion: '0.2.80',
+                      targetVersion: '0.2.81',
+                      sessionActive: false,
+                      isCurrent: () => true,
+                      loadRelease: () async => release('0.2.81'),
+                      request: (release) {
+                        requested.add(release.version);
+                        return answer.future;
+                      },
+                    ),
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(getConfirm());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    const requesting = Key('android-host-update-requesting');
+    final dialog = find.byKey(const Key('android-host-update-dialog'));
+
+    testWidgets('keeps the dialog open and says so until it is answered', (
+      tester,
+    ) async {
+      await ask(tester);
+      expect(requested, ['0.2.81']);
+      expect(dialog, findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(requesting)).data,
+        '업데이트를 요청하는 중이에요',
+      );
+      expect(find.byKey(const Key('app-busy-line-spinner')), findsOneWidget);
+      // The notes give way to the line, and the request is not sent twice.
+      expect(find.text('이 버전의 Host 변경 내역'), findsNothing);
+      expect(tester.widget<FilledButton>(getConfirm()).onPressed, isNull);
+      // Leaving does not take the request back: 닫기, not 취소.
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('android-host-update-cancel')),
+          matching: find.text('닫기'),
+        ),
+        findsOneWidget,
+      );
+      expect(result, 'open');
+      answer.complete();
+      await tester.pumpAndSettle();
+      expect(dialog, findsNothing);
+      expect((result as ProductRelease).version, '0.2.81');
+    });
+
+    testWidgets('closed while it is sent: the answer closes nothing else', (
+      tester,
+    ) async {
+      await ask(tester);
+      await tester.tap(find.byKey(const Key('android-host-update-cancel')));
+      await tester.pumpAndSettle();
+      expect(dialog, findsNothing);
+      expect(result, isNull);
+      answer.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('open'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   testWidgets('metadata completion after disposal does not update the view', (
     tester,
   ) async {

@@ -22,10 +22,13 @@ export function validateDeploymentKind(value = 'unknown') {
 // each side sends. A self-managed Docker install with neither list derives
 // them (`derivedPort`): each side is given the address it already reaches the
 // server at, on the UDP port Docker publishes (MULTITAP_UDP_PUBLISHED_PORT, as
-// compose passes it). Media then goes over UDP unless MULTITAP_UDP_MEDIA says
-// otherwise. Not derived while that port is not told or is published on
-// loopback only: sessions stay on WebSocket, as with empty lists anywhere.
-function udpRelayConfiguration(env, selfManaged = false) {
+// compose passes it). Not derived while that port is not told or is published
+// on loopback only: sessions stay on WebSocket, as with empty lists anywhere.
+// Media goes over UDP only where it is turned on: MULTITAP_UDP_MEDIA where it
+// is set (`on`, `off` or a list of desktops), else the switch a self-managed
+// install saves with its access settings (`saved`), else off. With it off the
+// relay still answers, so whether its port is reached can be seen first.
+function udpRelayConfiguration(env, selfManaged = false, saved = false) {
   const port = env.MULTITAP_UDP_PORT, host = env.MULTITAP_UDP_HOST || '0.0.0.0';
   if (!port) return null;
   if (!/^[1-9]\d{0,4}$/.test(port) || Number(port) > 65535) throw Error('invalid_udp_port');
@@ -37,8 +40,10 @@ function udpRelayConfiguration(env, selfManaged = false) {
   const relays = { host: parseUdpRelays(env.MULTITAP_UDP_HOST_RELAYS), client: parseUdpRelays(env.MULTITAP_UDP_CLIENT_RELAYS) };
   const published = selfManaged && !relays.host.length && !relays.client.length ? /^(?:(\d{1,3}(?:\.\d{1,3}){3}):)?([1-9]\d{0,4})$/.exec(env.MULTITAP_UDP_PUBLISHED_PORT ?? '') : null;
   const derivedPort = published && Number(published[2]) <= 65535 && (published[1] === undefined || (isIPv4(published[1]) && !published[1].startsWith('127.'))) ? Number(published[2]) : null;
-  return { port: Number(port), host, allowPeerDirect: false, stun, media: derivedPort !== null && !env.MULTITAP_UDP_MEDIA ? true : parseUdpMediaScope(env.MULTITAP_UDP_MEDIA), relays, ...(derivedPort !== null ? { derivedPort } : {}) };
+  return { port: Number(port), host, allowPeerDirect: false, stun, media: env.MULTITAP_UDP_MEDIA ? parseUdpMediaScope(env.MULTITAP_UDP_MEDIA) : saved === true, relays, ...(derivedPort !== null ? { derivedPort } : {}) };
 }
+// What .env fixes for media over UDP, as the console names it; null where it says nothing.
+const udpMediaEnv = env => !env.MULTITAP_UDP_MEDIA ? null : env.MULTITAP_UDP_MEDIA === 'on' ? 'on' : env.MULTITAP_UDP_MEDIA === 'off' ? 'off' : 'desktops';
 
 // host-route-v1: where Hosts inside this network reach the public origin, so a router
 // that loops traffic for its own public address back (hairpin NAT) is skipped. Hosts
@@ -180,11 +185,11 @@ export function configuration(env = process.env, { readAccessFile = readProtecte
   if (bytes !== null && self) {
     try {
       // The container's listener, TLS mode and certificate paths are not the policy's to choose.
-      const { config, updatedAt, publicIp, envSeed } = decodeSelfPolicy(bytes, self.fixed);
+      const { config, updatedAt, publicIp, envSeed, udpMedia } = decodeSelfPolicy(bytes, self.fixed);
       const identity = self.read(accessIdentityFile, 128);
       if (identity === null) throw Error('server_access_identity_missing');
       if (!/^[a-f0-9]{64}$/.test(identity.trim())) throw Error('server_access_identity_invalid');
-      saved = { schema: 1, protocol: config.protocol, revision: serverAccessHash(config), config, updatedAt }; self.publicIp = publicIp; self.savedEnvSeed = envSeed;
+      saved = { schema: 1, protocol: config.protocol, revision: serverAccessHash(config), config, updatedAt }; self.publicIp = publicIp; self.savedEnvSeed = envSeed; self.udpMedia = udpMedia;
     } catch (error) {
       // A saved policy this container cannot use (damaged, written by another
       // version, without its installation ID, or not servable here) does not
@@ -224,6 +229,7 @@ export function configuration(env = process.env, { readAccessFile = readProtecte
   if (!saved && !unreadable && legacyEnv.MULTITAP_PUBLIC_ORIGIN) {
     try { legacyPublicOrigin = normalizeBrokerOrigin(legacyEnv.MULTITAP_PUBLIC_ORIGIN, { allowInsecureHttp: env.MULTITAP_ALLOW_INSECURE_HTTP === '1' }); } catch { /* A saved policy supersedes stale legacy settings. */ }
   }
+  const udp = udpRelayConfiguration(env, self !== null, self?.udpMedia === true);
   const accessOperationId = env.MULTITAP_ACCESS_OPERATION_ID || null;
   if (accessOperationId !== null && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(accessOperationId)) throw Error('server_access_operation_invalid');
   return {
@@ -238,15 +244,18 @@ export function configuration(env = process.env, { readAccessFile = readProtecte
     deploymentKind,
     updateSocket: env.MULTITAP_UPDATE_SOCKET || null,
     // Set for a self-managed Docker install only: where it keeps its policy,
-    // what the container fixes, whether it follows the public IP, the .env
+    // what the container fixes, whether it follows the public IP, whether its
+    // saved switch lets media go over UDP (`udpMedia`; `udpSwitch`: whether the
+    // relay runs here at all, and the value .env fixes instead), the .env
     // address lines of now (`envSeed`) and of the last save (`savedEnvSeed`),
     // and whether lines edited since then are being ignored.
-    selfAccess: self ? { ...self, saved: saved !== null, unreadable, publicIp: self.publicIp ?? { follow: false, origin: null }, revision: selfPolicyRevision(accessConfig, self.publicIp),
+    selfAccess: self ? { ...self, saved: saved !== null, unreadable, publicIp: self.publicIp ?? { follow: false, origin: null }, udpMedia: self.udpMedia === true, udpSwitch: { relay: udp !== null, env: udpMediaEnv(env) },
+      revision: selfPolicyRevision(accessConfig, self.publicIp, self.udpMedia === true),
       envSeed: selfEnvSeed(env), savedEnvSeed: self.savedEnvSeed ?? null, envAddressesIgnored: saved !== null && ignoredEnvAddresses(env, saved, self.fixed, self.savedEnvSeed ?? null) } : null,
     // Docker Compose installs without an updater socket: the signed public
     // release feed that docker-update-check.mjs reads (null = no check).
     dockerUpdateFeed: dockerUpdateFeed(env.MULTITAP_DOCKER_UPDATE_FEED),
-    udp: udpRelayConfiguration(env, self !== null),
+    udp,
     hostRoute: hostRoute(env.MULTITAP_HOST_ROUTE),
   };
 }

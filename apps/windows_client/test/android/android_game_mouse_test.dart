@@ -633,6 +633,23 @@ void main() {
     await tester.tap(find.byKey(const Key('game-mouse-dialog-ok')));
     await _settle(tester);
     expect(h.capture.engages, 0, reason: 'waits while the VM takes the mouse');
+    // The wait is said on the picture; nothing moved there before.
+    const waiting = Key('android-game-mouse-waiting');
+    expect(find.byKey(waiting), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(waiting),
+        matching: find.text('마우스를 데스크톱에 연결하는 중이에요'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(waiting),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
     h.usbSocket.emit({'type': 'usb.attached', 'device': attach['device']});
     await _settle(tester);
     expect(h.usbNative.devices, [attach['device']]);
@@ -640,6 +657,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     await _settle(tester);
     expect(h.capture.engages, 1);
+    expect(find.byKey(waiting), findsNothing);
     expect(find.textContaining('롤 같은 일부 게임에서는'), findsNothing);
     // Off: the VM's mouse goes away again.
     await _back(tester);

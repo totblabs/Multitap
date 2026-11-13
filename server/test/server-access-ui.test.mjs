@@ -138,7 +138,7 @@ test('exact test/confirmed-save DTO, local NAT assistance and GET-proven applied
   assert.deepEqual(f.writes[1], { path: '/server-access/save', method: 'POST', body: {
     config: tested.body.config, testId: 'fixture-test', baseRevision: rev, confirm: true,
   } });
-  assert.match(f.find('[data-access-draft-status]').textContent, /연결을 끊고 새 설정을 적용하고 있어요/);
+  assert.match(f.find('[data-access-draft-status]').textContent, /새 설정을 적용하고 있어요/);
   assert.equal(f.find('[data-access-cancel]'), null, 'nothing to cancel while it is simply applying');
   assert.equal(f.find('[data-access-save]').disabled, true);
   assert.equal(f.document.body.textContent.includes('새 설정이 적용된 것을 확인'), false);
@@ -421,8 +421,8 @@ const waitingSnapshot = (extra = {}) => response({ state: 'waiting_idle', operat
 test('a save that is ending connections says so at the top of the form and offers no cancel', t => {
   const f = fixture(t, { snapshot: waitingSnapshot() });
   const editor = f.find('.server-access-editor'), text = editor.textContent;
-  assert.equal(f.find('[data-access-waiting]').textContent, '연결을 끊고 적용하는 중이에요. 잠시 기다려 주세요.');
-  assert.ok(text.indexOf('연결을 끊고 적용하는 중') < text.indexOf('HTTPS 접속'), 'shown above the endpoints');
+  assert.equal(f.find('[data-access-waiting]').textContent, '새 설정을 적용하고 있어요. 보통 몇 초면 끝나요.');
+  assert.ok(text.indexOf('새 설정을 적용하고 있어요. 보통') < text.indexOf('HTTPS 접속'), 'shown above the endpoints');
   assert.equal(f.find('[data-access-cancel]'), null);
   assert.equal(f.find('[name="http.enabled"]').disabled, true);
   assert.equal(f.find('[data-access-test]').disabled, true);
@@ -432,15 +432,16 @@ test('a save that is ending connections says so at the top of the form and offer
 test('the one confirmation says how many people are connected and that their connections end', async t => {
   const description = async snapshot => { const f = fixture(t, { snapshot }); await testedHttp(f); f.find('[data-access-save]').click(); return f.dialogs[0].options.description; };
   assert.equal(await description(response({ connections: { people: 3, sessions: 4, consoles: 0 } })),
-    '접속 중인 3명의 연결이 끊겨요. 저장한 뒤 바로 적용해요.\nHTTP는 로그인 정보와 화면을 암호화하지 않아요.\nHost·앱 주소는 직접 바꿔 주세요. 계정·데스크톱 배정은 유지돼요.');
+    '접속 중인 3명의 연결이 끊겨요. 서버가 몇 초 동안 다시 시작될 수 있어요.\nHTTP는 로그인 정보와 화면을 암호화하지 않아요.\nHost·앱 주소는 직접 바꿔 주세요. 계정·데스크톱 배정은 유지돼요.');
   const nobody = await description(response({ connections: { people: 0, sessions: 0, consoles: 0 } }));
-  assert.match(nobody, /^저장한 뒤 바로 적용해요\.\n/); assert.doesNotMatch(nobody, /끊겨요/);
-  assert.match(await description(response()), /^접속 중인 연결은 끊겨요\. 저장한 뒤 바로 적용해요\.\n/, 'a server that sends no count still says connections end');
+  // Nobody connected: nothing ends, and the restart the save may cause is still said before the click.
+  assert.match(nobody, /^저장하면 바로 적용해요\. 서버가 몇 초 동안 다시 시작될 수 있어요\.\n/); assert.doesNotMatch(nobody, /끊겨요/);
+  assert.match(await description(response()), /^접속 중인 연결은 끊겨요\. 서버가 몇 초 동안 다시 시작될 수 있어요\.\n/, 'a server that sends no count still says connections end');
   for (const text of [nobody, await description(response({ connections: { people: 12, sessions: 12, consoles: 1 } }))]) assert.equal(text.split('\n').length, 3, 'two or three short lines');
   // HTTPS only: the middle line is about the console itself.
   const f = fixture(t, { snapshot: response({ connections: { people: 1, sessions: 1, consoles: 0 } }) });
   f.change('https.origin', 'https://new.fixture'); f.find('[data-access-test]').click(); await flush(); f.find('[data-access-save]').click();
-  assert.equal(f.dialogs[0].options.description, '접속 중인 1명의 연결이 끊겨요. 저장한 뒤 바로 적용해요.\n관리자 페이지 연결이 잠시 끊길 수 있어요.\nHost·앱 주소는 직접 바꿔 주세요. 계정·데스크톱 배정은 유지돼요.');
+  assert.equal(f.dialogs[0].options.description, '접속 중인 1명의 연결이 끊겨요. 서버가 몇 초 동안 다시 시작될 수 있어요.\n관리자 페이지 연결이 잠시 끊길 수 있어요.\nHost·앱 주소는 직접 바꿔 주세요. 계정·데스크톱 배정은 유지돼요.');
 });
 
 test('a save held by the server\'s own work shows the reason in plain words, a bounded wait and a cancel that withdraws it', async t => {
@@ -740,7 +741,7 @@ test('집 밖에서 접속하려면 holds only its steps after an edit (no "null
   assert.equal([...f.find('[data-access-outside-steps]').childNodes].every(node => node.nodeType === 1), true);
   assert.doesNotMatch(f.find('[data-access-outside-steps]').textContent, /null/);
 });
-test('a Docker Compose install shows, read-only, whether the screen goes over UDP and where apps and Hosts send', t => {
+test('a Docker Compose install shows whether picture and sound go over UDP and where apps and Hosts send, whatever the switch says', t => {
   const derived = { running: true, port: 18481, derivedPort: 28481, media: 'on', relays: { host: [], client: [] }, hostRoute: null };
   const applied = dockerPolicy({ extraOrigins: ['http://203.0.113.7:8080', 'http://[2001:db8::10]:18480'] }, { enabled: true, origin: 'https://vdi.example.com', listenPort: 18480 });
   const f = fixture(t, { snapshot: docker({ applied, udpMedia: derived }) });
@@ -751,7 +752,7 @@ test('a Docker Compose install shows, read-only, whether the screen goes over UD
   // One endpoint per address in use, on the published UDP port; an IPv6 address has none.
   assert.equal(f.find('[data-access-udp-endpoints]').textContent, '보내는 곳 · vdi.example.com:28481, 192.0.2.10:28481, 203.0.113.7:28481');
   assert.equal(f.find('[data-access-udp-router]').textContent, '공유기 포트 포워딩 · UDP 28481 → 이 서버\n안 하면 밖에서는 화면이 TCP로 가요.');
-  assert.equal(panel().querySelector('input,textarea,select,button'), null, 'nothing to edit');
+  assert.equal(panel().querySelector('input,textarea,select,button'), null, 'a server that reports no switch shows none');
   // The router note of 공인 IP 따라가기 names the same published port.
   f.change('http.followPublicIp', true);
   assert.match(f.find('[data-access-follow-router]').textContent, /TCP 18480, UDP 28481 → 이 서버/);
@@ -760,7 +761,7 @@ test('a Docker Compose install shows, read-only, whether the screen goes over UD
   for (const [udpMedia, kind, text] of [
     // MULTITAP_UDP_MEDIA decides while it is set.
     [{ ...derived, media: 'desktops' }, 'derived', '서버 .env의 MULTITAP_UDP_MEDIA에 정한 데스크톱만 UDP로 보내요.'],
-    [{ ...derived, media: 'off' }, 'derived-off', '꺼 두었어요. 화면은 TCP로 가요.\n서버 .env의 MULTITAP_UDP_MEDIA가 off예요.'],
+    [{ ...derived, media: 'off' }, 'derived-off', '주소는 정해져 있지만 화면은 UDP로 보내지 않아요.\n서버 .env의 MULTITAP_UDP_MEDIA를 확인하세요.'],
     // Relay lists from .env.
     [{ ...derived, derivedPort: null, relays: lists }, 'configured', '쓰고 있어요.\n서버의 .env에 정한 주소로 보내요.'],
     [{ ...derived, derivedPort: null, relays: lists, media: 'off' }, 'configured', '주소는 정해져 있지만 화면은 UDP로 보내지 않아요.\n서버 .env의 MULTITAP_UDP_MEDIA를 확인하세요.'],
@@ -771,9 +772,9 @@ test('a Docker Compose install shows, read-only, whether the screen goes over UD
     f.state.ui = {}; f.setSnapshot(docker({ applied, udpMedia }));
     assert.equal(state().getAttribute('data-access-udp'), kind.replace('-off', ''), JSON.stringify(udpMedia));
     if (text) assert.equal(state().textContent, text);
-    assert.equal(!!f.find('[data-access-udp-router]'), kind === 'derived');
-    // Turned off, nothing is sent anywhere: no endpoint and no port to forward.
-    if (kind === 'derived-off') assert.equal(f.find('[data-access-udp-endpoints]'), null);
+    assert.equal(!!f.find('[data-access-udp-router]'), kind.startsWith('derived'));
+    // Turned off, the relay still answers: where a session would send, and the port to forward, stay in view.
+    if (kind === 'derived-off') assert.equal(f.find('[data-access-udp-endpoints]').textContent, '보내는 곳 · vdi.example.com:28481, 192.0.2.10:28481, 203.0.113.7:28481');
     if (kind === 'configured') assert.equal(f.find('[data-access-udp-endpoints]').textContent, 'Host가 보내는 곳 · 192.0.2.10:18481, vdi.example.com:18481\n앱이 보내는 곳 · vdi.example.com:18481');
     if (kind === 'off') assert.equal(f.find('[data-access-udp-endpoints]'), null);
   }
@@ -814,4 +815,101 @@ test('a server that started without its saved policy says so on the page, where 
   assert.equal(f.find('[name="http.origin"]').value, 'http://192.0.2.10:18480', 'the address the console is open at is the suggestion');
   assert.ok(f.find('[data-access-test]')); assert.ok(f.find('[data-access-save]'));
   for (const snapshot of [docker(), docker({ applied: null }), docker({ policyUnreadable: '' }), response()]) { f.state.ui = {}; f.setSnapshot(snapshot); assert.equal(f.find('[data-access-unreadable]'), null); }
+});
+
+test('a save after a test that could not try the address itself says so in its confirmation; one whose addresses were reached does not', async t => {
+  const f = fixture(t, { handler: async path => path.endsWith('/test') ? modernTest : { accepted: true, operationId: 'fixture-operation', state: 'waiting_idle' } });
+  await testedHttp(f);
+  f.find('[data-access-save]').click();
+  const warned = f.dialogs[0].fields.map(field => field.node).filter(node => node?.hasAttribute?.('data-access-save-unverified'));
+  assert.equal(warned.length, 1);
+  assert.equal(warned[0].textContent, '주소는 저장한 뒤에 확인해요.\n닿지 않으면 이전 설정으로 돌아가요.');
+  // The server tried the addresses at the test: nothing is left unchecked, and the result names them.
+  const reached = { ...modernTest, checks: [{ name: 'configuration', status: 'passed' }, { name: 'managed_installation', status: 'passed' }, { name: 'address', origin: 'http://broker.fixture:18490', status: 'passed', code: 'server_access_address_reached' }] };
+  const g = fixture(t, { handler: async path => path.endsWith('/test') ? reached : { accepted: true, operationId: 'fixture-operation', state: 'waiting_idle' } });
+  await testedHttp(g);
+  assert.equal(g.find('[data-access-test-status]').textContent, '서버가 주소에 닿는 것을 확인했어요.\n저장할 수 있어요.');
+  assert.deepEqual([...g.document.querySelectorAll('.server-access-checks li span')].map(node => node.textContent), ['설정 형식', '설치 방식', 'http://broker.fixture:18490이 서버로 연결돼요.']);
+  g.find('[data-access-save]').click();
+  assert.equal(g.dialogs[0].fields.some(field => field.node?.hasAttribute?.('data-access-save-unverified')), false);
+});
+
+test('an address check the page cannot read is not shown as a result: its address and where it came from are bounded', async t => {
+  for (const check of [{ name: 'address', origin: 'h'.repeat(3000), status: 'failed', code: 'server_access_address_closed' }, { name: 'address', origin: 'https://vdi.example.com', peer: '<b>172.18.0.1</b>', status: 'failed', code: 'server_access_address_proxy_untrusted' }]) {
+    const f = fixture(t, { handler: async () => ({ ...modernTest, testId: undefined, checks: [{ name: 'configuration', status: 'passed' }, check] }) });
+    await testedHttp(f);
+    assert.equal(f.find('.server-access-error').textContent, '검사 응답을 확인하지 못했어요. 다시 검사하세요.');
+    assert.equal(f.find('[data-access-save]').disabled, true);
+  }
+  // A proxy the server does not trust is named, so it can be added to the list.
+  const f = fixture(t, { handler: async () => ({ ...modernTest, testId: undefined, checks: [{ name: 'configuration', status: 'passed' }, { name: 'address', origin: 'https://vdi.example.com', peer: '172.18.0.1', status: 'failed', code: 'server_access_address_proxy_untrusted' }] }) });
+  await testedHttp(f);
+  assert.equal(f.find('[data-access-address-check="failed"]').textContent, 'https://vdi.example.com프록시(172.18.0.1)가 ‘신뢰할 프록시 IP’에 없어요. 추가한 뒤 다시 테스트하세요.');
+  assert.match(f.find('[data-access-test-status]').textContent, /닿지 못했어요\.\n저장하지 않았고, 지금 연결은 그대로예요\./);
+  assert.equal(f.find('[data-access-save]').disabled, true);
+});
+
+// ---- the switch for picture and sound over UDP ----
+const udpRelay = (extra = {}) => ({ running: true, port: 18481, derivedPort: 18481, media: 'off', sessions: 0, bindings: 0, relays: { host: [], client: [] }, hostRoute: null, ...extra });
+const udpSwitch = (extra = {}) => ({ saved: false, relay: true, env: null, ...extra });
+
+test('UDP로 화면과 소리 보내기: off until an administrator turns it on, said honestly, and saved by a test and a save that end nobody\'s connection', async t => {
+  const answers = { test: null };
+  const f = fixture(t, { snapshot: docker({ udpMedia: udpRelay(), udpSwitch: udpSwitch() }), handler: async path => path.endsWith('/test') ? answers.test : { accepted: true, operationId: 'switch-operation', state: 'waiting_idle' } });
+  const box = () => f.find('[name="udpMedia"]');
+  assert.equal(f.find('.server-access-udp .server-access-switch span').textContent, 'UDP로 화면과 소리 보내기');
+  assert.equal(box().getAttribute('role'), 'switch'); assert.ok(!box().checked, 'off on an install that never said'); assert.equal(box().disabled, false);
+  assert.equal(f.find('[data-access-udp]').textContent, '꺼져 있어요. 화면과 소리는 TCP로 가요.\nUDP 포트에 닿는지는 켜기 전에 아래에서 볼 수 있어요.');
+  assert.equal(f.find('[data-access-udp-help]').textContent, '패킷이 조금 빠져도 화면이 멈추지 않게 하려는 전송 방식이에요.\n새 기능이고, 아직 실제로 오래 써 보지 않았어요. UDP가 닿지 않는 연결은 TCP로 가요.');
+  assert.equal(f.find('[data-access-udp-effect]').textContent, '켜거나 꺼도 서버를 다시 시작하지 않고, 연결도 끊기지 않아요.\n켜면 새로 연결하는 세션부터 UDP로 보내고, 끄면 연결 중인 세션도 TCP로 돌아갈 수 있어요.');
+  // What is needed for it stays in view while it is off: where a session would send, the port to forward, and who reaches it now.
+  assert.equal(f.find('[data-access-udp-endpoints]').textContent, '보내는 곳 · 192.0.2.10:18481');
+  assert.equal(f.find('[data-access-udp-router]').textContent, '공유기 포트 포워딩 · UDP 18481 → 이 서버\n안 하면 밖에서는 화면이 TCP로 가요.');
+  assert.equal(f.find('[data-access-udp-reach]').textContent, '세션이 연결되면 UDP 포트에 닿는지 여기에 보여요.');
+  assert.equal(f.find('[data-access-save]').disabled, true);
+  // Turned on: an edit like any other, tested and saved.
+  f.change('udpMedia', true);
+  assert.equal(f.find('[data-access-draft-status]').textContent, '편집 중 · 아직 적용하지 않았어요.');
+  answers.test = { testId: '1'.repeat(64), baseRevision: rev, configHash: '2'.repeat(64), scope: 'preflight', requiresRestart: true, addressesUnchanged: true, expiresAt: '1970-01-01T00:17:40.000Z',
+    checks: [{ name: 'configuration', status: 'passed' }, { name: 'managed_installation', status: 'passed' }] };
+  f.find('[data-access-test]').click(); await flush();
+  assert.equal(f.writes[0].body.config.udpMedia, true); assert.deepEqual({ ...f.writes[0].body.config, udpMedia: undefined }, { ...dockerPolicy(), udpMedia: undefined }, 'the addresses as they are');
+  assert.equal(f.find('[data-access-test-status]').textContent, '저장할 수 있어요.\n주소는 그대로라 서버를 다시 시작하지 않고, 연결도 끊기지 않아요.');
+  f.find('[data-access-save]').click();
+  assert.equal(f.dialogs[0].options.description, '주소는 그대로예요.\n서버를 다시 시작하지 않고, 연결도 끊기지 않아요.');
+  assert.equal(f.dialogs[0].options.danger, false); assert.deepEqual(f.dialogs[0].fields, [], 'nobody is disconnected: nobody to tell first');
+  await f.dialogs[0].action(); await flush();
+  assert.equal(f.writes[1].body.config.udpMedia, true);
+  assert.equal(f.find('[data-access-waiting]'), null, 'no "ending connections"'); assert.equal(f.find('[data-access-draft-status]').textContent, '새 설정을 적용하고 있어요. 완료 상태를 기다려 주세요.');
+  // Applied: the server reports it in use, and the page is not "edited" any more.
+  f.setSnapshot(docker({ revision: nextRev, applied: { ...dockerPolicy(), udpMedia: true }, state: 'applied', operationId: 'switch-operation', udpMedia: udpRelay({ media: 'on', sessions: 2, bindings: 3 }), udpSwitch: udpSwitch({ saved: true }) }));
+  assert.equal(f.find('[data-access-draft-status]').textContent, '새 설정이 적용된 것을 확인했어요.'); assert.equal(box().checked, true);
+  assert.equal(f.find('[data-access-udp]').textContent, '쓰고 있어요.\n앱과 Host는 자기가 접속한 주소의 UDP 18481 포트로 보내요.');
+  assert.equal(f.find('[data-access-udp-reach]').textContent, '지금 세션 2개 · UDP 포트에 닿은 쪽 3곳\n한 세션은 앱과 Host 두 쪽이 모두 닿아야 UDP로 보낼 수 있어요.');
+  // Off again goes without the key, as an install that never had it.
+  f.change('udpMedia', false);
+  answers.test = { ...answers.test, testId: '3'.repeat(64), baseRevision: nextRev };
+  f.find('[data-access-test]').click(); await flush();
+  assert.equal(Object.hasOwn(f.writes[2].body.config, 'udpMedia'), false);
+});
+
+test('UDP로 화면과 소리 보내기 fixed by .env: shown with its value and not to be changed here; no switch where the relay does not run or the install has an updater', t => {
+  for (const [env, media, checked, value] of [['on', 'on', true, 'on'], ['off', 'off', false, 'off'], ['desktops', 'desktops', true, '데스크톱 목록']]) {
+    const f = fixture(t, { snapshot: docker({ udpMedia: udpRelay({ media }), udpSwitch: udpSwitch({ env, saved: env === 'off' }) }) });
+    const box = f.find('[name="udpMedia"]');
+    assert.equal(box.disabled, true, env); assert.equal(!!box.checked, checked, env);
+    assert.equal(f.find('[data-access-udp-fixed]').textContent, '서버 .env의 MULTITAP_UDP_MEDIA(' + value + ')로 정해져 있어요.\n여기서 바꾸려면 .env에서 그 줄을 지우세요.', env);
+    assert.equal(f.find('[data-access-udp-effect]'), null, env); assert.ok(f.find('[data-access-udp-help]'), env);
+    if (env === 'off') assert.equal(f.find('[data-access-udp]').textContent, '꺼 두었어요. 화면은 TCP로 가요.\n서버 .env의 MULTITAP_UDP_MEDIA가 off예요.');
+    // The saved value is not sent as an edit of this page.
+    assert.equal(f.find('[data-access-save]').disabled, true, env);
+  }
+  // No relay (no UDP port in the container), a relay that is down, or a switch report the page cannot read: the state, and no switch.
+  for (const snapshot of [docker({ udpMedia: null, udpSwitch: udpSwitch({ relay: false }) }), docker({ udpMedia: udpRelay({ running: false }), udpSwitch: udpSwitch() }), docker({ udpMedia: udpRelay(), udpSwitch: { saved: 'yes', relay: true, env: null } }),
+    docker({ udpMedia: udpRelay(), udpSwitch: udpSwitch({ env: 'sometimes' }) }), docker({ udpMedia: udpRelay({ derivedPort: null }), udpSwitch: udpSwitch() })]) {
+    const f = fixture(t, { snapshot });
+    assert.equal(f.find('[name="udpMedia"]'), null); assert.ok(f.find('[data-access-udp]'));
+  }
+  const updater = fixture(t, { snapshot: response({ udpMedia: udpRelay(), udpSwitch: udpSwitch() }) });
+  assert.equal(updater.find('.server-access-udp'), null);
 });

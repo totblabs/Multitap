@@ -3,12 +3,14 @@
 # Output: .artifacts\host-installer\<version>-<time>\ (package.msi, the EXE, build.json)
 param(
   [Parameter(Mandatory)][string]$Msi,
-  [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version
+  [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
+  # Where the <version>-<time> folder goes (a scratch build for checks names another folder).
+  [string]$OutRoot = '.artifacts\host-installer'
 )
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $src = Join-Path $root 'apps\windows_host\installer'
-$out = Join-Path $root ('.artifacts\host-installer\' + $Version + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$out = Join-Path ([IO.Path]::GetFullPath((Join-Path $root $OutRoot))) ($Version + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Force $out | Out-Null
 
 # 1. Plain MSI: copy, simplify, check.
@@ -19,6 +21,9 @@ $r = & cscript //nologo (Join-Path $PSScriptRoot 'simplify-msi.vbs') $package $p
 if ($LASTEXITCODE -ne 0 -or ($r | Select-Object -Last 1) -ne 'ok') { throw "simplify-msi failed: $r" }
 $productVersion = (($r | Where-Object { $_ -like 'version=*' }) -replace '^version=', '')
 if ($productVersion -ne $Version) { throw "MSI ProductVersion $productVersion differs from -Version $Version" }
+# The rows simplify-msi.vbs deleted (the old gate DLL) stay in the file as free sectors until it is rewritten.
+powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'compact-msi.ps1') -Msi $package
+if ($LASTEXITCODE -ne 0) { throw 'compact-msi failed' }
 
 # 2. Resources and compile-time version.
 $parts = $Version.Split('.')
@@ -37,13 +42,17 @@ Push-Location $out
 try {
   & rc.exe /nologo /fo host_installer.res host_installer.rc
   if ($LASTEXITCODE -ne 0) { throw 'rc failed' }
-  & cl.exe /nologo /O2 /MT /EHsc /std:c++17 /utf-8 /W4 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN ("/FI" + (Join-Path $out 'version.h')) /c (Join-Path $src 'host_installer.cpp') /Fohost_installer.obj
+  # /pathmap (with /experimental:deterministic, which it requires): no build-machine folder in the
+  # program (native\cmake\msvc-source-paths.cmake does the same for the CMake builds).
+  $maps = @(@($out, 'build'), @($env:VCToolsInstallDir, 'msvc'), @($env:UniversalCRTSdkDir, 'winsdk'), @($env:WindowsSdkDir, 'winsdk'), @($root, 'multitap')) |
+    Where-Object { $_[0] } | ForEach-Object { '/pathmap:' + ([IO.Path]::GetFullPath($_[0]).TrimEnd('\')) + '=' + $_[1] }
+  & cl.exe /nologo /O2 /MT /EHsc /std:c++17 /utf-8 /W4 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /experimental:deterministic @maps ("/FI" + (Join-Path $out 'version.h')) /c (Join-Path $src 'host_installer.cpp') /Fohost_installer.obj
   if ($LASTEXITCODE -ne 0) { throw 'cl failed' }
   $exe = "Multitap-Host-$Version-windows-x64.exe"
   # DLL planting: the two libraries that are not KnownDLLs are delay-loaded
   # (resolved only after wWinMain's SetDefaultDllDirectories), and the loader resolves the static imports
   # from System32 only (/DEPENDENTLOADFLAG:0x800 = LOAD_LIBRARY_SEARCH_SYSTEM32).
-  & link.exe /nologo /SUBSYSTEM:WINDOWS /OUT:$exe host_installer.obj host_installer.res shell32.lib ole32.lib advapi32.lib user32.lib wtsapi32.lib userenv.lib `
+  & link.exe /nologo /SUBSYSTEM:WINDOWS /OUT:$exe host_installer.obj host_installer.res shell32.lib ole32.lib advapi32.lib user32.lib gdi32.lib wtsapi32.lib userenv.lib `
     delayimp.lib /DELAYLOAD:wtsapi32.dll /DELAYLOAD:userenv.dll /DEPENDENTLOADFLAG:0x800 `
     /MANIFEST:EMBED /MANIFESTUAC:NO ("/MANIFESTINPUT:" + (Join-Path $src 'host_installer.manifest'))
   if ($LASTEXITCODE -ne 0) { throw 'link failed' }

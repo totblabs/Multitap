@@ -15,6 +15,7 @@ import 'package:multitap_client/models/stream_options.dart';
 import 'package:multitap_client/models/stream_preparation.dart';
 import 'package:multitap_client/models/vm_resources.dart';
 import 'package:multitap_client/ui/desktop_readiness.dart';
+import '../helpers/pump_work.dart';
 
 const _optionalPenChannel = MethodChannel('multitap/pen-input');
 
@@ -211,7 +212,7 @@ Future<FakeBroker> signedIn(
     'secret-pass',
   );
   await _tapVisible(tester, find.byKey(const Key('login-submit')));
-  await tester.pumpAndSettle();
+  await pumpWork(tester);
   return broker;
 }
 

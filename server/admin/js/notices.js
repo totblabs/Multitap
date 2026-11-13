@@ -36,7 +36,9 @@ function freshWhen(ui) {
   ui.when = nextHour();
   if (ui.nodes?.whenInput) ui.nodes.whenInput.value = ui.when;
 }
-const noticeUi = ctx => ctx.state.ui.notices ??= { target: 'all', user: '', desktop: '', kind: 'general', title: '', body: '', when: '', sending: false, error: '', nodes: null };
+// A notice being written when the last sign-in ended comes back (app.js keepDrafts): its text fields only.
+const keptNotice = ctx => { const kept = ctx.takeDraft?.('notices'); return kept ? Object.fromEntries(Object.entries(kept).filter(([key, value]) => ['target', 'user', 'desktop', 'kind', 'title', 'body', 'when'].includes(key) ? typeof value === 'string' : key === 'composing' && typeof value === 'boolean')) : {}; };
+const noticeUi = ctx => ctx.state.ui.notices ??= { target: 'all', user: '', desktop: '', kind: 'general', title: '', body: '', when: '', sending: false, error: '', nodes: null, ...keptNotice(ctx) };
 const audienceOf = ctx => ctx.value('notices')?.audience ?? null;
 const limitsOf = ctx => ({ ...fallbackLimits, ...(ctx.value('notices')?.limits ?? {}) });
 // Opens 공지, optionally already addressed to one person or one desktop

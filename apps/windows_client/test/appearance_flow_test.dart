@@ -15,6 +15,7 @@ import 'auth_flow_test.dart' show TestBroker, TestLoginMemory, assignedVm;
 import 'remote_session_test.dart' show SessionSocket, info, packet;
 import 'session_recovery_test.dart'
     show RecoveryMedia, machine, mockPresentation, selectedOptions, session;
+import 'helpers/pump_work.dart';
 
 void main() {
   Future<void> start(
@@ -35,7 +36,7 @@ void main() {
         appearance: appearance,
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
   }
 
   Future<void> login(WidgetTester tester) async {
@@ -45,7 +46,7 @@ void main() {
       'fixture-password',
     );
     await tester.tap(find.byKey(const Key('login-submit')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
   }
 
   testWidgets(
@@ -90,9 +91,9 @@ void main() {
       // button of their own); the light theme shows its day.
       expect(find.byKey(const Key('appearance-menu')), findsNothing);
       await tester.tap(find.byKey(const Key('workspace-account')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.tap(find.byKey(const Key('scene-meadow')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(appearance.scene, BackgroundScene.meadow);
       expect(
         (tester
@@ -108,14 +109,14 @@ void main() {
       // 다크 in the same open menu: the app and the menu itself turn dark in
       // place, and the menu stays open.
       await tester.tap(find.byKey(const Key('theme-dark')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(appearance.mode, ThemeMode.dark);
       expect(
         Theme.of(tester.element(find.byKey(const Key('sign-out')))).brightness,
         Brightness.dark,
       );
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byKey(const Key('sign-out')), findsNothing);
       // The same place at night.
       expect(
@@ -161,7 +162,7 @@ void main() {
         Brightness.dark,
       );
       await appearance.select(ThemeMode.light);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(
         Theme.of(tester.element(find.byType(SignInScreen))).brightness,
         Brightness.light,
@@ -205,7 +206,7 @@ void main() {
         find.byType(WorkspaceShell),
       );
       await appearance.select(ThemeMode.light);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       final after = tester.widget<WorkspaceShell>(find.byType(WorkspaceShell));
       expect(
         tester.element(find.byType(WorkspaceShell)),
@@ -220,19 +221,19 @@ void main() {
         Brightness.light,
       );
       await tester.tap(find.byKey(const Key('workspace-account')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.tap(find.byKey(const Key('sign-out')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       final confirmation = ModalRoute.of(tester.element(find.text('로그아웃할까요?')));
       await appearance.select(ThemeMode.dark);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(
         ModalRoute.of(tester.element(find.text('로그아웃할까요?'))),
         same(confirmation),
       );
       expect(api.logouts, 0);
       await tester.tap(find.byKey(const Key('confirm-sign-out')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(api.logouts, 1);
       expect(find.byType(SignInScreen), findsOneWidget);
       expect(
@@ -296,7 +297,7 @@ void main() {
       expect(api.logins, 1);
       expect(api.logouts, 0);
       navigator.pop();
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byType(WorkspaceShell), findsOneWidget);
       expect(api.logouts, 0);
       await tester.pumpWidget(const SizedBox.shrink());

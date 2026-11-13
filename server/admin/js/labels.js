@@ -334,6 +334,10 @@ export const eventNames = { user_created: t('labels.eventNames.user_created'), u
   server_access_saved: t('labels.eventNames.server_access_saved'), server_access_tested: t('labels.eventNames.server_access_tested'),
   // server/src/http.mjs and admin-http.mjs: a save ends the connections (with their count); a waiting save was withdrawn.
   server_access_connections_ended: t('labels.eventNames.server_access_connections_ended'), server_access_cancelled: t('labels.eventNames.server_access_cancelled'),
+  // server/src/self-access.mjs: a save that waits for the administrator's own proof of an address (opened, proven from
+  // that address, time up), and a save that was put back after its restart.
+  server_access_outside_started: t('labels.eventNames.server_access_outside_started'), server_access_outside_confirmed: t('labels.eventNames.server_access_outside_confirmed'),
+  server_access_outside_expired: t('labels.eventNames.server_access_outside_expired'), server_access_rolled_back: t('labels.eventNames.server_access_rolled_back'),
   vm_audio_added: t('labels.eventNames.vm_audio_added'), vm_audio_unknown: t('labels.eventNames.vm_audio_unknown'),
   // server/src/certificate-expiry.mjs: the presented TLS certificate reached 14 or 3 days before expiry.
   tls_certificate_expiring: t('labels.eventNames.tls_certificate_expiring'),

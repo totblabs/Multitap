@@ -61,7 +61,7 @@ export class AccessRuntime {
   async status(context) {
     // udpMedia: how UDP media is configured, for the console (udp-relay.mjs describe).
     if (!this.client) return { protocol: 'server-access-v1', revision: this.revision ?? (this.config ? serverAccessHash(this.config) : 'bootstrap'), applied: this.config, pending: null, supported: false, errorCode: 'server_access_unavailable', managementOrigin: context.managementOrigin, bootstrapListener: context.listener ?? null, deploymentKind: context.deploymentKind ?? 'unknown', udpPort: context.udpPort ?? null, udpMedia: context.udpMedia ?? null };
-    const state = await this.client.status();
+    const state = await this.client.status(context);
     // Only a terminal observation of this very operation releases the fence.
     const terminal = state.state === 'succeeded' || (state.state === 'rolled_back' && state.rollbackVerified === true) || (state.state === 'failed' && state.unchangedVerified === true);
     if (this.lease?.operationId === state.operationId && terminal) this.lease = null;
@@ -73,9 +73,14 @@ export class AccessRuntime {
     this.assertAdmission();
     return this.client.test(input, context);
   }
-  async save(input, context, { actor = null } = {}) {
+  // `admitted(config)`: the address the asking request would be let in at under that policy (http.mjs).
+  async save(input, context, { actor = null, admitted = null } = {}) {
     if (!this.client) throw new HttpError(503, 'server_access_unavailable');
     this.assertAdmission();
+    // A save that first waits for the administrator's own proof of an address
+    // (self-access.mjs) changes nothing until it has it: no fence yet. The
+    // client takes this fence itself (hold) once the proof is there.
+    if (input?.outside === true && this.outsideSupported) return this.client.saveOutside(input, context, { actor, admitted });
     const lease = { token: randomBytes(32).toString('hex'), operationId: randomUUID(), actor };
     this.lease = lease;
     try {
@@ -89,12 +94,19 @@ export class AccessRuntime {
       throw error;
     }
   }
-  // Withdraws exactly the operation this broker is fenced for. The fence is
+  get outsideSupported() { return typeof this.client?.saveOutside === 'function'; }
+  // The administrator's proof of an address, from that address.
+  async confirm(input, context, options) {
+    if (!this.outsideSupported) throw new HttpError(503, 'server_access_unavailable');
+    return this.client.confirmOutside(input, context, options);
+  }
+  // Withdraws exactly the operation this broker is fenced for, or the save
+  // that still waits for its proof (no fence yet). The fence is
   // released only by the engine's verified "unchanged" result, as for any
   // other end; a refusal (already applying) leaves everything as it is.
   async cancel(operationId) {
     if (!this.client) throw new HttpError(503, 'server_access_unavailable');
-    if (!this.lease || this.lease.operationId !== operationId) throw new HttpError(409, 'server_access_cancel_unavailable');
+    if ((!this.lease || this.lease.operationId !== operationId) && this.client.awaiting?.(operationId) !== true) throw new HttpError(409, 'server_access_cancel_unavailable');
     const result = await this.client.cancel({ operationId });
     await this.status({ managementOrigin: null }).catch(() => {});
     return result;

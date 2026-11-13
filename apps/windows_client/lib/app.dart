@@ -168,6 +168,11 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
   /// The broker's stop permission from the latest answer to this client's
   /// running power request (a listing read meanwhile predates it).
   final _powerCanStop = <String, bool>{};
+
+  /// When this client asked for each power task still running (its own
+  /// clock): the launcher counts the wait from it. Replaced, never mutated,
+  /// so the launcher sees the change.
+  Map<String, DateTime> _powerStarted = const {};
   int _powerSequence = 0;
   final _displayRequests = <String>{};
   int _listSequence = 0;
@@ -1232,6 +1237,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
       _releaseThumbnails(delete: false);
       _desktops = [];
       _powerRequests.clear();
+      _powerStarted = const {};
       _displayRequests.clear();
       _busy = false;
       _error = pcLoginTerminalMessage(code);
@@ -1345,6 +1351,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
         _releaseThumbnails(delete: false);
         _busy = false;
         _powerRequests.clear();
+        _powerStarted = const {};
         _displayRequests.clear();
         _desktops = [];
         _error = l10n.signHasExpiredSignAgain;
@@ -1521,6 +1528,10 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
   /// 다시 시도 there signs out again instead of reloading the list.
   String? _signOutError;
 
+  /// [_busy] is the sign-out (closing the remote windows, then the server's
+  /// answer), not a list read: the launcher says which.
+  bool _signingOut = false;
+
   Future<void> _logout() async {
     _mfa.retire();
     if (_previewOpen) {
@@ -1534,6 +1545,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     if (session == null || _busy) return;
     setState(() {
       _busy = true;
+      _signingOut = true;
       _error = null;
       _signOutError = null;
     });
@@ -1563,6 +1575,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
           _session = null;
           _releaseThumbnails(delete: true);
           _powerRequests.clear();
+          _powerStarted = const {};
           _displayRequests.clear();
           _desktops = [];
         });
@@ -1585,8 +1598,11 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
         setState(() => _signOutError = l10n.couldntCloseRemoteWindowClose);
       }
     } finally {
+      _signingOut = false;
       if (mounted && (_session == session || (cleared && _session == null))) {
         setState(() => _busy = false);
+      } else if (mounted) {
+        setState(() {});
       }
     }
   }
@@ -1643,6 +1659,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
         _session = null;
         _releaseThumbnails(delete: false);
         _powerRequests.clear();
+        _powerStarted = const {};
         _displayRequests.clear();
         _desktops = [];
         _error = l10n.passwordWasChangedSignAgain;
@@ -1945,6 +1962,8 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     _invalidateListReads();
     _powerRequests[desktopId] = operation;
     _powerCanStop[desktopId] = false;
+    // This client's own clock at the request: the tile counts the wait.
+    _powerStarted = {..._powerStarted, desktopId: DateTime.now()};
     setState(
       () => _desktops = [
         for (final machine in _desktops)
@@ -2028,6 +2047,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
           _powerRequests[desktopId] == operation) {
         _powerRequests.remove(desktopId);
         _powerCanStop.remove(desktopId);
+        _powerStarted = {..._powerStarted}..remove(desktopId);
         await _refresh(quiet: true, force: true);
       }
     }
@@ -2481,6 +2501,8 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
             isDemo: _previewOpen,
             displayName: _session?.username ?? l10n.demo,
             busy: _busy,
+            signingOut: !_previewOpen && _signingOut,
+            powerStarted: _previewOpen ? const {} : _powerStarted,
             error: _error,
             notice: _restartShown && !_previewOpen
                 ? serverRestartingMessage

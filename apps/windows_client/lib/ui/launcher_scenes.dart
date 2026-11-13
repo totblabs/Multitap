@@ -1070,6 +1070,7 @@ class _DesktopControlPanelState extends State<_DesktopControlPanel> {
         ),
         if (!widget.compact ||
             d.progress != null ||
+            d.actions.working != null ||
             d.readiness.phase != TilePhase.ready) ...[
           const SizedBox(height: 16),
           DesktopStatusArea(
@@ -1079,6 +1080,7 @@ class _DesktopControlPanelState extends State<_DesktopControlPanel> {
             progress: d.progress,
             preview: widget.preview,
             onDetails: d.actions.details,
+            working: d.actions.working,
           ),
         ],
       ],

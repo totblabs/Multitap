@@ -7,7 +7,9 @@ import 'product_log.dart';
 import '../l10n/l10n.dart';
 
 Duration hostSettingsRequestTimeout(String action) => switch (action) {
-  // The Host setup's WinFsp step allows msiexec 15 minutes as well.
+  // The helper ends a WinFsp installation that runs longer than 10 minutes
+  // itself (setup_winfsp.hpp), three attempts at most while another
+  // installation is running; this observer waits a little longer than one.
   'installWinfsp' => const Duration(minutes: 15),
   // Driver installation (DiInstallDevice) and the verified service restart.
   'installNativeDisplay' => const Duration(minutes: 8),
@@ -26,6 +28,59 @@ Duration hostSettingsRequestTimeout(String action) => switch (action) {
   'enroll' || 'service' => const Duration(seconds: 60),
   _ => const Duration(seconds: 35),
 };
+
+/// settings-progress-v1 (apps/windows_host/src/settings_progress.hpp): what a
+/// long request is doing while it runs. [step] is a fixed code the window
+/// has a sentence for. [done] of [total] are there only when the work has a
+/// real measure (Windows Installer's own count while WinFsp installs); a step
+/// without them has no known length and is shown as such.
+class HostSettingsProgress {
+  const HostSettingsProgress(this.action, this.step, {this.done, this.total});
+  final String action, step;
+  final int? done, total;
+
+  /// 0..1 when measured, else null.
+  double? get fraction {
+    final done = this.done, total = this.total;
+    if (done == null || total == null || total <= 0) return null;
+    return (done / total).clamp(0.0, 1.0).toDouble();
+  }
+
+  static final _code = RegExp(r'^[a-z0-9_]{1,48}$');
+
+  /// One stdout line of the helper, or null when it is not a progress line
+  /// (then it belongs to the reply).
+  static HostSettingsProgress? parseLine(String action, String line) {
+    if (!line.startsWith('{"progress":')) return null;
+    Object? decoded;
+    try {
+      decoded = jsonDecode(line);
+    } on FormatException {
+      return null;
+    }
+    if (decoded is! Map || decoded.length != 1) return null;
+    final value = decoded['progress'];
+    if (value is! Map) return null;
+    final step = value['step'];
+    if (step is! String || !_code.hasMatch(step)) return null;
+    final done = value['done'], total = value['total'];
+    final measured =
+        done is int && total is int && total > 0 && done >= 0 && done <= total;
+    return HostSettingsProgress(
+      action,
+      step,
+      done: measured ? done : null,
+      total: measured ? total : null,
+    );
+  }
+}
+
+/// A settings backend that tells what its running request is doing. The
+/// window shows the step when there is one and its own sentence otherwise;
+/// a backend without it (a test double, an older helper) changes nothing.
+abstract interface class HostSettingsProgressSource {
+  Stream<HostSettingsProgress> get progress;
+}
 
 abstract class HostSettingsApi {
   factory HostSettingsApi.windows() = NativeHostSettingsApi;
@@ -246,7 +301,8 @@ typedef HostSettingsProcessStarter = Future<Process> Function(
   String executable,
 );
 
-class NativeHostSettingsApi implements HostSettingsApi {
+class NativeHostSettingsApi
+    implements HostSettingsApi, HostSettingsProgressSource {
   NativeHostSettingsApi({
     String? executable,
     HostSettingsProcessStarter? processStarter,
@@ -266,10 +322,16 @@ class NativeHostSettingsApi implements HostSettingsApi {
 
   /// Added to the helper's inherited environment: MULTITAP_LANG=ko|en, the
   /// app's language (자동 resolved as the app does), so the helper's own
-  /// error texts match the screen.
+  /// error texts match the screen; MULTITAP_SETTINGS_PROGRESS=1, so it
+  /// writes a line for each step of a long request before its reply.
   static Map<String, String> hostToolEnvironment() => {
     'MULTITAP_LANG': AppLanguageController.instance.code,
+    'MULTITAP_SETTINGS_PROGRESS': '1',
   };
+
+  final _progress = StreamController<HostSettingsProgress>.broadcast();
+  @override
+  Stream<HostSettingsProgress> get progress => _progress.stream;
 
   @override
   Future<Map<String, dynamic>> request(
@@ -371,15 +433,22 @@ class NativeHostSettingsApi implements HostSettingsApi {
     try {
       final process = await _startProcess(executable);
       child = process;
-      final output = process.stdout.transform(utf8.decoder).fold<String>('', (
-        value,
-        next,
-      ) {
-        if (value.length + next.length > 131072) {
-          throw HostSettingsException(l10n.couldntReadHostSettingsResponse);
-        }
-        return value + next;
-      });
+      // Line by line: a progress line goes to the window at once, every
+      // other line is the reply (one line; kept whole whatever it holds).
+      final output = process.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .fold<String>('', (value, line) {
+            final step = HostSettingsProgress.parseLine(action, line);
+            if (step != null) {
+              if (!_progress.isClosed) _progress.add(step);
+              return value;
+            }
+            if (value.length + line.length > 131072) {
+              throw HostSettingsException(l10n.couldntReadHostSettingsResponse);
+            }
+            return value.isEmpty ? line : '$value\n$line';
+          });
       final errors = process.stderr.drain<void>();
       // Enrollment and Windows account fields travel through stdin only.
       process.stdin.write(jsonEncode({'action': action, ...fields}));

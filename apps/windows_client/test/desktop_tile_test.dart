@@ -23,6 +23,7 @@ import 'package:multitap_client/ui/desktop_readiness.dart';
 import 'package:multitap_client/ui/readiness_dialog.dart';
 import 'package:multitap_client/ui/workspace_shell.dart';
 import 'helpers/stream_connect_consent.dart';
+import 'helpers/pump_work.dart';
 
 DesktopMachine vm(
   String id, {
@@ -244,7 +245,7 @@ void main() {
               brightness: layout.brightness,
             ),
           );
-          await t.pumpAndSettle();
+          await pumpWork(t);
           expect(badge, findsNothing);
           expect(t.takeException(), isNull);
         }

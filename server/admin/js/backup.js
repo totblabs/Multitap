@@ -108,7 +108,14 @@ async function uploadAndInspect(flow, file, passphrase) {
     // Only a wrong passphrase keeps the upload; anything else starts over.
     if (error.code !== 'backup_unreadable' && error.code !== 'backup_busy') { ui.uploadId = null; ui.uploaded = null; }
     ui.error = error.message;
-  } finally { if (action.current()) { ui.busy = null; flow.render(); } }
+  } finally {
+    if (action.current()) {
+      ui.busy = null; flow.render();
+      // The file stays chosen (ui.file; the browser's own field is drawn anew and looks empty): the passphrase is
+      // what to type again, so it has the focus.
+      if (ui.error && ui.file) globalThis.document?.querySelector?.('[data-focus="backup-passphrase"]')?.focus?.();
+    }
+  }
 }
 async function forget(flow) {
   const { ctx } = flow, ui = uiOf(ctx), id = ui.uploadId;
@@ -242,6 +249,7 @@ function chooseView(flow, status) {
     el('label', {}, t('backup.21'), el('input', { type: 'password', name: 'passphrase', required: true, minlength: 12, maxlength: 256, autocomplete: 'off', disabled: busy, 'data-focus': 'backup-passphrase' })),
     flow.extraFields?.(busy) ?? null,
     ui.error ? el('p', { class: 'error', role: 'alert' }, ui.error) : null,
+    ui.error && ui.file && !busy ? el('p', { class: 'field-hint', 'data-backup-file-kept': '' }, t('backup.fileKept')) : null,
     busy ? el('div', { class: 'backup-progress', role: 'status' }, el('span', { class: 'loading-dot', 'aria-hidden': 'true' }),
       el('div', {}, el('strong', {}, ui.busy === 'upload' ? t('backup.77', { percent }) : t('backup.78')), el('span', {}, ui.busy === 'upload' ? t('backup.79') : t('backup.80')))) : null,
     el('div', { class: 'backup-actions' }, disable(el('button', { type: 'submit', class: 'primary' }, icon('search'), t('backup.81')), busy ? t('backup.82') : null)));

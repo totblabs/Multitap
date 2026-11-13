@@ -8,6 +8,7 @@ import 'package:multitap_client/data/broker_api.dart';
 import 'package:multitap_client/models/desktop_organize.dart';
 
 import 'android_launcher_test.dart' show FakeBroker, MemoryStore;
+import '../helpers/pump_work.dart';
 
 BrokerDesktop _vm(
   String id,
@@ -87,13 +88,13 @@ Future<void> _signIn(
   fixture.prefs.putIfAbsent('launcher.view', () => 'cards');
   fixture.install();
   await tester.pumpWidget(AndroidVdiApp(apiFactory: (_) => broker));
-  await tester.pumpAndSettle();
+  await pumpWork(tester);
   await tester.enterText(
     find.byKey(const Key('sign-in-password')),
     'secret-pass',
   );
   await _tapVisible(tester, find.byKey(const Key('login-submit')));
-  await tester.pumpAndSettle();
+  await pumpWork(tester);
 }
 
 Finder _card(String id) => find.byKey(Key('card-$id'));
@@ -124,17 +125,17 @@ final _input = find.byKey(const Key('desktop-search-input'));
 Future<void> _chip(WidgetTester tester, String id) async {
   final chip = find.byKey(Key('chip-$id'));
   await tester.ensureVisible(chip);
-  await tester.pumpAndSettle();
+  await pumpWork(tester);
   await _tapVisible(tester, chip);
-  await tester.pumpAndSettle();
+  await pumpWork(tester);
 }
 
 Future<void> _status(WidgetTester tester, String id) async {
   final segment = find.byKey(Key('status-$id'));
   await tester.ensureVisible(segment);
-  await tester.pumpAndSettle();
+  await pumpWork(tester);
   await _tapVisible(tester, segment);
-  await tester.pumpAndSettle();
+  await pumpWork(tester);
 }
 
 String _statusCount(WidgetTester tester, String id) =>
@@ -154,11 +155,11 @@ void main() {
     expect(_order(tester).length, 4);
     expect(find.byKey(const Key('desktop-search')), findsNothing);
     await _tapVisible(tester, find.byKey(const Key('desktop-search-open')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.byKey(const Key('desktop-search')), findsOneWidget);
     Future<void> type(String text) async {
       await tester.enterText(_input, text);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
     }
 
     await type('dev');
@@ -179,7 +180,7 @@ void main() {
     expect(_order(tester), isEmpty);
     expect(find.text("'없는이름'에 맞는 데스크톱이 없어요"), findsOneWidget);
     await _tapVisible(tester, find.byKey(const Key('no-match-clear')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(_order(tester).length, 4);
     // Cleared and closed: the magnifier is back.
     expect(find.byKey(const Key('desktop-search-open')), findsOneWidget);
@@ -191,12 +192,12 @@ void main() {
   ) async {
     await _signIn(tester, FakeBroker(_fleet()));
     await _tapVisible(tester, find.byKey(const Key('desktop-search-open')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await tester.enterText(_input, 'lab');
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(_order(tester), ['pve-150']);
     await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.byKey(const Key('desktop-search')), findsNothing);
     expect(_order(tester).length, 4);
   });
@@ -214,14 +215,14 @@ void main() {
     // The favourite leads in every sort.
     expect(_order(tester).first, 'pve-149');
     await _tapVisible(tester, find.byKey(const Key('desktop-sort')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await _tapVisible(tester, find.byKey(const Key('sort-name')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(_order(tester), ['pve-149', 'pve-150', 'pve-160', 'pve-101']);
     await _tapVisible(tester, find.byKey(const Key('desktop-sort')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await _tapVisible(tester, find.byKey(const Key('sort-running')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(_order(tester), ['pve-149', 'pve-101', 'pve-160', 'pve-150']);
   });
 
@@ -235,9 +236,9 @@ void main() {
     await _signIn(tester, FakeBroker(_fleet()), store: store);
     await _chip(tester, 'pool:영업팀');
     await _tapVisible(tester, find.byKey(const Key('desktop-sort')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await _tapVisible(tester, find.byKey(const Key('sort-name')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     final key = 'organize.https://vdi.example|tester';
     expect(store.prefs[key], contains('"chip":"pool:영업팀"'));
     expect(store.prefs[key], contains('"sort":"name"'));
@@ -299,9 +300,9 @@ void main() {
         '1/4',
       );
       await _tapVisible(tester, find.byKey(const Key('desktop-search-open')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.enterText(_input, 'no match');
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(_order(tester), isEmpty);
       expect(find.byKey(const Key('desktop-status')), findsOneWidget);
       expect(
@@ -353,15 +354,15 @@ void main() {
       await _chip(tester, 'tag:dev');
       expect(_order(tester), ['pve-149']);
       await _tapVisible(tester, find.byKey(const Key('desktop-search-open')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.enterText(_input, 'lab');
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(_order(tester), isEmpty);
       final reset = find.byKey(const Key('desktop-filter-reset'));
       await tester.ensureVisible(reset);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await _tapVisible(tester, reset);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(_order(tester), ['pve-150']);
       expect(tester.widget<TextField>(_input).controller!.text, 'lab');
       expect(reset, findsNothing);
@@ -381,9 +382,9 @@ void main() {
         contains('"status":"stopped"'),
       );
       await _tapVisible(tester, find.byKey(const Key('desktop-search-open')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.enterText(_input, 'lab');
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
 
       await tester.pumpWidget(const SizedBox());
       await _signIn(tester, FakeBroker(_fleet()), store: store);
@@ -414,7 +415,7 @@ void main() {
       await _status(tester, 'stopped');
       broker.inventory = [_vm('pve-101', '사무실 PC'), _vm('pve-150', 'Lab')];
       await _tapVisible(tester, find.byKey(const Key('refresh-desktops')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(_order(tester), ['pve-101', 'pve-150']);
       expect(
         [
@@ -474,19 +475,19 @@ void main() {
         );
         expect(scroll.position.maxScrollExtent, greaterThan(0));
         await tester.drag(row, const Offset(-500, 0));
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
         expect(scroll.position.pixels, greaterThan(0));
         await _status(tester, 'stopped');
         expect(_order(tester), ['pve-150']);
         await _tapVisible(tester, find.byKey(const Key('desktop-search-open')));
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
         final search = find.byKey(const Key('desktop-search'));
         expect(search, findsOneWidget);
         expect(find.byKey(const Key('desktop-status')), findsOneWidget);
         expect(tester.getRect(search).right, lessThanOrEqualTo(300));
         expect(tester.getSize(search).height, tester.getSize(row).height);
         await tester.enterText(_input, 'lab');
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
         expect(_order(tester), ['pve-150']);
         expect(tester.takeException(), isNull);
       });
@@ -497,9 +498,9 @@ void main() {
     Future<void> kind(WidgetTester tester, String id) async {
       final segment = find.byKey(Key('kind-$id'));
       await tester.ensureVisible(segment);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await _tapVisible(tester, segment);
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
     }
 
     String count(WidgetTester tester, String id) =>
@@ -534,12 +535,12 @@ void main() {
       await kind(tester, 'pc');
       expect(_order(tester), ['pve-150']);
       await _tapVisible(tester, find.byKey(const Key('desktop-filter-reset')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(_order(tester).length, 5);
       await _tapVisible(tester, find.byKey(const Key('desktop-search-open')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.enterText(_input, 'gaming');
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(_order(tester), ['pc-gaming']);
       await kind(tester, 'vm');
       expect(_order(tester), isEmpty);
@@ -596,10 +597,10 @@ void main() {
         expect(status.left, closeTo(kindRect.left, 1));
         final target = find.byKey(const Key('kind-pc'));
         await tester.ensureVisible(target);
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
         final visible = tester.getRect(target).intersect(tester.getRect(row));
         await tester.tapAt(visible.center);
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
         expect(_order(tester), ['pc-gaming']);
         expect(tester.takeException(), isNull);
       });
@@ -612,7 +613,7 @@ void main() {
     final broker = _FavoriteBroker(_fleet())..answer = Completer<bool>();
     await _signIn(tester, broker);
     await _tapVisible(tester, find.byKey(const Key('desktop-more-pve-160')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.text('즐겨찾기에 추가'), findsOneWidget);
     await _tapVisible(tester, find.byKey(const Key('favorite-pve-160')));
     await tester.pump();
@@ -620,7 +621,7 @@ void main() {
     expect(find.byKey(const Key('favorite-star-pve-160')), findsOneWidget);
     expect(_order(tester).take(2), ['pve-149', 'pve-160']);
     broker.answer!.completeError(const BrokerException('network_error'));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.byKey(const Key('favorite-star-pve-160')), findsNothing);
     expect(find.text('즐겨찾기를 바꾸지 못했어요. 잠시 후 다시 시도하세요.'), findsOneWidget);
     expect(broker.sent, [('pve-160', true)]);
@@ -632,10 +633,10 @@ void main() {
     final broker = _FavoriteBroker(_fleet());
     await _signIn(tester, broker);
     await _tapVisible(tester, find.byKey(const Key('desktop-more-pve-149')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.text('즐겨찾기에서 빼기'), findsOneWidget);
     await _tapVisible(tester, find.byKey(const Key('favorite-pve-149')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.byKey(const Key('favorite-star-pve-149')), findsNothing);
     expect(broker.sent, [('pve-149', false)]);
     expect(_order(tester).first, 'pve-101');
@@ -650,7 +651,7 @@ void main() {
       ]),
     );
     await _tapVisible(tester, find.byKey(const Key('desktop-more-pve-1')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.byKey(const Key('favorite-pve-1')), findsNothing);
     expect(find.byKey(const Key('details-pve-1')), findsOneWidget);
     // An old broker's FakeBroker is not a FavoriteBrokerApi either way.
@@ -684,10 +685,10 @@ void main() {
     };
     expect(heights.length, 1);
     await _tapVisible(tester, find.byKey(const Key('desktop-search-open')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.byKey(const Key('desktop-search')), findsOneWidget);
     await tester.enterText(_input, '풀-3');
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(_order(tester), ['pve-103']);
     expect(tester.takeException(), isNull);
   });
@@ -695,6 +696,6 @@ void main() {
 
 Future<void> _tapVisible(WidgetTester tester, Finder target) async {
   await tester.ensureVisible(target);
-  await tester.pumpAndSettle();
+  await pumpWork(tester);
   await tester.tap(target);
 }

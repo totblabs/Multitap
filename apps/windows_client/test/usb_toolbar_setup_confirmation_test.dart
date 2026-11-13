@@ -9,6 +9,7 @@ import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/usb_panel.dart';
 
 import 'usb_redirection_test.dart' show FakeBackend;
+import 'helpers/pump_work.dart';
 
 class _SetupBackend extends FakeBackend {
   int installCalls = 0;
@@ -90,13 +91,13 @@ void main() {
           ),
         );
         await tester.tap(find.byKey(const Key('open-setup-panel')));
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
         final launch = Key(
           action == 'install' ? 'usb-install' : 'usb-restart-now',
         );
         await tester.ensureVisible(find.byKey(launch));
         await tester.tap(find.byKey(launch));
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
         final yes = Key(
           action == 'install'
               ? 'usb-install-confirm'
@@ -127,11 +128,11 @@ void main() {
             ),
           );
         }
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 25)),
         );
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
         expect(
           backend.installCalls,
           beforeInstall +

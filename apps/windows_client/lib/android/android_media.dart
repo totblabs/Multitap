@@ -84,7 +84,7 @@ class AndroidRemoteMedia extends NativeRemoteMedia
     implements SharedAudioCounterMedia {
   AndroidRemoteMedia({super.audioEnabled});
 
-  /// AndroidAudioTrim's counters are the app's totals (one per AndroidMedia),
+  /// The jitter buffer's counters are the app's totals (one per AndroidMedia),
   /// so every session of this app reads them against the same baselines.
   static final _audioBaselines = <String, num>{};
   @override

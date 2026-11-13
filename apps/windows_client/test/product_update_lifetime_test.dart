@@ -5,9 +5,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/data/product_updates.dart';
+import 'package:multitap_client/ui/app_dialog.dart';
 import 'package:multitap_client/ui/product_update_dialog.dart';
 
 import 'product_updates_test.dart' show Transport, entry, executable;
+import 'helpers/pump_work.dart';
 
 class _InstallPlatform extends UpdatePlatform {
   final sessions = Completer<bool>();
@@ -219,7 +221,7 @@ void main() {
     await tester.tap(find.byKey(const Key('apply-product-update')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('confirm-update-sessions')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(platform.closes, 1);
     await tester.tap(find.byKey(const Key('close-product-update')));
     await tester.pumpAndSettle();
@@ -275,12 +277,93 @@ void main() {
       await tester.tap(find.byKey(const Key('apply-product-update')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('confirm-update-sessions')));
-      await tester.pumpAndSettle();
+      // The dialog moves while the windows close, so it never settles.
+      await pumpWork(tester);
       expect(platform.closes, 1);
       expect(platform.installs, 0);
+      // The step is still "ready": the dialog says what it waits for, its
+      // icon and the pressed button's icon turn, and the button is greyed.
+      const line = Key('update-closing-sessions');
+      expect(tester.widget<Text>(find.byKey(line)).data, '열려 있는 원격 창을 닫는 중이에요');
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('apply-product-update')),
+          matching: find.byKey(const Key('update-closing-sessions-mark')),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('apply-product-update')))
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<AppToneIcon>(find.byType(AppToneIcon).first).busy,
+        isTrue,
+      );
       platform.closedSessions.complete();
       await tester.pump();
       expect(platform.installs, 1);
+      // The installer has it now: the wait's line is gone.
+      expect(find.byKey(line), findsNothing);
+      expect(
+        find.byKey(const Key('update-closing-sessions-mark')),
+        findsNothing,
+      );
+      await cleanup(tester);
+    },
+  );
+
+  testWidgets(
+    'the button is greyed from the press, before the remote windows are counted',
+    (tester) async {
+      final platform = await ready(tester);
+      FilledButton apply() => tester.widget<FilledButton>(
+        find.byKey(const Key('apply-product-update')),
+      );
+      expect(apply().onPressed, isNotNull);
+      await tester.tap(find.byKey(const Key('apply-product-update')));
+      await tester.pump();
+      expect(platform.checks, 1);
+      expect(apply().onPressed, isNull, reason: 'pressed once');
+      // Nothing is being closed yet: no closing line, nothing turns for it.
+      expect(find.byKey(const Key('update-closing-sessions')), findsNothing);
+      platform.sessions.complete(false);
+      await tester.pump();
+      expect(platform.installs, 1);
+      await cleanup(tester);
+    },
+  );
+
+  testWidgets(
+    'remote windows that could not be closed: the failure takes the place of the wait',
+    (tester) async {
+      final platform = await ready(tester);
+      platform.sessions.complete(true);
+      await tester.tap(find.byKey(const Key('apply-product-update')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-update-sessions')));
+      await pumpWork(tester);
+      expect(find.byKey(const Key('update-closing-sessions')), findsOneWidget);
+      platform.closedSessions.completeError(StateError('window stayed open'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(platform.installs, 0);
+      expect(find.byKey(const Key('update-failure')), findsOneWidget);
+      // Never a failure beside a mark that keeps turning.
+      expect(find.byKey(const Key('update-closing-sessions')), findsNothing);
+      expect(
+        find.byKey(const Key('update-closing-sessions-mark')),
+        findsNothing,
+      );
+      expect(
+        tester.widget<AppToneIcon>(find.byType(AppToneIcon).first).busy,
+        isFalse,
+      );
+      expect(find.byKey(const Key('retry-product-update')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('close-product-update')));
+      await tester.pumpAndSettle();
       await cleanup(tester);
     },
   );

@@ -19,6 +19,7 @@ import 'package:multitap_client/ui/desktop_readiness.dart';
 
 import 'android_launcher_test.dart'
     show FakeBroker, MemoryStore, vm, mainButton;
+import '../helpers/pump_work.dart';
 
 const _op = '12345678-1234-1234-1234-123456789012';
 
@@ -137,7 +138,7 @@ Future<void> pumpApp(
     'secret-pass',
   );
   await _tapVisible(tester, find.byKey(const Key('login-submit')));
-  await tester.pumpAndSettle();
+  await pumpWork(tester);
 }
 
 void main() {

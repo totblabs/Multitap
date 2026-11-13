@@ -7,6 +7,7 @@ import '../data/usb_picker.dart';
 import '../data/usb_redirection.dart';
 import 'app_dialog.dart';
 import 'app_menu.dart';
+import 'app_progress.dart';
 import 'app_theme.dart';
 import 'korean_text.dart';
 import 'session_menu.dart' show SessionPopups;
@@ -359,14 +360,22 @@ class _UsbPanelState extends State<UsbPanel> {
                 ),
               ),
             // The colour is the icon's; the sentence is ordinary text.
+            // A state that is on its way by itself (reconnecting, the desktop
+            // getting ready) moves; a settled one keeps its icon.
             if (status != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: AppStatusLine(
-                  status.$1,
-                  textKey: const Key('usb-status'),
-                  tone: status.$2,
-                ),
+                child: _statusBusy(usb)
+                    ? AppBusyLine(
+                        status.$1,
+                        textKey: const Key('usb-status'),
+                        color: p.ink,
+                      )
+                    : AppStatusLine(
+                        status.$1,
+                        textKey: const Key('usb-status'),
+                        tone: status.$2,
+                      ),
               ),
             // The installed driver needs this PC restarted: offer it now or
             // later; nothing restarts without the save-your-work question.
@@ -446,15 +455,19 @@ class _UsbPanelState extends State<UsbPanel> {
               child: picker.isEmpty && picker.hiddenNeeded == 0
                   ? Padding(
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-                      child: KeepAllText(
-                        key: const Key('usb-empty'),
-                        usb.listing
-                            ? l10n.lookingDevices
-                            : usb.driver == UsbDriverState.ready
-                            ? l10n.noUsbDevicesConnect
-                            : '',
-                        style: uiText(size: 13, color: p.muted),
-                      ),
+                      // Looking for devices is work under way: it moves.
+                      child: usb.listing
+                          ? AppBusyLine(
+                              l10n.lookingDevices,
+                              textKey: const Key('usb-empty'),
+                            )
+                          : KeepAllText(
+                              key: const Key('usb-empty'),
+                              usb.driver == UsbDriverState.ready
+                                  ? l10n.noUsbDevicesConnect
+                                  : '',
+                              style: uiText(size: 13, color: p.muted),
+                            ),
                     )
                   : ListView(
                       shrinkWrap: true,
@@ -526,6 +539,12 @@ class _UsbPanelState extends State<UsbPanel> {
     // Takes the device back from UsbDk once more so Windows starts it again.
     onCheckReturn: () => unawaited(usb.bringBack(row.entry)),
   );
+
+  /// The panel's state line is a wait that ends by itself: USB coming back
+  /// after a lost connection, or the desktop getting ready to take devices.
+  bool _statusBusy(UsbSession usb) => usb.closed
+      ? usb.error != 'usb_policy_changed' && usb.recovering
+      : usb.unavailableReason == null && !usb.ready;
 
   (String, AppTone)? _status(UsbSession usb) {
     if (usb.closed) {
@@ -748,6 +767,14 @@ class _DeviceRow extends StatelessWidget {
         : otherWindow != null
         ? (usbOtherWindowMessage(otherWindow), AppTone.warn)
         : (stateText, stateTone);
+    // Under way for this row now: being attached, given back, or brought
+    // over from another window. Its line moves until that ends; the result
+    // (connected, a failure) takes the line's place with its own dot.
+    final inFlight =
+        entry.moving ||
+        (otherWindow == null &&
+            (entry.state == UsbEntryState.connecting ||
+                entry.state == UsbEntryState.returning));
     final String? notReady = usb.closed
         ? (usb.recovering ? l10n.reconnectingUsb2 : l10n.usbConnectionLost)
         : !usb.ready
@@ -892,13 +919,19 @@ class _DeviceRow extends StatelessWidget {
                     ),
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: AppStatusLine(
-                      text,
-                      textKey: ValueKey('usb-status-${device.id}'),
-                      tone: tone,
-                      size: 12,
-                      dot: true,
-                    ),
+                    child: inFlight
+                        ? AppBusyLine(
+                            text,
+                            textKey: ValueKey('usb-status-${device.id}'),
+                            size: 12,
+                          )
+                        : AppStatusLine(
+                            text,
+                            textKey: ValueKey('usb-status-${device.id}'),
+                            tone: tone,
+                            size: 12,
+                            dot: true,
+                          ),
                   ),
                   // What needs attention: one line with a yellow icon.
                   if (entry.notReturned &&

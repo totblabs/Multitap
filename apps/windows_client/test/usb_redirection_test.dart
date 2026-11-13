@@ -172,8 +172,13 @@ class FakeBackend extends UsbBackend {
 
   @override
   Future<UsbEnvironment> environment() async => UsbEnvironment(driver);
+  /// Holds the device list back while set (a listing that takes a while).
+  Completer<void>? listGate;
   @override
-  Future<List<UsbLocalDevice>> list() async => devices;
+  Future<List<UsbLocalDevice>> list() async {
+    await listGate?.future;
+    return devices;
+  }
   @override
   Future<UsbCapture> capture(UsbLocalDevice device) async {
     captureCalls++;

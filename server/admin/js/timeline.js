@@ -42,6 +42,11 @@ export function auditEntry(e, usersById, desktopsById) {
   else if (e.event === 'hostless_assignments_removed' && /^\d+$/.test(tokens[0] ?? '')) entry.detail.push(t('timeline.14', { Number: Number(tokens[0]) }));
   // operationId:people:connections (server/src/http.mjs, a save of the server access settings).
   else if (e.event === 'server_access_connections_ended' && /^\d+$/.test(rest[0] ?? '') && /^\d+$/.test(rest[1] ?? '')) entry.detail.push(t('timeline.15', { Number: Number(rest[0]), Number2: Number(rest[1]) }));
+  // operationId:address (server/src/self-access.mjs): the address to prove from outside, proven or not; the one a save went back for.
+  else if (['server_access_outside_started', 'server_access_outside_confirmed', 'server_access_outside_expired', 'server_access_rolled_back'].includes(e.event) && rest.length && rest.join(':')) entry.detail.push(rest.join(':'));
+  // The backup dialog asked for the administrator's password again and it was wrong (server/src/admin-http.mjs): the
+  // record has no subject, its event is its reason.
+  else if (e.event === 'backup_reauthentication_failed') { entry.code = 'current_password_incorrect'; entry.codeLabel = t('timeline.backupPasswordWrong'); }
   else if (e.event === 'integration_updated') entry.detail.push(own(settingNames, e.subject) ?? e.subject);
   else if (e.event === 'proxmox_synchronized') entry.detail.push(t('timeline.16', { subject: e.subject }));
   // threshold:expiry date:fingerprint prefix (certificate-expiry.mjs).

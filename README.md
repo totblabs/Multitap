@@ -76,6 +76,27 @@ curl -fsSL https://raw.githubusercontent.com/totblabs/Multitap/main/deploy/docke
 
 It installs Docker if it is missing, starts the server and shows the address to open, the first sign-in and a one-time setup code. From there, **Getting started** in the admin console takes you through connecting Proxmox, installing the Host in each Windows desktop and assigning desktops to people. The apps and the Host are downloaded from your own server, or from [Releases](https://github.com/totblabs/Multitap/releases).
 
+### What the install line does
+
+[`install.sh`](deploy/docker/install.sh) first checks that it runs as root on Debian or Ubuntu (x86_64) and, in a CT, that nesting is on; if not, it stops before installing anything. Then it:
+
+- installs Docker if `docker compose` is missing: from Docker's repository (`download.docker.com`), or the distribution's `docker.io` package when that fails;
+- downloads `compose.yaml`, `.env.example` and the `multitap` command from the newest release's tag, and the image `ghcr.io/totblabs/multitap-broker` from GitHub's container registry;
+- creates `/opt/multitap`, `/usr/local/bin/multitap`, the Docker volume `multitap-broker-data` and the log `/var/log/multitap-install.log`;
+- lets Docker publish TCP 18480 and UDP 18481, and asks two questions: the address on your network (Enter = yes) and HTTP from outside (Enter = no). For the second, it asks `1.1.1.1` once for the public IP.
+
+It adds no service other than Docker and the server container, no login accounts or SSH keys, and sends no usage data. `multitap uninstall` removes the container and the command; the data volume, `/opt/multitap` and Docker stay.
+
+To read it before you run it:
+
+```sh
+curl -fsSLo install.sh https://raw.githubusercontent.com/totblabs/Multitap/main/deploy/docker/install.sh
+less install.sh
+bash install.sh
+```
+
+The server image is built from the release tag by the public [image workflow](.github/workflows/broker-image.yml), and its `org.opencontainers.image.revision` label names the commit it was built from. The container runs as a user other than root, read-only, with every capability dropped ([compose.yaml](compose.yaml)). Everything here is open source under the AGPL-3.0, so every line can be read before it runs.
+
 ## Documentation
 
 - **[Guide on the website](https://multitap.me/en/guide/)**: start here. Nine short chapters from install to the first connection.

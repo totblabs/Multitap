@@ -2,8 +2,6 @@ package me.totb.multitap_client
 
 import android.content.Context
 import android.hardware.display.DisplayManager
-import android.media.AudioAttributes
-import android.media.AudioFormat
 import android.media.AudioTimestamp
 import android.media.AudioTrack
 import android.media.MediaCodec
@@ -70,6 +68,11 @@ import kotlin.math.roundToInt
  * same track path as PCM packets. Any other start is the released PCM. The
  * Opus decoder is made on [setup], never on the worker (AndroidOpusPipe).
  *
+ * Sound, PCM or decoded Opus, goes from the worker into a jitter buffer
+ * (AudioJitterBuffer, the Windows client's rules) and from there to the
+ * AudioTrack on a thread of its own at audio priority (AndroidAudioOut): the
+ * worker never writes to the track.
+ *
  * While the app is not visible ([visible] false: the Activity stopped) the
  * decoder goes on (the H.264 reference chain needs every packet, and a client
  * cannot ask for a key frame on WebSocket: only the relay sends
@@ -97,8 +100,14 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     @Volatile private var captured = false
     private val keyMap = AndroidKeyMap() // main thread
     @Volatile private var disposed = false
-    // AndroidAudioFocus.kt: the VM sound's audio focus (main thread); its volume goes to the track on the worker.
-    private val audioFocus = AndroidAudioFocus(activity, main) { volume -> worker.post { try { audio?.setVolume(volume) } catch (_: Exception) {} } }
+    // AndroidAudioFocus.kt: the VM sound's audio focus (main thread); its volume goes to the track (any thread).
+    private val audioFocus: AndroidAudioFocus = AndroidAudioFocus(activity, main) { volume -> audioOut.setVolume(volume) }
+    // AndroidAudioJitter.kt: received sound waits here (the decoder worker pushes, the audio thread pulls, both
+    // under its lock). One per engine: its counters are the app's totals (audio-stats-v1 deltas, AndroidRemoteMedia).
+    private val playout: AudioJitterBuffer = AudioJitterBuffer(AudioJitterConfig.ANDROID)
+    // AndroidAudioOut.kt: the stream's track, fed from [playout] by its own audio-priority thread.
+    private val audioOut: AndroidAudioOut = AndroidAudioOut(playout, { audioFocus.volume },
+        onTrack = { main.post { audioFocus.acquire() } }, onSound = { main.post { audioFocus.soundStarted() } })
     // AndroidStreamWifi.kt: the Wi-Fi low-latency lock of a stream that is shown (main thread; not for a track's own decoder).
     private val wifi = if (registerChannels) AndroidStreamWifi(activity) else null
     // AndroidThermal.kt: the device's thermal status while a stream runs, for the statistics only.
@@ -150,37 +159,19 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     private val appCpu = AppCpuMeter(Runtime.getRuntime().availableProcessors(), try { Os.sysconf(OsConstants._SC_CLK_TCK) } catch (_: Exception) { 100L })
     private var checkPosted = false
     private val frameWatch = AndroidInputFrameWatch()
-    private var audio: AudioTrack? = null
     private var audioEnabled = false
     private var audioOpus = false
     private var opus: AndroidOpusDecoder? = null
-    // Opus frames concealed by earlier decoders of this engine (audio-stats-v1 counts for the app, as AndroidAudioTrim).
+    // Opus frames concealed by earlier decoders of this engine (audio-stats-v1 counts for the app, as [playout]).
     private var concealedBefore = 0L
-    // The target grows after underruns up to AUDIO_MAX_TARGET_FRAMES and the cap keeps 40 ms above it,
-    // within the track's capacity (audioBufferFollowsCap says why the headroom must not shrink).
-    private val audioTrim = AndroidAudioTrim(
-        targetFrames = AUDIO_TARGET_FRAMES, capFrames = AUDIO_LIMIT_FRAMES,
-        maxTargetFrames = AUDIO_MAX_TARGET_FRAMES, capacityFrames = AUDIO_CAPACITY_FRAMES)
-    // audio-path-v1: the current track's own accounting. Frames written to it (audioFrames
-    // counts every track of the stream), whether its effective buffer follows the trim's cap and the cap
-    // last applied, the start watch, and the tracks made again (dead, or written to and not playing).
-    private var trackWritten = 0L
-    private var bufferFollows = false
-    private var appliedCap = 0L
-    private var forceFollow = false
-    private val startWatch = AudioStartWatch()
-    private var trackRestarts = 0L
-    private var trackStuck = 0L
-    private var lastRestart = 0L
+    // [playout]'s dropped frames (overrun cuts and drift trims) when this stream started: audioDroppedFrames is per stream.
+    private var droppedBefore = 0L
     private var width = 0
     private var height = 0
     private var targetFps = 60
     private var allowHardware = true
     private var exactSizes = false
     private var decoded = 0L
-    private var audioFrames = 0L
-    private var audioDropped = 0L
-    private var audioError = 0
     private var decodeCalls = 0L
     private var decodeMs = 0.0
     private var decodeMaxMs = 0.0
@@ -241,6 +232,17 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
                 scheduleCheck()
             }
         }
+    }
+
+    /**
+     * Main thread: the Activity's window gained or lost input focus (the user
+     * is in the app, or went to another window in split screen, a dialog or
+     * the shade). A permanent audio-focus loss is asked back when the user
+     * returns (AndroidAudioFocus.windowFocus).
+     */
+    fun windowFocus(focused: Boolean) {
+        trackState?.lanes?.forEach { it.decoder.windowFocus(focused) }
+        audioFocus.windowFocus(focused)
     }
 
     /** Background task queue: one media-wire-v1 packet. */
@@ -614,12 +616,13 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             }
             closeEngine(); audioEnabled = nextAudioEnabled; audioOpus = nextAudioOpus
             texture = entry; surface = nextSurface; width = w; height = h; targetFps = track.fps; allowHardware = request.hardware; exactSizes = exact
-            decoded = 0; audioFrames = 0; audioDropped = 0; droppedPackets = 0; trackRestarts = 0; trackStuck = 0; lastRestart = 0
-            error = 0; audioError = 0; decodeCalls = 0; decodeMs = 0.0; decodeMaxMs = 0.0; clock.resetBusy()
+            decoded = 0; droppedPackets = 0
+            error = 0; decodeCalls = 0; decodeMs = 0.0; decodeMaxMs = 0.0; clock.resetBusy()
             decodeRecent.reset(); arrivalRecent.reset(); presentRecent.reset()
-            if (audioEnabled) createAudio()
+            droppedBefore = synchronized(playout) { playout.counters.overrunFrames + playout.counters.trimmedFrames }
+            if (audioEnabled) audioOut.open()
             // Asked for, not made here: the start answer and the video decoder do not wait for it.
-            if (audioOpus && audio != null) opus = AndroidOpusDecoder(worker, setup, ::opusFrame).also { it.prepare() }
+            if (audioOpus && audioOut.active) opus = AndroidOpusDecoder(worker, setup, ::opusFrame).also { it.prepare() }
             main.post {
                 if (disposed || lease != next) result.error("session_replaced", null, null)
                 else {
@@ -637,15 +640,24 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
 
     /** Worker. Statistics of the current decoder (fixed fields, no content). */
     private fun stats(): Map<String, Any?> {
-        val track = audio
+        val track = audioOut.track
         val played = try { (track?.playbackHeadPosition?.toLong() ?: 0L) and 0xffffffffL } catch (_: Exception) { 0L }
         val oldest = pending.firstOrNull()?.accepted
         val now = System.nanoTime()
         // Without frame-consumed callbacks (the pacer stopped holding before
         // Flutter took any frame), rendered frames stand in for taken ones.
         val textureFrames = if (pacer.taken > 0 || pacer.gated) pacer.taken else pacer.rendered
-        val queuedMs = if (track == null) 0.0 else (trackWritten - played).coerceAtLeast(0) / 48.0
+        val trackMs = if (track == null) 0.0 else (audioOut.trackWritten - played).coerceAtLeast(0) / 48.0
+        // One consistent reading of the jitter buffer (the audio thread changes it every 5 ms).
+        val sound = synchronized(playout) {
+            val c = playout.counters
+            longArrayOf(c.underruns, c.overruns, c.trimmedFrames, c.insertedFrames, c.overrunFrames + c.trimmedFrames,
+                c.concealedFrames, playout.level.toLong(), playout.target.toLong(), if (playout.playing) 1 else 0)
+        }
+        val playing = audioEnabled && sound[8] == 1L
+        val depthMs = if (playing) sound[6] / 48.0 else 0.0
         val decoder = opus
+        val audioError = audioOut.error
         return mapOf(
             "decodedFrames" to decoded,
             "textureFrames" to textureFrames,
@@ -661,35 +673,41 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             "texturePacing" to pacer.gated,
             "texturePath" to TEXTURE_PATH_SURFACE,
             "displayHz" to displayHz(),
-            "audioPlayedFrames" to played, "audioWrittenFrames" to audioFrames, "audioDroppedFrames" to audioDropped,
-            "audioQueuedMs" to queuedMs,
-            "audioTrimmed" to audioTrim.trimmed,
-            "audioTargetMs" to audioTrim.target / 48.0,
-            // audio-stats-v1 (lib/data/audio_stats.dart), the Windows engine's keys:
-            // underruns the sound went on through (the track's raw count also
-            // counts a silent VM), packets refused above the cap, trimmed frames,
-            // and written -> presented by the track's own timestamp. Android
-            // never repeats frames and has no A/V offset estimate yet.
+            // This stream: the current track's play head, frames written to its tracks, and frames received
+            // and not played (overrun cuts and drift trims of the jitter buffer); what the track holds.
+            "audioPlayedFrames" to played, "audioWrittenFrames" to audioOut.written,
+            "audioDroppedFrames" to (sound[4] - droppedBefore).coerceAtLeast(0),
+            "audioQueuedMs" to trackMs,
+            // Frames the drift correction dropped, in 10 ms (the unit the former packet trim counted in).
+            "audioTrimmed" to sound[2] / 480,
+            "audioTargetMs" to sound[7] / 48.0,
+            // audio-stats-v1 (lib/data/audio_stats.dart), the Windows engine's keys and meanings
+            // (AudioJitterBuffer is its AudioJitterBuffer): the level (jitter buffer + track) while sound
+            // plays, underruns the sound went on through (the track's raw count also counts a silent VM),
+            // backlogs cut to the target, frames trimmed / repeated by the drift correction, and
+            // written -> presented by the track's own timestamp. No A/V offset estimate yet.
             "audioEnabled" to audioEnabled,
-            "audioPlaying" to (queuedMs > 0),
-            "audioDepthMs" to queuedMs,
+            "audioPlaying" to playing,
+            "audioDepthMs" to depthMs,
             "audioLatencyMs" to latencyMs(track),
             // The track's effective buffer (the most that can be queued, and before API 31 the level
             // it starts at) and whether Android gave it the fast mixer path it was asked for.
             "audioBufferMs" to audioBufferMs(track),
             "audioFastTrack" to audioFastTrack(track),
-            "audioUnderruns" to audioTrim.underruns,
-            "audioTrackUnderruns" to underruns(track),
-            "audioOverruns" to audioTrim.overruns,
-            "audioTrimmedFrames" to audioTrim.trimmedFrames,
-            "audioInsertedFrames" to 0L,
+            "audioUnderruns" to sound[0],
+            "audioTrackUnderruns" to audioOut.trackUnderruns(),
+            "audioOverruns" to sound[1],
+            "audioTrimmedFrames" to sound[2],
+            "audioInsertedFrames" to sound[3],
             // An Opus stream without a working decoder has no sound, as one without a track.
             "audioError" to (if (decoder?.failed == true) -1 else audioError), "error" to error,
-            // audio-opus-v1 streams: 10 ms frames concealed (repeated and faded) for lost packets, the app's total.
-            "audioConcealed" to (if (audioOpus) concealedBefore + (decoder?.stream?.concealed ?: 0L) else null),
+            // audio-opus-v1 streams, the app's total of 10 ms frames made up: for lost packets
+            // (AndroidOpusStream: one mirrored fade-out, then silence) and fade-out tails where the
+            // jitter buffer ran dry (counted by their 10 ms).
+            "audioConcealed" to (if (audioOpus) concealedBefore + (decoder?.stream?.concealed ?: 0L) + sound[5] / 480 else null),
             // audio-path-v1, fixed numbers only: which decoder plays the sound (0 none: PCM or
             // no sound; 1 the platform's software Opus decoder, 2 another Opus decoder, 3 none could be used),
-            // the format it stated, the track's start level and whether its buffer follows the cap, tracks
+            // the format it stated, the track's start level and whether its buffer is the jitter target, tracks
             // made again (dead / written to and not playing), audio focus (AudioFocusPolicy.State ordinal:
             // 0 none, 1 held, 2 waiting, 3 paused, 4 lost) and whether it mutes the track, and the API level.
             "audioDecoder" to when {
@@ -702,10 +720,10 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             "audioOutRate" to decoder?.outputRate?.takeIf { it > 0 },
             "audioOutChannels" to decoder?.outputChannels?.takeIf { it > 0 },
             "audioOutFloat" to decoder?.takeIf { it.outputRate > 0 }?.outputFloat,
-            "audioStartMs" to (if (track == null) null else audioTrim.startLevel / 48.0),
-            "audioBufferFollows" to (if (track == null) null else bufferFollows),
-            "audioTrackRestarts" to trackRestarts,
-            "audioTrackStuck" to trackStuck,
+            "audioStartMs" to (if (track == null) null else audioOut.startLevel / 48.0),
+            "audioBufferFollows" to (if (track == null) null else audioOut.follows),
+            "audioTrackRestarts" to audioOut.restarts,
+            "audioTrackStuck" to audioOut.stuck,
             "audioFocus" to audioFocus.stateCode,
             "audioMuted" to (audioFocus.volume == 0f),
             "audioOpusUnusable" to AndroidOpusDecoder.unusableThisRun,
@@ -758,9 +776,6 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             SharpPictures.stats.values()
     }
 
-    /** Worker. The track's cumulative underrun count (API 24+), 0 where unknown. */
-    private fun underruns(track: AudioTrack?): Long = try { track?.underrunCount?.toLong() ?: 0L } catch (_: Exception) { 0L }
-
     /** Worker. The track's effective buffer in ms of 48 kHz audio, null without a track. */
     private fun audioBufferMs(track: AudioTrack?): Double? = try { track?.bufferSizeInFrames?.let { it / 48.0 } } catch (_: Exception) { null }
 
@@ -773,7 +788,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     /** Worker. Written -> presented (ms) by the track's timestamp, null where unknown. */
     private fun latencyMs(track: AudioTrack?): Double? = try {
         if (track != null && track.getTimestamp(timestamp)) {
-            val frames = trackWritten - timestamp.framePosition
+            val frames = audioOut.trackWritten - timestamp.framePosition
             (frames / 48.0 - (System.nanoTime() - timestamp.nanoTime) / 1e6).takeIf { it in 0.0..60000.0 }
         } else null
     } catch (_: Exception) { null }
@@ -787,76 +802,11 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         display?.refreshRate?.roundToInt()?.takeIf { it in 1..1000 }
     } catch (_: Exception) { null }
 
-    private fun createAudio() {
-        try {
-            val minimum = AudioTrack.getMinBufferSize(48000, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-            check(minimum > 0)
-            val track = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build())
-                .setAudioFormat(AudioFormat.Builder().setSampleRate(48000)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-                .setBufferSizeInBytes(maxOf(minimum, (AUDIO_CAPACITY_FRAMES * 4).toInt()))
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                // The platform's fast mixer path where it can (no extra
-                // mixer buffering); otherwise a normal track.
-                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                .build()
-            try {
-                // AndroidAudioTrim keeps the standing level at its adaptive
-                // target (40-120 ms) with 40 ms above it, and from API 31
-                // playback starts at ~30 ms (the start threshold) with the
-                // whole capacity as the buffer. Where the track starts only
-                // with a full buffer (before API 31, or a threshold that did
-                // not take), the buffer follows the trim's cap instead
-                // (audioBufferFollowsCap), and whatever level the track
-                // reports it waits for, the trim lets be queued (startLevel).
-                var threshold = -1
-                if (Build.VERSION.SDK_INT >= 31 && !forceFollow) {
-                    threshold = try { track.setStartThresholdInFrames(AUDIO_START_FRAMES) } catch (_: Exception) { -1 }
-                }
-                bufferFollows = audioBufferFollowsCap(Build.VERSION.SDK_INT, threshold > 0) || forceFollow
-                val buffer = try {
-                    track.setBufferSizeInFrames((if (bufferFollows) audioTrim.wantedCap else AUDIO_CAPACITY_FRAMES).toInt())
-                } catch (_: Exception) { -1 }
-                appliedCap = audioTrim.wantedCap
-                val reported = try { track.bufferSizeInFrames } catch (_: Exception) { buffer }
-                audioTrim.startLevel = (if (bufferFollows) maxOf(buffer, reported) else threshold).toLong().coerceAtLeast(0)
-                trackWritten = 0
-                startWatch.reset()
-                try { track.setVolume(audioFocus.volume) } catch (_: Exception) {}
-                track.play(); audio = track
-                main.post { audioFocus.acquire() }
-            } catch (failure: Exception) { try { track.release() } catch (_: Exception) {}; throw failure }
-        } catch (_: Exception) { audioError = -1; audio = null }
-    }
-
-    /**
-     * Worker. The track died (the platform's audio server lost it) or is
-     * written to and does not play: it is released and made again, at most
-     * once a second and [MAX_TRACK_RESTARTS] times a stream. A track that did
-     * not play is made again with its buffer following the cap. The stream
-     * and its decoder go on; the new track starts with the trim's start cut.
-     */
-    private fun remakeAudio(stuck: Boolean) {
-        val now = System.nanoTime()
-        if (trackRestarts + trackStuck >= MAX_TRACK_RESTARTS || (lastRestart != 0L && now - lastRestart < 1_000_000_000L)) return
-        lastRestart = now
-        if (stuck) { trackStuck++; forceFollow = true } else trackRestarts++
-        val old = audio
-        audio = null
-        try { old?.pause(); old?.flush() } catch (_: Exception) {}
-        try { old?.release() } catch (_: Exception) {}
-        audioTrim.reset()
-        createAudio()
-        if (audio != null) audioError = 0
-    }
-
     /** Worker. Every admitted packet ends here or in [done] exactly once. */
     private fun receive(packet: Packet) {
         if (lease != packet.lease || failedLease == packet.lease) { done(packet); return }
         if (!packet.video) {
-            try { if (audioOpus) playOpus(packet) else play(packet) } catch (_: Exception) { audioError = -1 }
+            try { if (audioOpus) playOpus(packet) else play(packet) } catch (_: Exception) {}
             done(packet)
             return
         }
@@ -879,65 +829,29 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         pool.give(packet.bytes)
     }
 
-    private fun play(packet: Packet) = playPcm(packet.bytes, 12, packet.length - 12, packet.accepted, androidMediaPts(packet.bytes))
+    private fun play(packet: Packet) = playPcm(packet.bytes, 12, packet.length - 12, androidMediaPts(packet.bytes))
 
     /** audio-opus-v1: the packet goes to the decoder; its PCM comes back through [opusFrame]. */
     private fun playOpus(packet: Packet) {
-        if (!audioEnabled || audio == null) return
+        if (!audioEnabled || !audioOut.active) return
         opus?.packet(packet.bytes, 12, packet.length - 12, androidMediaPts(packet.bytes), packet.accepted)
     }
 
     /** Worker, from the Opus decoder's output: decoded or concealed 10 ms, in play order. */
+    @Suppress("UNUSED_PARAMETER")
     private fun opusFrame(pcm: ByteArray, bytes: Int, pts: Long, accepted: Long) {
-        try { playPcm(pcm, 0, bytes, accepted, pts) } catch (_: Exception) { audioError = -1 }
+        try { playPcm(pcm, 0, bytes, pts) } catch (_: Exception) {}
     }
 
     /**
-     * 48 kHz s16 stereo PCM ([bytes] at [offset]) that arrived at [accepted]
-     * with Host PTS [pts]: a PCM packet's payload, or an Opus frame.
+     * Worker. 48 kHz s16 stereo PCM ([bytes] at [offset]) with Host PTS [pts]:
+     * a PCM packet's payload, or an Opus frame. It waits in [playout] until the
+     * audio thread (AndroidAudioOut) hands it to the track.
      */
-    private fun playPcm(pcm: ByteArray, offset: Int, bytes: Int, accepted: Long, pts: Long) {
-        if (!audioEnabled) return
-        val track = audio ?: return
-        if (audioTrim.starting) {
-            // audio-start-cut-v1: the start burst is held and cut to the target at once.
-            val cut = audioTrim.cutFrames
-            val held = audioTrim.start(pcm, offset, bytes, accepted)
-            audioDropped += audioTrim.cutFrames - cut
-            if (held < 0) return
-            if (held > 0) write(track, audioTrim.held, 0, held)
-            if (audio !== track) return
-        }
-        val played = try { track.playbackHeadPosition.toLong() and 0xffffffffL } catch (_: Exception) { trackWritten }
-        val now = System.nanoTime()
-        val queued = trackWritten - played
-        // A track that waits for more than may be queued, or never plays at all, is made again.
-        if (startWatch.stuck(now, played, queued + bytes / 4 > audioTrim.cap)) { remakeAudio(stuck = true); return }
-        if (!audioTrim.accept(queued, bytes / 4, now, underruns(track), pts)) {
-            audioDropped += bytes / 4
-            return
-        }
-        write(track, pcm, offset, bytes)
-        followCap(track)
-    }
-
-    /** Worker. Where the track's buffer follows the cap (audioBufferFollowsCap), a changed cap is applied. */
-    private fun followCap(track: AudioTrack) {
-        if (!bufferFollows || audio !== track) return
-        val wanted = audioTrim.wantedCap
-        if (wanted == appliedCap) return
-        appliedCap = wanted
-        val applied = try { track.setBufferSizeInFrames(wanted.toInt()) } catch (_: Exception) { return }
-        if (applied > 0) audioTrim.startLevel = applied.toLong()
-    }
-
-    private fun write(track: AudioTrack, buffer: ByteArray, offset: Int, bytes: Int) {
-        val written = track.write(buffer, offset, bytes, AudioTrack.WRITE_NON_BLOCKING)
-        if (written < 0) {
-            audioError = -1
-            // The platform lost the track: every later write would fail too.
-            if (written == AudioTrack.ERROR_DEAD_OBJECT || written == AudioTrack.ERROR) remakeAudio(stuck = false)
-        } else { audioFrames += written / 4; trackWritten += written / 4; audioDropped += (bytes - written) / 4 }
+    private fun playPcm(pcm: ByteArray, offset: Int, bytes: Int, pts: Long) {
+        if (!audioEnabled || !audioOut.active) return
+        val now = System.nanoTime() / 1000
+        synchronized(playout) { playout.push(pts, pcm, offset, bytes, now) }
     }
 
     /** Worker, after the start answer: the decoder before its key frame arrives. */
@@ -1143,11 +1057,8 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         clock.clear()
         frameWatch.clear()
         opus?.let { concealedBefore += it.stream.concealed; it.close() }; opus = null
-        if (audio != null) main.post { audioFocus.release() }
-        try { audio?.stop() } catch (_: Exception) {}
-        try { audio?.release() } catch (_: Exception) {}
-        audio = null
-        audioTrim.reset()
+        if (audioOut.active) main.post { audioFocus.release() }
+        audioOut.close()
         surface?.release(); surface = null
         val old = texture; texture = null
         if (old != null) main.post {
@@ -1348,19 +1259,5 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         private const val RETIRED_TEXTURE_MS = 120000L
         /** stream-stats texturePath: 1 = GPU surface texture (0 is the Windows CPU pixel buffer). */
         private const val TEXTURE_PATH_SURFACE = 1
-        /**
-         * 48 kHz stereo frames: track capacity 200 ms; the target starts at 40 ms and grows after underruns
-         * up to 120 ms, the cap 40 ms above it (80 ms at the start, 160 ms at most); playback starts at 30 ms
-         * where the start threshold takes. With a target of at most 80 ms and a cap of at most 120 ms
-         * (less than the Windows client's 200 ms queue), a device whose packets come in bursts (Wi-Fi
-         * power saving, a busy relay) keeps dropping 10 ms pieces.
-         */
-        private const val AUDIO_CAPACITY_FRAMES = 48L * 200
-        private const val AUDIO_LIMIT_FRAMES = 48L * 80
-        private const val AUDIO_TARGET_FRAMES = 48L * 40
-        private const val AUDIO_MAX_TARGET_FRAMES = 48L * 120
-        private const val AUDIO_START_FRAMES = 48 * 30
-        /** Tracks made again in one stream at most (AndroidMedia.remakeAudio). */
-        private const val MAX_TRACK_RESTARTS = 3
     }
 }

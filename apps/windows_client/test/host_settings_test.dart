@@ -8,6 +8,7 @@ import 'package:multitap_client/data/window_close_guard.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/host_overview_panels.dart';
 import 'package:multitap_client/ui/host_settings_screen.dart';
+import 'helpers/pump_work.dart';
 
 // The status reads of the Host tool (settings_rpc.hpp): nothing is changed.
 bool isReadOnlyHostRequest(Map<String, dynamic> request) =>
@@ -391,14 +392,14 @@ void main() {
       ),
     );
     await t.pumpWidget(app);
-    await t.pumpAndSettle();
+    await pumpWork(t);
   }
 
   Future<void> nav(WidgetTester t, int page) async {
     final f = find.byKey(Key('host-nav-$page'));
     await t.ensureVisible(f);
     await t.tap(f);
-    await t.pumpAndSettle();
+    await pumpWork(t);
   }
 
   Future<void> tap(WidgetTester t, String key) async {
@@ -407,9 +408,9 @@ void main() {
     // To the middle of the view: at its top edge a control sits under the
     // page's pinned header and the tap would hit the header instead.
     await Scrollable.ensureVisible(t.element(f), alignment: .5);
-    await t.pumpAndSettle();
+    await pumpWork(t);
     await t.tap(f);
-    await t.pumpAndSettle();
+    await pumpWork(t);
   }
 
   // The overview's ONE status beside the desktop's name.
@@ -474,7 +475,7 @@ void main() {
       await tap(t, 'host-console-transfer');
       expect(find.text('스트리밍 화면으로 전환할까요?'), findsOneWidget);
       await t.tap(find.text('취소'));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(
         api.requests.where((r) => r['action'] == 'consoleTransfer'),
         isEmpty,
@@ -503,7 +504,7 @@ void main() {
         isNull,
       );
       api.consolePending!.complete();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.textContaining('Windows 로그인 전환을 확인했어요.'), findsWidgets);
       expect(
         api.requests.any(
@@ -541,14 +542,14 @@ void main() {
       expect(find.text('가상 화면 복구 기록을 초기화할까요?'), findsOneWidget);
       expect(find.textContaining('기록은 삭제하지 않고 백업해요'), findsOneWidget);
       await t.tap(find.text('취소'));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(
         api.requests.where((r) => r['action'] == 'resetNativeRecovery'),
         isEmpty,
       );
       await tap(t, 'host-native-recovery-reset');
       await t.tap(find.byKey(const Key('host-confirm')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(
         api.requests
             .where((r) => r['action'] == 'resetNativeRecovery')
@@ -560,7 +561,7 @@ void main() {
       expect(find.textContaining('4개를 백업'), findsWidgets);
       expect(find.textContaining('✓ 이전 가상 모니터: 남아 있지 않음'), findsWidgets);
       await t.tap(find.byKey(const Key('host-result-close')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
 
       api.resetResult = {
         'ok': false,
@@ -571,11 +572,11 @@ void main() {
       };
       await tap(t, 'host-native-recovery-reset');
       await t.tap(find.byKey(const Key('host-confirm')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.textContaining('초기화하지 않았어요'), findsWidgets);
       expect(find.textContaining('✗ 사용 중인 연결: 스트리밍 연결 중'), findsWidgets);
       await t.tap(find.byKey(const Key('host-result-close')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await t.pumpWidget(const SizedBox.shrink());
 
       final remote = FakeHostSettings(registered: true)
@@ -650,10 +651,10 @@ void main() {
       await nav(t, 2);
       await tap(t, 'host-console-transfer');
       await t.tap(find.byKey(const Key('host-confirm')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.textContaining('전환 요청은 받았지만 완료를 확인하지 못했어요.'), findsWidgets);
       await t.pump(const Duration(seconds: 5));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(
         api.requests.where((r) => r['action'] == 'consoleTransfer').length,
         1,
@@ -669,7 +670,7 @@ void main() {
       final before = api.requests.where((r) => r['action'] == 'status').length;
       api.registered = true;
       await t.pump(const Duration(seconds: 3));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(
         api.requests.where((r) => r['action'] == 'status').length,
         greaterThan(before),
@@ -695,7 +696,7 @@ void main() {
 
   Future<void> approvalTick(WidgetTester t) async {
     await t.pump(const Duration(milliseconds: 3010));
-    await t.pumpAndSettle();
+    await pumpWork(t);
   }
 
   Map<String, dynamic> brokerEvidence({
@@ -758,7 +759,7 @@ void main() {
           testCase.$3 ? '스트리밍 가능' : isNot(contains('스트리밍')),
         );
         await t.pumpWidget(const SizedBox());
-        await t.pumpAndSettle();
+        await pumpWork(t);
       }
     },
   );
@@ -820,7 +821,7 @@ void main() {
       'ok': true,
       'status': {'registered': true},
     });
-    await t.pumpAndSettle();
+    await pumpWork(t);
     await t.pump(const Duration(seconds: 20));
     expect(api.requests.where((r) => r['action'] == 'status'), hasLength(2));
     expect(t.takeException(), isNull);
@@ -847,7 +848,7 @@ void main() {
         expect(find.textContaining(testCase.$2), findsOneWidget);
         expect(find.textContaining('raw-secret-token'), findsNothing);
         await t.pumpWidget(const SizedBox());
-        await t.pumpAndSettle();
+        await pumpWork(t);
       }
     },
   );
@@ -985,7 +986,7 @@ void main() {
       await t.pump(const Duration(seconds: 2));
       expect(api.requests, hasLength(1));
       await t.pump(const Duration(milliseconds: 1010));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(api.requests, hasLength(2));
       expect(pill(t), '관리자 승인 필요');
       await nav(t, 1);
@@ -1070,7 +1071,7 @@ void main() {
         isEmpty,
       );
       await t.tap(find.text('취소'));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'host-cancel-connection');
       await t.tap(find.byKey(const Key('host-confirm')));
       await t.pump();
@@ -1079,7 +1080,7 @@ void main() {
         hasLength(1),
       );
       delayed.complete(oldResponse);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'host-result-close');
       expect(find.byKey(const Key('host-approval-heading')), findsNothing);
       expect(find.text('연결 요청을 취소했어요.'), findsOneWidget);
@@ -1410,7 +1411,7 @@ void main() {
         isNull,
       );
       api.credentialPending!.complete();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'host-result-close');
       expect(find.text(r'TESTER\테스터'), findsOneWidget);
       expect(find.byKey(const Key('host-account-password')), findsNothing);
@@ -1451,7 +1452,7 @@ void main() {
         isEmpty,
       );
       await t.tap(find.text('취소'));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(api.credentialsConfigured, isTrue);
       await tap(t, 'host-clear-account');
       await tap(t, 'host-confirm');
@@ -1499,10 +1500,10 @@ void main() {
         findsOneWidget,
       );
       final closing = guard.onRequest!();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.text('저장하지 않은 설정을 버릴까요?'), findsOneWidget);
       await t.tap(find.text('취소'));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await closing;
       expect(guard.closes, 0);
       expect(
@@ -1579,7 +1580,7 @@ void main() {
         isEmpty,
       );
       await t.tap(find.text('취소'));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(
         api.requests.where((r) => r['action'] == 'repairDisplay'),
         isEmpty,
@@ -1639,7 +1640,7 @@ void main() {
         isNull,
       );
       api.repairPending!.complete();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.text('작업 완료'), findsOneWidget);
       expect(
         find.descendant(
@@ -2063,7 +2064,7 @@ void main() {
         isEmpty,
       );
       await t.tap(find.text('취소'));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'host-display-setup');
       await tap(t, 'host-confirm');
       expect(find.byKey(const Key('host-result-dialog')), findsOneWidget);
@@ -2189,7 +2190,7 @@ void main() {
         hasLength(1),
       );
       api.pending!.complete();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'host-result-close');
       expect(find.text('서비스 다시 시작'), findsOneWidget);
     },
@@ -2246,7 +2247,7 @@ void main() {
       expect(guard.closes, 0);
       expect(find.text('설정 작업이 끝난 뒤 창을 닫아 주세요.'), findsOneWidget);
       api.pending!.complete();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'host-result-close');
       expect(guard.busy, isFalse);
     },
@@ -2264,10 +2265,10 @@ void main() {
       await t.pump();
       expect(guard.dirty, isTrue);
       final cancelled = guard.onRequest!();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.text('저장하지 않은 설정을 버릴까요?'), findsOneWidget);
       await t.tap(find.text('취소'));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await cancelled;
       expect(guard.closes, 0);
       expect(
@@ -2278,7 +2279,7 @@ void main() {
         'draft',
       );
       final confirmed = guard.onRequest!();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'host-confirm');
       await confirmed;
       expect(guard.closes, 1);

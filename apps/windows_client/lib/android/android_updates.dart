@@ -544,8 +544,21 @@ abstract class AndroidUpdatePlatform {
   Future<void> install(File file, AndroidRelease release);
   Future<void> discard(File file);
 
-  /// Installer results after the hand-off (fixed codes).
+  /// Installer results after the hand-off (fixed codes), and one step that
+  /// is not a result: [androidUpdateConfirmOpened].
   Stream<String> get statuses;
+}
+
+/// Android's own confirmation screen was opened and waits for the person:
+/// a step on [AndroidUpdatePlatform.statuses], never a result.
+const androidUpdateConfirmOpened = 'confirm_opened';
+
+/// A platform that says how much of the file it has copied into Android's
+/// install session. The hand-off copies and hashes the whole APK once more,
+/// and those bytes of the known size are the one measure it has; checking
+/// the package before and committing after have none.
+abstract interface class AndroidUpdateInstallProgress {
+  Stream<({int copied, int total})> get installProgress;
 }
 
 const androidUpdateCodes = {
@@ -566,7 +579,8 @@ const androidUpdateCodes = {
   'cancelled',
 };
 
-class NativeAndroidUpdatePlatform implements AndroidUpdatePlatform {
+class NativeAndroidUpdatePlatform
+    implements AndroidUpdatePlatform, AndroidUpdateInstallProgress {
   NativeAndroidUpdatePlatform() {
     channel.setMethodCallHandler((call) async {
       final arguments = call.arguments;
@@ -575,11 +589,25 @@ class NativeAndroidUpdatePlatform implements AndroidUpdatePlatform {
           arguments['status'] is String) {
         _statuses.add(arguments['status'] as String);
       }
+      if (call.method == 'installProgress' && arguments is Map) {
+        final copied = arguments['copied'], total = arguments['size'];
+        if (copied is int && total is int && total > 0 && copied >= 0) {
+          _installProgress.add((
+            copied: copied > total ? total : copied,
+            total: total,
+          ));
+        }
+      }
       return null;
     });
   }
   static const channel = MethodChannel('multitap/android/update');
   final _statuses = StreamController<String>.broadcast();
+  final _installProgress =
+      StreamController<({int copied, int total})>.broadcast();
+  @override
+  Stream<({int copied, int total})> get installProgress =>
+      _installProgress.stream;
 
   Future<T?> _call<T>(String method, [Object? arguments]) async {
     try {

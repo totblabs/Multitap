@@ -12,6 +12,7 @@ import 'package:multitap_client/data/desktop_mapping.dart';
 import 'package:multitap_client/data/login_memory.dart';
 
 import 'auth_flow_test.dart' show TestBroker, TestLoginMemory;
+import 'helpers/pump_work.dart';
 
 final origin = Uri.parse('https://console.fixture.invalid:8443');
 BrokerDesktop desktop({
@@ -192,7 +193,7 @@ void main() {
     final f = find.byKey(Key(key));
     await t.ensureVisible(f);
     await t.tap(f);
-    await t.pumpAndSettle();
+    await pumpWork(t);
   }
 
   Future<void> windows(
@@ -212,7 +213,7 @@ void main() {
     await t.pumpWidget(
       MultitapApp(api: broker, serverOrigin: configured, loginMemory: memory),
     );
-    await t.pumpAndSettle();
+    await pumpWork(t);
     await tap(t, 'login-submit');
   }
 
@@ -237,7 +238,7 @@ void main() {
       expect(opened, isEmpty);
       expect(find.textContaining('앱 안에서 이 데스크톱의 원래 화면'), findsOneWidget);
       await t.tap(find.text('Console로 열기').last);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(opened, [
         {
           'origin': origin.origin,
@@ -248,6 +249,47 @@ void main() {
       ]);
       expect(broker.connects, 0);
       expect(find.byKey(const Key('desktop-more-lab_149')), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'Windows console says on the tile that it is opening, from the question to the window; a failure takes its place',
+    (t) async {
+      var answer = Completer<bool>();
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('multitap/window'),
+        (call) async =>
+            call.method == 'openConsoleWebView' ? await answer.future : null,
+      );
+      final broker = BrowserFixtureBroker();
+      await windows(t, broker);
+      final working = find.byKey(const Key('tile-working-lab_149'));
+      Future<void> open() async {
+        await tap(t, 'stream-modes-lab_149');
+        await tap(t, 'emergency-console-lab_149');
+        // The question is open: nothing is being opened yet.
+        expect(working, findsNothing);
+        await t.tap(find.text('Console로 열기').last);
+        await pumpWork(t);
+      }
+
+      await open();
+      // Asked and not there yet: the tile says so beside its moving mark.
+      expect(t.widget<Text>(working).data, 'Console을 여는 중이에요');
+      expect(find.byKey(const Key('status-busy-lab_149')), findsOneWidget);
+      answer.complete(true);
+      await pumpWork(t);
+      expect(working, findsNothing);
+      expect(find.byType(SnackBar), findsNothing);
+
+      // The window could not be opened: the reason is said in its place.
+      answer = Completer<bool>();
+      await open();
+      expect(working, findsOneWidget);
+      answer.complete(false);
+      await pumpWork(t);
+      expect(working, findsNothing);
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(broker.connects, 0);
     },
   );
   for (final marker in <String?>[null, 'future']) {
@@ -270,7 +312,7 @@ void main() {
         await tap(t, 'stream-modes-pve-149');
         await tap(t, 'emergency-console-pve-149');
         await t.tap(find.text('Console로 열기').last);
-        await t.pumpAndSettle();
+        await pumpWork(t);
         expect(find.textContaining('관리자에게 알려 주세요'), findsOneWidget);
         expect(calls, isNot(contains('openConsoleWebView')));
         expect(calls, isNot(contains('openSessionWindow')));
@@ -298,7 +340,7 @@ void main() {
       await tap(t, 'stream-modes-lab_149');
       await tap(t, 'emergency-console-lab_149');
       await t.tap(find.text('Console로 열기').last);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.textContaining('HTTPS 주소로 다시 로그인'), findsOneWidget);
       expect(calls, isNot(contains('openConsoleWebView')));
       expect(calls, isNot(contains('openSessionWindow')));
@@ -321,12 +363,12 @@ void main() {
       await tap(t, 'emergency-console-lab_149');
       broker.fresh = Completer<List<BrokerDesktop>>();
       await t.tap(find.text('Console로 열기').last);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'stream-modes-lab_149');
       await tap(t, 'emergency-console-lab_149');
       expect(find.textContaining('앱 안에서 이 데스크톱의 원래 화면'), findsNothing);
       broker.fresh!.complete([desktop(marker: null)]);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.textContaining('관리자에게 알려 주세요'), findsOneWidget);
       expect(opens, 0);
     },
@@ -343,7 +385,7 @@ void main() {
       await tap(t, 'stream-modes-lab_149');
       await tap(t, 'emergency-console-lab_149');
       await t.tap(find.text('Console로 열기').last);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.textContaining('네트워크를 확인하고 다시 시도'), findsOneWidget);
       expect(broker.connects, 0);
     },
@@ -369,7 +411,7 @@ void main() {
         await tap(t, 'emergency-console-lab_149');
         broker.assigned = changed;
         await t.tap(find.text('Console로 열기').last);
-        await t.pumpAndSettle();
+        await pumpWork(t);
         expect(opens, 0);
         expect(broker.connects, 0);
       },
@@ -392,12 +434,12 @@ void main() {
       await tap(t, 'emergency-console-lab_149');
       broker.fresh = Completer<List<BrokerDesktop>>();
       await t.tap(find.text('Console로 열기').last);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'workspace-account');
       await tap(t, 'sign-out');
       await tap(t, 'confirm-sign-out');
       broker.fresh!.complete([desktop()]);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.byKey(const Key('login-submit')), findsOneWidget);
       expect(opens, 0);
     },
@@ -418,13 +460,13 @@ void main() {
       await tap(t, 'stream-modes-lab_149');
       await tap(t, 'emergency-console-lab_149');
       await t.tap(find.text('취소').last);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(opens, 0);
       await tap(t, 'stream-modes-lab_149');
       await tap(t, 'emergency-console-lab_149');
       broker.assigned = [];
       await t.tap(find.text('Console로 열기').last);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(opens, 0);
       expect(broker.connects, 0);
     },
@@ -458,7 +500,7 @@ void main() {
       addTearDown(t.view.reset);
       final broker = BrowserFixtureBroker();
       await t.pumpWidget(AndroidVdiApp(apiFactory: (_) => broker));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       await tap(t, 'login-submit');
       // ▾ holds 콘솔 on Android as on Windows.
       await tap(t, 'stream-modes-lab_149');
@@ -475,7 +517,7 @@ void main() {
       ]);
       expect(broker.connects, 0);
       await t.pumpWidget(const SizedBox());
-      await t.pumpAndSettle();
+      await pumpWork(t);
     },
   );
 }

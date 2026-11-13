@@ -1,6 +1,6 @@
 #pragma once
 // The Host installer's texts (host_installer.cpp, Multitap-Host-<version>-windows-x64.exe):
-// its message boxes, in Korean and English (docs/i18n.md). X(id, Korean, English); Korean
+// its message boxes and its status window, in Korean and English (docs/i18n.md). X(id, Korean, English); Korean
 // is the source and stays exactly the text shown before; "{0}".."{9}" are placeholders
 // (multitap::ui::fill). apps/windows_host/src/ui_text_test.cpp checks every row.
 #include "../src/ui_language.hpp"
@@ -21,7 +21,16 @@
   X(Location, L"\n설치 위치: {0}", L"\nInstall location: {0}") \
   X(Restart, L"\n\n설정을 마치려면 Windows를 다시 시작해 주세요.", L"\n\nRestart Windows to finish the setup.") \
   X(OpenSettings, L"\n\n시작 메뉴나 바탕 화면의 Multitap Host를 열어 설치를 마무리해 주세요.", L"\n\nOpen Multitap Host from the Start menu or the desktop to finish the installation.") \
-  X(ErrorDetail, L"\n\n오류 번호: {0}\n기록 파일: {1}", L"\n\nError number: {0}\nLog file: {1}")
+  X(ErrorDetail, L"\n\n오류 번호: {0}\n기록 파일: {1}", L"\n\nError number: {0}\nLog file: {1}") \
+  /* The status window: what the installer is doing while Windows Installer's own progress window is not on screen. */ \
+  X(StatusUnpacking, L"설치 파일을 준비하고 있어요", L"Getting the setup files ready") \
+  X(StatusClosing, L"실행 중인 Multitap Host를 닫고 있어요", L"Closing Multitap Host programs that are running") \
+  X(StatusStarting, L"Windows Installer를 시작하고 있어요", L"Starting Windows Installer") \
+  X(StatusInstalling, L"Multitap Host를 설치하고 있어요", L"Installing Multitap Host") \
+  X(StatusFinishing, L"설치를 마무리하고 있어요", L"Finishing the installation") \
+  X(StatusOpening, L"Host 설정을 열고 있어요", L"Opening Host settings") \
+  X(StatusWait, L"창이 바뀔 때까지 잠시만 기다려 주세요.", L"Please wait until the next window opens.") \
+  X(StatusVersion, L"Multitap Host {0}", L"Multitap Host {0}")
 namespace multitap::installer_text {
 enum class Text : unsigned {
 #define MULTITAP_INSTALLER_TEXT_ID(id, ko, en) id,

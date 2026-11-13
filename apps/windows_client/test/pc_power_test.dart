@@ -7,6 +7,7 @@ import 'package:multitap_client/data/desktop_mapping.dart';
 import 'package:multitap_client/ui/workspace_shell.dart';
 
 import 'auth_flow_test.dart' show TestBroker;
+import 'helpers/pump_work.dart';
 
 // Local PC power (pc-power-v1) in the Windows client: parsing, the offered
 // actions and the ⏻ flows against a recording broker. Nothing here reaches a
@@ -191,14 +192,14 @@ void main() {
     await tester.pumpWidget(
       MultitapApp(api: api, serverOrigin: Uri.parse('https://cloud.example.com')),
     );
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await tester.enterText(find.byKey(const Key('sign-in-id')), 'qa-user');
     await tester.enterText(
       find.byKey(const Key('sign-in-password')),
       'qa-password',
     );
     await tester.tap(find.byKey(const Key('login-submit')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
   }
 
   testWidgets(
@@ -207,12 +208,12 @@ void main() {
       final api = PcBroker()..assigned = [pc()];
       await login(tester, api);
       await tester.tap(find.byKey(const Key('desktop-power-$pcId')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byKey(const Key('power-stop-$pcId')), findsNothing);
       expect(find.byKey(const Key('power-start-$pcId')), findsNothing);
       expect(find.byKey(const Key('power-shutdown-$pcId')), findsOneWidget);
       await tester.tap(find.byKey(const Key('power-reboot-$pcId')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.text('로컬 PC를 다시 시작할까요?'), findsOneWidget);
       expect(find.text('저장하지 않은 작업이 있으면 먼저 저장하세요.'), findsOneWidget);
       expect(api.requested, isEmpty, reason: 'It asks first.');
@@ -220,7 +221,7 @@ void main() {
       await tester.pump();
       expect(api.requested, ['reboot']);
       await tester.pump(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.textContaining('Windows가 다시 시작 요청을 받았어요'), findsOneWidget);
     },
   );
@@ -241,7 +242,7 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await failed;
     expect(api.requested, ['shutdown']);
   });
@@ -261,15 +262,15 @@ void main() {
         ..assigned = [pc(online: false, actions: const {}, wake: false)];
       await login(tester, api);
       await tester.tap(find.byKey(const Key('desktop-power-$pcId')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byKey(const Key('power-shutdown-$pcId')), findsNothing);
       await tester.tap(find.byKey(const Key('power-start-$pcId')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.text('로컬 PC를 켜지 못했어요'), findsOneWidget);
       expect(find.text('서버가 이 로컬 PC의 랜카드 정보를 아직 받지 못했어요.'), findsOneWidget);
       expect(find.textContaining('Wake-on-LAN'), findsNothing);
       await tester.tap(find.byKey(const Key('pc-wake-details')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.textContaining('Wake-on-LAN'), findsOneWidget);
       expect(api.requested, isEmpty, reason: 'Nothing is sent.');
     },
@@ -283,15 +284,15 @@ void main() {
       ..finalExit = 'wake_timeout';
     await login(tester, api);
     await tester.tap(find.byKey(const Key('desktop-power-$pcId')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     await tester.tap(find.byKey(const Key('power-start-$pcId')));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.text('로컬 PC를 켤까요?'), findsOneWidget);
     await tester.tap(find.byKey(const Key('confirm-power-start-$pcId')));
     await tester.pump();
     expect(api.requested, ['start']);
     await tester.pump(const Duration(seconds: 1));
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
     expect(find.text('로컬 PC를 켜지 못했어요'), findsOneWidget);
     expect(find.text('켜기 신호를 보냈지만 4분 안에 켜지지 않았어요.'), findsOneWidget);
   });

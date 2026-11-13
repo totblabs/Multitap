@@ -154,7 +154,11 @@ test('an actual admin policy revocation stops paired clipboard and video sockets
 test('Initial admin/admin can only change both credentials; completing setup revokes every old session', async t => {
   const announced = [];
   const f = await setup(t, { initialSetupOptions: { announce: code => announced.push(code) } });
+  // The sign-in page asks, signed in to nothing, whether the first setup is still to be done: a boolean and nothing else.
+  const firstSetup = async () => { const response = await fetch(`http://127.0.0.1:${f.server.address().port}/api/v1/admin/first-setup`); return { status: response.status, body: await response.json() }; };
+  assert.deepEqual(await firstSetup(), { status: 200, body: { pending: false } }, 'a commissioned server');
   f.store.db.prepare('UPDATE users SET password_hash=?,must_change_credentials=1 WHERE username=?').run(await initialPasswordHash(), 'admin');
+  assert.deepEqual(await firstSetup(), { status: 200, body: { pending: true } });
   const login = await f.login('admin'); assert.equal(login.body.user.mustChangeCredentials, true);
   assert.equal((await f.call('/api/v1/admin/session')).body.user.mustChangeCredentials, true);
   assert.equal((await f.call('/api/v1/admin/inventory')).status, 428);
@@ -168,6 +172,7 @@ test('Initial admin/admin can only change both credentials; completing setup rev
   assert.equal((await f.call('/api/v1/admin/setup', 'POST', { username: 'alice', password: 'Replacement-password-71!', setupCode })).status, 409);
   assert.equal((await f.call('/api/v1/admin/setup', 'POST', { username: 'owner', password: 'Replacement-password-71!', setupCode })).status, 200);
   assert.equal((await f.call('/api/v1/admin/session')).status, 401);
+  assert.deepEqual(await firstSetup(), { status: 200, body: { pending: false } }, 'never said again after the setup');
   assert.equal((await f.call('/api/v1/admin/login', 'POST', { username: 'admin', password: 'admin' })).status, 401);
   const changed = await f.login('Replacement-password-71!', 'owner'); assert.equal(changed.body.user.mustChangeCredentials, false);
   assert.equal((await f.call('/api/v1/admin/inventory')).status, 200);

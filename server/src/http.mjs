@@ -361,7 +361,10 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
     return { protocol: 'server-access-connections-v1', fence: true, ended };
   };
   accessClient?.attach?.({ activity: accessActivity, endConnections: endAccessConnections, hold: options => accessRuntime.hold(options), release: lease => accessRuntime.release(lease),
-    blocked: () => accessRuntime.blocked, settle: () => accessRuntime.status({ managementOrigin: null }) });
+    blocked: () => accessRuntime.blocked, settle: () => accessRuntime.status({ managementOrigin: null }),
+    record: (event, actor, detail) => store.audit(event, actor, detail),
+    // The saved switch for media over UDP, taken over without a restart: sessions that connect from now on get keys or not.
+    udpMedia: on => { if (relay.udp) relay.udp.media = on === true; } });
   // At most one re-check per event-loop turn, however many responses ask.
   let revalidateQueued = false, notifyQueued = false;
   const revalidateSoon = notify => {
@@ -407,16 +410,39 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
       // Only the holder of the current fence, on this
       // machine, may ask; the broker ends them itself and records how many.
       if (path === '/internal/server-access/end-connections' && req.method === 'POST' && !url.search && localActivityRequest(req) && accessRuntime.accepts(req.headers['x-multitap-access-fence'])) { send(200, endAccessConnections(), false); return; }
+      // 연결 테스트 of a Docker Compose install without an updater asks this
+      // server at the address under test (src/self-access.mjs), which need not
+      // be an address it lets in yet: answered before admission, to the
+      // one-time value that test is waiting for and to nothing else. Any other
+      // value goes on as the ordinary request it is.
+      const probe = accessClient?.answerProbe && req.method === 'GET' && !url.search ? /^\/api\/v1\/access-probe\/([a-f0-9]{64})$/.exec(path) : null;
+      const probed = probe ? accessClient.answerProbe(probe[1], req) : null;
+      if (probed) { send(200, probed, false); return; }
       const internalHealth = strictAccess && path === '/healthz' && req.method === 'GET' && !url.search && localActivityRequest(req);
       let context = { origin: publicOrigin, bootstrapOnly: false };
       if (strictAccess) {
         try { context = resolveRequestAccess(req, accessConfig, { bootstrap, setupOrigin }); }
-        catch (error) { if (!internalHealth && !legacyProxyHealthProbe(req, accessConfig)) throw error; context = { origin: publicOrigin, bootstrapOnly: !accessConfig, healthProbeOnly: true }; }
+        catch (error) {
+          // An address a save of the access settings is waiting to have proven
+          // from outside (self-access.mjs) leads to the console meanwhile, and
+          // to nothing else.
+          const provisional = accessClient?.provisionalAccess?.(req) ?? null;
+          if (provisional) context = provisional;
+          else { if (!internalHealth && !legacyProxyHealthProbe(req, accessConfig)) throw error; context = { origin: publicOrigin, bootstrapOnly: !accessConfig, healthProbeOnly: true }; }
+        }
       }
+      // The address under proof typed by itself (a phone outside the network has no link to press): it leads to the
+      // console page that asks for the code, as the link on the waiting screen does. Nothing else is served there.
+      if (context.provisional && path === '/' && !url.search && (req.method === 'GET' || req.method === 'HEAD')) {
+        res.writeHead(302, { Location: '/admin/#/server-access', 'Cache-Control': 'no-store', 'Content-Length': 0, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'", ...securityHeaders, 'X-Request-Id': requestId });
+        res.end(); return;
+      }
+      if (context.provisional && !(path === '/admin' || path.startsWith('/admin/') || path.startsWith('/api/v1/admin/'))) throw new HttpError(403, 'origin_not_allowed');
       const requestOrigin = context.origin;
       req.brokerOrigin = requestOrigin;
       req.brokerTls = observabilityTls(req, context);
-      securityHeaders = { ...securityHeaders, ...originHeaders(requestOrigin) };
+      // No transport policy for a name that is not this server's address yet.
+      securityHeaders = { ...securityHeaders, ...(context.provisional ? {} : originHeaders(requestOrigin)) };
       // A fresh install's root address opens the first-setup page, so nobody
       // has to type /admin: always while bootstrapping, and for a browser while
       // the initial administrator setup is still pending.
@@ -597,7 +623,7 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
       // The standalone viewer shares password admission/session issuance. A
       // future MFA provider is passed here before any cookie can be issued.
       if (await browserConsole.handle(req, res, path, { origin: requestOrigin, body, send, login, confirmLogin, mfaRoutes })) return;
-      if (await adminRoutes({ store, vault, proxmox, relay, power, hostRequests, notices, resources: adminResources, login, mfaRoutes, passwordJob, body, backup, stream: entry => { res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': entry.size, 'Content-Disposition': 'attachment; filename="' + entry.filename + '"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'", ...securityHeaders, 'X-Request-Id': requestId }); const file = createReadStream(entry.path); file.once('error', () => res.destroy()); file.pipe(res); }, publicOrigin: requestOrigin, setupScriptSha256: () => proxmoxSetupSha256(requestOrigin), cookieScope: strictAccess ? requestOrigin : null, legacyCookieOrigin: legacyAdminOrigin, accessRuntime, restartServer, hostRemovalActivity: id => desktopActivitySnapshot({ relay, vmAudio, store }, id), serverUpdate, initialSetup, certificates: certificateMonitor, agentAccess: { denied: () => vmStates.agentRefused(), reset: () => vmStates.resetAgentDenial() }, audioInventory: (config, vms) => vmAudio.observeInventory(config, vms), consoleAccess: { state: () => consolePrivilege, record: granted => { consolePrivilege = typeof granted === 'boolean' ? granted : null; } }, relocation: vmRelocation, serverInfo: { service: 'multitap-broker', version: VERSION, transport: strictAccess ? currentTransport : transport, listener: req.socket.localPort ? { address: req.socket.localAddress, port: req.socket.localPort } : null, deployment: { kind: deploymentKind, configured: deploymentKind !== 'unknown' }, udpPort: relayOptions.udp?.port ?? null, startedAt: new Date(brokerStartedAt).toISOString(), restart: { supported: typeof restartServer === 'function' }, update: { state: 'not_configured', feedConfigured: false, applySupported: false } } })(req, res, path, send)) return;
+      if (await adminRoutes({ store, vault, proxmox, relay, power, hostRequests, notices, resources: adminResources, login, mfaRoutes, passwordJob, body, backup, stream: entry => { res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': entry.size, 'Content-Disposition': 'attachment; filename="' + entry.filename + '"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'", ...securityHeaders, 'X-Request-Id': requestId }); const file = createReadStream(entry.path); file.once('error', () => res.destroy()); file.pipe(res); }, publicOrigin: requestOrigin, setupScriptSha256: () => proxmoxSetupSha256(requestOrigin), cookieScope: strictAccess ? requestOrigin : null, legacyCookieOrigin: legacyAdminOrigin, accessRuntime, accessAdmitted: config => { try { return resolveRequestAccess(req, config).origin; } catch { return null; } }, restartServer, hostRemovalActivity: id => desktopActivitySnapshot({ relay, vmAudio, store }, id), serverUpdate, initialSetup, certificates: certificateMonitor, agentAccess: { denied: () => vmStates.agentRefused(), reset: () => vmStates.resetAgentDenial() }, audioInventory: (config, vms) => vmAudio.observeInventory(config, vms), consoleAccess: { state: () => consolePrivilege, record: granted => { consolePrivilege = typeof granted === 'boolean' ? granted : null; } }, relocation: vmRelocation, serverInfo: { service: 'multitap-broker', version: VERSION, transport: strictAccess ? currentTransport : transport, listener: req.socket.localPort ? { address: req.socket.localAddress, port: req.socket.localPort } : null, deployment: { kind: deploymentKind, configured: deploymentKind !== 'unknown' }, udpPort: relayOptions.udp?.port ?? null, startedAt: new Date(brokerStartedAt).toISOString(), restart: { supported: typeof restartServer === 'function' }, update: { state: 'not_configured', feedConfigured: false, applySupported: false } } })(req, res, path, send)) return;
       if (path === '/api/v1/hosts/requests' || path === '/api/v1/hosts/requests/status' || path === '/api/v1/hosts/requests/cancel') {
         if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
         const input = await body(req, path === '/api/v1/hosts/requests' ? 2048 : 512);

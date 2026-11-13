@@ -5,93 +5,86 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// AndroidAudioTrim with the track's buffer and start level, as AndroidMedia uses them
-// (audioBufferFollowsCap, AudioStartWatch): a track that plays only once a level is
-// queued must always get that level, and the cap must keep its headroom above the
-// target as the target grows after underruns.
+// The track's start level, its buffer and how it is made again (AndroidAudioJitter.kt, as
+// AndroidAudioOut uses them): a track that plays only once a level is in it must get that level
+// from the first write after priming, and a stream must get its sound back after a later failure.
 class AudioStartBufferTest {
-    // AndroidMedia's values.
-    private val capacity = 48L * 200
-    private val cap = 48L * 80
-    private val target = 48L * 40
-    private val maxTarget = 48L * 120
-    private val packet = ByteArray(480 * 4)
     private val ms = 1_000_000L
+    private val packet = ByteArray(1920)
 
-    private fun trim() = AndroidAudioTrim(targetFrames = target, capFrames = cap, maxTargetFrames = maxTarget, capacityFrames = capacity)
-
-    /**
-     * Frames queued in a track that has not started (nothing is played), after
-     * [packets] 10 ms packets, with the buffer following the cap as AndroidMedia does.
-     */
-    private fun fill(trim: AndroidAudioTrim, packets: Int = 40, level: Long = trim.wantedCap): Long {
-        var queued = 0L
-        trim.startLevel = level
-        for (index in 0 until packets) {
-            val now = index * 10 * ms
-            if (trim.starting) {
-                val held = trim.start(packet, 0, packet.size, now)
-                if (held < 0) continue
-                queued += held / 4
-            }
-            // The track's write never takes more than its effective buffer (the cap here).
-            if (trim.accept(queued, 480, now)) queued = minOf(trim.cap, queued + 480)
-        }
-        return queued
+    @Test fun theBufferIsTheTargetBeforeAndroid12OrWithoutAStartThreshold() {
+        for (api in 26..30) assertTrue(audioBufferFollowsTarget(api, startThresholdApplied = true))
+        assertFalse(audioBufferFollowsTarget(31, startThresholdApplied = true))
+        assertFalse(audioBufferFollowsTarget(36, startThresholdApplied = true))
+        assertTrue("a threshold that did not take: the track waits for its buffer", audioBufferFollowsTarget(31, startThresholdApplied = false))
     }
 
-    @Test fun theBufferFollowsTheCapBeforeAndroid12OrWithoutAStartThreshold() {
-        for (api in 26..30) assertTrue(audioBufferFollowsCap(api, startThresholdApplied = true))
-        assertFalse(audioBufferFollowsCap(31, startThresholdApplied = true))
-        assertFalse(audioBufferFollowsCap(36, startThresholdApplied = true))
-        assertTrue("a threshold that did not take: the track waits for its buffer", audioBufferFollowsCap(31, startThresholdApplied = false))
+    /** One look of a track that has not started: [room] free, [device] in it. */
+    private fun firstWrite(buffer: AudioJitterBuffer, device: Int, room: Int, nowUs: Long): Int =
+        buffer.pull(ByteArray(9600 * 4), room, device, nowUs)
+
+    @Test fun primingWritesTheWholeTargetAtOnce() {
+        // Before API 31 the track's buffer is the target and it plays once that buffer is full.
+        val buffer = AudioJitterBuffer(AudioJitterConfig.ANDROID)
+        buffer.followDevice(1920)
+        for (k in 0 until 3) { buffer.push(k * 10_000L, packet, 0, packet.size, k * 10_000L); assertEquals(0, firstWrite(buffer, 0, 1920, k * 10_000L)) }
+        buffer.push(30_000, packet, 0, packet.size, 30_000)
+        assertEquals("the first write fills the track's whole buffer", 1920, firstWrite(buffer, 0, 1920, 30_000))
     }
 
-    @Test fun theFirstFillReachesTheLevelAFullBufferTrackWaitsFor() {
-        val trim = trim()
-        val queued = fill(trim)
-        assertEquals(cap, trim.startLevel)
-        assertEquals("a track that waits for its whole buffer gets it", trim.startLevel, queued)
-    }
-
-    @Test fun theCapKeepsItsHeadroomAsTheTargetGrows() {
-        // 507887d: before Android 12 the cap was the track's 80 ms buffer and the target grew to
-        // the same 80 ms, so nothing was left above the target. Now the cap stays 40 ms above it.
-        val trim = trim()
+    /** [packets] 10 ms packets in real time (none when [silent]) into a track that plays 480 frames per 10 ms. */
+    private class Steady(val buffer: AudioJitterBuffer, val bufferFrames: Int) {
         var now = 0L
-        repeat(8) { if (trim.starting) trim.start(packet, 0, packet.size, now); now += 10 * ms }
-        assertTrue(trim.accept(target, 480, now, underruns = 0, ptsMicros = now / 1000))
-        var underruns = 0L
-        repeat(10) {
-            now += 10 * ms
-            trim.accept(0, 480, now, underruns = ++underruns, ptsMicros = now / 1000)
-            assertEquals(trim.target + (cap - target), trim.cap)
+        var device = 0
+        var ptsUs = 0L
+        val out = ByteArray(9600 * 4)
+        fun run(packets: Int, silent: Boolean = false) = repeat(packets) {
+            if (!silent) { buffer.push(ptsUs, ByteArray(1920), 0, 1920, now); ptsUs += 10_000 }
+            device = maxOf(0, device - 480)
+            device += buffer.pull(out, bufferFrames - device, device, now)
+            now += 10_000
         }
-        assertEquals(maxTarget, trim.target)
-        assertEquals(maxTarget + (cap - target), trim.cap)
-        assertTrue(trim.cap <= capacity)
     }
 
-    @Test fun aStartLevelAboveTheCapRaisesTheCap() {
-        // A track that reports it waits for more than the trim would queue (a clamped buffer,
-        // a start threshold the platform raised): the trim lets that much be queued.
-        val trim = trim()
-        trim.startLevel = 48L * 100
-        assertEquals(48L * 100, trim.cap)
-        assertEquals("the queue reaches the level the track waits for", 48L * 100, fill(trim, level = 48L * 100))
+    @Test fun afterAPauseTheFirstWriteMeetsTheRestartLevelAgain() {
+        // The VM fell silent long enough for the mixer to disable the track; its next start needs a full buffer.
+        val buffer = AudioJitterBuffer(AudioJitterConfig.ANDROID)
+        buffer.followDevice(2880)
+        val track = Steady(buffer, 2880)
+        track.run(100)
+        assertTrue(buffer.playing)
+        track.run(200, silent = true)
+        assertEquals("ran dry", 0, track.device)
+        track.ptsUs += 2_000_000
+        for (k in 0 until 5) { buffer.push(track.ptsUs, packet, 0, packet.size, track.now); track.ptsUs += 10_000; assertEquals(0, firstWrite(buffer, 0, 2880, track.now)); track.now += 10_000 }
+        buffer.push(track.ptsUs, packet, 0, packet.size, track.now)
+        assertEquals("primed again: the restart level from the first write", 2880, firstWrite(buffer, 0, 2880, track.now))
+        assertEquals(1L, buffer.counters.silences)
+        assertEquals(0L, buffer.counters.underruns)
     }
 
-    @Test fun afterItRanDryWholePacketsFillItAgain() {
-        // A pause in the VM's sound: the track ran dry and waits for a full buffer again.
-        val trim = trim()
-        trim.startLevel = trim.wantedCap
-        var queued = 0L
+    @Test fun aStartThresholdAboveTheTargetRaisesTheTarget() {
+        // A threshold the platform raised (API 31+): the buffer never aims below it.
+        val buffer = AudioJitterBuffer(AudioJitterConfig.ANDROID)
+        buffer.raiseFloor(48 * 50)
+        assertEquals(48 * 50, buffer.target)
         var now = 0L
-        repeat(8) { if (trim.starting) trim.start(packet, 0, packet.size, now); now += 10 * ms }
-        repeat(100) { assertTrue(trim.accept(target, 480, now)); now += 10 * ms }
-        now += 3_000 * ms
-        repeat(20) { if (trim.accept(queued, 480, now)) queued += 480; now += 10 * ms }
-        assertEquals(trim.cap, queued)
+        repeat(4) { buffer.push(now, packet, 0, packet.size, now); assertEquals(0, firstWrite(buffer, 0, 9600, now)); now += 10_000 }
+        buffer.push(now, packet, 0, packet.size, now)
+        assertEquals(48 * 50, firstWrite(buffer, 0, 9600, now))
+        // Calm for a minute: the target does not shrink below the threshold.
+        val calm = AudioJitterBuffer(AudioJitterConfig.ANDROID)
+        calm.raiseFloor(48 * 50)
+        Steady(calm, 9600).run(6000)
+        assertEquals(48 * 50, calm.target)
+        assertEquals(0L, calm.counters.underruns)
+    }
+
+    @Test fun theLevelIsWrittenMinusTheHeadAcrossTheWrap() {
+        assertEquals(480, audioDeviceFrames(written = 1000, head = 520, capacity = 9600))
+        // The head is a 32-bit counter: it wraps after 2^32 frames (about 25 h).
+        assertEquals(100, audioDeviceFrames(written = (1L shl 32) + 50, head = (-50), capacity = 9600))
+        assertEquals("a head past the writes is not a level", 0, audioDeviceFrames(written = 100, head = 200, capacity = 9600))
     }
 
     @Test fun aTrackWrittenToThatDoesNotPlayIsSeenAfterOneSecond() {
@@ -106,5 +99,26 @@ class AudioStartBufferTest {
         // Not full (still filling, or a refill after a pause): never stuck.
         watch.reset()
         repeat(300) { assertFalse(watch.stuck(now, played, full = false)); now += 10 * ms }
+    }
+
+    @Test fun remakesAreRateLimitedNotCountedOutForTheStream() {
+        val limiter = RemakeLimiter()
+        val second = 1_000_000_000L
+        assertTrue(limiter.allow(0))
+        assertFalse("at most one a second", limiter.allow(second / 2))
+        assertTrue(limiter.allow(2 * second))
+        assertTrue(limiter.allow(4 * second))
+        assertFalse("three in a minute", limiter.allow(10 * second))
+        assertFalse(limiter.allow(59 * second))
+        // A later route change (the old rule allowed three a stream, then never again): allowed again.
+        assertTrue("the first left the minute", limiter.allow(60 * second))
+        assertFalse(limiter.allow(61 * second + second / 2))
+        assertTrue(limiter.allow(62 * second))
+        var allowed = 0
+        var now = 100 * second
+        repeat(600) { if (limiter.allow(now)) allowed++; now += second }
+        assertEquals("ten minutes of failures: three a minute", 30, allowed)
+        limiter.reset()
+        assertTrue(limiter.allow(now))
     }
 }

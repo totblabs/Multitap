@@ -56,6 +56,34 @@ class AudioFocusPolicyTest {
     }
 
     @Test
+    fun aLossWhileTheAppIsInFrontIsAskedBackWhenTheUserReturns() {
+        // Another player took focus permanently while the stream was on screen: muted, but not for the
+        // rest of the session. Back in the app (window focus), or new VM sound while the user is in it,
+        // asks again, and the grant unmutes.
+        p.requested(AudioFocusPolicy.REQUEST_GRANTED)
+        p.changed(AudioFocusPolicy.LOSS)
+        assertEquals(0f, p.volume)
+        assertTrue("the user came back to the app", p.askAgain(wanted = true, userHere = true))
+        p.requested(AudioFocusPolicy.REQUEST_GRANTED)
+        assertEquals(1f, p.volume)
+        assertFalse("held again: nothing to ask", p.askAgain(wanted = true, userHere = true))
+    }
+
+    @Test
+    fun aLossIsNotAskedBackWhileTheUserIsElsewhereOrForACall() {
+        p.requested(AudioFocusPolicy.REQUEST_GRANTED)
+        p.changed(AudioFocusPolicy.LOSS)
+        assertFalse("the user is in another window (split screen)", p.askAgain(wanted = true, userHere = false))
+        assertFalse("no stream wants sound", p.askAgain(wanted = false, userHere = true))
+        p.changed(AudioFocusPolicy.GAIN)
+        p.changed(AudioFocusPolicy.LOSS_TRANSIENT)
+        assertFalse("a call: the platform gives focus back itself", p.askAgain(wanted = true, userHere = true))
+        assertEquals(0f, p.volume)
+        p.changed(AudioFocusPolicy.GAIN)
+        assertEquals(1f, p.volume)
+    }
+
+    @Test
     fun releaseForgetsTheFocus() {
         p.requested(AudioFocusPolicy.REQUEST_GRANTED)
         p.changed(AudioFocusPolicy.LOSS_TRANSIENT)

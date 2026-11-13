@@ -8,6 +8,7 @@ import 'package:multitap_client/models/vm_resources.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/desktop_readiness.dart';
 import 'package:multitap_client/ui/workspace_shell.dart';
+import 'helpers/pump_work.dart';
 
 DesktopMachine machine(StreamPreparation? preparation, {bool ready = false}) =>
     DesktopMachine(
@@ -152,7 +153,7 @@ void main() {
               ),
             ),
           );
-          await t.pumpAndSettle();
+          await pumpWork(t);
           final current = t.getSize(find.byKey(const Key('card-pve-149')));
           if (previous != null) expect(current, previous);
           previous = current;

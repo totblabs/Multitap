@@ -398,10 +398,11 @@ void main() {
     await disposeApp(tester);
   });
 
-  // The sign-in button must not show "로그인 중…" until the sign-out is
-  // answered.
+  // Until the sign-out is answered the sign-in button turns its spinner and
+  // says it is signing out, never "로그인 중…" (it used to stand still with
+  // "로그인" greyed, which looked stopped).
   testWidgets('로그아웃 while the server has not answered: the sign-in button '
-      'waits without saying it is signing in', (tester) async {
+      'says it is signing out, not signing in', (tester) async {
     final broker = _SilentLogoutBroker([vm(id: 'pve-101', name: '데스크톱 1')]);
     await boot(tester, api: broker);
     await tap(tester, 'account-menu');
@@ -420,14 +421,21 @@ void main() {
         of: find.byKey(const Key('login-submit')),
         matching: find.byType(CircularProgressIndicator),
       ),
-      findsNothing,
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('login-submit')),
+        matching: find.text('로그아웃하는 중이에요'),
+      ),
+      findsOneWidget,
     );
     expect(
       find.descendant(
         of: find.byKey(const Key('login-submit')),
         matching: find.text('로그인'),
       ),
-      findsOneWidget,
+      findsNothing,
     );
     await disposeApp(tester);
   });

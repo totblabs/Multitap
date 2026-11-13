@@ -579,8 +579,12 @@ class _BulkHostUpdateDialogState extends State<BulkHostUpdateDialog> {
                         ),
                       ],
                     ),
+                    // Every state in which the request or the Host is at work
+                    // moves (the server took it and the Host has it too);
+                    // only the download reports how far it is.
                     if (switch (row.phase) {
                       BulkHostPhase.requesting ||
+                      BulkHostPhase.acknowledged ||
                       BulkHostPhase.downloading ||
                       BulkHostPhase.verifying ||
                       BulkHostPhase.installing ||

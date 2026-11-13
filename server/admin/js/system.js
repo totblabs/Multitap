@@ -7,9 +7,16 @@ import { messages, updateActive, updateLabels, deploymentLabels, hostUpdateCodeT
 import { hostUpdateEligible, hostUpdateView, hostUpdateButton, hostUpdateAll, hostUpdateAllLabel, hostUpdateFailed, hostBatchPanel, registeredHostIds } from './hosts.js';
 import { healthLine } from './overview.js';
 import { createShellSetup, enrollmentCommand, renewalCommand, enableConsoleCommand, dedicatedIdentity, decodeRenewalBlock, commandBox } from '../proxmox-shell-setup.js';
-import { t } from './i18n.js';
+import { t, localNotes } from './i18n.js';
 
 
+// a.b.c against a.b.c, as numbers.
+export function newerVersion(a, b) {
+  const left = String(a).split('.').map(Number), right = String(b).split('.').map(Number);
+  if (left.length !== 3 || right.length !== 3 || [...left, ...right].some(part => !Number.isInteger(part) || part < 0)) return false;
+  for (let index = 0; index < 3; index++) if (left[index] !== right[index]) return left[index] > right[index];
+  return false;
+}
 // The server's part of 업데이트: what runs now, the new version with its notes,
 // the check and the apply action (server-update-v1).
 function serverUpdate(ctx) {
@@ -44,10 +51,12 @@ function serverUpdate(ctx) {
     // (every 1.5 s during an update) must not add and remove it, and the restart of an update is told once, as
     // the progress on the right, not here as an error as well.
     state.serverInfoLoading && !info ? el('p', { role: 'status', class: 'muted panel-foot' }, t('system.32')) : state.serverInfoError && !busy ? el('p', { class: 'is-error panel-foot', role: 'alert' }, state.serverInfoError) : null);
-  const release = panel({ title: update?.state === 'available' && update.latest ? t('system.33') + update.latest.version : update?.latest ? t('common.34') + update.latest.version : t('common.8'), description: update?.latest?.releasedAt ? t('system.34', { date: date(update.latest.releasedAt) }) : null, className: 'server-release', actions: ['current', 'available'].includes(update?.state) || !connected ? [] : [stateDot(stateLabel, stateTone)] },
+  // This server runs a release newer than the newest one the feed lists (a pre-release, or a build of one's own).
+  const ahead = !!info?.version && !!update?.latest?.version && update.state !== 'available' && newerVersion(info.version, update.latest.version);
+  const release = panel({ title: update?.state === 'available' && update.latest ? t('system.33') + update.latest.version : ahead ? t('system.latestPublic') + update.latest.version : update?.latest ? t('common.34') + update.latest.version : t('common.8'), description: update?.latest?.releasedAt ? t('system.34', { date: date(update.latest.releasedAt) }) : null, className: 'server-release', actions: ['current', 'available'].includes(update?.state) || !connected ? [] : [stateDot(stateLabel, stateTone)] },
     connected ? el('div', {},
-      update?.state === 'current' ? el('p', { class: 'release-current' }, t('system.35')) : null,
-      update?.latest ? el('div', {}, el('h3', {}, t('common.104')), el('p', { class: 'release-notes' }, update.latest.changelog)) : update?.state === 'current' || busy ? null : el('p', {}, t('system.36')),
+      ahead ? el('p', { class: 'release-current', 'data-server-ahead': '' }, t('system.newerThanLatest', { version: info.version, latest: update.latest.version })) : update?.state === 'current' ? el('p', { class: 'release-current' }, t('system.35')) : null,
+      update?.latest ? el('div', {}, el('h3', {}, t('common.104')), el('p', { class: 'release-notes' }, localNotes(update.latest.changelog))) : update?.state === 'current' || busy ? null : el('p', {}, t('system.36')),
       busy ? el('div', { role: 'status', class: 'progress-block' }, el('p', {}, state.serverInfoError || updateLabels[update?.state] || t('system.37')), el('progress', { ...(update?.state === 'downloading' && update.totalBytes > 0 ? { max: update.totalBytes, value: update.downloadedBytes ?? 0 } : {}) })) : null,
       update?.errorCode ? el('p', { class: 'is-error', role: 'alert' }, manual ? (update.errorCode === 'update_signature_invalid' ? t('system.38') : t('system.39'))
         : update.errorCode === 'server_update_unavailable' ? messages.server_update_unavailable
@@ -69,7 +78,9 @@ function hostUpdates(ctx) {
   const views = (registered ? data.desktops.filter(d => registered.has(d.id)) : []).map(d => ({ d, view: hostUpdateView(ctx, d) }));
   const inUse = eligible.filter(d => hostUpdateView(ctx, d).sessionActive).length;
   const hostRow = eligible.length && latest ? row('download', 'warn', t('system.47', { eligibleCount: eligible.length, version: latest.version }), t('system.49', { value: inUse ? t('system.48', { inUse }) : '' }), [open(t('system.50'), 'secondary small', 'update'), button(hostUpdateAllLabel(eligible.length), () => hostUpdateAll(ctx), 'primary small')])
-    : latest ? row('download', registered ? 'good' : '', registered ? t('system.51', { version: latest.version }) : t('system.52', { version: latest.version }), registered ? null : t('system.53'))
+    // No registered desktop at all is not "every desktop has the latest Host".
+    : latest && registered && !views.length ? row('download', '', t('system.52', { version: latest.version }), t('system.noDesktops'))
+    : latest ? row('download', registered ? 'good' : '', registered ? t('system.51', { version: latest.version }) : t('system.52', { version: latest.version }), registered || ctx.serverDown?.() === true ? null : t('system.53'))
     : row('download', '', t('system.54'), t('system.55'));
   const failedRows = views.filter(({ view }) => view?.available && hostUpdateFailed(view))
     .map(({ d, view }) => row('alert', 'bad', t('system.56', { name: d.name }), hostUpdateCodeText[view.operation.code] ?? t('system.57'), [hostUpdateButton(ctx, d, 'secondary small')]));
@@ -85,6 +96,11 @@ export function updateCounts(ctx, serverVersion = null) {
 }
 // 업데이트: the server first, then the Hosts.
 export function updates(ctx) {
+  // The server does not answer (app.js, the state of its banner "서버가 응답하지 않아요"): one steady line until it
+  // answers again, instead of a read that fails every few seconds and a guide for an install of an unknown kind.
+  if (ctx.serverDown?.() === true) return [ctx.pageHeader({ title: t('app.updatesPage'), actions: [disable(button(t('system.11'), () => {}, 'secondary', 'refresh'), t('system.serverDownHint'))] }),
+    panel({ title: t('system.20'), className: 'server-current server-down' }, el('p', { role: 'status', class: 'panel-foot', 'data-server-down': '' }, el('span', { class: 'loading-dot is-inline', 'aria-hidden': 'true' }), t('system.serverDown'))),
+    ...hostUpdates(ctx)];
   const server = serverUpdate(ctx);
   return [ctx.pageHeader({ title: t('app.updatesPage'), description: server.manual ? t('system.59') : null, actions: [server.check] }),
     ...server.body, ...hostUpdates(ctx)];
@@ -307,7 +323,7 @@ export function serverInformation(ctx) {
   const restart = info?.restart?.supported === true || restarting ? disable(button(t('system.restart'), ctx.restartServer, 'secondary', 'refresh', { 'data-server-restart': '' }), restarting ? t('system.restarting') : null) : null;
   return [ctx.pageHeader({ title: t('common.14') }),
     panel({ title: t('system.147'), className: 'server-facts', actions: [restart, ctx.link(t('system.148'), 'updates', null, { class: 'button quiet' })].filter(Boolean) },
-      restarting ? el('p', { role: 'status', class: 'field-hint', 'data-server-restarting': '' }, t('system.restarting')) : null, facts([
+      restarting ? el('p', { role: 'status', class: 'field-hint server-restarting', 'data-server-restarting': '' }, el('span', { class: 'loading-dot is-inline', 'aria-hidden': 'true' }), t('system.restarting')) : null, facts([
       [t('system.149'), transport ? el('span', { class: 'mono-value' }, transport.publicOrigin) : ctx.state.serverInfoLoading ? t('common.30') : t('common.17'), transport ? t('system.transport', { scheme: transport.scheme === 'http' ? t('system.25') : t('system.150'), port: transport.port }) : t('system.153')],
       consoleOrigin !== transport?.publicOrigin ? [t('system.154'), el('span', { class: 'mono-value', title: t('system.155') }, consoleOrigin)] : null,
       [t('system.156'), info?.version ? el('span', { class: 'mono-value' }, info.version) : ctx.state.serverInfoLoading ? t('common.30') : t('common.17')],

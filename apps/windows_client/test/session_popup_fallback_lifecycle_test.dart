@@ -13,6 +13,7 @@ import 'package:multitap_client/ui/usb_panel.dart';
 
 import 'drive_session_test.dart' show FakeFiles, driveUrl, sessionId;
 import 'usb_redirection_test.dart' show FakeBackend;
+import 'helpers/pump_work.dart';
 
 const _machine = DesktopMachine(
   id: 'pve-149',
@@ -98,7 +99,7 @@ void main() {
           if (beforeBuild) {
             popups.closeAll();
           } else {
-            await tester.pumpAndSettle();
+            await pumpWork(tester);
             expect(popups.isEmpty, isFalse);
             expect(find.byType(Dialog), findsOneWidget);
             popups.closeAll();

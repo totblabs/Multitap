@@ -82,6 +82,18 @@ int usbControllerReplacement(){
   {Fake f;f.removeRestart=true;const auto v=JsonParser::parse(replaceUsbControllerResult(access(f),true));require(v.get("error").string()=="usb_restart_required"&&v.get("restart").boolean()&&f.log==std::vector<std::string>{"remove"},"A removal Windows had not finished went on to install");++cases;}
   {Fake f;f.after=2;f.installRestart=true;const auto v=JsonParser::parse(replaceUsbControllerResult(access(f),true));require(v.get("error").string()=="usb_restart_required"&&v.get("restart").boolean(),"A restart Windows asked for was lost");++cases;}
   {Fake f;f.installError=5;require(JsonParser::parse(replaceUsbControllerResult(access(f),true)).get("error").string()=="usb_driver_install_failed","A failed install was reported as done");++cases;}
+  // settings-progress-v1: the two long steps are told as they start, and telling them changes nothing.
+  {std::vector<std::string> lines;settings_progress::sink()=[&](const std::string& line){lines.push_back(line);};
+   {Fake f;const auto v=JsonParser::parse(replaceUsbControllerResult(withUsbSteps(access(f)),true));
+    require(v.get("error").string().empty()&&v.get("removed").number()==1&&f.log==std::vector<std::string>{"remove","install"}&&
+      lines==std::vector<std::string>{R"({"progress":{"step":"usb_remove"}})",R"({"progress":{"step":"usb_install"}})"},"The USB replacement did not tell its steps in order");++cases;}
+   lines.clear();
+   {Fake f;f.removed=-1;const auto v=JsonParser::parse(replaceUsbControllerResult(withUsbSteps(access(f)),true));
+    require(v.get("error").string()=="usb_replace_remove_failed"&&lines==std::vector<std::string>{R"({"progress":{"step":"usb_remove"}})"},"A step that never started was told");++cases;}
+   lines.clear();
+   {Fake f;const auto v=JsonParser::parse(replaceUsbControllerResult(withUsbSteps(access(f)),false));require(v.get("error").string()=="confirmation_required"&&lines.empty()&&f.log.empty(),"An unconfirmed replacement told a step");++cases;}
+   settings_progress::sink()=nullptr;
+   {Fake f;const auto v=JsonParser::parse(replaceUsbControllerResult(withUsbSteps(access(f)),true));require(v.get("error").string().empty()&&f.log==std::vector<std::string>{"remove","install"},"Without a listener the replacement ended differently");++cases;}}
   return cases;
 }
 // A first Windows password (windows_account_password.hpp). Every NetUser,

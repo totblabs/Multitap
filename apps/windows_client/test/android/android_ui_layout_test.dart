@@ -30,6 +30,7 @@ import 'android_session_contract_test.dart' show AndroidNativeFake;
 import 'android_ui_audit.dart';
 import '../i18n/hangul_audit.dart';
 import 'android_updates_test.dart' show FakePlatform, catalog, apk;
+import '../helpers/pump_work.dart';
 
 typedef _Screen = ({String label, Size size, EdgeInsets insets, bool tv});
 
@@ -184,15 +185,15 @@ void _expectClean(
 /// Closes the open menu or dialog (a menu may be an overlay, not a route).
 Future<void> _pop(WidgetTester t) async {
   await t.sendKeyEvent(LogicalKeyboardKey.escape);
-  await t.pumpAndSettle();
+  await pumpWork(t);
 }
 
 Future<bool> _open(WidgetTester t, Finder finder) async {
   if (finder.evaluate().isEmpty) return false;
   await t.ensureVisible(finder.first);
-  await t.pumpAndSettle();
+  await pumpWork(t);
   await t.tap(finder.first);
-  await t.pumpAndSettle();
+  await pumpWork(t);
   return true;
 }
 
@@ -224,7 +225,7 @@ Future<void> _app(
       updatePlatform: FakePlatform(),
     ),
   );
-  await t.pumpAndSettle();
+  await pumpWork(t);
   if (!signIn) return;
   t
           .widget<TextField>(find.byKey(const Key('sign-in-password')))
@@ -232,13 +233,13 @@ Future<void> _app(
           .text =
       'secret-pass';
   await t.ensureVisible(find.byKey(const Key('login-submit')));
-  await t.pumpAndSettle();
+  await pumpWork(t);
   await t.tap(find.byKey(const Key('login-submit')));
-  await t.pumpAndSettle();
+  await pumpWork(t);
   await t.runAsync(
     () => Future<void>.delayed(const Duration(milliseconds: 60)),
   );
-  await t.pumpAndSettle();
+  await pumpWork(t);
 }
 
 /// A connected streaming session over a blank stand-in picture.
@@ -407,18 +408,18 @@ void main() {
           // (its catalog read finishes outside the fake clock).
           final check = find.byKey(const Key('android-update-check'));
           await t.ensureVisible(check);
-          await t.pumpAndSettle();
+          await pumpWork(t);
           await t.tap(check);
           await t.pump();
           await t.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 60)),
           );
-          await t.pumpAndSettle();
+          await pumpWork(t);
           expect(find.byKey(const Key('host-update-offer')), findsOneWidget);
           _expectClean(t, 'update panel · $at', scale);
           final host = find.byKey(const Key('open-host-update-pc-gaming'));
           await t.ensureVisible(host);
-          await t.pumpAndSettle();
+          await pumpWork(t);
           _expectClean(t, 'update panel Host entry · $at', scale);
           await _pop(t);
           semantics.dispose();

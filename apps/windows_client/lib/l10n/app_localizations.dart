@@ -11071,7 +11071,7 @@ abstract class AppLocalizations {
   /// No description provided for @installingWinfspMayTake1.
   ///
   /// In ko, this message translates to:
-  /// **'WinFsp를 설치하고 있어요. 1~2분 걸릴 수 있어요. 창을 닫지 마세요.'**
+  /// **'WinFsp를 설치하고 있어요. 창을 닫지 마세요.'**
   String get installingWinfspMayTake1;
 
   /// No description provided for @couldNotCheckWinfspInstall.
@@ -14116,7 +14116,7 @@ abstract class AppLocalizations {
   /// No description provided for @installsSharedFolderDriverWinfsp.
   ///
   /// In ko, this message translates to:
-  /// **'공유 폴더용 드라이버(WinFsp)를 설치해요. 1~2분 걸릴 수 있어요.\nWindows를 다시 시작해야 하면 알려 드려요. 자동으로 다시 시작하지 않아요.'**
+  /// **'공유 폴더용 드라이버(WinFsp)를 설치해요.\nWindows를 다시 시작해야 하면 알려 드려요. 자동으로 다시 시작하지 않아요.'**
   String get installsSharedFolderDriverWinfsp;
 
   /// No description provided for @switchUsbConnectionMultitap.
@@ -18962,6 +18962,270 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'Proxmox에서 이 데스크톱의 VM을 찾지 못했어요. 관리자에게 알려 주세요.'**
   String get proxmoxNoLongerListsVm;
+
+  /// No description provided for @progressStepOf.
+  ///
+  /// In ko, this message translates to:
+  /// **'{index}/{count}단계'**
+  String progressStepOf(Object index, Object count);
+
+  /// No description provided for @androidSigningOut.
+  ///
+  /// In ko, this message translates to:
+  /// **'로그아웃하는 중이에요'**
+  String get androidSigningOut;
+
+  /// No description provided for @androidHostUpdateRequesting.
+  ///
+  /// In ko, this message translates to:
+  /// **'업데이트를 요청하는 중이에요'**
+  String get androidHostUpdateRequesting;
+
+  /// No description provided for @androidHostUpdateReading.
+  ///
+  /// In ko, this message translates to:
+  /// **'Host 배포 정보를 확인하는 중이에요'**
+  String get androidHostUpdateReading;
+
+  /// No description provided for @androidCheckingOtherConnection.
+  ///
+  /// In ko, this message translates to:
+  /// **'다른 연결이 있는지 확인하는 중이에요'**
+  String get androidCheckingOtherConnection;
+
+  /// No description provided for @androidCheckingDesktopAgain.
+  ///
+  /// In ko, this message translates to:
+  /// **'데스크톱 상태를 다시 확인하는 중이에요'**
+  String get androidCheckingDesktopAgain;
+
+  /// No description provided for @androidOpeningConsole.
+  ///
+  /// In ko, this message translates to:
+  /// **'Console을 여는 중이에요'**
+  String get androidOpeningConsole;
+
+  /// No description provided for @androidEndingConsole.
+  ///
+  /// In ko, this message translates to:
+  /// **'Console 연결을 끊는 중이에요'**
+  String get androidEndingConsole;
+
+  /// No description provided for @androidUpdateCheckingPackage.
+  ///
+  /// In ko, this message translates to:
+  /// **'설치 파일의 서명을 확인하는 중이에요'**
+  String get androidUpdateCheckingPackage;
+
+  /// No description provided for @androidUpdatePreparingInstall.
+  ///
+  /// In ko, this message translates to:
+  /// **'설치를 준비하는 중이에요'**
+  String get androidUpdatePreparingInstall;
+
+  /// No description provided for @androidUpdateWaitingConfirm.
+  ///
+  /// In ko, this message translates to:
+  /// **'Android 설치 화면의 확인을 기다리고 있어요'**
+  String get androidUpdateWaitingConfirm;
+
+  /// No description provided for @androidUpdateInstallingNow.
+  ///
+  /// In ko, this message translates to:
+  /// **'Android가 업데이트를 설치하고 있어요.\n끝나면 앱이 닫혀요. 다시 열면 새 버전으로 시작해요.'**
+  String get androidUpdateInstallingNow;
+
+  /// No description provided for @androidReadingFolder.
+  ///
+  /// In ko, this message translates to:
+  /// **'폴더를 읽는 중이에요'**
+  String get androidReadingFolder;
+
+  /// No description provided for @androidChangingPassword.
+  ///
+  /// In ko, this message translates to:
+  /// **'비밀번호를 바꾸는 중이에요'**
+  String get androidChangingPassword;
+
+  /// No description provided for @androidTestingServer.
+  ///
+  /// In ko, this message translates to:
+  /// **'서버 연결을 테스트하는 중이에요'**
+  String get androidTestingServer;
+
+  /// No description provided for @androidMouseLockConnecting.
+  ///
+  /// In ko, this message translates to:
+  /// **'마우스를 데스크톱에 연결하는 중이에요'**
+  String get androidMouseLockConnecting;
+
+  /// No description provided for @tileOpeningConsole.
+  ///
+  /// In ko, this message translates to:
+  /// **'Console을 여는 중이에요'**
+  String get tileOpeningConsole;
+
+  /// No description provided for @tileOpeningWindow.
+  ///
+  /// In ko, this message translates to:
+  /// **'원격 창을 여는 중이에요'**
+  String get tileOpeningWindow;
+
+  /// No description provided for @tileRequestingHostUpdate.
+  ///
+  /// In ko, this message translates to:
+  /// **'Host 업데이트를 요청하는 중이에요'**
+  String get tileRequestingHostUpdate;
+
+  /// No description provided for @signingOutNow.
+  ///
+  /// In ko, this message translates to:
+  /// **'로그아웃하는 중이에요'**
+  String get signingOutNow;
+
+  /// No description provided for @loadingDesktopList.
+  ///
+  /// In ko, this message translates to:
+  /// **'데스크톱 목록을 불러오는 중이에요'**
+  String get loadingDesktopList;
+
+  /// No description provided for @updateClosingRemoteWindows.
+  ///
+  /// In ko, this message translates to:
+  /// **'열려 있는 원격 창을 닫는 중이에요'**
+  String get updateClosingRemoteWindows;
+
+  /// No description provided for @sessionEndClosingConnections.
+  ///
+  /// In ko, this message translates to:
+  /// **'열린 연결을 닫는 중이에요'**
+  String get sessionEndClosingConnections;
+
+  /// No description provided for @hostStepDisplayPackage.
+  ///
+  /// In ko, this message translates to:
+  /// **'드라이버 파일이 원본과 같은지 확인하는 중이에요'**
+  String get hostStepDisplayPackage;
+
+  /// No description provided for @hostStepDisplayTrust.
+  ///
+  /// In ko, this message translates to:
+  /// **'드라이버 서명을 확인하는 중이에요'**
+  String get hostStepDisplayTrust;
+
+  /// No description provided for @hostStepDisplayDevice.
+  ///
+  /// In ko, this message translates to:
+  /// **'가상 화면 드라이버를 설치하는 중이에요. 화면이 잠시 깜빡일 수 있어요.'**
+  String get hostStepDisplayDevice;
+
+  /// No description provided for @hostStepDisplayService.
+  ///
+  /// In ko, this message translates to:
+  /// **'Host 서비스가 가상 화면을 여는 것을 기다리는 중이에요'**
+  String get hostStepDisplayService;
+
+  /// No description provided for @hostStepDisplayRestart.
+  ///
+  /// In ko, this message translates to:
+  /// **'Host 서비스를 다시 시작하는 중이에요'**
+  String get hostStepDisplayRestart;
+
+  /// No description provided for @hostStepWinfspPackage.
+  ///
+  /// In ko, this message translates to:
+  /// **'WinFsp 설치 파일을 확인하는 중이에요'**
+  String get hostStepWinfspPackage;
+
+  /// No description provided for @hostStepWinfspInstall.
+  ///
+  /// In ko, this message translates to:
+  /// **'WinFsp를 설치하는 중이에요'**
+  String get hostStepWinfspInstall;
+
+  /// No description provided for @hostStepWinfspRollback.
+  ///
+  /// In ko, this message translates to:
+  /// **'WinFsp 설치를 되돌리는 중이에요'**
+  String get hostStepWinfspRollback;
+
+  /// No description provided for @hostStepWinfspWaiting.
+  ///
+  /// In ko, this message translates to:
+  /// **'다른 설치가 끝나기를 기다리는 중이에요'**
+  String get hostStepWinfspWaiting;
+
+  /// No description provided for @hostStepWinfspCheck.
+  ///
+  /// In ko, this message translates to:
+  /// **'설치된 WinFsp를 확인하는 중이에요'**
+  String get hostStepWinfspCheck;
+
+  /// No description provided for @hostStepUsbRemove.
+  ///
+  /// In ko, this message translates to:
+  /// **'다른 USB 연결 기능을 지우는 중이에요'**
+  String get hostStepUsbRemove;
+
+  /// No description provided for @hostStepUsbInstall.
+  ///
+  /// In ko, this message translates to:
+  /// **'Multitap USB 연결 기능을 설치하는 중이에요'**
+  String get hostStepUsbInstall;
+
+  /// No description provided for @hostPhaseTestingServer.
+  ///
+  /// In ko, this message translates to:
+  /// **'서버에 연결해 응답을 기다리고 있어요.'**
+  String get hostPhaseTestingServer;
+
+  /// No description provided for @hostPhaseRequestingServer.
+  ///
+  /// In ko, this message translates to:
+  /// **'서버에 연결 요청을 보내고 응답을 기다리고 있어요.'**
+  String get hostPhaseRequestingServer;
+
+  /// No description provided for @hostPhaseRestartingService.
+  ///
+  /// In ko, this message translates to:
+  /// **'Host 서비스를 멈췄다가 다시 시작하고 있어요. 창을 닫지 마세요.'**
+  String get hostPhaseRestartingService;
+
+  /// No description provided for @hostCheckingInstallResult.
+  ///
+  /// In ko, this message translates to:
+  /// **'설치 결과 확인 중'**
+  String get hostCheckingInstallResult;
+
+  /// No description provided for @hostPhaseCheckingInstallResult.
+  ///
+  /// In ko, this message translates to:
+  /// **'설치한 항목을 Windows에서 다시 확인하고 있어요.'**
+  String get hostPhaseCheckingInstallResult;
+
+  /// No description provided for @hostCheckingRequestResult.
+  ///
+  /// In ko, this message translates to:
+  /// **'요청 결과 확인 중'**
+  String get hostCheckingRequestResult;
+
+  /// No description provided for @hostPhaseCheckingRequestResult.
+  ///
+  /// In ko, this message translates to:
+  /// **'Windows 자동 로그인 요청이 어떻게 끝났는지 조회하고 있어요.'**
+  String get hostPhaseCheckingRequestResult;
+
+  /// No description provided for @hostApprovalWaitingLine.
+  ///
+  /// In ko, this message translates to:
+  /// **'승인을 기다리는 중이에요. 승인되면 바로 다음으로 넘어가요.'**
+  String get hostApprovalWaitingLine;
+
+  /// No description provided for @hostProgressPercent.
+  ///
+  /// In ko, this message translates to:
+  /// **'{percent}%'**
+  String hostProgressPercent(Object percent);
 
   /// No description provided for @usbUnreadableDevices.
   ///

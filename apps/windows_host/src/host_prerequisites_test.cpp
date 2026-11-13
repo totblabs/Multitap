@@ -84,6 +84,10 @@ class Machine final:public Access {
   }
   void wait(unsigned long milliseconds)override{++waits;waitedMs+=milliseconds;}
   bool restartService()override{++restarts;log.push_back("service");if(serviceRestarts)restarted=true;return serviceRestarts;}
+  // What Host settings is told while it waits (settings_progress.hpp); never part of `log`:
+  // telling a step changes nothing.
+  std::vector<std::string> steps;
+  void step(const char* code)override{steps.push_back(code?code:"");}
   bool changed()const{return !log.empty()||devices.installs||devices.removes;}
 };
 Selection selected(const std::wstring& instance=Selected){Selection value;value.present=value.valid=true;value.instance=instance;return value;}
@@ -361,6 +365,31 @@ int main(){
     Result leaked;leaked.error="C:\\Users\\name";
     check(resultJson(leaked).find("\"error\":\"unknown\"")!=std::string::npos&&code("pnp_install_failed")=="pnp_install_failed"&&code("Bad Code")=="unknown"&&code(std::string(65,'a'))=="unknown","free text never reaches a reply");
     check(selectionJson(L"PCI\\VEN_1234",{}).empty()&&selectionJson(L"ROOT\\DISPLAY\\00\"1",{}).empty(),"only an exact root display node is ever selected");
+  }
+  // The steps told to Host settings: in the order the work is done, and only what was started.
+  {
+    using Steps=std::vector<std::string>;
+    {Machine m;install(m,true,true);check(m.steps==Steps{"display_package","display_trust","display_device","display_service"},"a first install tells its four steps in order");}
+    {Machine m;install(m,false,true);check(m.steps.empty()&&!m.changed(),"an unconfirmed request told a step");}
+    {Machine m;m.packageCode="native_display_package_mismatch";install(m,true,true);check(m.steps==Steps{"display_package"},"a package that is not the original went past its check");}
+    {Machine m;install(m,true,false);check(m.steps==Steps{"display_package","display_trust"}&&m.devices.installs==0,"trust that was not given went on to the device");}
+    {Machine m;m.current=selected();m.devices.nodes[Selected]={0x8,0};install(m,true,true);check(m.steps==Steps{"display_package"},"a kept device claimed more steps than its check");}
+    // A service that does not take the device by itself is restarted, and that is said.
+    {Machine m;m.adoptAfter=-1;const auto result=install(m,true,true);
+     check(text(result.service)=="restarted"&&m.steps==Steps{"display_package","display_trust","display_device","display_service","display_restart"},"a restarted service was not told as a restart");}
+    // A restart that could not be done is followed by one more wait for the service.
+    {Machine m;m.adoptAfter=-1;m.serviceRestarts=false;const auto result=install(m,true,true);
+     check(text(result.service)=="unverified"&&m.steps==Steps{"display_package","display_trust","display_device","display_service","display_restart","display_service"},"the wait after a failed restart was not told");}
+    // Telling steps is not a change: the same run without anyone listening ends the same.
+    {struct Silent final:Access{Machine inner;
+       std::string package()override{return inner.package();}bool certificateTrusted()override{return inner.certificateTrusted();}bool catalogTrusted()override{return inner.catalogTrusted();}
+       bool addCertificate(std::vector<std::string>& added)override{return inner.addCertificate(added);}void removeCertificate(const std::string& store)override{inner.removeCertificate(store);}
+       void recordTrust(const std::string& store)override{inner.recordTrust(store);}void forgetTrust(const std::string& store)override{inner.forgetTrust(store);}
+       Selection selection()override{return inner.selection();}std::vector<std::wstring> recordedNodes()override{return inner.recordedNodes();}multitap::pnp::Backend& pnp()override{return inner.pnp();}
+       std::wstring inf()override{return inner.inf();}std::string boundInf(const std::wstring& id)override{return inner.boundInf(id);}bool writeSelection(const std::string& json)override{return inner.writeSelection(json);}
+       bool serviceUsesDevice(const std::wstring& id)override{return inner.serviceUsesDevice(id);}void wait(unsigned long milliseconds)override{inner.wait(milliseconds);}bool restartService()override{return inner.restartService();}};
+     Silent silent;Machine told;const auto a=install(silent,true,true),b=install(told,true,true);
+     check(resultJson(a)==resultJson(b)&&silent.inner.log==told.log&&silent.inner.steps.empty()&&!told.steps.empty(),"an access that tells nothing ended differently");}
   }
   std::printf("checks=%u failed=%u\n",checks,failed);
   return failed?1:0;

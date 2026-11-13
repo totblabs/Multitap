@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../data/product_updates.dart';
 import '../data/product_log.dart';
 import 'app_dialog.dart';
+import 'app_progress.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
 import 'release_notes.dart';
@@ -113,6 +114,9 @@ class _ProductUpdateDialogState extends State<ProductUpdateDialog> {
   // The running install goes to the graphical installer (manual panel, or
   // the fallback after a failed restart).
   bool _manualRun = false;
+  // The open remote windows are being closed before the installer takes
+  // over: the step is still "ready", so the dialog says what it waits for.
+  bool _closingSessions = false;
   final _notesScroll = ScrollController();
 
   bool get _host => widget.product == 'host';
@@ -326,7 +330,13 @@ class _ProductUpdateDialogState extends State<ProductUpdateDialog> {
             confirmKey: const Key('confirm-update-sessions'),
           );
           if (!confirmed || !ownsInstall()) return;
-          await _platform.closeRemoteSessions();
+          _set(() => _closingSessions = true);
+          try {
+            await _platform.closeRemoteSessions();
+          } finally {
+            // Before the next step or the failure is shown: never both.
+            _set(() => _closingSessions = false);
+          }
           if (!ownsInstall()) return;
         }
       }
@@ -1024,6 +1034,11 @@ class _ProductUpdateDialogState extends State<ProductUpdateDialog> {
         _ => l10n.close,
       }),
     );
+    final closing = SizedBox.square(
+      key: const Key('update-closing-sessions-mark'),
+      dimension: 16,
+      child: CircularProgressIndicator(strokeWidth: 2, color: p.amber),
+    );
     // While bytes arrive only "취소" remains; while the installer takes over
     // nothing can be pressed twice, so no button is shown at all.
     final Widget? primary = switch (_phase) {
@@ -1035,24 +1050,34 @@ class _ProductUpdateDialogState extends State<ProductUpdateDialog> {
         icon: const Icon(Icons.download_rounded, size: 18),
         label: KeepAllText(l10n.downloadUpdate),
       ),
+      // Pressed once: it stays where it is, greyed, while the remote
+      // windows are looked for and closed (the mark turns while they close).
       UpdatePhase.ready => FilledButton.icon(
         key: const Key('apply-product-update'),
         autofocus: true,
-        onPressed: () => unawaited(_install(manual: widget.manual)),
+        onPressed: _acting
+            ? null
+            : () => unawaited(_install(manual: widget.manual)),
         style: AppButtons.filled(p),
-        icon: Icon(
-          widget.manual ? Icons.open_in_new_rounded : Icons.restart_alt_rounded,
-          size: 18,
-        ),
+        icon: _closingSessions
+            ? closing
+            : Icon(
+                widget.manual
+                    ? Icons.open_in_new_rounded
+                    : Icons.restart_alt_rounded,
+                size: 18,
+              ),
         label: KeepAllText(widget.manual ? l10n.openInstaller : l10n.restartUpdate),
       ),
       UpdatePhase.failed when needsInstaller && _downloaded != null =>
         FilledButton.icon(
           key: const Key('manual-product-update'),
           autofocus: true,
-          onPressed: () => unawaited(_install(manual: true)),
+          onPressed: _acting ? null : () => unawaited(_install(manual: true)),
           style: AppButtons.filled(p, tone: AppTone.warn),
-          icon: const Icon(Icons.open_in_new_rounded, size: 18),
+          icon: _closingSessions
+              ? closing
+              : const Icon(Icons.open_in_new_rounded, size: 18),
           label: KeepAllText(l10n.continueInstaller),
         ),
       UpdatePhase.failed => FilledButton.icon(
@@ -1084,9 +1109,17 @@ class _ProductUpdateDialogState extends State<ProductUpdateDialog> {
         key: const Key('product-update-dialog'),
         icon: icon,
         tone: tone,
-        busy: busy,
+        busy: busy || _closingSessions,
         title: title,
         titleKey: const Key('update-title'),
+        // Right above the buttons, in view whatever the body scrolled to.
+        footer: _closingSessions
+            ? AppBusyLine(
+                l10n.updateClosingRemoteWindows,
+                textKey: const Key('update-closing-sessions'),
+                color: p.ink,
+              )
+            : null,
         subtitle: '${updateProductLabel(widget.product)} · $current',
         maxWidth: 520,
         body: [
@@ -1116,7 +1149,9 @@ class _ProductUpdateDialogState extends State<ProductUpdateDialog> {
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
                 key: const Key('manual-product-update'),
-                onPressed: () => unawaited(_install(manual: true)),
+                onPressed: _acting
+                    ? null
+                    : () => unawaited(_install(manual: true)),
                 icon: const Icon(Icons.open_in_new_rounded, size: 16),
                 label: KeepAllText(l10n.installInstaller),
               ),

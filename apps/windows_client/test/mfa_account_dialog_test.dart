@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/data/mfa_account.dart';
 import 'package:multitap_client/data/mfa_account_controller.dart';
+import 'package:multitap_client/ui/app_dialog.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/mfa_account_dialog.dart';
 
@@ -32,6 +33,32 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.byKey(const Key('mfa-account-close'))); await tester.pump();
     expect(f.controller.phase, MfaAccountPhase.closed);
+    await _remove(tester);
+  });
+  testWidgets('the dialog icon turns while the setup status is read; the answer or the failure takes its place', (tester) async {
+    final f = MfaTestOwner(); addTearDown(f.dispose);
+    var reply = Completer<MfaAccountStatus>(); f.api.read = () => reply.future;
+    await _mount(tester, MfaAccountDialog(controller: f.controller, onClose: () {})); await tester.pump();
+    AppToneIcon icon() => tester.widget<AppToneIcon>(find.byType(AppToneIcon));
+    // Reading: said in words, and the icon turns for it.
+    expect(f.controller.reading, isTrue);
+    expect(find.text('설정 상태를 확인하고 있어요.'), findsOneWidget);
+    expect(icon().busy, isTrue);
+    expect(find.descendant(of: find.byType(AppToneIcon), matching: find.byType(CircularProgressIndicator)), findsOneWidget);
+    // It could not be read: the sentence changes and nothing keeps turning.
+    reply.completeError(StateError('synthetic read failure')); await tester.pumpAndSettle();
+    expect(f.controller.reading, isFalse);
+    expect(icon().busy, isFalse);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('설정 상태를 확인하고 있어요.'), findsNothing);
+    // Asked again and answered: the summary, still.
+    reply = Completer<MfaAccountStatus>();
+    await tester.tap(find.byKey(const Key('mfa-account-refresh'))); await tester.pump();
+    expect(icon().busy, isTrue);
+    reply.complete(const MfaAccountStatus(enabled: false, recoveryCodesRemaining: 0)); await tester.pumpAndSettle();
+    expect(icon().busy, isFalse);
+    expect(find.byKey(const Key('mfa-account-enable')), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await _remove(tester);
   });
   testWidgets('exact in-flight mutation disables close, then completed root view survives auth retirement', (tester) async {

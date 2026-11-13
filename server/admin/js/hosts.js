@@ -4,7 +4,7 @@ import { el, icon, button, stateDot, table, panel, facts, emptyState, loadingSta
 import { messages, hostUpdateActive, hostUpdateLabels, hostUpdateCodeText, hostUpdateDescription, hostUpdateStage, displayReason, activationReason, recoveryLabels, nativePhases, consoleReasons } from './labels.js';
 import { hostEntries } from './timeline.js';
 import { announceFirst, announcements } from './notices.js';
-import { t } from './i18n.js';
+import { t, localNotes } from './i18n.js';
 
 const vmOrder = (a, b) => Number(a.pve_vmid) - Number(b.pve_vmid);
 export const localPc = desktop => desktop?.kind === 'pc' && desktop.localPcApproved === true;
@@ -104,7 +104,7 @@ export const hostUpdateEligible = ctx => {
 };
 // The button that updates every waiting Host: with one desktop it does not say "all".
 export const hostUpdateAllLabel = count => count === 1 ? t('hosts.updateOneF1') : t('common.100', { eligibleCount: count });
-function hostUpdateNotes(latest) { return el('div', { class: 'host-update-notes-field' }, el('span', {}, t('common.104')), el('pre', { class: 'host-update-notes' }, latest.changelog?.trim() || t('hosts.23'))); }
+function hostUpdateNotes(latest) { return el('div', { class: 'host-update-notes-field' }, el('span', {}, t('common.104')), el('pre', { class: 'host-update-notes' }, localNotes(latest.changelog?.trim() ?? '') || t('hosts.23'))); }
 export function hostUpdateForm(ctx, desktop) {
   const view = hostUpdateView(ctx, desktop), latest = ctx.state.data?.hostUpdates?.latest;
   if (!view?.available || !latest || latest.version !== view.latestVersion) return;

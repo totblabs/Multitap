@@ -112,6 +112,13 @@ export function createAccountSecurityView({ document, accountName = '', onAction
     return b;
   }
   const paragraph = (text, className = '') => node('p', className, text);
+  // A sentence with one link in the place of {link}: the dialog closes and the address changes.
+  const linked = (text, label, href, marker) => {
+    const p = node('p'), [before, after = ''] = text.split('{link}'), a = node('a', '', label);
+    a.href = href; a.setAttribute(marker, '');
+    listen(a, 'click', event => { if (event.ctrlKey || event.metaKey || event.shiftKey) return; event.preventDefault?.(); requestClose(); if (globalThis.location) globalThis.location.hash = href; });
+    p.append(document.createTextNode(before), a, document.createTextNode(after)); return p;
+  };
   const actions = (...children) => { const n = node('div', 'as-actions'); n.append(...children); return n; };
   function input(label, name, { type = 'password', maxLength = 256, numeric = false } = {}) {
     const wrap = node('label', 'as-field', label);
@@ -232,7 +239,11 @@ export function createAccountSecurityView({ document, accountName = '', onAction
     const alert = node('p', 'as-message' + (model.stage === 'recovery' ? ' is-done' : ''), httpOnly ? '' : model.message || ''); alert.setAttribute('data-view-message', ''); alert.setAttribute('role', 'alert'); alert.hidden = httpOnly || !model.message;
     let title = t('account-security-view.48');
     if (model.stage === 'loading') body.append(paragraph(t('account-security-view.49')));
-    else if (httpOnly) body.append(paragraph(t('account-security-view.httpsOnlyF3')));
+    else if (httpOnly) body.append(paragraph(t('account-security-view.httpsOnlyF3')),
+      // Where to go instead: an HTTPS address is added on 서버 접속 설정; the password is changed on one's own row
+      // of 사용자 (비밀번호 재설정, js/users.js). The dialog closes and the console follows the address (app.js).
+      linked(t('account-security-view.httpsWhere'), t('common.12'), '#/server-access', 'data-security-https-link'),
+      ...(accountName ? [linked(t('account-security-view.passwordWhere'), t('common.7') + ' › ' + accountName, '#/users/' + encodeURIComponent(accountName), 'data-security-password-link')] : []));
     else if (model.stage === 'uncertain') {
       title = model.requiresLogin ? t('account-security-view.50') : t('account-security-view.51');
       body.append(paragraph(model.requiresLogin ? t('account-security-view.52') : t('account-security-view.53')));

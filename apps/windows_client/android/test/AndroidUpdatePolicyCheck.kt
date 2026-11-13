@@ -71,6 +71,19 @@ object AndroidUpdatePolicyCheck {
         val hex = AndroidUpdatePolicy.copyVerified(ByteArrayInputStream(bytes), out, bytes.size.toLong())
         verify(hex == AndroidUpdatePolicy.hex(bytes), "digest of copied bytes")
         verify(out.toByteArray().contentEquals(bytes), "copied bytes")
+        // The dialog's bar: the bytes written so far, rising to exactly the size; the copy is the same.
+        val seen = mutableListOf<Long>()
+        val measured = ByteArrayOutputStream()
+        val measuredHex = AndroidUpdatePolicy.copyVerified(ByteArrayInputStream(bytes), measured, bytes.size.toLong()) { seen.add(it) }
+        verify(measuredHex == hex && measured.toByteArray().contentEquals(bytes), "progress changes nothing copied")
+        verify(seen.size > 1 && seen == seen.sorted() && seen.toSet().size == seen.size, "progress only rises")
+        verify(seen.first() > 0 && seen.last() == bytes.size.toLong(), "progress ends at the size")
+        val refused = mutableListOf<Long>()
+        verify(
+            AndroidUpdatePolicy.copyVerified(ByteArrayInputStream(bytes), ByteArrayOutputStream(), bytes.size - 1L) { refused.add(it) } == null &&
+                refused.all { it < bytes.size },
+            "a longer source never reports more than the size",
+        )
         verify(AndroidUpdatePolicy.copyVerified(ByteArrayInputStream(bytes), ByteArrayOutputStream(), bytes.size - 1L) == null, "longer source")
         verify(AndroidUpdatePolicy.copyVerified(ByteArrayInputStream(bytes), ByteArrayOutputStream(), bytes.size + 1L) == null, "shorter source")
         verify(AndroidUpdatePolicy.hex(ByteArray(0)) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "sha-256 of empty")

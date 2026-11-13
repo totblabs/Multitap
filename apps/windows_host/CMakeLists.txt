@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.2 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.3 LANGUAGES CXX)
+# No build-machine folder in the programs (__FILE__, std::source_location); before any target.
+include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
 option(MULTITAP_PRIVATE_SIGNIN_DIAGNOSTIC_TRIAL "Compile the local preparation diagnostic listener for private qualification only" OFF)
 enable_language(RC)
@@ -796,10 +798,11 @@ add_executable(MultitapHostClipboardFilesTest EXCLUDE_FROM_ALL src/clipboard_fil
 add_executable(MultitapHostServiceControlSecurityTest EXCLUDE_FROM_ALL src/service_control_security_test.cpp)
 target_compile_definitions(MultitapHostServiceControlSecurityTest PRIVATE UNICODE _UNICODE)
 target_compile_options(MultitapHostServiceControlSecurityTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-# The Host installer's own checks (installer/host_installer.cpp compiled in): squatted lock, untrusted cache folder, held package.
+# The Host installer's own checks (installer/host_installer.cpp compiled in): squatted lock, untrusted cache folder, held package,
+# and its status window (the bar is filled only from the bytes written; drawn off screen, no window is shown).
 add_executable(MultitapHostInstallerTest EXCLUDE_FROM_ALL src/host_installer_test.cpp)
 target_compile_definitions(MultitapHostInstallerTest PRIVATE UNICODE _UNICODE "MULTITAP_HOST_VERSION=\"9.9.9\"")
-target_link_libraries(MultitapHostInstallerTest PRIVATE shell32 ole32 advapi32 user32 wtsapi32 userenv)
+target_link_libraries(MultitapHostInstallerTest PRIVATE shell32 ole32 advapi32 user32 gdi32 wtsapi32 userenv)
 target_compile_options(MultitapHostInstallerTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostResizeTest src/resize_test.cpp ../windows_client/windows/runner/remote_decoder.cpp)
 add_executable(MultitapCodecBenchmark EXCLUDE_FROM_ALL src/codec_benchmark.cpp ../windows_client/windows/runner/remote_decoder.cpp)

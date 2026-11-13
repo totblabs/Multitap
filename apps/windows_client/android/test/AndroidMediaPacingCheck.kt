@@ -6,7 +6,7 @@ import java.nio.ByteOrder
 /**
  * JVM-only test of the production media policies (AndroidMediaPacing.kt):
  * frame pacing, decoder latency, buffer reuse, media-wire-v1, packet rules,
- * stale non-reference dropping, audio trimming, display mode choice and the
+ * stale non-reference dropping, display mode choice and the
  * decoder order. No MediaCodec, AudioTrack, Flutter texture or device claim.
  */
 private class RecordingSink : AndroidFrameSink {
@@ -197,119 +197,6 @@ fun main() {
     verify(dropStaleNonReference(waiting, 1 * ms, { it.at }, { it.nonRef }, { dropped.add(it.id) }) == 1 &&
         dropped == listOf(2) && waiting.map { it.id } == listOf(1, 3, 4), "deep queue: only non-reference, never the newest")
 
-    // --- audio trimming --------------------------------------------------------
-    val trim = AndroidAudioTrim(targetFrames = 1920, capFrames = 3840, windowNanos = 2000 * ms)
-    verify(!trim.accept(3500, 480, 0), "above the cap: dropped")
-    verify(trim.accept(2400, 480, 0), "below the cap: kept")
-    verify(trim.accept(2500, 480, 1000 * ms), "inside the window: kept")
-    verify(!trim.accept(2600, 480, 2000 * ms) && trim.trimmed == 1L, "standing level above target: one packet trimmed")
-    verify(trim.accept(2000, 480, 2100 * ms) && trim.accept(1000, 480, 3000 * ms), "jitter dips keep packets")
-    verify(trim.accept(2600, 480, 4100 * ms) && trim.trimmed == 1L, "lowest level under target: nothing trimmed")
-    trim.reset()
-    verify(trim.accept(2600, 480, 9000 * ms), "reset starts a new window")
-    // Adaptive cushion: an underrun grows the target (40 -> 60 -> 80 ms, never past
-    // the maximum), the cap follows, a calm period shrinks it slowly to the floor.
-    val adaptive = AndroidAudioTrim(targetFrames = 1920, capFrames = 3840, windowNanos = 2000 * ms, maxTargetFrames = 3840, capacityFrames = 5760,
-        growFrames = 960, shrinkFrames = 480, shrinkAfterNanos = 8000 * ms)
-    verify(adaptive.accept(100, 480, 0, underruns = 3) && adaptive.target == 1920L && adaptive.cap == 3840L, "the first count is a baseline, not an underrun")
-    verify(adaptive.accept(100, 480, 10 * ms, underruns = 4) && adaptive.target == 2880L && adaptive.cap == 4800L, "an underrun grows the target and the cap")
-    verify(adaptive.accept(100, 480, 20 * ms, underruns = 4) && adaptive.target == 2880L, "no new underrun: unchanged")
-    verify(adaptive.accept(100, 480, 30 * ms, underruns = 5) && adaptive.target == 3840L && adaptive.cap == 5760L, "a second underrun reaches the maximum and the track capacity")
-    verify(adaptive.accept(100, 480, 40 * ms, underruns = 6) && adaptive.target == 3840L && adaptive.cap == 5760L, "never past the maximum or the capacity")
-    verify(adaptive.accept(100, 480, 8039 * ms, underruns = 6) && adaptive.target == 3840L, "not yet calm for the shrink period")
-    verify(adaptive.accept(100, 480, 8041 * ms, underruns = 6) && adaptive.target == 3360L, "calm: shrinks by one step")
-    verify(adaptive.accept(100, 480, 16100 * ms, underruns = 6) && adaptive.target == 2880L, "and slowly on")
-    verify(adaptive.accept(100, 480, 100000 * ms, underruns = 6) && adaptive.accept(100, 480, 120000 * ms, underruns = 6) && adaptive.target == 1920L, "back to the floor, not below")
-    verify(!adaptive.accept(3800, 480, 130000 * ms, underruns = 6), "the cap is back to the initial one")
-    verify(adaptive.accept(100, 480, 130100 * ms, underruns = 7) && adaptive.target == 2880L, "an underrun after the shrink grows again")
-    adaptive.reset()
-    verify(adaptive.target == 1920L, "reset returns to the initial target")
-    val fixedCushion = AndroidAudioTrim(targetFrames = 1920, capFrames = 3840)
-    fixedCushion.accept(0, 480, 0, underruns = 0); fixedCushion.accept(0, 480, 1, underruns = 9)
-    verify(fixedCushion.target == 1920L, "without a maximum the thresholds are fixed")
-    // audio-stats-v1: the track also underruns while the VM is silent (nothing is
-    // sent). Only an underrun the sound goes on through (PTS within 50 ms of where
-    // it ended) grows the cushion; counts for the statistics.
-    val paused = AndroidAudioTrim(targetFrames = 1920, capFrames = 3840, maxTargetFrames = 3840, growFrames = 960)
-    verify(paused.accept(100, 480, 0, underruns = 0, ptsMicros = 0) && paused.accept(100, 480, 10 * ms, underruns = 0, ptsMicros = 10_000), "baseline")
-    verify(paused.accept(0, 480, 3000 * ms, underruns = 1, ptsMicros = 3_000_000) && paused.target == 1920L && paused.silences == 1L && paused.underruns == 0L,
-        "the VM fell silent for 3 s: no growth")
-    verify(paused.accept(0, 480, 3100 * ms, underruns = 2, ptsMicros = 3_010_000) && paused.target == 2880L && paused.underruns == 1L,
-        "late audio that goes on from where the sound ended grows the target")
-    verify(paused.accept(0, 480, 3200 * ms, underruns = 3) && paused.target == 3840L && paused.underruns == 2L, "without a PTS every underrun counts")
-    verify(!paused.accept(5500, 480, 3300 * ms, ptsMicros = 3_030_000) && paused.overruns == 1L, "above the cap: an overrun")
-    val counted = AndroidAudioTrim(targetFrames = 1920, capFrames = 3840, windowNanos = 2000 * ms)
-    counted.accept(2400, 480, 0); counted.accept(2600, 480, 2000 * ms)
-    verify(counted.trimmed == 1L && counted.trimmedFrames == 480L, "trimmed frames are counted")
-
-    // --- audio start cut (audio-start-cut-v1) ----------------------------------
-    // AndroidMedia.play against a simulated track at the production settings:
-    // the track plays 48 frames a ms once 30 ms are written (its start
-    // threshold); queued = written - played, as the stats report it.
-    class Run(burst: Int, jitterMs: IntArray, seconds: Int, val audio: AndroidAudioTrim = AndroidAudioTrim(
-        targetFrames = 1920, capFrames = 3840, maxTargetFrames = 3840, capacityFrames = 5760)) {
-        var written = 0L; var played = 0L; var playing = false
-        var underruns = 0L; var held = -1L; var releaseQueued = -1L; var lowestAfter = Long.MAX_VALUE
-        var depthSum = 0L; var depthSamples = 0L; var refused = 0L
-        val pcm = ArrayList<Byte>()
-        init {
-            // Packet k (10 ms) carries its index k as content; (arrival us, k).
-            val arrivals = ArrayList<Pair<Long, Int>>()
-            for (k in 0 until burst) arrivals.add(500_000L + k * 50L to k)
-            var k = burst
-            for (step in 1..seconds * 100) { arrivals.add(500_000L + step * 10_000L + jitterMs[step % jitterMs.size] * 1000L to k); k++ }
-            var next = 0
-            for (msNow in 0 until 500 + seconds * 1000) {
-                if (!playing && written - played >= 1440) playing = true
-                if (playing) { if (written - played >= 48) played += 48 else { underruns++; played = written } }
-                if (playing && !audio.starting && msNow % 7 == 0) { depthSum += written - played; depthSamples++ }
-                while (next < arrivals.size && arrivals[next].first < (msNow + 1) * 1000L) {
-                    val (atUs, index) = arrivals[next++]
-                    val bytes = ByteArray(1920) { index.toByte() }
-                    if (audio.starting) {
-                        val h = audio.start(bytes, 0, bytes.size, atUs * 1000)
-                        if (h < 0) continue
-                        held = h.toLong()
-                        for (i in 0 until h step 1920) pcm.add(audio.held[i])
-                        written += h / 4
-                        releaseQueued = written - played
-                    } else if (written - played < lowestAfter) lowestAfter = written - played
-                    if (audio.accept(written - played, 480, atUs * 1000, underruns, index * 10_000L)) { written += 480; pcm.add(bytes[0]) } else refused++
-                }
-            }
-        }
-    }
-    val jitter = intArrayOf(0, 3, -2, 4, -4, 1, -3, 2, 0, -1, 4, -4)
-    // A 200 ms backlog arrives at once, then the sound goes on in real time.
-    val burst = Run(burst = 20, jitterMs = jitter, seconds = 30)
-    verify(burst.audio.overruns == 1L && burst.audio.cutFrames == 20L * 480 - 1920,
-        "the backlog is cut once to the target, not refused packet by packet: overruns ${burst.audio.overruns}, cut ${burst.audio.cutFrames}")
-    verify(burst.held == 1920L * 4 && burst.releaseQueued == 1920L, "the newest 40 ms are kept: depth at the target when the sound starts")
-    verify(burst.pcm.take(5).map { it.toInt() } == listOf(16, 17, 18, 19, 20), "the oldest audio is dropped, the newest plays in order")
-    verify(burst.underruns == 0L && burst.audio.underruns == 0L, "no underrun over 30 s of jittered real-time audio")
-    verify(burst.refused == 0L && burst.audio.trimmed == 0L && burst.audio.overruns == 1L, "nothing refused or trimmed after the cut")
-    val depthMs = burst.depthSum.toDouble() / burst.depthSamples / 48
-    verify(depthMs in 40.0..50.0, "steady depth stays at the 40 ms target (plus at most one packet): $depthMs ms")
-    verify(burst.lowestAfter in 1L..1920L, "the standing level stays at or under the target: ${burst.lowestAfter}")
-    // Real time from the first packet: primed to the target, nothing cut.
-    val calm = Run(burst = 0, jitterMs = jitter, seconds = 10)
-    verify(calm.audio.overruns == 0L && calm.audio.cutFrames == 0L && calm.underruns == 0L, "no backlog: nothing cut, no underrun")
-    verify(calm.held == 1920L * 4 && calm.releaseQueued == 1920L, "a calm start is primed to the target before it plays")
-    // Each stream starts over; the counters keep counting (audio-stats-v1 deltas).
-    val again = AndroidAudioTrim(targetFrames = 1920, capFrames = 3840)
-    val packet = ByteArray(1920)
-    for (k in 0 until 10) again.start(packet, 0, packet.size, k * 10_000L)
-    verify(again.start(packet, 0, packet.size, 200 * ms) == 1920 * 4 && !again.starting && again.overruns == 1L, "first stream: one cut")
-    again.reset()
-    verify(again.starting, "a new stream holds its start again")
-    for (k in 0 until 10) again.start(packet, 0, packet.size, 300 * ms + k * 10_000L)
-    verify(again.start(packet, 0, packet.size, 400 * ms) == 1920 * 4 && again.overruns == 2L && again.cutFrames == 2L * 6 * 480, "second stream: cumulative counts")
-    // One packet longer than the target keeps only its newest frames.
-    val long = AndroidAudioTrim(targetFrames = 1920, capFrames = 3840)
-    val big = ByteArray(9600) { (it / 1920).toByte() }
-    verify(long.start(big, 0, big.size, 0) == -1 && long.cutFrames == 2400L - 1920, "an oversize packet is cut to its newest target frames")
-    verify(long.start(packet, 0, packet.size, 60 * ms) == 1920 * 4 && long.held[0].toInt() == 1 && long.held[7679].toInt() == 4, "...in order")
-
     // --- display mode -----------------------------------------------------------
     fun mode(id: Int, hz: Float, w: Int = 1080, h: Int = 2400) = AndroidDisplayMode(id, w, h, hz)
     val modes = listOf(mode(1, 60f), mode(2, 90f), mode(3, 120f), mode(4, 120f, w = 720, h = 1600), mode(5, 144f))
@@ -370,5 +257,5 @@ fun main() {
     verify(cpu.sample(null, 5_000_000_000L) == -1 && cpu.tenths == -1, "unreadable proc file is unknown")
     verify(cpu.sample(50, 6_000_000_000L) == -1 && cpu.sample(150, 7_000_000_000L) == 125, "recovers after re-priming")
     verify(AppCpuMeter(0, 100).sample(1, 0L) == -1, "no cores is unknown")
-    println("{\"checks\":$checks,\"framePacing\":true,\"decodeClock\":true,\"bufferPool\":true,\"mediaWire\":true,\"staleDrop\":true,\"audioTrim\":true,\"audioStartCut\":true,\"simulatedDepthMs\":${"%.1f".format(depthMs)},\"displayMode\":true,\"decoderOrder\":true,\"appCpu\":true,\"mediaCodecExecuted\":false}")
+    println("{\"checks\":$checks,\"framePacing\":true,\"decodeClock\":true,\"bufferPool\":true,\"mediaWire\":true,\"staleDrop\":true,\"displayMode\":true,\"decoderOrder\":true,\"appCpu\":true,\"mediaCodecExecuted\":false}")
 }

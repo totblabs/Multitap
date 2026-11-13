@@ -14,6 +14,7 @@
 #include "host_service_restart.hpp"
 #include "display_adapter_inventory.hpp"
 #include "native_display_trust.hpp"
+#include "settings_progress.hpp"
 #include <wincrypt.h>
 #include <wintrust.h>
 #include <softpub.h>
@@ -177,6 +178,7 @@ class Machine final:public Access {
   }
   void wait(unsigned long milliseconds)override{Sleep(milliseconds);}
   bool restartService()override{return service_restart::native().outcome==service_restart::Outcome::completed;}
+  void step(const char* code)override{settings_progress::step(code);}
 
  private:
   // The .cer is one DER certificate (its bytes are pinned by SHA-256).

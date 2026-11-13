@@ -124,6 +124,10 @@ test('checking a file uploads it in pieces, shows what is inside, and changes no
   // A wrong passphrase: said on the page, and the upload is kept for the next try.
   await f.check(restore(), '틀린 백업 암호 열두 글자쯤');
   assert.equal(restore().querySelector('.error').textContent, '백업 암호가 다르거나 파일이 손상됐어요.');
+  // The file stays chosen (said, since the browser's own field is drawn anew), and the passphrase has the focus.
+  assert.equal(restore().querySelector('[data-backup-file-kept]').textContent, '고른 파일은 그대로예요. 백업 암호만 다시 넣으세요.');
+  assert.equal(restore().querySelector('.backup-file-name').textContent, '백업.mtbk · 2 KB');
+  assert.equal(f.focused(), restore().querySelector('input[name=passphrase]'));
   assert.deepEqual(s.chunks.map(chunk => chunk.offset), [0, 1000, 2000]);
   assert.deepEqual(Buffer.concat(s.chunks.map(chunk => Buffer.from(chunk.data, 'base64'))), bytes, 'the pieces are the file');
   assert.equal(restore().querySelector('.backup-preview'), null);

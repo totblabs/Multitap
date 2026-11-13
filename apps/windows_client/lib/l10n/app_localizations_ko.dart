@@ -6440,8 +6440,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get installingWinfsp => 'WinFsp 설치 중';
 
   @override
-  String get installingWinfspMayTake1 =>
-      'WinFsp를 설치하고 있어요. 1~2분 걸릴 수 있어요. 창을 닫지 마세요.';
+  String get installingWinfspMayTake1 => 'WinFsp를 설치하고 있어요. 창을 닫지 마세요.';
 
   @override
   String get couldNotCheckWinfspInstall =>
@@ -8196,7 +8195,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get installsSharedFolderDriverWinfsp =>
-      '공유 폴더용 드라이버(WinFsp)를 설치해요. 1~2분 걸릴 수 있어요.\nWindows를 다시 시작해야 하면 알려 드려요. 자동으로 다시 시작하지 않아요.';
+      '공유 폴더용 드라이버(WinFsp)를 설치해요.\nWindows를 다시 시작해야 하면 알려 드려요. 자동으로 다시 시작하지 않아요.';
 
   @override
   String get switchUsbConnectionMultitap => 'USB 연결 기능을 Multitap용으로 바꿀까요?';
@@ -11005,6 +11004,146 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String get proxmoxNoLongerListsVm =>
       'Proxmox에서 이 데스크톱의 VM을 찾지 못했어요. 관리자에게 알려 주세요.';
+
+  @override
+  String progressStepOf(Object index, Object count) {
+    return '$index/$count단계';
+  }
+
+  @override
+  String get androidSigningOut => '로그아웃하는 중이에요';
+
+  @override
+  String get androidHostUpdateRequesting => '업데이트를 요청하는 중이에요';
+
+  @override
+  String get androidHostUpdateReading => 'Host 배포 정보를 확인하는 중이에요';
+
+  @override
+  String get androidCheckingOtherConnection => '다른 연결이 있는지 확인하는 중이에요';
+
+  @override
+  String get androidCheckingDesktopAgain => '데스크톱 상태를 다시 확인하는 중이에요';
+
+  @override
+  String get androidOpeningConsole => 'Console을 여는 중이에요';
+
+  @override
+  String get androidEndingConsole => 'Console 연결을 끊는 중이에요';
+
+  @override
+  String get androidUpdateCheckingPackage => '설치 파일의 서명을 확인하는 중이에요';
+
+  @override
+  String get androidUpdatePreparingInstall => '설치를 준비하는 중이에요';
+
+  @override
+  String get androidUpdateWaitingConfirm => 'Android 설치 화면의 확인을 기다리고 있어요';
+
+  @override
+  String get androidUpdateInstallingNow =>
+      'Android가 업데이트를 설치하고 있어요.\n끝나면 앱이 닫혀요. 다시 열면 새 버전으로 시작해요.';
+
+  @override
+  String get androidReadingFolder => '폴더를 읽는 중이에요';
+
+  @override
+  String get androidChangingPassword => '비밀번호를 바꾸는 중이에요';
+
+  @override
+  String get androidTestingServer => '서버 연결을 테스트하는 중이에요';
+
+  @override
+  String get androidMouseLockConnecting => '마우스를 데스크톱에 연결하는 중이에요';
+
+  @override
+  String get tileOpeningConsole => 'Console을 여는 중이에요';
+
+  @override
+  String get tileOpeningWindow => '원격 창을 여는 중이에요';
+
+  @override
+  String get tileRequestingHostUpdate => 'Host 업데이트를 요청하는 중이에요';
+
+  @override
+  String get signingOutNow => '로그아웃하는 중이에요';
+
+  @override
+  String get loadingDesktopList => '데스크톱 목록을 불러오는 중이에요';
+
+  @override
+  String get updateClosingRemoteWindows => '열려 있는 원격 창을 닫는 중이에요';
+
+  @override
+  String get sessionEndClosingConnections => '열린 연결을 닫는 중이에요';
+
+  @override
+  String get hostStepDisplayPackage => '드라이버 파일이 원본과 같은지 확인하는 중이에요';
+
+  @override
+  String get hostStepDisplayTrust => '드라이버 서명을 확인하는 중이에요';
+
+  @override
+  String get hostStepDisplayDevice =>
+      '가상 화면 드라이버를 설치하는 중이에요. 화면이 잠시 깜빡일 수 있어요.';
+
+  @override
+  String get hostStepDisplayService => 'Host 서비스가 가상 화면을 여는 것을 기다리는 중이에요';
+
+  @override
+  String get hostStepDisplayRestart => 'Host 서비스를 다시 시작하는 중이에요';
+
+  @override
+  String get hostStepWinfspPackage => 'WinFsp 설치 파일을 확인하는 중이에요';
+
+  @override
+  String get hostStepWinfspInstall => 'WinFsp를 설치하는 중이에요';
+
+  @override
+  String get hostStepWinfspRollback => 'WinFsp 설치를 되돌리는 중이에요';
+
+  @override
+  String get hostStepWinfspWaiting => '다른 설치가 끝나기를 기다리는 중이에요';
+
+  @override
+  String get hostStepWinfspCheck => '설치된 WinFsp를 확인하는 중이에요';
+
+  @override
+  String get hostStepUsbRemove => '다른 USB 연결 기능을 지우는 중이에요';
+
+  @override
+  String get hostStepUsbInstall => 'Multitap USB 연결 기능을 설치하는 중이에요';
+
+  @override
+  String get hostPhaseTestingServer => '서버에 연결해 응답을 기다리고 있어요.';
+
+  @override
+  String get hostPhaseRequestingServer => '서버에 연결 요청을 보내고 응답을 기다리고 있어요.';
+
+  @override
+  String get hostPhaseRestartingService =>
+      'Host 서비스를 멈췄다가 다시 시작하고 있어요. 창을 닫지 마세요.';
+
+  @override
+  String get hostCheckingInstallResult => '설치 결과 확인 중';
+
+  @override
+  String get hostPhaseCheckingInstallResult => '설치한 항목을 Windows에서 다시 확인하고 있어요.';
+
+  @override
+  String get hostCheckingRequestResult => '요청 결과 확인 중';
+
+  @override
+  String get hostPhaseCheckingRequestResult =>
+      'Windows 자동 로그인 요청이 어떻게 끝났는지 조회하고 있어요.';
+
+  @override
+  String get hostApprovalWaitingLine => '승인을 기다리는 중이에요. 승인되면 바로 다음으로 넘어가요.';
+
+  @override
+  String hostProgressPercent(Object percent) {
+    return '$percent%';
+  }
 
   @override
   String usbUnreadableDevices(Object count) {

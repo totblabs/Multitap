@@ -11,6 +11,7 @@ import 'package:multitap_client/ui/product_update_dialog.dart';
 import 'package:multitap_client/ui/workspace_shell.dart';
 
 import 'auth_flow_test.dart' show TestBroker, fixtureOrigin;
+import 'helpers/pump_work.dart';
 
 const _offered = HostUpdateState(
   present: true,
@@ -97,18 +98,18 @@ Future<WorkspaceShell> _login(
       },
     ),
   );
-  await t.pumpAndSettle();
+  await pumpWork(t);
   await t.enterText(find.byKey(const Key('sign-in-id')), 'ordinary-user');
   await t.enterText(find.byKey(const Key('sign-in-password')), 'fixture-only');
   await t.tap(find.byKey(const Key('login-submit')));
-  await t.pumpAndSettle();
+  await pumpWork(t);
   return t.widget<WorkspaceShell>(find.byType(WorkspaceShell));
 }
 
 Future<BulkHostUpdateDialog> _openFromHeader(WidgetTester t) async {
   // Host updates have their own header button, never the app panel.
   await t.tap(find.byKey(const Key('open-host-updates')));
-  await t.pumpAndSettle();
+  await pumpWork(t);
   expect(find.byType(ProductUpdateDialog), findsNothing);
   return t.widget<BulkHostUpdateDialog>(find.byType(BulkHostUpdateDialog));
 }
@@ -208,7 +209,7 @@ void main() {
         findsOneWidget,
       );
       await t.tap(find.byKey(const Key('open-host-updates')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       final bulk = t.widget<BulkHostUpdateDialog>(
         find.byType(BulkHostUpdateDialog),
       );
@@ -220,7 +221,7 @@ void main() {
       ]);
       expect(broker.posts, isEmpty);
       await t.tap(find.byKey(const Key('bulk-host-close')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
 
       // The list push clears the badge once nothing is installable.
       broker.assigned = [
@@ -236,7 +237,7 @@ void main() {
         ),
       ];
       await t.tap(find.byKey(const Key('refresh-desktops')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.byKey(const Key('open-host-updates')), findsNothing);
       await t.pumpWidget(const SizedBox());
     },
@@ -273,7 +274,7 @@ void main() {
       broker.networkFailure = false;
       broker.assigned = [];
       expect(await bulk.refreshAssigned!(), isEmpty);
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(bulk.liveMachines!.value, isEmpty);
       final pendingRead = Completer<List<BrokerDesktop>>();
       broker.nextRead = pendingRead;
@@ -283,10 +284,10 @@ void main() {
         throwsA(isA<BrokerException>()),
       );
       await t.tap(find.byKey(const Key('bulk-host-close')));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       pendingRead.complete([]);
       await lateRejected;
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.byType(BulkHostUpdateDialog), findsNothing);
       expect(find.byType(ProductUpdateDialog), findsNothing);
       expect(
@@ -354,7 +355,7 @@ void main() {
       final late = bulk.refreshAssigned!();
       broker.assigned = [];
       shell.onRefresh();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(bulk.liveMachines!.value, isEmpty);
       old.complete([_vm('pve-101')]);
       expect(await late, isEmpty);
@@ -384,7 +385,7 @@ void main() {
       final rejected = expectLater(pending, throwsA(isA<BrokerException>()));
       now = now.add(const Duration(hours: 2));
       shell.onRefresh();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.byType(BulkHostUpdateDialog), findsNothing);
       expect(find.byType(ProductUpdateDialog), findsNothing);
       gate.complete(_accepted);
@@ -409,7 +410,7 @@ void main() {
         bulk.api.requestHostUpdate(bulk.token, 'pve-101', '0.2.81'),
         throwsA(isA<BrokerException>()),
       );
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.byType(BulkHostUpdateDialog), findsNothing);
       expect(find.byType(WorkspaceShell), findsNothing);
       expect(broker.posts, hasLength(1));
@@ -439,7 +440,7 @@ void main() {
           ),
         ),
       );
-      await t.pumpAndSettle();
+      await pumpWork(t);
       final trigger = find.byKey(const Key('open-bulk-host-update'));
       final first = t.widget<TextButton>(trigger).onPressed!;
       first();
@@ -454,7 +455,7 @@ void main() {
       await t.pump();
       expect(catalog.verifying, isNull);
       bulkGate.complete();
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(find.byKey(const Key('install-product-update')), findsOneWidget);
       await t.tap(find.byKey(const Key('install-product-update')));
       await t.pump();
@@ -463,14 +464,14 @@ void main() {
       await t.pump();
       expect(t.widget<TextButton>(trigger).onPressed, isNull);
       catalog.downloadGate.complete(_Download());
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(t.widget<TextButton>(trigger).onPressed, isNotNull);
       await t.tap(find.byKey(const Key('apply-product-update')));
       await t.pump();
       expect(platform.installs, 1);
       expect(t.widget<TextButton>(trigger).onPressed, isNull);
       platform.installGate.completeError(const UpdateFailure('launch_failed'));
-      await t.pumpAndSettle();
+      await pumpWork(t);
       expect(t.widget<TextButton>(trigger).onPressed, isNotNull);
       expect(opens, 1);
       await t.pumpWidget(const SizedBox());

@@ -16,6 +16,7 @@ import 'package:multitap_client/data/appearance_settings.dart';
 
 import 'android_launcher_test.dart'
     show MemoryStore, FakeBroker, vm, signedIn, mainButton;
+import '../helpers/pump_work.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -42,7 +43,7 @@ void main() {
         expect(find.byKey(const Key('desktop-in-use-pve-149')), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pumpAndSettle();
+        await pumpWork(tester);
       },
     );
   }
@@ -66,7 +67,7 @@ void main() {
     expect(find.byKey(const Key('stream-state-pve-149')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpAndSettle();
+    await pumpWork(tester);
   });
   for (final size in [
     const Size(300, 720),
@@ -124,23 +125,23 @@ void main() {
               ),
             ),
           );
-          await tester.pumpAndSettle();
+          await pumpWork(tester);
           await tester.enterText(
             find.byKey(const Key('sign-in-password')),
             'fixture-password',
           );
           final login = find.byKey(const Key('login-submit'));
           await tester.ensureVisible(login);
-          await tester.pumpAndSettle();
+          await pumpWork(tester);
           await tester.tap(login);
-          await tester.pumpAndSettle();
+          await pumpWork(tester);
           await tester.runAsync(
             () => precacheImage(
               AssetImage(BackgroundScene.peaks.asset(dark: dark)),
               tester.element(find.byKey(const Key('cards-view'))),
             ),
           );
-          await tester.pumpAndSettle();
+          await pumpWork(tester);
           expect(tester.takeException(), isNull);
           final cards = [
             for (final id in [101, 102, 103])
@@ -193,7 +194,7 @@ void main() {
             isEmpty,
           );
           await tester.pumpWidget(const SizedBox.shrink());
-          await tester.pumpAndSettle();
+          await pumpWork(tester);
         });
       }
     }

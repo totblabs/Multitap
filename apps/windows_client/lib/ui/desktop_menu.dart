@@ -89,7 +89,20 @@ class DesktopActions {
     this.consoleReason,
     this.favorite,
     this.toggleFavorite,
+    this.working,
+    this.powerSince,
   });
+
+  /// What this client is doing for the desktop right now, as one sentence
+  /// (opening its Console or its remote window, asking for a Host update):
+  /// the tile's status shows it beside a moving mark until the work ends.
+  /// Null: nothing of the kind.
+  final String? working;
+
+  /// When this client asked for the power task that is running, by its own
+  /// clock: the main button counts the wait from it. Null for a task it did
+  /// not start (no time is shown then).
+  final DateTime? powerSince;
 
   /// The tile's default action: stream windowed, or power on
   /// and connect when the VM is off.

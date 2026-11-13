@@ -19,6 +19,7 @@ import 'package:multitap_client/data/product_updates.dart'
     show UpdateFailure, UpdateResponse, UpdateTransport;
 
 import 'android_launcher_test.dart' show FakeBroker, MemoryStore, vm;
+import '../helpers/pump_work.dart';
 
 final origin = Uri.parse('https://vdi.example');
 
@@ -309,7 +310,11 @@ void main() {
     expect(platform.calls.where((c) => c == 'directory'), hasLength(1));
     expect(find.byKey(const Key('android-update-preparing')), findsOneWidget);
     platform.location.complete(Directory('fake-downloads'));
-    await tester.pumpAndSettle();
+    // Handed to Android, the dialog keeps a mark turning until Android's
+    // confirmation is reported, so it never settles here.
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
     expect(updates.downloads, 1);
     expect(platform.calls.where((c) => c.startsWith('install:')), hasLength(1));
   });
@@ -761,7 +766,19 @@ void main() {
     expect(find.textContaining('현재 0.1.0-preview.4'), findsOneWidget);
     expect(platform.calls.where((c) => c.startsWith('install')), isEmpty);
     await tester.tap(find.byKey(const Key('android-update-install')));
-    await tester.pumpAndSettle();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    // Handed off: Android's confirmation is on its way, and the instruction
+    // comes when Android reports that it opened.
+    expect(
+      find.byKey(const Key('android-update-opening-installer')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('android-update-handed-off')), findsNothing);
+    platform.status.add(androidUpdateConfirmOpened);
+    await tester.pump();
+    await tester.pump();
     expect(find.byKey(const Key('android-update-handed-off')), findsOneWidget);
     expect(
       platform.calls.last,
@@ -1060,11 +1077,11 @@ void main() {
         'secret-pass',
       );
       await tester.tap(find.byKey(const Key('login-submit')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
     }
 
     testWidgets('badge the header; the panel lists them and opens one', (
@@ -1093,7 +1110,7 @@ void main() {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.text('최신'), findsOneWidget);
       expect(find.byKey(const Key('host-update-offer')), findsOneWidget);
       expect(find.text('Host 업데이트 2대 가능'), findsOneWidget);
@@ -1124,12 +1141,12 @@ void main() {
       );
       expect(broker.requests, isEmpty);
       await tester.tap(find.text('취소'));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
 
       // The list push clears the badge once nothing is installable.
       broker.inventory = [desktop('pve-101', offer: false)];
       await tester.tap(find.byKey(const Key('refresh-desktops')));
-      await tester.pumpAndSettle();
+      await pumpWork(tester);
       expect(find.byKey(const Key('host-update-badge')), findsNothing);
       expect(find.byKey(const Key('android-update-check')), findsOneWidget);
     });
