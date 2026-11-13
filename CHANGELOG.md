@@ -2,7 +2,39 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 and 1.1.2 carry the Windows app, the Android app and the Host at the same number. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.3 carry the Windows app, the Android app and the Host at the same number. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.3](https://github.com/totblabs/Multitap/releases/tag/v1.1.3)
+
+### Server and admin console
+
+- **The connection test really tries each address** on Server access, extra addresses included, and says whether it works and why (name not found, nothing answering, not HTTPS, another server, an untrusted proxy). A main address that fails cannot be saved.
+- **Confirm it yourself and save**: an address the server cannot reach from inside but that opens from outside (a router without loopback, a name known only outside) is saved after you open it from outside within 5 minutes, for example on a phone. Until then nothing changes.
+- **Every save ends with its result** on the page, naming the address when the previous settings came back. The waiting screen never stays.
+- **Sending the picture and sound over UDP is off by default** and is a switch on Server access. Turning it on or off restarts nothing and disconnects nobody.
+- Turning on public IP following registers the address within seconds.
+- The console says when the server stops answering or the sign-in has ended, and keeps what you typed (never passwords or codes) for the next sign-in.
+- A saved access setting that cannot be read starts the server with only the admin console, and every page says how to fix it.
+- Release notes show the console's language only.
+
+### Install command and `multitap`
+
+- `multitap update` without a version never goes back to an older release.
+- The home page and the guide say what the install command does and how to read it before running it.
+
+### Windows app and Android app
+
+- **Android sound** no longer plays, then crackles and stops: it is buffered and played evenly, as in the Windows app, and comes back after another app has taken it.
+- Long operations show their progress: power, Host updates, opening the Console, signing out, loading the list, USB and folders; an Android update shows how much is copied.
+
+### Host
+
+- The first install shows what each step does and its progress; installing WinFsp fills a real progress bar.
+- The installer is smaller and carries no paths of the machine it was built on.
+
+### Updating
+
+From 1.1.1, see the note under 1.1.2. 1.1.2 was published as a pre-release only.
 
 ## [1.1.2](https://github.com/totblabs/Multitap/releases/tag/v1.1.2)
 
