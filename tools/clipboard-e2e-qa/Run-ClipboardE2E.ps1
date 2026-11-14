@@ -58,7 +58,11 @@ foreach ($relay in $Relays) {
   $directory = Join-Path $Work "relay-$label-$runId"
   New-Item -ItemType Directory -Force $directory | Out-Null
   $archive = Join-Path $Work "relay-$label-$runId.tar"
-  & git -C $repo archive --format=tar -o $archive $commit server/src server/package.json
+  # server/update holds modules src/ imports (transport-policy.mjs) in releases from 1.0 on.
+  $parts = @('server/src', 'server/package.json')
+  & git -C $repo cat-file -e "${commit}:server/update" 2>$null
+  if ($LASTEXITCODE -eq 0) { $parts += 'server/update' }
+  & git -C $repo archive --format=tar -o $archive $commit @parts
   if ($LASTEXITCODE -ne 0) { throw "git archive $commit failed." }
   & tar -xf $archive -C $directory
   New-Item -ItemType Junction -Path (Join-Path $directory 'server/node_modules') -Target $serverNodeModules | Out-Null

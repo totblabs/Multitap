@@ -8994,6 +8994,12 @@ abstract class AppLocalizations {
   /// **'서식 있는 텍스트'**
   String get richText;
 
+  /// No description provided for @listingItems.
+  ///
+  /// In ko, this message translates to:
+  /// **'목록 확인 중 · {count}개'**
+  String listingItems(Object count);
+
   /// No description provided for @ofLabel.
   ///
   /// In ko, this message translates to:
@@ -12529,8 +12535,74 @@ abstract class AppLocalizations {
   /// No description provided for @readyStream.
   ///
   /// In ko, this message translates to:
-  /// **'스트리밍 가능'**
+  /// **'스트리밍할 수 있어요'**
   String get readyStream;
+
+  /// No description provided for @readyConnect2.
+  ///
+  /// In ko, this message translates to:
+  /// **'연결할 수 있어요'**
+  String get readyConnect2;
+
+  /// No description provided for @autoSign2.
+  ///
+  /// In ko, this message translates to:
+  /// **'{accountLabel} · 자동 로그인'**
+  String autoSign2(Object accountLabel);
+
+  /// No description provided for @signedWindows.
+  ///
+  /// In ko, this message translates to:
+  /// **'Windows 로그인됨'**
+  String get signedWindows;
+
+  /// No description provided for @noVirtualDisplayDriver.
+  ///
+  /// In ko, this message translates to:
+  /// **'가상 화면 드라이버 없음'**
+  String get noVirtualDisplayDriver;
+
+  /// No description provided for @virtualDisplayRecoveryNeeded.
+  ///
+  /// In ko, this message translates to:
+  /// **'가상 화면 복구 필요'**
+  String get virtualDisplayRecoveryNeeded;
+
+  /// No description provided for @windowsSignNeeded2.
+  ///
+  /// In ko, this message translates to:
+  /// **'Windows 로그인 필요'**
+  String get windowsSignNeeded2;
+
+  /// No description provided for @streamingScreenSwitchNeeded.
+  ///
+  /// In ko, this message translates to:
+  /// **'스트리밍 화면 전환 필요'**
+  String get streamingScreenSwitchNeeded;
+
+  /// No description provided for @preparingVirtualDisplay3.
+  ///
+  /// In ko, this message translates to:
+  /// **'가상 화면 준비 중'**
+  String get preparingVirtualDisplay3;
+
+  /// No description provided for @server3.
+  ///
+  /// In ko, this message translates to:
+  /// **'서버{serverDetail}'**
+  String server3(Object serverDetail);
+
+  /// No description provided for @client.
+  ///
+  /// In ko, this message translates to:
+  /// **'클라이언트{clientDetail}'**
+  String client(Object clientDetail);
+
+  /// No description provided for @client2.
+  ///
+  /// In ko, this message translates to:
+  /// **'클라이언트'**
+  String get client2;
 
   /// No description provided for @checkingStatus2.
   ///

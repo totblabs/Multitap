@@ -15,6 +15,7 @@ bool onPasteHeader = true;   // and the on-paste revision unless started with --
 bool dropWaiting = false;    // --drop-waiting: a Host that never reports a waiting paste (the event is optional for the card)
 int emitDelayMs = 0;         // --emit-delay-ms N: every data chunk this Host sends is held back N ms (a slow link from the VM to the PC)
 bool pullQueueHeader = true; // the pull queue (pull-queue-4-v1) unless started with --no-pullqueue
+bool deferredHeader = true;  // the deferred manifest (manifest-on-paste-v1) unless started with --no-deferred
 bool quiet = false;          // --quiet (throughput benchmark): no event line per data message; the service's JSON parse of it still runs
 
 // ClipboardChannel (apps/windows_host/src/clipboard_channel.hpp) for a loopback ws:// relay: the same headers, queue bounds and
@@ -43,7 +44,7 @@ class PlainChannel {
         Internet connection(WinHttpConnect(session.handle, hostName.c_str(), parts.nPort, 0));
         Internet request(WinHttpOpenRequest(connection.handle, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0));
         winCheck(WinHttpSetOption(request.handle, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0), "WebSocket");
-        const auto authorization = L"Authorization: Host " + wide(token) + L"\r\nX-Multitap-Clipboard-Limits: 2\r\nX-Multitap-Clipboard-Formats: 2\r\nX-Multitap-Clipboard-Pull: 1\r\n" + std::wstring(scaleHeader ? L"X-Multitap-Clipboard-Scale: 1\r\n" : L"") + std::wstring(onPasteHeader ? L"X-Multitap-Clipboard-OnPaste: 1\r\n" : L"") + std::wstring(pullQueueHeader ? L"X-Multitap-Clipboard-PullQueue: 1\r\n" : L"");
+        const auto authorization = L"Authorization: Host " + wide(token) + L"\r\nX-Multitap-Clipboard-Limits: 2\r\nX-Multitap-Clipboard-Formats: 2\r\nX-Multitap-Clipboard-Pull: 1\r\n" + std::wstring(scaleHeader ? L"X-Multitap-Clipboard-Scale: 1\r\n" : L"") + std::wstring(onPasteHeader ? L"X-Multitap-Clipboard-OnPaste: 1\r\n" : L"") + std::wstring(pullQueueHeader ? L"X-Multitap-Clipboard-PullQueue: 1\r\n" : L"") + std::wstring(deferredHeader ? L"X-Multitap-Clipboard-Deferred: 1\r\n" : L"");
         winCheck(WinHttpSendRequest(request.handle, authorization.c_str(), DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0), "connect");
         winCheck(WinHttpReceiveResponse(request.handle, nullptr), "response");
         DWORD status = 0, length = sizeof(status);
@@ -52,7 +53,10 @@ class PlainChannel {
         const auto web = WinHttpWebSocketCompleteUpgrade(request.handle, 0); if (!web) winCheck(FALSE, "upgrade");
         socket_ = web;
         sender = std::thread([this] {
-          try { while (!stopped_) { std::string json; { std::unique_lock lock(mutex_); condition_.wait(lock, [this] { return stopped_ || !queue_.empty(); }); if (stopped_) break; json = std::move(queue_.front()); queue_.pop_front(); bytes_ -= json.size(); } if (sendWebSocketMessageOn(socket_.load(), true, json.data(), json.size()) != NO_ERROR) break; } } catch (...) {}
+          // (The sent count for the worker's flow control, as ClipboardChannel reports it.)
+          uint64_t written = 0;
+          try { while (!stopped_) { std::string json; bool drained = false; { std::unique_lock lock(mutex_); condition_.wait(lock, [this] { return stopped_ || !queue_.empty(); }); if (stopped_) break; json = std::move(queue_.front()); queue_.pop_front(); bytes_ -= json.size(); drained = queue_.empty(); } if (sendWebSocketMessageOn(socket_.load(), true, json.data(), json.size()) != NO_ERROR) break;
+              if ((++written % 16 == 0 || drained) && flow_) try { flow_(written); } catch (...) {} } } catch (...) {}
           close();
         });
         std::array<char, 16384> buffer{}; std::string json;
@@ -74,6 +78,7 @@ class PlainChannel {
       if (receive_) try { receive_("{\"type\":\"clipboard.channel.closed\"}"); } catch (...) {}
     });
   }
+  std::function<void(uint64_t)> flow_;  // set before start: the sent count goes to the worker directly (no event line)
  private:
   std::atomic<bool> stopped_{true}; std::atomic<HINTERNET> socket_{nullptr}; std::thread thread_; Receive receive_; std::mutex mutex_; std::condition_variable condition_; std::deque<std::string> queue_; size_t bytes_ = 0;
   void close() { stopped_ = true; if (const auto socket = socket_.exchange(nullptr)) WinHttpCloseHandle(socket); { std::lock_guard lock(mutex_); queue_.clear(); bytes_ = 0; } condition_.notify_all(); }
@@ -91,7 +96,7 @@ void fail(int64_t id, const std::string& why) { e2e::emitLine(object({{"id", id}
 int wmain(int argc, wchar_t** argv) {
   try {
     const auto url = argument(argc, argv, L"--url"), token = argument(argc, argv, L"--token"), session = argument(argc, argv, L"--session"), root = argument(argc, argv, L"--root");
-    for (int i = 1; i < argc; ++i) { if (!wcscmp(argv[i], L"--no-scale")) scaleHeader = false; if (!wcscmp(argv[i], L"--no-onpaste")) onPasteHeader = false; if (!wcscmp(argv[i], L"--drop-waiting")) dropWaiting = true; if (i + 1 < argc && !wcscmp(argv[i], L"--emit-delay-ms")) emitDelayMs = _wtoi(argv[i + 1]); if (!wcscmp(argv[i], L"--no-pullqueue")) pullQueueHeader = false; if (!wcscmp(argv[i], L"--quiet")) quiet = true; }
+    for (int i = 1; i < argc; ++i) { if (!wcscmp(argv[i], L"--no-scale")) scaleHeader = false; if (!wcscmp(argv[i], L"--no-onpaste")) onPasteHeader = false; if (!wcscmp(argv[i], L"--drop-waiting")) dropWaiting = true; if (i + 1 < argc && !wcscmp(argv[i], L"--emit-delay-ms")) emitDelayMs = _wtoi(argv[i + 1]); if (!wcscmp(argv[i], L"--no-pullqueue")) pullQueueHeader = false; if (!wcscmp(argv[i], L"--no-deferred")) deferredHeader = false; if (!wcscmp(argv[i], L"--quiet")) quiet = true; }
     const bool oleOk = SUCCEEDED(OleInitialize(nullptr));
     ClipboardWorkerAccess access;
     access.read = [](HWND w, bool t, bool f) { return board.read(w, clip::ReadOptions{t, f, false, false}); };
@@ -110,7 +115,15 @@ int wmain(int argc, wchar_t** argv) {
     access.publishers.paths = [](HWND w, const std::vector<std::filesystem::path>& p, std::optional<DWORD> e) { return board.putFiles(w, p, e); };
     access.publishers.localTree = [](HWND, const std::vector<clip::TreeEntry>& entries, std::optional<DWORD> e) { return board.publishLocalTree(entries, e); };
     // The listener of the worker's window: every change of the stand-in clipboard is a WM_CLIPBOARDUPDATE there.
-    board.changed = [] { if (const HWND window = FindWindowExW(HWND_MESSAGE, nullptr, L"Multitap.Clipboard.Worker.v1", nullptr)) PostMessageW(window, WM_CLIPBOARDUPDATE, 0, 0); };
+    // This process's worker window only: another helper of a run going on at the same time, or a real Host worker on this desktop, has
+    // a window of the same class, and the first one found is not necessarily ours.
+    board.changed = [] {
+      for (HWND window = FindWindowExW(HWND_MESSAGE, nullptr, L"Multitap.Clipboard.Worker.v1", nullptr); window;
+           window = FindWindowExW(HWND_MESSAGE, window, L"Multitap.Clipboard.Worker.v1", nullptr)) {
+        DWORD process = 0; GetWindowThreadProcessId(window, &process);
+        if (process == GetCurrentProcessId()) { PostMessageW(window, WM_CLIPBOARDUPDATE, 0, 0); return; }
+      }
+    };
 
     PlainChannel channel;
     std::unique_ptr<ClipboardWorker> worker;
@@ -135,11 +148,12 @@ int wmain(int argc, wchar_t** argv) {
         if (emitDelayMs > 0 && value.str("type") == "clipboard.chunk") Sleep(DWORD(emitDelayMs)); } catch (...) {}
       channel.send(payload);
     }, [] { return true; }, std::filesystem::path(e2e::wide(root)) / L"host-transfers", access);
+    channel.flow_ = [&](uint64_t sent) { worker->message(JsonParser::parse("{\"type\":\"clipboard.flow\",\"sent\":" + std::to_string(sent) + "}")); };
     channel.start(url, token, [&](const std::string& json) {
       if (quiet) { worker->message(JsonParser::parse(json)); return; }
       try {
         const auto value = e2e::parse(json);
-        e2e::emitLine(object({{"event", "recv"}, {"type", value.str("type")}, {"requestId", value.str("requestId")}, {"reason", value.str("reason")}}));
+        e2e::emitLine(object({{"event", "recv"}, {"type", value.str("type")}, {"requestId", value.str("requestId")}, {"reason", value.str("reason")}, {"enabled", value.flag("enabled")}}));
       } catch (...) {}
       worker->message(JsonParser::parse(json));
     });
@@ -164,6 +178,7 @@ int wmain(int argc, wchar_t** argv) {
         else if (name == "setFiles") { std::vector<std::filesystem::path> files; if (const auto* list = command.find("paths")) if (const auto* a = std::get_if<e2e::JArray>(&list->v)) for (const auto& item : *a) files.emplace_back(e2e::wide(std::get<std::string>(item.v))); board.userFiles(files); respond(id, true); }
         else if (name == "setVirtual") { const auto* list = command.find("entries"); board.userVirtual(list ? e2e::virtualItems(*list) : std::vector<vsrc::Item>{}); respond(id, true); }
       else if (name == "clear") { board.userClear(); respond(id, true); }
+      else if (name == "renumber") { board.renumber(); respond(id, true); }
         else if (name == "get") respond(id, board.describe());
         else if (name == "describePaths") { std::vector<std::filesystem::path> tops; if (const auto* list = command.find("paths")) if (const auto* a = std::get_if<e2e::JArray>(&list->v)) for (const auto& item : *a) tops.emplace_back(e2e::wide(std::get<std::string>(item.v))); respond(id, e2e::Board::describePaths(tops)); }
         else if (name == "paste") {

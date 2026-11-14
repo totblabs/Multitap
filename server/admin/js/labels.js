@@ -224,7 +224,9 @@ export const hostUpdateStateText = { accepted: t('labels.hostUpdateStateText.acc
 // test/usb-labels.test.mjs compares these tables with the header.
 export const hostUsbText = { 1: t('labels.hostUsbText.1'), 2: t('labels.hostUsbText.2'), 3: t('labels.hostUsbText.3'), 4: t('labels.hostUsbText.4'), 5: t('labels.hostUsbText.5'), 6: t('labels.hostUsbText.6'), 7: t('labels.hostUsbText.7'), 8: t('labels.hostUsbText.8'), 10: t('labels.hostUsbText.10'), 11: t('labels.hostUsbText.11'), 12: t('labels.hostUsbText.12'), 13: t('labels.hostUsbText.13'), 14: t('labels.hostUsbText.14'), 15: t('labels.hostUsbText.15'), 16: t('labels.hostUsbText.16'), 17: t('labels.hostUsbText.17'), 18: t('labels.hostUsbText.18'), 20: t('labels.hostUsbText.20'), 21: t('labels.hostUsbText.21'), 22: t('labels.hostUsbText.22'), 23: t('labels.hostUsbText.23'),
   24: t('labels.hostUsbText.24'), 25: t('labels.hostUsbText.25'), 26: t('labels.hostUsbText.26'), 27: t('labels.hostUsbText.27'), 28: t('labels.hostUsbText.28'),
-  29: t('labels.hostUsbText.29'), 30: t('labels.hostUsbText.30'), 31: t('labels.hostUsbText.31'), 32: t('labels.hostUsbText.32') };
+  29: t('labels.hostUsbText.29'), 30: t('labels.hostUsbText.30'), 31: t('labels.hostUsbText.31'), 32: t('labels.hostUsbText.32'),
+  33: t('labels.hostUsbText.33'), 34: t('labels.hostUsbText.34'), 35: t('labels.hostUsbText.35'),
+  36: t('labels.hostUsbText.36'), 37: t('labels.hostUsbText.37'), 38: t('labels.hostUsbText.38') };
 // The desktop's USB controller (Host diagnostics devices.usbController; hostAction 250 stage 8 sends its index as `expected`).
 export const usbControllerCodes = ['none', 'started', 'stopped', 'unmarked', 'duplicates', 'foreign', 'multiple', 'unknown'];
 export const usbControllerText = { none: t('labels.usbControllerText.none'), started: t('labels.usbControllerText.started'), stopped: t('labels.usbControllerText.stopped'), unmarked: t('labels.usbControllerText.unmarked'), duplicates: t('labels.usbControllerText.duplicates'), foreign: t('labels.usbControllerText.foreign'), multiple: t('labels.usbControllerText.multiple'), unknown: t('labels.usbControllerText.unknown') };

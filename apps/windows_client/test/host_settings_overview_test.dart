@@ -1,8 +1,8 @@
-// The Host settings overview (개요): its readiness said ONCE in plain words
-// beside the desktop's name (no route picture, no "정상" pill or row
-// words), ONE banner with ONE action for the most important problem,
-// and plain rows. Every value comes from the status the window already
-// reads (FakeHostSettings).
+// The Host settings overview (개요): ONE status pill beside the desktop's
+// name, the route 이 데스크톱 → 서버 → 클라이언트 (back on 2026-11-14 at the
+// owner's word), ONE banner with ONE action for the most important problem,
+// and plain rows (a fine row carries no "정상"). Every value comes from the
+// status the window already reads (FakeHostSettings).
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/data/appearance_settings.dart';
@@ -56,7 +56,9 @@ FakeHostSettings _ready([Map<String, dynamic> more = const {}]) =>
       ..credentialUsername = 'ToTB'
       ..statusOverrides = {..._desktop(), ...more};
 
-const _ok = HostRouteState.ok, _warn = HostRouteState.warn;
+const _ok = HostRouteState.ok,
+    _warn = HostRouteState.warn,
+    _idle = HostRouteState.idle;
 
 void main() {
   Future<void> show(
@@ -88,9 +90,20 @@ void main() {
     await pumpWork(tester);
   }
 
-  // The readiness beside the desktop's name: plain words, said once.
-  HostReadiness pill(WidgetTester t) =>
-      t.widget<HostReadiness>(find.byKey(const Key('host-overview-state')));
+  HostStatusPill pill(WidgetTester t) =>
+      t.widget<HostStatusPill>(find.byKey(const Key('host-overview-state')));
+  HostRouteDiagram route(WidgetTester t) =>
+      t.widget<HostRouteDiagram>(find.byKey(const Key('host-route')));
+  List<HostRouteState> states(WidgetTester t) {
+    final r = route(t);
+    return [
+      r.points[0].state,
+      r.toServer,
+      r.points[1].state,
+      r.toClient,
+      r.points[2].state,
+    ];
+  }
 
   String text(WidgetTester t, String key) =>
       t.widget<Text>(find.byKey(Key(key))).data!;
@@ -108,16 +121,18 @@ void main() {
     final api = _ready();
     await show(t, api);
     expect(text(t, 'host-connection-heading'), 'Code-agent');
-    expect(pill(t).label, '스트리밍 가능');
+    expect(pill(t).label, '스트리밍할 수 있어요');
     expect(pill(t).state, _ok);
     expect(text(t, 'host-machine-line'), 'Proxmox VM · pve-173');
-    // Readiness is said once, in words, beside the name: no
-    // route picture, no pill, no "정상" on every row.
-    expect(find.text('스트리밍 가능'), findsOneWidget);
-    expect(find.byKey(const Key('host-route')), findsNothing);
-    expect(find.byKey(const Key('host-route-ring-0')), findsNothing);
-    expect(find.text('클라이언트'), findsNothing);
-    expect(find.byType(HostStatusPill), findsNothing);
+    // Three points, two legs, all carrying; no "정상" on the rows.
+    expect(states(t), [_ok, _ok, _ok, _ok, _ok]);
+    expect(route(t).points.map((p) => p.name), ['Code-agent', '서버', '클라이언트']);
+    expect(route(t).points.map((p) => p.detail), [
+      'ToTB · 자동 로그인',
+      'vdi.example.com · 방금 확인',
+      '연결할 수 있어요',
+    ]);
+    expect(route(t).label, contains('vdi.example.com'));
     expect(find.text('정상'), findsNothing);
     // Nothing is wrong: no banner, no dot in the navigation.
     expect(find.byType(HostProblemBanner), findsNothing);
@@ -159,7 +174,14 @@ void main() {
     await show(t, api);
     expect(pill(t).label, 'Windows 로그인 필요');
     expect(pill(t).state, _warn);
-    expect(find.text('스트리밍 가능'), findsNothing);
+    // The desktop is the broken place; the server is still fine; nothing is
+    // claimed about a client.
+    expect(states(t), [_warn, _warn, _ok, _idle, _idle]);
+    expect(route(t).points[0].detail, 'Windows 로그인 필요');
+    expect(route(t).points[1].detail, 'vdi.example.com · 방금 확인');
+    expect(route(t).points[2].detail, isEmpty);
+    expect(find.byKey(const Key('host-route-detail-2')), findsNothing);
+    expect(find.text('스트리밍할 수 있어요'), findsNothing);
     expect(find.byType(HostProblemBanner), findsOneWidget);
     expect(
       text(t, 'host-problem-message'),
@@ -292,7 +314,7 @@ void main() {
     await show(t, api);
     expect(text(t, 'host-connection-heading'), 'TOTB-GAMING');
     expect(text(t, 'host-machine-line'), '로컬 PC');
-    expect(pill(t).label, '스트리밍 가능');
+    expect(pill(t).label, '스트리밍할 수 있어요');
     expect(find.textContaining('VM'), findsNothing);
     expect(find.textContaining('Proxmox'), findsNothing);
     expect(find.textContaining('pc-0a1b'), findsNothing);
@@ -480,7 +502,7 @@ void main() {
     api.statusOverrides = _desktop();
     await t.tap(find.byKey(const Key('host-refresh')));
     await pumpWork(t);
-    expect(pill(t).label, '스트리밍 가능');
+    expect(pill(t).label, '스트리밍할 수 있어요');
     expect(find.byType(HostProblemBanner), findsNothing);
     expect(api.requests.every(isReadOnlyHostRequest), isTrue);
     expect(t.takeException(), isNull);
@@ -493,7 +515,7 @@ void main() {
     expect(pill(t).label, '상태 읽기 실패');
     expect(find.textContaining('VM'), findsNothing);
     expect(find.textContaining('등록하지 않았어요'), findsNothing);
-    expect(find.text('스트리밍 가능'), findsNothing);
+    expect(find.text('스트리밍할 수 있어요'), findsNothing);
     expect(find.text('정상'), findsNothing);
     api.failStatus = false;
     await t.tap(find.widgetWithText(FilledButton, '새로고침'));

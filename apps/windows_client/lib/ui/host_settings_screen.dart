@@ -2743,12 +2743,53 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   String _withServer(String words) =>
       _serverName.isEmpty ? words : '$_serverName · $words';
 
-  // 개요: the desktop's name with its readiness said once in plain words,
-  // ONE sentence and ONE action when something is wrong, then a plain line
-  // per area that opens its page (a fine area carries no state word).
+  /// One short line under the desktop's ring: what on this Windows stands in
+  /// the way, or who is signed in.
+  String _desktopRouteDetail(HostFacts facts, HostRouteState state) {
+    if (state == HostRouteState.idle) return l10n.checking;
+    if (state == HostRouteState.ok) {
+      return _autoLoginOn
+          ? l10n.autoSign2(_windowsLogin.accountLabel)
+          : l10n.signedWindows;
+    }
+    bool server(HostProblem p) => p.page == 1;
+    final first = hostProblems(facts).firstWhere((p) => !server(p));
+    return switch (first) {
+      HostProblem.serviceMissing ||
+      HostProblem.serviceStopped ||
+      HostProblem.serviceUnknown => _serviceText(_section('service')),
+      HostProblem.installUnfinished ||
+      HostProblem.installBlocked => l10n.noVirtualDisplayDriver,
+      HostProblem.restartRequired => l10n.windowsRestartNeeded,
+      HostProblem.displayRecovery => l10n.virtualDisplayRecoveryNeeded,
+      HostProblem.windowsSignedOut => l10n.windowsSignNeeded2,
+      HostProblem.displayTransfer => l10n.streamingScreenSwitchNeeded,
+      HostProblem.displayPreparing => l10n.preparingVirtualDisplay3,
+      _ => l10n.checkVirtualDisplay2,
+    };
+  }
+
+  String _serverRouteDetail(HostRouteState state) => switch (state) {
+    HostRouteState.ok => _withServer(_ackWords),
+    HostRouteState.idle => _serverName,
+    HostRouteState.warn =>
+      _cancellingConnection
+          ? _withServer(l10n.cancelingRequest)
+          : _awaitingApproval
+          ? _withServer(l10n.pendingApproval)
+          : !_registered
+          ? l10n.notRegistered2
+          : _withServer(_brokerStateText),
+  };
+
+  // 개요: the desktop's name with ONE status pill, the route to a client (back
+  // on 2026-11-14 at the owner's word), ONE sentence and ONE action when
+  // something is wrong, then a plain line per area that opens its page (a
+  // fine area carries no state word).
   Widget _overview() {
     final facts = _facts;
     final problem = hostMainProblem(facts);
+    final route = hostRoute(facts);
     final id = '${_state['desktopId'] ?? ''}';
     final local = hostMachineKind(id) == HostMachineKind.pc;
     final name = !_registered || id.isEmpty
@@ -2759,6 +2800,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         : facts.loaded
         ? (HostRouteState.ok, l10n.readyStream)
         : (HostRouteState.idle, l10n.checkingStatus2);
+    final desktopDetail = _desktopRouteDetail(facts, route.desktop);
+    final serverDetail = _serverRouteDetail(route.server);
+    final clientDetail = route.client == HostRouteState.ok ? l10n.readyConnect2 : '';
     final d = _section('display');
     final monitors = (d['monitors'] as List? ?? []).length;
     final states = _setupStates;
@@ -2767,7 +2811,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       children: [
         Wrap(
           spacing: 12,
-          runSpacing: 4,
+          runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Semantics(
@@ -2784,7 +2828,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
                 ),
               ),
             ),
-            HostReadiness(
+            HostStatusPill(
               key: const Key('host-overview-state'),
               state: readyState,
               label: readyLabel,
@@ -2801,6 +2845,34 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
               : l10n.notRegisteredServerYet,
           key: const Key('host-machine-line'),
           style: TextStyle(fontSize: 13, color: _palette.muted, height: 1.45),
+        ),
+        const SizedBox(height: 28),
+        HostRouteDiagram(
+          key: const Key('host-route'),
+          toServer: route.toServer,
+          toClient: route.toClient,
+          label: [
+            '$name: $desktopDetail',
+            l10n.server3(serverDetail.isEmpty ? '' : ': $serverDetail'),
+            l10n.client(clientDetail.isEmpty ? '' : ': $clientDetail'),
+          ].join(', '),
+          points: [
+            HostRoutePoint(
+              name: name,
+              detail: desktopDetail,
+              state: route.desktop,
+            ),
+            HostRoutePoint(
+              name: l10n.server,
+              detail: serverDetail,
+              state: route.server,
+            ),
+            HostRoutePoint(
+              name: l10n.client2,
+              detail: clientDetail,
+              state: route.client,
+            ),
+          ],
         ),
         if (problem != null) ...[
           const SizedBox(height: 24),

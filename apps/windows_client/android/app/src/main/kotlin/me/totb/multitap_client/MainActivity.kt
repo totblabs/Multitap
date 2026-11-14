@@ -127,6 +127,8 @@ class MainActivity : FlutterActivity() {
     }
     private var media: AndroidMedia? = null
     private var gameMouse: AndroidGameMouse? = null
+    // gamepad-v1: this phone's game controllers for the session (AndroidGamepad.kt).
+    private var gamepad: AndroidGamepad? = null
     private var udp: AndroidUdp? = null
     private var update: AndroidUpdate? = null
     private var printer: AndroidPrint? = null
@@ -260,6 +262,8 @@ class MainActivity : FlutterActivity() {
         // 게임 마우스: pointer capture feeds the virtual USB mouse or moveRelative.
         gameMouse?.dispose()
         gameMouse = AndroidGameMouse(this, engine, media!!)
+        gamepad?.dispose()
+        gamepad = AndroidGamepad(this, engine)
         AndroidStore(this, engine)
         AndroidDisplay(this, engine)
         clipboard?.dispose()
@@ -335,6 +339,7 @@ class MainActivity : FlutterActivity() {
         if (event.action == MotionEvent.ACTION_HOVER_MOVE || event.action == MotionEvent.ACTION_SCROLL || event.action == MotionEvent.ACTION_MOVE)
             ClientAuthActivity.human(ClientAuthActivity.owner)
         if (!ClientAuthActivity.check()) return super.dispatchGenericMotionEvent(event)
+        if (gamepad?.motion(event) == true) return true
         gameMouse?.observe(event)
         return penInput?.dispatchGeneric(
             event,
@@ -345,6 +350,8 @@ class MainActivity : FlutterActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.flags and KeyEvent.FLAG_FALLBACK == 0) ClientAuthActivity.human(ClientAuthActivity.owner)
         if (!ClientAuthActivity.check()) return super.dispatchKeyEvent(event)
+        // A game controller's keys go to the desktop's virtual controller, never the app's navigation.
+        if (gamepad?.key(event) == true) return true
         reportImeVisibility()
         if (imeVisible() == true) return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && AndroidTv.isTelevision(this)) {
@@ -448,6 +455,8 @@ class MainActivity : FlutterActivity() {
         udp = null
         gameMouse?.dispose()
         gameMouse = null
+        gamepad?.dispose()
+        gamepad = null
         media?.dispose()
         media = null
         update?.dispose()

@@ -65,8 +65,12 @@ class ClipboardCapture {
     this.skipped = 0,
     this.offer = false,
     this.sourceReceipt,
+    this.deferred = false,
   });
   final String format;
+
+  /// A deferred offer (manifest-on-paste-v1): files were copied, and their list is walked only when the peer pastes. [items] is empty.
+  final bool deferred;
   final List<ClipboardItem> items;
   final int? sequence;
 
@@ -226,6 +230,36 @@ abstract interface class ClipboardPullQueueBridge {
   set pullDepth(int value);
 }
 
+/// The list of a deferred copy, walked when the peer pastes it ([ClipboardDeferredBridge.manifestWalk]).
+class ClipboardManifest {
+  const ClipboardManifest({required this.items, required this.tops, required this.skipped});
+  final List<ClipboardItem> items;
+  final int tops, skipped;
+}
+
+/// Deferred manifest (manifest-on-paste-v1, like RDP): a copy of files that is not small is announced without its list; the list is
+/// walked when the peer pastes. Only the Windows adapter can. [deferred] is set once the relay confirmed it for the pair: capture then
+/// returns such copies as [ClipboardCapture.deferred].
+abstract interface class ClipboardDeferredBridge {
+  bool get supportsDeferred;
+  set deferred(bool value);
+
+  /// Publishes the peer's deferred offer: the data object asks for the list (a [ClipboardPullManifest] event) when something pastes.
+  Future<void> publishDeferredOffer(String owner, String offerId);
+
+  /// The peer pastes this side's deferred copy [offerId]: walks it now (progress arrives as [ClipboardPullManifestProgress] events) and
+  /// returns its list. Fails with clipboard_offer_expired when the clipboard no longer holds that copy. [walk] is the peer's request id.
+  Future<ClipboardManifest> manifestWalk(String owner, String offerId, String walk);
+
+  /// The walk for request [walk] is no longer wanted (also when it has not started yet).
+  Future<void> manifestCancel(String owner, String walk);
+
+  /// The peer's answer to this side's list request for its deferred offer [offerId].
+  Future<void> manifestDeliver(String owner, String offerId, List<ClipboardItem> entries);
+  Future<void> manifestFail(String owner, String offerId, String reason);
+  Future<void> manifestProgress(String owner, String offerId);
+}
+
 abstract interface class ClipboardOnPasteBridge {
   bool get supportsOnPaste;
   set onPaste(bool value);
@@ -345,6 +379,27 @@ class ClipboardPullFailed extends ClipboardPullEvent {
   final String reason;
 }
 
+/// Something pastes the peer's deferred offer [offerId]: ask the peer for its list.
+class ClipboardPullManifest extends ClipboardPullEvent {
+  const ClipboardPullManifest(this.offerId) : super(0);
+  final String offerId;
+}
+
+/// The list request for [offerId] is no longer wanted: [reason] clipboard_cancelled (the paste gave up, a newer copy) or
+/// clipboard_timeout (the peer was silent too long: the paste failed).
+class ClipboardPullManifestCancel extends ClipboardPullEvent {
+  const ClipboardPullManifestCancel(this.offerId, [this.reason = 'clipboard_cancelled']) : super(0);
+  final String offerId;
+  final String reason;
+}
+
+/// This side walks its deferred copy [offerId] for the peer's paste: [entries] walked so far.
+class ClipboardPullManifestProgress extends ClipboardPullEvent {
+  const ClipboardPullManifestProgress(this.offerId, this.entries) : super(0);
+  final String offerId;
+  final int entries;
+}
+
 abstract interface class ClipboardBridge {
   /// [skipOwn]: automatic sharing; report [ClipboardCapture.own] instead of
   /// opening sources when the content is this session's own received copy.
@@ -407,6 +462,7 @@ class NativeClipboardBridge
         ClipboardPullBridge,
         ClipboardOnPasteBridge,
         ClipboardPullQueueBridge,
+        ClipboardDeferredBridge,
         ClipboardClaimBridge,
         ClipboardPendingBridge,
         ClipboardWatchOwnership {
@@ -755,6 +811,72 @@ class NativeClipboardBridge
   bool onPaste = false;
   @override
   bool get supportsPullQueue => _windows && supportsOnPaste;
+  @override
+  bool get supportsDeferred => _windows && supportsOnPaste;
+  @override
+  bool deferred = false;
+
+  @override
+  Future<void> publishDeferredOffer(String owner, String offerId) async {
+    final publication = _startPublication(owner, offerId);
+    final result = await _channel.invokeMapMethod<String, dynamic>('publishOffer', {
+      'owner': owner,
+      'offerId': offerId,
+      'format': 'tree',
+      'deferred': true,
+      'ownProgress': true,
+      if (pullDepth > 1) 'prefetchDepth': pullDepth,
+    });
+    if (!_publicationCurrent(publication)) return;
+    final sequence = result?['sequence'];
+    _lastCommittedSequence = _validSequence(sequence) ? sequence as int : null;
+    _lastPublishCheck = null;
+    _lastPublication = publication;
+  }
+
+  @override
+  Future<ClipboardManifest> manifestWalk(String owner, String offerId, String walk) async {
+    final result = await _channel.invokeMapMethod<String, dynamic>('manifestWalk', {'owner': owner, 'offerId': offerId, 'walk': walk});
+    final items = result?['items'], tops = result?['tops'], skipped = result?['skipped'];
+    if (items is! List || tops is! int || skipped is! int) throw PlatformException(code: 'clipboard_transfer_failed');
+    return ClipboardManifest(
+      tops: tops,
+      skipped: skipped,
+      items: [
+        for (final e in items)
+          ClipboardItem(
+            size: (e as Map)['size'] as int,
+            name: e['name'] as String?,
+            kind: e['kind'] as String?,
+            attributes: e['attrs'] is int ? e['attrs'] as int : 0,
+            mtime: e['mtime'] is int ? e['mtime'] as int : null,
+          ),
+      ],
+    );
+  }
+
+  @override
+  Future<void> manifestCancel(String owner, String walk) =>
+      _channel.invokeMethod<void>('manifestCancel', {'owner': owner, 'walk': walk});
+
+  @override
+  Future<void> manifestDeliver(String owner, String offerId, List<ClipboardItem> entries) =>
+      _channel.invokeMethod<void>('manifestDeliver', {
+        'owner': owner,
+        'offerId': offerId,
+        'items': [
+          for (final item in entries)
+            {'size': item.size, 'name': item.name, 'kind': item.kind, 'attrs': item.attributes, 'mtime': item.mtime ?? 0},
+        ],
+      });
+
+  @override
+  Future<void> manifestFail(String owner, String offerId, String reason) =>
+      _channel.invokeMethod<void>('manifestFail', {'owner': owner, 'offerId': offerId, 'reason': reason});
+
+  @override
+  Future<void> manifestProgress(String owner, String offerId) =>
+      _channel.invokeMethod<void>('manifestProgress', {'owner': owner, 'offerId': offerId});
 
   /// Files asked for ahead of their reader in the offers published from now on: 1, or the relay's pull queue depth.
   @override
@@ -805,13 +927,27 @@ class NativeClipboardBridge
         final index = number('index'), reason = arguments['reason'];
         if (index == null || reason is! String) return null;
         return ClipboardPullFailed(range, index, reason);
+      case 'manifest' || 'manifestCancel' || 'manifestProgress':
+        final offer = arguments['offerId'];
+        if (offer is! String || offer.isEmpty) return null;
+        if (kind == 'manifest') return ClipboardPullManifest(offer);
+        if (kind == 'manifestCancel') {
+          return ClipboardPullManifestCancel(
+            offer,
+            arguments['reason'] == 'clipboard_timeout' ? 'clipboard_timeout' : 'clipboard_cancelled',
+          );
+        }
+        final entries = number('index');
+        if (entries == null) return null;
+        return ClipboardPullManifestProgress(offer, entries);
     }
     return null;
   }
 
-  void restrictFormats({required bool text, required bool files}) {
-    allowedText = allowedText && text;
-    allowedFiles = allowedFiles && files;
+  /// What this PC may send now, as the relay's ready says (set, not narrowed: an administrator may widen it).
+  void allowFormats({required bool text, required bool files}) {
+    allowedText = text;
+    allowedFiles = files;
   }
 
   static bool _installed = false;
@@ -876,6 +1012,7 @@ class NativeClipboardBridge
       if (formats) 'formats': true,
       if (pull) 'pull': true,
       if (onPaste) 'onPaste': true,
+      if (deferred && offerId != null) 'deferred': true,
       if (formats) 'richBytes': richBytes,
       'offerId': ?offerId,
     }))!;
@@ -900,6 +1037,7 @@ class NativeClipboardBridge
       tops: result['tops'] is int ? result['tops'] as int : 0,
       skipped: result['skipped'] is int ? result['skipped'] as int : 0,
       offer: result['offer'] == true,
+      deferred: result['deferred'] == true,
       items: (result['items'] as List)
           .map(
             (e) => ClipboardItem(

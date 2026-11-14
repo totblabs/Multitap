@@ -20,6 +20,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <variant>
 #include <vector>
 
 namespace host::cursor {
@@ -262,25 +263,116 @@ inline void windowScaling(POINT position, ShownInputs& in) {
   CloseHandle(process);
 }
 }
-// What the size decision needs, read from Windows for the cursor now showing.
-inline ShownInputs readShownInputs(HCURSOR handle) {
+// What the size decision needs, read from Windows for `handle` shown at `position`.
+inline ShownInputs readShownInputsAt(HCURSOR handle, POINT position) {
   ShownInputs in;
-  CURSORINFO info{sizeof(CURSORINFO)};
-  if (!handle || !GetCursorInfo(&info)) return in;
-  in.outputDpi = detail::monitorDpi(info.ptScreenPos);
+  if (!handle) return in;
+  in.outputDpi = detail::monitorDpi(position);
   if (!in.outputDpi) { in.outputDpi = 96; return in; }
   in.systemCursor = detail::systemCursor(handle);
   if (in.systemCursor) {
     if (const auto arrow = extract(LoadCursorW(nullptr, IDC_ARROW))) in.arrowSide = arrow->width;
     in.nominalSide = unsigned(std::max(0, GetSystemMetricsForDpi(SM_CXCURSOR, in.outputDpi)));
-  } else detail::windowScaling(info.ptScreenPos, in);
+  } else detail::windowScaling(position, in);
   return in;
+}
+// What the size decision needs, read from Windows for the cursor now showing.
+inline ShownInputs readShownInputs(HCURSOR handle) {
+  CURSORINFO info{sizeof(CURSORINFO)};
+  if (!handle || !GetCursorInfo(&info)) return ShownInputs{};
+  return readShownInputsAt(handle, info.ptScreenPos);
 }
 // The channel's extractor: the shape at the size Windows shows it.
 inline std::optional<Shape> extractShown(HCURSOR handle) {
   const double factor = shownFactor(readShownInputs(handle));
   return factor == 1.0 ? extract(handle) : extractScaled(handle, factor);
 }
+
+// ---- The cursor drawn into the video ---------------------------------------
+// When the capture draws the cursor into the picture (cursor-compose-v1 while
+// the client holds the mouse, or a session without cursor-v1), the video must
+// show it at the size Windows shows it too. It used SM_CXCURSOR instead: the
+// nominal size of the DPI the session signed in at (32 at 100 %), so at 150 %
+// the pointer was two thirds of its size (half at 200 %), its hotspot was left
+// at the bitmap's (an I-beam drawn off its point), and an application's larger
+// cursor (a game's 64-pixel one) was squeezed to 32. The same decision as the
+// channel's shape (shownFactor) now applies to the cursor's own bitmap and
+// hotspot, and the drawn picture is a copy Windows makes at that size (from
+// the cursor's resource when it has one, as on the screen), not a stretch.
+struct ShownCursor { int width = 0, height = 0, hotspotX = 0, hotspotY = 0; };
+// `icon` from GetIconInfo of the cursor; its own bitmap size and hotspot, times `factor` (shownSize: at most maximumSide).
+inline ShownCursor shownCursor(const ICONINFO& icon, double factor) {
+  BITMAP bitmap{}; int width = 0, height = 0;
+  if (icon.hbmColor && GetObjectW(icon.hbmColor, sizeof(bitmap), &bitmap)) { width = bitmap.bmWidth; height = bitmap.bmHeight; }
+  else if (icon.hbmMask && GetObjectW(icon.hbmMask, sizeof(bitmap), &bitmap)) { width = bitmap.bmWidth; height = bitmap.bmHeight / 2; }
+  if (width <= 0 || height <= 0) return ShownCursor{std::max(1, GetSystemMetrics(SM_CXCURSOR)), std::max(1, GetSystemMetrics(SM_CYCURSOR)), int(icon.xHotspot), int(icon.yHotspot)};
+  const SIZE size = shownSize(unsigned(width), unsigned(height), factor);
+  const auto hotspot = [](DWORD value, LONG shown, int own) { return int((double(value) * double(shown) / double(own)) + 0.5); };
+  return ShownCursor{int(size.cx), int(size.cy), hotspot(icon.xHotspot, size.cx, width), hotspot(icon.yHotspot, size.cy, height)};
+}
+// Per capture: the factor of the cursor showing (re-read when the cursor, the
+// output's DPI or the window under the pointer changes, and every
+// revalidateUs for a pointer scheme change), and copies of cursors at the size
+// they are drawn (a few, the latest kept).
+class VideoCursor {
+ public:
+  VideoCursor() = default;
+  VideoCursor(const VideoCursor&) = delete;
+  VideoCursor& operator=(const VideoCursor&) = delete;
+  ~VideoCursor() {
+    for (auto& copy : copies_) if (copy.made) DestroyCursor(copy.made);
+    for (const auto old : retired_) DestroyCursor(old);
+  }
+  ShownCursor shown(HCURSOR handle, POINT position, const ICONINFO& icon) {
+    const unsigned dpi = detail::monitorDpi(position);
+    const HWND window = WindowFromPoint(position);
+    const auto now = std::chrono::steady_clock::now();
+    if (handle != handle_ || dpi != dpi_ || window != window_ || now - at_ >= std::chrono::microseconds(revalidateUs)) {
+      factor_ = shownFactor(readShownInputsAt(handle, position));
+      handle_ = handle; dpi_ = dpi; window_ = window; at_ = now;
+      // Windows rewrites a system cursor in place under the same handle (a pointer scheme or colour change, SetSystemCursor): a copy
+      // made before is made again when next drawn. The copies it replaced a revalidation ago are long out of every frame: they go now.
+      for (const auto old : retired_) DestroyCursor(old);
+      retired_.clear();
+      for (auto& copy : copies_) copy.stale = true;
+    }
+    return shownCursor(icon, factor_);
+  }
+  // The cursor to draw at width x height: a copy Windows made at that size, or the cursor itself when it has that size already or no
+  // copy can be made (DrawIconEx then stretches it, as before).
+  HCURSOR shape(HCURSOR handle, const ICONINFO& icon, int width, int height) {
+    BITMAP bitmap{}; int own = 0, ownHeight = 0;
+    if (icon.hbmColor && GetObjectW(icon.hbmColor, sizeof(bitmap), &bitmap)) { own = bitmap.bmWidth; ownHeight = bitmap.bmHeight; }
+    else if (icon.hbmMask && GetObjectW(icon.hbmMask, sizeof(bitmap), &bitmap)) { own = bitmap.bmWidth; ownHeight = bitmap.bmHeight / 2; }
+    if (!handle || width <= 0 || height <= 0 || (own == width && ownHeight == height)) return handle;
+    const auto make = [&] {
+      HCURSOR made = reinterpret_cast<HCURSOR>(CopyImage(handle, IMAGE_CURSOR, width, height, LR_COPYFROMRESOURCE));
+      return made ? made : reinterpret_cast<HCURSOR>(CopyImage(handle, IMAGE_CURSOR, width, height, 0));
+    };
+    for (auto& copy : copies_) if (copy.source == handle && copy.width == width && copy.height == height) {
+      copy.used = ++clock_;
+      if (copy.stale) {
+        // Made again from what the handle shows now. The older copy may still be drawn in this frame (the two sizes of the
+        // source-resolution path can be equal): it is destroyed at the next revalidation, not here.
+        if (copy.made) retired_.push_back(copy.made);
+        copy.made = make(); copy.stale = false;
+      }
+      return copy.made ? copy.made : handle;
+    }
+    HCURSOR made = make();
+    if (copies_.size() >= 8) {
+      auto oldest = std::min_element(copies_.begin(), copies_.end(), [](const Copy& a, const Copy& b) { return a.used < b.used; });
+      if (oldest->made) DestroyCursor(oldest->made);
+      copies_.erase(oldest);
+    }
+    copies_.push_back(Copy{handle, width, height, made, ++clock_, false});
+    return made ? made : handle;
+  }
+ private:
+  struct Copy { HCURSOR source = nullptr; int width = 0, height = 0; HCURSOR made = nullptr; uint64_t used = 0; bool stale = false; };
+  HCURSOR handle_ = nullptr; unsigned dpi_ = 0; HWND window_ = nullptr; std::chrono::steady_clock::time_point at_{}; double factor_ = 1.0;
+  std::vector<Copy> copies_; std::vector<HCURSOR> retired_; uint64_t clock_ = 0;
+};
 
 inline void put16(std::vector<uint8_t>& out, size_t at, uint16_t value) { out[at] = uint8_t(value); out[at + 1] = uint8_t(value >> 8); }
 inline void put32(std::vector<uint8_t>& out, size_t at, uint32_t value) { for (int i = 0; i < 4; ++i) out[at + i] = uint8_t(value >> (8 * i)); }
@@ -404,6 +496,72 @@ class InjectedPointer {
 // One GetCursorInfo result of a capture tick (screen pixels).
 struct Observation { bool known = false; DWORD flags = 0; HCURSOR handle = nullptr; POINT position{}; };
 
+// Why a separated session's pointer was shown or hidden, over one capture epoch (counts only, never a
+// position or a picture). Written when the epoch ends as hostAction 200 stage 248: one record per kind,
+// error = kind | count << 8 (count capped at 2^24-1). A Host on a physical PC hid the pointer with the
+// mouse free while the composed one showed (2026-11-14): these say which test said hidden.
+inline constexpr uint32_t cursorRecordStage = 48;
+enum CursorRecordKind : uint32_t {
+  cursorTicks = 1,          // observations of the epoch
+  cursorUnknown = 2,        // GetCursorInfo failed
+  cursorNotShowing = 3,     // Windows: CURSOR_SHOWING not set
+  cursorSuppressed = 4,     // Windows: CURSOR_SUPPRESSED (touch or pen input)
+  cursorNoHandle = 5,       // showing without a cursor handle
+  cursorOutside = 6,        // the hotspot outside every captured output
+  cursorUnsupported = 7,    // no shape could be read: composed instead
+  cursorShapesSent = 8,
+  cursorVisibleStates = 9,  // states sent saying visible
+  cursorHiddenStates = 10,  // states sent saying hidden
+  cursorOutsideSides = 11,  // where the outside hotspots were: 1 left, 2 right, 4 above, 8 below (or-ed)
+  cursorComposeTicks = 12,  // ticks composed because the client asked (cursor-compose-v1, the mouse held)
+  cursorNoMouseTicks = 13,  // ticks with no mouse attached to this PC (GetSystemMetrics(SM_MOUSEPRESENT) == 0)
+  cursorShownNoMouse = 14,  // ticks Windows hid the pointer only for that, shown to the client all the same
+};
+inline constexpr uint32_t cursorRecord(uint32_t kind, uint64_t count) noexcept {
+  return (kind & 0xffu) | (uint32_t(count > 0xffffffu ? 0xffffffu : count) << 8);
+}
+struct CursorDiagnosis {
+  uint64_t ticks = 0, unknown = 0, notShowing = 0, suppressed = 0, noHandle = 0, outside = 0, unsupported = 0,
+           shapes = 0, visibleStates = 0, hiddenStates = 0, composeTicks = 0, noMouseTicks = 0, shownNoMouse = 0;
+  uint32_t outsideSides = 0;
+  // The records of one epoch, in kind order; nothing when no tick was observed.
+  std::vector<uint32_t> records() const {
+    std::vector<uint32_t> out;
+    if (!ticks && !unknown) return out;
+    const std::pair<uint32_t, uint64_t> all[] = {{cursorTicks, ticks}, {cursorUnknown, unknown}, {cursorNotShowing, notShowing},
+        {cursorSuppressed, suppressed}, {cursorNoHandle, noHandle}, {cursorOutside, outside}, {cursorUnsupported, unsupported},
+        {cursorShapesSent, shapes}, {cursorVisibleStates, visibleStates}, {cursorHiddenStates, hiddenStates},
+        {cursorOutsideSides, outsideSides}, {cursorComposeTicks, composeTicks}, {cursorNoMouseTicks, noMouseTicks},
+        {cursorShownNoMouse, shownNoMouse}};
+    for (const auto& [kind, count] : all) if (count || kind == cursorTicks) out.push_back(cursorRecord(kind, count));
+    return out;
+  }
+};
+
+// Whether a mouse is attached to this PC, as every new Channel reads it (tests replace it before making channels).
+inline std::function<bool()>& mousePresentSource() {
+  static std::function<bool()> source = [] { return GetSystemMetrics(SM_MOUSEPRESENT) != 0; };
+  return source;
+}
+
+// worker.pointer.absent (pointer_device.hpp): whether a capture epoch asks its service for the Host's own
+// pointer device now. Only when no mouse is attached, read at most once a second, and once per epoch (the
+// service ignores an ask while its device is plugged in or on its way).
+class PointerAsk {
+ public:
+  bool due(uint64_t nowUs) {
+    if (asked_ || (readUs_ && nowUs - *readUs_ < 1000000)) return false;
+    readUs_ = nowUs;
+    bool present = true;
+    try { const auto& source = mousePresentSource(); present = source ? source() : true; } catch (...) { present = true; }
+    if (present) return false;
+    asked_ = true;
+    return true;
+  }
+ private:
+  bool asked_ = false; std::optional<uint64_t> readUs_;
+};
+
 // One capture epoch of one granted session; capture thread only.
 class Channel {
  public:
@@ -445,6 +603,10 @@ class Channel {
     echoed_.reset();
   }
   Counters takeCounters() { const auto value = counters_; counters_ = {}; return value; }
+  // The epoch's reasons so far (not reset by takeCounters).
+  const CursorDiagnosis& diagnosis() const { return diagnosis_; }
+  // Tests: whether a mouse is attached (production: GetSystemMetrics(SM_MOUSEPRESENT), read at most once a second).
+  void setMousePresentForTesting(std::function<bool()> present) { mousePresent_ = std::move(present); mouseReadUs_.reset(); }
   size_t liveShapes() const { return entries_.size(); }
 
   // The picture of this tick is not the capture's: the SYSTEM helper's frame of
@@ -460,7 +622,7 @@ class Channel {
     previous_.reset();
     if (ready_ && (!sent_ || *sent_ != hidden) && (!lastStateUs_ || nowUs - *lastStateUs_ >= stateIntervalUs) && messageTimes_.size() < messagesPerSecond) {
       records.push_back(stateRecord(false, 0, std::nullopt));
-      sent_ = hidden; lastStateUs_ = nowUs; messageTimes_.push_back(nowUs); ++counters_.states;
+      sent_ = hidden; lastStateUs_ = nowUs; messageTimes_.push_back(nowUs); ++counters_.states; ++diagnosis_.hiddenStates;
     }
     return records;
   }
@@ -472,14 +634,30 @@ class Channel {
     // Failed observation says nothing about visibility. Keep the previous
     // state (and composition choice) until an actual Windows observation is
     // available; old cursor-v1 peers need no new flag or protocol change.
-    if (!seen.known) { previous_.reset(); return records; }
-    const bool showing = seen.known && (seen.flags & CURSOR_SHOWING) && !(seen.flags & CURSOR_SUPPRESSED) && seen.handle;
+    if (!seen.known) { previous_.reset(); ++diagnosis_.unknown; return records; }
+    // Windows keeps the pointer hidden on a PC with no mouse attached (its show count starts below zero there, and
+    // the absolute positions this Host injects for a free mouse do not count as a mouse; the relative moves of a held
+    // one do). The client still points at the desktop with its own mouse: that pointer is shown with the shape
+    // Windows has for it. Seen on a Host on a physical PC on 2026-11-14 (stage 248: notShowing nearly every tick
+    // with the mouse free). A pointer an application hides on a PC with a mouse stays hidden.
+    const bool noMouse = !mousePresent(nowUs);
+    const bool hiddenForNoMouse = noMouse && !(seen.flags & CURSOR_SHOWING) && !(seen.flags & CURSOR_SUPPRESSED) && seen.handle;
+    const bool showing = seen.known && (((seen.flags & CURSOR_SHOWING) && !(seen.flags & CURSOR_SUPPRESSED)) || hiddenForNoMouse) && seen.handle;
     const bool inside = seen.known && contains(seen.position);
     const bool candidate = showing && inside;
+    ++diagnosis_.ticks;
+    if (noMouse) ++diagnosis_.noMouseTicks;
+    if (requested_) ++diagnosis_.composeTicks;
+    else if (hiddenForNoMouse) ++diagnosis_.shownNoMouse;
+    else if (!(seen.flags & CURSOR_SHOWING)) ++diagnosis_.notShowing;
+    else if (seen.flags & CURSOR_SUPPRESSED) ++diagnosis_.suppressed;
+    else if (!seen.handle) ++diagnosis_.noHandle;
+    else if (!inside) { ++diagnosis_.outside; diagnosis_.outsideSides |= sidesOutside(seen.position); }
     Entry* entry = nullptr; bool unsupported = false;
     if (candidate && !requested_) {
       entry = resolve(seen.handle, nowUs);
       unsupported = !entry;
+      if (unsupported) ++diagnosis_.unsupported;
     }
     const bool shapeBudget = ready_ && shapeTimes_.size() < shapesPerSecond && messageTimes_.size() < messagesPerSecond;
     // Resolution can reserve ids while the send budget is exhausted. If a
@@ -496,7 +674,7 @@ class Channel {
     if (entry && !entry->sent && shapeBudget) {
       records.push_back(shapeRecord(entry->shape, entry->id));
       lastPublishedShape_ = entry->id;
-      entry->sent = true; entry->shape = {}; shapeTimes_.push_back(nowUs); messageTimes_.push_back(nowUs); ++counters_.shapes;
+      entry->sent = true; entry->shape = {}; shapeTimes_.push_back(nowUs); messageTimes_.push_back(nowUs); ++counters_.shapes; ++diagnosis_.shapes;
     }
     std::optional<State> desired;
     if (requested_ || !candidate || unsupported) desired = State{false, 0};
@@ -519,6 +697,7 @@ class Channel {
     if (ready_ && (changed || warp) && (!lastStateUs_ || nowUs - *lastStateUs_ >= stateIntervalUs) && messageTimes_.size() < messagesPerSecond) {
       records.push_back(stateRecord(next.visible, next.id, warp));
       sent_ = next; lastStateUs_ = nowUs; messageTimes_.push_back(nowUs); ++counters_.states;
+      ++(next.visible ? diagnosis_.visibleStates : diagnosis_.hiddenStates);
       if (warp) { expected_ = seen.position; echoed_ = *warp; lastWarpUs_ = nowUs; ++counters_.warps; }
     }
     return records;
@@ -576,6 +755,22 @@ class Channel {
   bool contains(POINT point) const {
     return std::any_of(areas_.begin(), areas_.end(), [point](const RECT& area) { return point.x >= area.left && point.x < area.right && point.y >= area.top && point.y < area.bottom; });
   }
+  bool mousePresent(uint64_t nowUs) {
+    if (!mouseReadUs_ || nowUs < *mouseReadUs_ || nowUs - *mouseReadUs_ >= revalidateUs) {
+      try { mouseAttached_ = mousePresent_ ? mousePresent_() : true; } catch (...) { mouseAttached_ = true; }
+      mouseReadUs_ = nowUs;
+    }
+    return mouseAttached_;
+  }
+  // Which sides of the captured area(s) a point outside them lies beyond (cursorOutsideSides bits).
+  uint32_t sidesOutside(POINT point) const {
+    uint32_t sides = 0;
+    for (const auto& area : areas_) {
+      if (point.x < area.left) sides |= 1; else if (point.x >= area.right) sides |= 2;
+      if (point.y < area.top) sides |= 4; else if (point.y >= area.bottom) sides |= 8;
+    }
+    return sides;
+  }
   void trim(uint64_t nowUs) {
     for (auto* times : {&shapeTimes_, &messageTimes_})
       while (!times->empty() && (nowUs < times->front() || nowUs - times->front() >= 1000000)) times->pop_front();
@@ -623,6 +818,9 @@ class Channel {
   std::deque<uint64_t> shapeTimes_, messageTimes_;
   bool ready_ = false, compose_ = false, requested_ = false;
   Counters counters_;
+  CursorDiagnosis diagnosis_;
+  std::function<bool()> mousePresent_ = mousePresentSource();
+  std::optional<uint64_t> mouseReadUs_; bool mouseAttached_ = true;
 };
 
 // A channel the capture thread shares with the cursor-echo-v1 poller. Every
@@ -652,6 +850,7 @@ class SharedChannel {
   bool composeFallback() { std::lock_guard lock(mutex_); return channel_.composeFallback(); }
   void composeRequested(bool on) { std::lock_guard lock(mutex_); channel_.composeRequested(on); }
   Channel::Counters takeCounters() { std::lock_guard lock(mutex_); return channel_.takeCounters(); }
+  CursorDiagnosis diagnosis() { std::lock_guard lock(mutex_); return channel_.diagnosis(); }
  private:
   std::mutex mutex_;
   Channel channel_;

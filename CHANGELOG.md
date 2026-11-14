@@ -2,7 +2,138 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.5 carry the Windows app, the Android app and the Host at the same number. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 and 1.1.13 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.13](https://github.com/totblabs/Multitap/releases/tag/v1.1.13)
+
+### Starting a PC (server)
+
+- **Fixed: on a server installed as a Linux service, starting a local PC never worked.** The server service's security settings kept it from reading its network list, so it sent no Wake-on-LAN signal at all and failed at once. It sends the signal now; updating the server to 1.1.13 applies it.
+- A signal that cannot be sent is recorded in the admin console's log as "PC wake signal not sent", with the reason. Until now it read "VM power request failed".
+
+### Copy and paste permission (server)
+
+- **Fixed: copy and paste permissions an administrator widened during a connection (files allowed, say) applied only after connecting again.** The 1.1.8 fix had no effect: the server never passed a wider permission to a running connection. Now only the copy and paste channel opens again with the new permission; the screen stays connected, and a copy under way finishes first.
+- It needs the Windows or Android app at 1.1.13 or later. An older app, or a connection that started with copy and paste all off, gets it from the next connection. The admin console's hint says so.
+
+### Gamepads (server, Windows app, Android app, Host)
+
+- **Fixed: right after connecting, the virtual pad was plugged in only on the first press, so a short first press was lost.** It is plugged in when the first picture comes.
+- **Fixed: a button or trigger held when the connection dropped for a moment stayed held on the desktop.** While the connection is away the virtual pads are released, and their states are sent again when it is back.
+- **Fixed: a pad kept vibrating when the game stopped the rumble during such a drop.** The latest rumble is sent again when the connection is back, and the motors stop while it is frozen.
+- **Fixed (Windows app): 30 minutes of play with only a gamepad signed you out for inactivity.** With a Multitap window in front, buttons, triggers and stick movement count as input; a resting stick's small drift does not.
+- Only the window in front drives the rumble: a game in a window behind no longer shakes the pad in your hands, and a window that ends no longer stops the rumble of the game you are playing.
+- Android: a TV remote or a keyboard is not taken for a gamepad (only a controller with sticks or the A button is); PlayStation-style triggers send how far they are pulled; nothing held stays held after you leave the app and come back; rumble no longer stops after 60 seconds.
+- Host: a pad input that arrives just after a session ended no longer plugs a pad in again, and plugging and unplugging a pad fast no longer piles up work. A rare memory error is fixed.
+
+### Less video while the picture is hidden (Windows app, Android app)
+
+- **Fixed: a hidden-picture notice lost while the connection was frozen, or just before it opened, could leave a visible picture at one frame a second.** It is sent again when the connection is back and when the first picture comes.
+
+### USB sharing (Host)
+
+- A real wired Xbox 360 controller shared over USB is no longer taken for a virtual pad when its start is checked.
+- Removing a device no longer unplugs a port the virtual mouse or a pad uses.
+
+### Admin console (server)
+
+- The Host's log shows the virtual mouse and gamepad stages with their port, pad number and failure reason; until now they read as unrelated USB sharing reasons.
+
+## [1.1.12](https://github.com/totblabs/Multitap/releases/tag/v1.1.12)
+
+### Gamepad records (server, Windows app, Android app)
+
+- **The app's connection statistics record the gamepads.** Whether the connection was allowed gamepads, the pads connected on the Host, the pad inputs sent and the rumbles received. No button or stick value and no pad name is recorded.
+- When a pad does not work, the records tell the causes apart: a connection not allowed gamepads, a PC or phone that read no pad (no input), or inputs sent with no response on the desktop.
+- It needs the server at 1.1.12. An older server drops these values and keeps the rest of the record.
+
+### Host
+
+- No change; it stays at 1.1.11.
+
+## [1.1.11](https://github.com/totblabs/Multitap/releases/tag/v1.1.11)
+
+### Gamepads (server, Windows app, Android app, Host)
+
+- **A gamepad connected to the PC or the phone plays the desktop's games.** The Host plugs in a virtual Xbox 360 controller for each pad, which the desktop's games see as a real Xbox controller. Up to four pads; the game's rumble comes back to the pad in your hands.
+- The Windows app reads Xbox and other XInput controllers; the Android app reads Bluetooth and USB game controllers, and during a connection the pad's B button is not Back.
+- No new driver on the Host: the virtual pads are plugged in with the driver used for USB devices (installed then if it is not yet).
+- With the window inactive or the app in the background, the pads are sent as released.
+- It needs all four at 1.1.11.
+
+## [1.1.10](https://github.com/totblabs/Multitap/releases/tag/v1.1.10)
+
+### Less video while the picture is hidden (server, Windows app, Android app, Host)
+
+- **With the Android app in the background or the screen off, the desktop's picture is sent once a second.** Until now every frame (60 fps and 15 Mbps, say) kept arriving although nothing showed it, using data and battery. Sound and the connection go on, and coming back brings every frame again at once.
+- The same for the Windows app while its window is minimised.
+- It needs all four at 1.1.10; with any of them older, every frame is sent as before.
+
+## [1.1.9](https://github.com/totblabs/Multitap/releases/tag/v1.1.9)
+
+### Host
+
+- **Fixed: on a desktop with no mouse attached, the pointer was still not seen with the mouse free.** The 1.1.8 fix had no effect: with no mouse Windows removes the pointer itself, so there was no pointer to show. The Host now plugs in a virtual USB mouse of its own that never moves (Multitap Pointer), and Windows shows the pointer as it does in a VM.
+- The virtual mouse is plugged in with the driver used for USB devices (installed then if it is not yet). A desktop with a mouse never gets it, and it goes when the Host service stops. Device Manager lists it as "Multitap Pointer".
+
+### Server
+
+- The Host's log in the admin console names the virtual mouse being plugged in, failing to plug in and going.
+
+### Windows app, Android app
+
+- No change; the number follows.
+
+## [1.1.8](https://github.com/totblabs/Multitap/releases/tag/v1.1.8)
+
+### Host
+
+- **Fixed: on a PC with no mouse attached, the pointer was not seen with the mouse free.** Windows hides the pointer when no mouse is attached; it is now shown anyway. A pointer an application hides stays hidden.
+
+### Windows app
+
+- **Fixed: a clipboard permission the administrator widened during a connection (files allowed, say) took effect only after connecting again.** It now applies at once.
+
+### Server, Android app
+
+- No change; the number follows.
+
+## [1.1.7](https://github.com/totblabs/Multitap/releases/tag/v1.1.7)
+
+### Clipboard (server, Windows app, Host)
+
+- **Fixed: pasting the same large copy again could close the clipboard connection.** After a paste of a large folder failed or was cancelled, pasting it again was taken by the server for a protocol error. It is now answered again, from the list already made.
+- **Fixed: cancelling a paste and pasting again at once could wait 30 seconds and fail.** The cancel of the first paste reached the second one.
+- **Fixed: a copy made during a paste could break that paste.** Copying something on the side you paste on (on the PC while pasting from the desktop, for example) cut the paste off; so did a new copy while the list of a large folder was being made. A paste that has begun now finishes, as with RDP; the next paste gets the newer copy.
+- **Fixed: pasting a very large folder from the desktop to the PC (about 40,000 items or more) closed the clipboard connection.** The desktop now sends the list only as fast as the connection takes it.
+- On a slow connection a long list no longer counts as a dead connection while it is still being delivered.
+- A paste on the PC that the desktop stopped answering now says so on the card ("The desktop didn't respond in time.") instead of ending silently; with file copying turned off by the administrator, the paste says that instead of a general failure.
+- While the PC makes the list of a large folder, the clipboard keeps working (it waited for the list to finish).
+
+### Mouse lock (Host)
+
+- Fixed: after changing the pointer's colour or scheme during a mouse-locked session, the old pointer could stay in the picture.
+
+### Android app
+
+- No change; the number follows.
+
+## [1.1.6](https://github.com/totblabs/Multitap/releases/tag/v1.1.6)
+
+### Clipboard (server, Windows app, Host)
+
+- **A large copy gets its list when it is pasted, as with RDP.** Copying more than 256 items or 16 MB of files and folders no longer walks them: only the copy is announced. The list is made when you paste, and the card shows "Listing · N items" with the real count. A folder of more than 200,000 items is refused with the limit when you paste.
+- **Fixed: pasting a large folder failed with "what you copied is no longer available".** Windows sometimes renumbers the clipboard without a new copy, and that was taken for a new copy. A paste now goes ahead while the same files are copied, for small copies too.
+- Small copies (up to 256 items and 16 MB) are ready at once as before, and paste into programs that take only file paths.
+- The new behaviour needs the server, the Windows app and the Host at 1.1.6; a mixed set works as before. The renumbering fix needs only the side you copy on at 1.1.6 (the Host for a copy in the desktop, the Windows app for a copy on the PC).
+
+### Mouse lock (Host)
+
+- **Fixed: the cursor looked small while the mouse was locked.** At a desktop scale of 150 % or 200 % it was drawn at two thirds or half of its size, and a game's large cursor (64 pixels, say) was squeezed to 32. It is now drawn at the size and hotspot Windows shows.
+
+### Android app
+
+- No change; the number follows.
 
 ## [1.1.5](https://github.com/totblabs/Multitap/releases/tag/v1.1.5)
 

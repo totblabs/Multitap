@@ -254,6 +254,8 @@ request and the grant. Sections below give the details.
 | `stream-observability-v1` | `observabilityProtocol` | `observabilityProtocol` | passive queue and timing snapshots ([stream-observability.md](stream-observability.md)) |
 | `input-latency-v1`, `frame-timing-v1` | `inputLatencyProtocol` | `inputLatencyProtocol` | [input latency measurement](#input-latency-measurement-input-latency-v1) |
 | `cursor-v1`, `cursor-tracks-v1`, `cursor-echo-v1`, `cursor-compose-v1` | `cursorProtocol`, `cursorTracksProtocol`, `cursorEchoProtocol`, `cursorComposeProtocol` | the same names | [cursor](#cursor-separation-cursor-v1) outside the video |
+| `background-video-v1` | `backgroundVideoProtocol` | `backgroundVideoProtocol` | [one picture a second](#background-video-background-video-v1) while the client's view is hidden |
+| `gamepad-v1` | `gamepadProtocol` | `gamepadProtocol` | [the client's gamepads](#gamepads-gamepad-v1) as virtual Xbox 360 controllers |
 | `relative-mouse-v1`, `relative-mouse-tracks-v1` | `relativeMouseProtocol`, `relativeMouseTracksProtocol` | `relativeMouseProtocol` | [relative mouse](#relative-mouse-relative-mouse-v1) for 마우스 잠금 |
 | `text-input-v1` | `textInputProtocol` | `textInputProtocol` | [committed Unicode text](#text-input-text-input-v1) |
 | `touch-input-v1` | `touchInputProtocol` | `touchInputProtocol` | [Windows touch contacts](#touch-input-touch-input-v1) |
@@ -674,6 +676,104 @@ stream that already shows pictures (`server/src/session-resume.mjs`).
   2 and 4 s), spend nothing while the stream is away and get one fresh set
   when it continues. Every other mix of peers keeps the earlier behaviour: an
   ended print, drive or USB pair stays ended for the session.
+
+## Background video (background-video-v1)
+
+While the client's picture cannot be seen (the Android app in the background
+or with the screen off, the Windows app minimised) every frame would still be
+captured, encoded, sent and decoded: on 2026-11-14 an Android app three
+minutes in the background received 14-17 Mbps at 60 fps. With this grant the
+client tells the Host, and the Host sends what an idle screen sends.
+
+**Negotiation.** The Host advertises
+`backgroundVideoProtocol:'background-video-v1'`; a client asks with the same
+connect field only where the desktop list shows it (a released broker rejects
+the field and strips the marker). The broker grants it for an ordinary stream
+session (never independent outputs) and adds it to the response and to
+`session.start`. A malformed field is 400 `invalid_background_video`.
+
+**Request.** `{"type":"stream.background","on":true|false}`, exactly these
+fields; forwarded as `{type:'stream.background', sessionId, on}` only in a
+granted session (otherwise the session ends with `invalid_input`). `on:true`:
+the view is hidden; `on:false`: it is shown again.
+
+**Host.** While hidden, the worker's capture loop captures and encodes one
+tick a second (`BackgroundPace` in `background_video.hpp`); the other ticks
+only wait 50 ms. The encoder, its rate and the stream are unchanged, so every
+watchdog sees what it sees for an idle screen (at least a picture a second,
+`stream.stats` each second). Sound, input, the cursor channel and the side
+channels go on. `on:false` takes effect at the next tick with an IDR. The
+request is kept across a restart of the same session (a resize) and dropped
+with the session.
+
+**Client.** Android sends `on:true` when the app is hidden or paused and
+`on:false` when it is visible again (also while merely inactive, e.g. under
+the notification shade); the Windows app likewise when minimised and
+restored. A session that ever hid sends where it stands again after its
+socket was replaced (session-resume-v1), since the last request may have been
+lost with the old socket.
+
+## Gamepads (gamepad-v1)
+
+The gamepads of the client's PC or phone drive the desktop as Xbox 360
+controllers, the way Moonlight and Sunshine do it, but without a new driver on
+the Host: it plugs in a virtual wired Xbox 360 controller (045E:028E) per pad
+through the pinned usbip-win2 controller it already ships, and Windows' own
+Xbox controller driver takes it, so every XInput game sees an ordinary
+controller (`apps/windows_host/src/gamepad_device.hpp`).
+
+**Negotiation.** The Host advertises `gamepadProtocol:'gamepad-v1'` where the
+USB controller can be used (a workstation Windows with the pinned package); a
+client asks with the same connect field only where the desktop list shows it.
+The broker grants it for an ordinary stream session (never independent
+outputs) and adds it to the response and to `session.start`. A malformed
+field is 400 `invalid_gamepad_protocol`.
+
+**Client to Host.** `{"type":"gamepad.state","pad":0..3,"buttons","lt","rt",
+"lx","ly","rx","ry"}`: one pad's whole state in XInput's ranges and button
+bits (`buttons` 0..0xFFFF without 0x0800, triggers 0..255, sticks
+-32768..32767), and `{"type":"gamepad.remove","pad"}`. Exactly these fields;
+forwarded with `sessionId` only in a granted session (otherwise the session
+ends with `invalid_input`). A resize does not hold them: a dropped release
+would leave a button pressed. The client sends a state only when it changed;
+the first state of a pad (also a neutral one) plugs it in; while its view is
+not focused or in front, every pad is sent neutral once, and its state again
+when it is.
+
+**Host to client.** `{"type":"gamepad.rumble","sessionId","pad","low",
+"high"}` (each motor 0..255) when the VM's game changes it; the relay passes it
+to the client without the `sessionId`, and drops a Host that sends it
+ungranted. The client sets the local pad's motors (Android: the controller's
+one vibrator at the stronger of the two).
+
+**Host.** The service owns the pads (no worker is involved): plugging in and
+unplugging run in order on one thread, a state never waits for them, a pad
+that could not be plugged in is not tried again in that session, and every pad
+goes when the session ends. The controller is the device as it describes
+itself (four vendor interfaces, the 20-byte input report on 0x81, the 8-byte
+rumble report on 0x01; the facts were cross-checked with VIIPER's
+device/xbox360, GPL-3.0, no code used), with Multitap's own strings. A read of
+0x81 is answered with the newest state, or waits for the next; the driver's
+capability request (C1 01 0100) is answered; other vendor requests stall
+(Windows' driver asks C0 01 three times and works without it). Records:
+hostAction 250 stages 36-38.
+
+**Clients.** Windows: XInput (`xinput1_4`, loaded at run time), the connected
+slots every 4 ms on a high-resolution timer and an absent slot once a second
+(`windows/runner/gamepad_input.h`). Android: the key and motion events of a
+gamepad or joystick device, taken while a granted session runs so B is not
+Back (`AndroidGamepad.kt`). Both: `lib/data/session_gamepads.dart`. The
+Windows app reads only XInput pads: a pad in DirectInput mode (an 8BitDo
+switched to D, for one) or a PlayStation controller is not seen there.
+
+**Records.** Each `streamStats` row of a client carries `gamepad` (granted)
+and, in a granted session, `gamepadPads` (pads the Host was asked to hold at
+the window's end), `gamepadStates` (states sent), `gamepadRefused` (states the
+session could not take: not connected yet, resuming) and `gamepadRumbles`
+(rumbles received) in that window (`GamepadTally` in `lib/data/gamepad.dart`;
+counts only, never a button, an axis or a controller's name). A granted
+session with no state sent means no pad was read on that device. Brokers
+before 1.1.12 drop these fields and keep the row.
 
 ## Ending a session (stop-v1)
 
@@ -1120,7 +1220,11 @@ fields; forwarded as `{type:'cursor.compose', sessionId, on}` only in a granted
 session.
 
 **Host.** While asked, every capture tick draws the cursor into the video as
-Windows shows it, and the cursor channel reports it hidden (as for an
+Windows shows it: the size and hotspot of the cursor channel's shape decision
+(the output's scale for the system cursors, an application's own cursor at its
+own size), drawn from a copy Windows makes at that size (`VideoCursor` in
+`cursor_channel.hpp`), never the session's fixed `SM_CXCURSOR`. The cursor
+channel reports it hidden (as for an
 unrepresentable shape); resting positions still leave as hidden states with a
 position. When it ends, the real state (a new shape first) follows at the next
 tick. It ends with `on:false`, the session and the worker; a resize restart of
@@ -1318,6 +1422,7 @@ what the other side could not take before sending anything.
 | pull queue | `X-Multitap-Clipboard-PullQueue: 1` (needs on-paste) | `clipboardPullQueue:'pull-queue-4-v1'` | up to 4 outstanding pulls per requester |
 | settled | `X-Multitap-Clipboard-Settled: 1` (needs on-paste and clipboard-sync-v1) | `clipboardSettled:'text-image-250-v1'` | text and image changes are announced only after 250 ms of quiet |
 | intent | `X-Multitap-Clipboard-Intent: 1` (needs settled) | `clipboardIntent:'text-image-pending-v1'` | `clipboard.intent` and watch epochs |
+| deferred manifest | `X-Multitap-Clipboard-Deferred: 1` (needs on-paste) | `clipboardDeferred:'manifest-on-paste-v1'` | a large copy is announced without its list; the list is walked when it is pasted |
 
 ### Automatic sharing (clipboard-sync-v1)
 
@@ -1640,6 +1745,70 @@ A copy is silent: no file byte crosses the relay until a consumer pastes.
   announcement to be applied; it does not prefetch file bytes. If the user
   cancels a PC-to-VM paste between file ranges, the client withdraws that
   offer, so a later paste needs a new copy.
+
+### Deferred manifest (manifest-on-paste-v1)
+
+Like RDP, nothing heavy happens when something is copied: a large copy is
+announced without walking it, and its list is walked when a paste asks for it.
+
+- **Small or large.** On a deferred pair the copying peer walks a file copy at
+  copy time only as far as the CF_HDROP bounds (`treeFitsWithin`: at most 256
+  entries and 16 MiB, stopping as soon as either is passed). A copy within them
+  is offered as before (the list crosses with the offer, so the receiver can also
+  offer CF_HDROP and any application can paste it). Anything larger is offered
+  as `clipboard.offer {requestId, format:'tree', deferred:true}` (exactly these
+  keys): the receiver publishes the virtual files at once without a list and
+  answers `clipboard.applied`. Virtual-file sources staged at copy time and pairs
+  without the profile keep the walked offer.
+- **The list on paste.** The first `GetData` of `FileGroupDescriptorW` (or of a
+  file) waits, pumping COM calls, while the receiver asks with
+  `clipboard.manifest {requestId: pullc-<n>|pullh-<n>, offerId}`. The request is
+  a pull for the relay: the requester's id order, a pull slot (the queue's order
+  on a pull-queue pair), one request per offer, the files permission. The
+  offering peer answers with `clipboard.manifest.progress {requestId, entries}`
+  at least every second while it walks, then
+  `clipboard.manifest.begin {requestId, offerId, entries, files, bytes, tops,
+  skipped}` and the `clipboard.entries` pages of an offer (with `mtime`). The
+  relay checks them like an offer's tree; after the last page the offer has its
+  list and its files are pulled as usual. Failure is `clipboard.error` with the
+  reason the walk met (`clipboard_offer_expired`, `clipboard_entry_count_limit`,
+  `clipboard_path_too_long`, `clipboard_depth_limit`, `clipboard_file_locked`,
+  ...); the offer stays deferred and the next paste asks again. A request with no
+  message for 30 s is cancelled by the relay for both peers (the requester shows
+  it as `clipboard_timeout`: the offering peer answers a list request with the
+  list or an error, never a cancel), and one the requester abandons (a newer
+  copy, the user's cancel, no word for 30 s on its side) is cancelled by it.
+- **Asked again.** A list that already crossed may be asked for again (the
+  receiver refused it with its own checks, or its cancel crossed the last page):
+  the relay forwards the request like the first, the offering peer answers from
+  the list it walked before (no second walk), and that list is the one later
+  pulls are checked against. Only one request per offer is out at a time on the
+  receiving side: an attempt that starts while an abandoned one winds down takes
+  its request over, and a new request goes out only after the older cancel did
+  (a cancel names the offer, so it must never overtake a newer request).
+- **Still the same copy.** The offering peer keeps the copied paths and the
+  clipboard sequence they were read at. A list request (and the first pull of any
+  offer) is answered while the clipboard sequence is unchanged *or the clipboard
+  names exactly the copied paths*: Windows renumbers the clipboard for more than
+  a new copy (another program adding a format, a delayed render), and copying the
+  same items again is the same copy. Anything else is `clipboard_offer_expired`.
+  The copy is pasting from the moment its walk starts (a list request is a
+  paste): a newer copy does not end a paste under way (OfferRegistry::pasteHold),
+  and neither does the pasting side's own next copy, which waits its turn.
+- **Walking.** The offering peer's walk lets other work through at every step:
+  the Host pumps its STA (Explorer's calls into published offers, the cancel),
+  the client walks without the lock its clipboard thread takes and stops at its
+  next step when the request is cancelled (taken as the message arrives, ahead of
+  the pull lane the walk holds).
+- **Backlog.** A list of 200,000 entries is tens of MB of pages with no window.
+  On a deferred pair a receiver that falls behind does not end the pair: the
+  relay stops reading the sending peer until the receiver's queue has drained
+  below half its bound (the queue may reach four times the bound meanwhile).
+  While the receiver takes the backlog, that is its heartbeat traffic and the
+  progress of the request being drained; a receiver that takes nothing still
+  runs out of both.
+- **Progress.** While a list is walked the client card says "목록 확인 중 · N개"
+  (N from the progress messages: real counts, no percentage).
 
 **Client presentation.** The client shows a transfer only when somebody waits
 for it: a manual send or receive, a paste in the VM that waits for the copy,

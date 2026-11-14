@@ -47,6 +47,12 @@ const clipboardPullQueueHeader = 'X-Multitap-Clipboard-PullQueue';
 const clipboardPullQueueHeaderValue = '1';
 const clipboardPullQueueProtocol = 'pull-queue-4-v1';
 const clipboardPullQueueDepth = 4;
+
+/// Deferred manifest (on top of the on-paste revision, like RDP): a copy of files that is not small is announced without its list,
+/// which is walked when the peer pastes (clipboard.manifest). docs/remote-session-protocol.md, "Deferred manifest".
+const clipboardDeferredHeader = 'X-Multitap-Clipboard-Deferred';
+const clipboardDeferredHeaderValue = '1';
+const clipboardDeferredProtocol = 'manifest-on-paste-v1';
 const clipboardPullQueueWindowBytes = 4 * 1024 * 1024;
 const clipboardPullQueueWindowUnits = 128;
 

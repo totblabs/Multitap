@@ -572,7 +572,7 @@ void main() {
       await t.tap(find.byKey(const Key('host-result-close')));
       await t.pumpAndSettle();
       // The areas show the settled state, not the read taken in between.
-      expect(find.text('스트리밍 가능'), findsOneWidget);
+      expect(find.text('스트리밍할 수 있어요'), findsOneWidget);
       expect(
         t.widget<Text>(find.byKey(const Key('host-broker-state'))).data,
         'cloud.example.com · 방금 확인',

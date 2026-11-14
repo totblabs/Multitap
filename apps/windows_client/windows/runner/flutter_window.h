@@ -32,6 +32,7 @@
 #include "product_update_task.hpp"
 #include "relative_mouse.h"
 #include "game_mouse_usb_channel.h"
+#include "gamepad_input.h"
 #include "cursor_presenter.h"
 #include "stream_size_query.h"
 #include "console_webview.h"
@@ -201,6 +202,8 @@ class FlutterWindow : public Win32Window, private multitap::tray::Delegate {
   multitap::RelativeMouse relative_mouse_;
   // 게임 마우스 over USB: the virtual mouse device (game_mouse_usb_channel.h).
   std::unique_ptr<multitap::GameMouseUsbChannel> game_mouse_usb_;
+  // gamepad-v1: this PC's XInput controllers (gamepad_input.h).
+  std::unique_ptr<multitap::GamepadInput> gamepad_input_;
   void ConfigureRelativeMouse();
   void RestorePresentation();
 };

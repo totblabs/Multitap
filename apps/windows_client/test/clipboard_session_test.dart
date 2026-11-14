@@ -212,6 +212,42 @@ void main() {
     );
   });
   tearDown(() async => session.close());
+  // 2026-11-14: an administrator allowed files while a stream ran; the relay ended the pair and the next one's ready
+  // allowed files, but the session intersected it with the stream's start (text only) and files stayed refused until
+  // the stream was opened again. The pair's ready is the setting now, wider or narrower.
+  test('The relay\'s policy in ready is the setting now, also when it is wider than the stream\'s start', () async {
+    for (final (start, now) in [
+      (const ClipboardPolicy(textToRemote: true, textToLocal: true), const ClipboardPolicy.all()),
+      (const ClipboardPolicy.all(), const ClipboardPolicy(textToRemote: true, textToLocal: true)),
+    ]) {
+      final pairSocket = ClipboardSocket();
+      final narrow = ClipboardSession(
+        policy: start,
+        url: Uri.parse('wss://cloud.example.com/api/v1/sessions/$sessionId/clipboard'),
+        token: 'test-token',
+        sessionId: sessionId,
+        bridge: MemoryClipboard(),
+        dialer: (url, token) async => pairSocket,
+      );
+      final opened = narrow.start();
+      await Future<void>.delayed(Duration.zero);
+      pairSocket.incoming.add(jsonEncode({
+        ...ready,
+        'clipboardPolicy': {
+          'textToRemote': now.textToRemote,
+          'textToLocal': now.textToLocal,
+          'filesToRemote': now.filesToRemote,
+          'filesToLocal': now.filesToLocal,
+        },
+      }));
+      await opened;
+      expect(narrow.effectivePolicy.filesToRemote, now.filesToRemote);
+      expect(narrow.effectivePolicy.filesToLocal, now.filesToLocal);
+      expect(narrow.effectivePolicy.textToRemote, isTrue);
+      await narrow.close();
+    }
+  });
+
   test('Closing an unopened clipboard session does not access the native clipboard bridge', () async {
     await session.close();
     expect(dials, 0);

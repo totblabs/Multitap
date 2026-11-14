@@ -21,6 +21,7 @@
 #include "direct_input_validation.hpp"
 #include "json_object.hpp"
 #include "cursor_channel.hpp"
+#include "background_video.hpp"
 #include "text_input.hpp"
 #include "touch_input.hpp"
 #include "caret_follow.hpp"
@@ -322,7 +323,10 @@ class Agent {
   // no capture: binds the session exactly as stream() does before capture.
   Agent(Status status,AgentBridge::Send local,RemoteInput::Injector injector,RemotePointerBounds bounds,TouchInjectionBackend touch={})
       :status_(std::move(status)),local_(std::move(local)),input_(std::move(injector),true,std::move(bounds),std::move(touch)){}
-  void inputLatencyTestStream(const Json& start,RECT area){stopStream();sessionId_=start.get("sessionId").string();inputLatency_.configure(start);configureCursor(start,area);configureCursorEcho(start);textInput_=textInputSessionRequested(start);touchInput_=touchInputSessionRequested(start);relativeMouse_=relativeMouseSessionRequested(start);input_.area(area);streamStop_=false;active_=true;stopped_=false;}
+  void inputLatencyTestStream(const Json& start,RECT area){stopStream();sessionId_=start.get("sessionId").string();inputLatency_.configure(start);configureCursor(start,area);configureCursorEcho(start);configureBackground(start);textInput_=textInputSessionRequested(start);touchInput_=touchInputSessionRequested(start);relativeMouse_=relativeMouseSessionRequested(start);input_.area(area);streamStop_=false;active_=true;stopped_=false;}
+  // background-video-v1: whether the capture runs at the hidden pace, and whether the next picture is an IDR.
+  bool backgroundTestHidden()const{return streamBackground_.load();}
+  bool backgroundTestGranted()const{return backgroundGranted_.load();}
   // cursor-echo-v1: the request the capture's poller follows (0 none).
   uint32_t cursorTestEchoRequest()const{return cursorEchoRequest_.load();}
   bool cursorTestEchoGranted()const{return cursorEchoGranted_.load();}
@@ -486,8 +490,10 @@ class Agent {
         text(trackSourceInfo(sent,available));audioEnabled=available;audioGo=true;
         auto measured=Clock::now(),next=measured;FramePacer pacer;const auto period=std::chrono::microseconds(1000000/plan.fps);
         Clock::time_point lastWork{};  // last tick that emitted media
+        cursor::PointerAsk pointerAsk;  // worker.pointer.absent (pointer_device.hpp), as for one output
         while(!streamStop_&&!stopped_){
           const auto began=Clock::now();
+          if(local_&&pointerAsk.due(hostMonotonicUs()))text("{\"type\":\"worker.pointer.absent\",\"sessionId\":"+jsonQuote(plan.sessionId)+'}');
           // tracks-resume-v1: the relay restarts every output at an IDR after a resume.
           if(keyFrameRequested_.exchange(false))pipeline->keyFrame();
           pipeline->lossless(losslessRequested(plan.sessionId));pipeline->composeRequested(cursorCompose_.wanted());
@@ -899,6 +905,15 @@ class Agent {
     if(caretGranted_){caret_.configure(sessionId_,source);if(caretWanted_)caret_.watch(true);}
   }
   void caretEnd(){caret_.watch(false);caretWanted_=false;caretSession_.clear();}
+  // background-video-v1 (background_video.hpp): granted per session.start; the client's latest request survives a
+  // restart of the same session (a resize), any other session starts shown.
+  std::atomic<bool> backgroundGranted_{false}, streamBackground_{false}; std::string backgroundSession_;
+  void configureBackground(const Json& start){
+    const bool granted=backgroundVideoGranted(start);
+    if(!granted||backgroundSession_!=sessionId_)streamBackground_=false;
+    backgroundGranted_=granted;backgroundSession_=granted?sessionId_:std::string();
+  }
+  void backgroundEnd(){streamBackground_=false;backgroundGranted_=false;backgroundSession_.clear();}
   void stopStream(bool stopBridge=true) {
     resume_.clear();udpProbeEnd();active_ = false; streamStop_ = true;if(auto input=trackInput_.exchange({}))input->close();input_.reset();adaptive_.stop();inputLatency_.stop();observability_.reset();observedWriteKnown_=false;cursorSeparated_=false;cursorInput_.reset();
     if (bridge_&&stopBridge) bridge_->stop();
@@ -953,7 +968,7 @@ class Agent {
     if(!checkedFrameLayout(uint64_t(sourceWidth),uint64_t(sourceHeight),false)||!displayRectangleFits(sourceLeft,sourceTop,uint64_t(sourceWidth),uint64_t(sourceHeight)))throw std::runtime_error("Validated virtual display geometry required");
     const RECT source{sourceLeft,sourceTop,sourceLeft+sourceWidth,sourceTop+sourceHeight};const auto selectedCapture=parseCaptureSelection(control,source);validateCaptureSelection(selectedCapture,currentCaptureMonitors());input_.area(source);systemInputSeen_=false;systemButtons_.clear();systemInputArea(control.get("sessionId").string(),source);const std::wstring device=wide(control.get("displayDeviceName").string());const bool audioRequested=control.get("audio").boolean(true),audioOpusRequested=opusAudioRequested(control);
     // cursor-v1: only a session.start carrying the granted marker separates it.
-    configureCursor(control,source);textInput_=textInputSessionRequested(control);touchInput_=touchInputSessionRequested(control);relativeMouse_=relativeMouseSessionRequested(control);configureCaret(control,source);configureCursorEcho(control);const bool cursorSeparated=cursorSeparated_,cursorEchoAllowed=cursorSeparated&&cursorEchoGranted_;
+    configureCursor(control,source);textInput_=textInputSessionRequested(control);touchInput_=touchInputSessionRequested(control);relativeMouse_=relativeMouseSessionRequested(control);configureCaret(control,source);configureCursorEcho(control);configureBackground(control);const bool cursorSeparated=cursorSeparated_,cursorEchoAllowed=cursorSeparated&&cursorEchoGranted_;
     streamStop_ = false; active_ = true; if (local_) stopped_ = false;
     capture_ = std::thread([this, maximumWidth, maximumHeight, fps, bitrate,source,sourceWidth,sourceHeight,device,audioRequested,audioOpusRequested,selectedCapture,epochFields,resized,session=sessionId_,rate,resumeBitrate,cursorSeparated,cursorEchoAllowed,viewportLimits,sizesV2,pixelBudget,sizeLimits,pixelCap,resizeStages,startBegan] {
       std::thread audio; std::atomic<bool> audioGo{false};
@@ -1052,7 +1067,18 @@ class Agent {
         // cursor-v1: no cursor in the video; its records follow the first IDR.
         // Shared with the cursor-echo-v1 poller below.
         std::optional<cursor::SharedChannel> cursorChannel;
+        // worker.pointer.absent (pointer_device.hpp): with no mouse on this PC Windows hides the pointer, in
+        // the video and as a record alike; the service then plugs in the Host's own mouse (once per epoch).
+        cursor::PointerAsk pointerAsk;
         if (cursorSeparated) { capture.composeCursor(false); cursorChannel.emplace(source, cursor::Channel::Allocate([this, session] { return cursorIds_.next(session); })); }
+        // hostAction 200 stage 248 when this epoch ends: why the pointer was shown or hidden (cursor_channel.hpp
+        // CursorDiagnosis, counts only). Destroyed before the channel it reads.
+        std::function<void(uint32_t,uint32_t)> cursorRecordSink=[this](uint32_t stage,uint32_t value){if(this->captureDiagnostic_)this->captureDiagnostic_(stage,value);};
+        struct CursorEpochRecord {
+          std::optional<cursor::SharedChannel>& channel; std::function<void(uint32_t,uint32_t)> record;
+          ~CursorEpochRecord(){ if(!channel||!record)return; try{ for(const auto value:channel->diagnosis().records()) record(cursor::cursorRecordStage,value); }catch(...){ } }
+        };
+        CursorEpochRecord cursorEpochRecord{cursorChannel,std::move(cursorRecordSink)};
         capture.observeReadback(observability_.enabled());ReadbackObservation readback;
         // cursor-echo-v1: while the client holds the mouse, the VM's real cursor
         // position as it changes (its own thread; ends with this capture).
@@ -1177,6 +1203,7 @@ class Agent {
         catch(const std::exception& error){(void)follow(error.what(),false);}
         // Start of the last tick that captured a new frame or submitted one.
         Clock::time_point lastWork{};
+        BackgroundPace backgroundPace;
         // secure_desktop_notice.hpp: a UAC prompt of this unlocked session. The notice (NV12 at the encoded size,
         // made on first use and after a rescale) stands in for the capture; no statistics while it shows.
         SecureDesktopNotice secureDesktop;std::vector<uint8_t> noticeNv12;
@@ -1298,6 +1325,9 @@ class Agent {
             if(secureDesktop.active()){if(const auto wait=secureFill(iteration);wait.count()>0)std::this_thread::sleep_for(wait);continue;}
           }
           try{topology->verify();}catch(const std::exception& error){if(!follow(error.what(),false))break;continue;}
+          // background-video-v1 (background_video.hpp): while the client's view is hidden, one tick a second
+          // captures and encodes, at an idle screen's pace; the others only wait, so a return is seen at once.
+          if(!backgroundPace.due(streamBackground_.load(),Clock::now())){std::this_thread::sleep_for(BackgroundPace::idleWait);continue;}
           const auto captureBegan = Clock::now();
           // The client wants tiles now (opted in, not paused by 게임 마우스) and the
           // capture still describes the announced source (no follow since).
@@ -1375,6 +1405,7 @@ class Agent {
                                    [&](const std::vector<uint8_t>& record) { enqueue({false, mediaPacket(cursor::mediaKind, uint64_t(pts), record)}); });
             capture.composeCursor(cursorChannel->composeFallback());
           }
+          if (local_ && pointerAsk.due(hostMonotonicUs())) text("{\"type\":\"worker.pointer.absent\",\"sessionId\":" + jsonQuote(session) + '}');
           const auto now = Clock::now(); const double seconds = std::chrono::duration<double>(now - measured).count();
           const double encodeMs = std::chrono::duration<double,std::milli>(now-encodeBegan).count();
           if(observability_.enabled())readback.observe(capture.lastReadbackMs());
@@ -1551,7 +1582,7 @@ class Agent {
     if(type=="input"||type=="input.reset"||type=="cursor.compose"||type=="cursor.echo"||type=="caret.watch"||type=="display.scale"||type=="stream.resize"||type=="session.stop"||type=="session.ended")if(auto input=directInput_.load())input->pause();
     if(type=="stream.tracks.ready"){if(auto input=trackInput_.load())input->acknowledge(message);return;}
     if (type == "input.reset") { if (bridge_) bridge_->control(message); else { input_.reset(); systemButtons_.clear(); } }
-    else if (type == "session.stop" || type == "session.ended") { caretEnd(); cursorEchoEnd(); stopStream(); report(L"서버 연결됨 · 원격 접속 대기"); }
+    else if (type == "session.stop" || type == "session.ended") { caretEnd(); cursorEchoEnd(); backgroundEnd(); stopStream(); report(L"서버 연결됨 · 원격 접속 대기"); }
     else if (type == "input") {
       // input-latency-v1 adds nothing to the injected event: the same message is
       // applied in the same order. Service: a sampled input carries its receipt
@@ -1612,6 +1643,15 @@ class Agent {
     else if (type == "cursor.compose") {
       if (bridge_) bridge_->control(message);
       else if (const auto on = cursor::composeRequest(message)) cursorCompose_.set(*on);
+    }
+    // background-video-v1: likewise; the worker's capture takes one picture a second while hidden, and the first
+    // picture after it is an IDR (the client may have dropped its decoder's surface meanwhile).
+    // gamepad-v1: the service's own virtual controllers (gamepad_device.hpp); a worker has nothing to do with them.
+    else if (type == "gamepad.state" || type == "gamepad.remove") { if (bridge_) bridge_->control(message); }
+    else if (type == "stream.background") {
+      if (bridge_) bridge_->control(message);
+      else if (backgroundGranted_ && (message.get("sessionId").string().empty() || message.get("sessionId").string() == sessionId_))
+        if (const auto on = backgroundRequest(message)) { if (streamBackground_.exchange(*on) && !*on) keyFrameRequested_ = true; }
     }
     // stream-size-v1: the client's decoder load; the service hands it to the
     // worker, whose capture thread reads the latest report.

@@ -139,8 +139,30 @@ inline const char* prepareReason(Prepare value) {
   }
 }
 
-// The decision sequence of the service (tested with a substituted Windows).
-inline Prepare prepareController(const DriverAccess& access, const std::atomic<bool>& stopping) {
+// One preparation (install, protect, sweep) at a time in this service: a USB session and the pointer device
+// (pointer_device.hpp) may both prepare the controller, and two installs at once are how a VM got two nodes.
+// The pointer device holds it from its preparation until its port is known, so a session's sweep never sees
+// that port before it is kept.
+inline std::recursive_mutex& controllerLock() { static std::recursive_mutex lock; return lock; }
+// The ports of the Host's own devices (the pointer device, the gamepads). Never strangers: every sweep of
+// "ports left attached" skips them.
+class KeptPorts {
+ public:
+  void add(int port) { std::lock_guard lock(mutex_); ports_.insert(port); }
+  void remove(int port) { std::lock_guard lock(mutex_); ports_.erase(port); }
+  bool contains(int port) const { std::lock_guard lock(mutex_); return ports_.count(port) != 0; }
+  bool empty() const { std::lock_guard lock(mutex_); return ports_.empty(); }
+  void clearForTesting() { std::lock_guard lock(mutex_); ports_.clear(); }
+ private:
+  mutable std::mutex mutex_; std::set<int> ports_;
+};
+inline KeptPorts& keptPorts() { static KeptPorts ports; return ports; }
+
+// The decision sequence of the service (tested with a substituted Windows). [sweep]: unplug the ports a
+// crashed run left (a USB session's start); the pointer device prepares without it, as a session's devices
+// may be attached at that moment.
+inline Prepare prepareController(const DriverAccess& access, const std::atomic<bool>& stopping, bool sweep = true) {
+  std::lock_guard serial(controllerLock());
   if (!access.platformSupported()) { recordUsbEvent(UsbStage::driverMissing, false, 1); return Prepare::platformUnsupported; }
   if (!access.packagePresent()) { recordUsbEvent(UsbStage::driverMissing, false, 2); return Prepare::packageMissing; }
   if (!access.packageVerified()) { recordUsbEvent(UsbStage::driverInstallFailed, false, 1); return Prepare::signatureInvalid; }
@@ -168,7 +190,7 @@ inline Prepare prepareController(const DriverAccess& access, const std::atomic<b
   // object's descriptor is not kept across a restart of the device.
   if (!access.protect() || !access.protectionProven()) { recordUsbEvent(UsbStage::protectionFailed, false); return Prepare::protectionFailed; }
   // A crashed run may have left ports attached: no session starts with strangers.
-  if (const int left = access.detachAll(); left > 0) recordUsbEvent(UsbStage::leftovers, true, 0, uint32_t(left));
+  if (sweep) if (const int left = access.detachAll(); left > 0) recordUsbEvent(UsbStage::leftovers, true, 0, uint32_t(left));
   return Prepare::ready;
 }
 
@@ -323,10 +345,12 @@ inline std::vector<int> vhciPorts() {
   }
   return ports;
 }
+// Every port but the Host's own devices' (keptPorts); returns how many were unplugged.
 inline int vhciDetachAll() {
-  const auto ports = vhciPorts();
-  for (const int port : ports) vhciDetach(port);
-  return int(ports.size());
+  std::lock_guard serial(controllerLock());
+  int count = 0;
+  for (const int port : vhciPorts()) if (!keptPorts().contains(port)) { vhciDetach(port); ++count; }
+  return count;
 }
 
 // --- device node: find, install, protect ---------------------------------------------

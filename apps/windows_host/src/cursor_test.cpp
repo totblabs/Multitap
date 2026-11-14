@@ -267,6 +267,67 @@ void channelShapesAndVisibility() {
   require(out.size() == 2 && decode(out[0]).type == 1 && decode(out[0]).id > first, "An in-place shape change kept the old id");
   const auto counted = channel.takeCounters();
   require(counted.shapes >= 3 && counted.states >= 10 && counted.composed >= 2 && channel.takeCounters().shapes == 0, "Channel counters");
+  // hostAction 200 stage 248: each hidden case above counted under its own reason, the sides of the outside
+  // ones, the states and shapes sent; not reset by takeCounters.
+  const auto& why = channel.diagnosis();
+  require(why.notShowing >= 1 && why.suppressed >= 1 && why.noHandle >= 1 && why.outside >= 2 && (why.outsideSides & 3u) == 3u &&
+          why.unknown >= 1 && why.unsupported >= 1 && why.shapes >= 3 && why.visibleStates >= 5 && why.hiddenStates >= 5 && why.composeTicks == 0 &&
+          why.ticks > why.notShowing + why.outside, "Cursor diagnosis counts");
+  const auto records = why.records();
+  require(!records.empty() && (records.front() & 0xffu) == cursor::cursorTicks && (records.front() >> 8) == why.ticks, "Cursor records begin with the ticks");
+  require(std::any_of(records.begin(), records.end(), [&](uint32_t r) { return (r & 0xffu) == cursor::cursorOutside && (r >> 8) == why.outside; }), "Cursor records carry the outside count");
+  require(cursor::cursorRecord(cursor::cursorTicks, 0x1ffffffull) == (cursor::cursorTicks | (0xffffffu << 8)) && cursor::CursorDiagnosis{}.records().empty(), "Cursor records cap and stay silent without ticks");
+}
+
+// A PC with no mouse attached (2026-11-14, a Host on a physical PC): Windows reports the pointer hidden while the
+// client points with its own mouse. The channel shows it with its shape; with a mouse attached the same observation
+// is hidden as before; touch/pen suppression and a missing handle stay hidden; stage 248 counts both.
+void channelNoMouse() {
+  Fake fake; fake.table[0x101] = synthetic(11);
+  const RECT source{100, 100, 2020, 1180};
+  cursor::SessionShapeIds ids;
+  for (const bool mouse : {false, true}) {
+    cursor::Channel channel(source, [&] { return ids.next(mouse ? "with-mouse" : "no-mouse"); }, fake.extractor());
+    channel.setMousePresentForTesting([mouse] { return mouse; });
+    channel.keyFrame();
+    uint64_t now = 1'000'000;
+    cursor::InjectedPointer::Mark none;
+    const auto hiddenByWindows = cursor::Observation{true, 0, fakeHandle(0x101), POINT{540, 440}};
+    auto out = channel.observe(hiddenByWindows, none, now);
+    if (!mouse) {
+      require(out.size() == 2 && decode(out[0]).type == 1 && decode(out[1]).flags == 1, "Without a mouse, the pointer Windows hides for that is shown with its shape");
+      now += 100000; out = channel.observe(cursor::Observation{true, CURSOR_SUPPRESSED, fakeHandle(0x101), POINT{540, 440}}, none, now);
+      require(out.size() == 1 && decode(out[0]).flags == 0, "Touch or pen suppression still hides it without a mouse");
+      now += 100000; out = channel.observe(cursor::Observation{true, 0, nullptr, POINT{540, 440}}, none, now);
+      require(out.empty() || decode(out[0]).flags == 0, "No handle: nothing to show");
+      require(channel.diagnosis().noMouseTicks == 3 && channel.diagnosis().shownNoMouse == 1 && channel.diagnosis().notShowing >= 1, "No-mouse ticks are counted");
+    } else {
+      require(out.size() == 1 && decode(out[0]).type == 2 && decode(out[0]).flags == 0, "With a mouse, a pointer Windows hides stays hidden");
+      require(channel.diagnosis().noMouseTicks == 0 && channel.diagnosis().shownNoMouse == 0 && channel.diagnosis().notShowing == 1, "With a mouse nothing is counted as no-mouse");
+    }
+  }
+}
+
+// worker.pointer.absent (pointer_device.hpp): an epoch asks for the Host's own mouse only when none is attached,
+// reads Windows at most once a second, and asks once.
+void pointerAsk() {
+  const auto saved = cursor::mousePresentSource();
+  bool present = true; int reads = 0;
+  cursor::mousePresentSource() = [&] { ++reads; return present; };
+  { cursor::PointerAsk ask;
+    require(!ask.due(0) && !ask.due(500000) && reads == 1, "With a mouse an epoch asked, or read Windows more than once a second");
+    require(!ask.due(1000000) && reads == 2, "The mouse was not read again after a second"); }
+  { present = false; cursor::PointerAsk ask;
+    require(ask.due(0), "With no mouse the epoch did not ask");
+    require(!ask.due(2000000) && !ask.due(9000000), "An epoch asked twice"); }
+  { present = true; reads = 0; cursor::PointerAsk ask;
+    require(!ask.due(0), "asked with a mouse");
+    present = false;
+    require(!ask.due(999999) && reads == 1, "Windows was read again within a second");
+    require(ask.due(1000000), "A mouse that went was not noticed"); }
+  { cursor::mousePresentSource() = [] () -> bool { throw std::runtime_error("unreadable"); }; cursor::PointerAsk ask;
+    require(!ask.due(0), "An unreadable answer asked for the pointer"); }
+  cursor::mousePresentSource() = saved;
 }
 
 // The SYSTEM helper's frame of a secure desktop (secure_desktop_switch.hpp) has that desktop's pointer composed
@@ -1056,6 +1117,61 @@ void workerComposeRequests() {
   require(bridge.controls.size() == 1 && bridge.controls[0].get("type").string() == "cursor.compose" && bridge.controls[0].get("on").boolean(false), "The service did not hand the compose request to its worker");
 }
 
+// background-video-v1 (background_video.hpp): granted per start, the client's hidden/shown request exactly, an IDR
+// when it comes back, kept across a restart of the same session, dropped at its end; the pace of the capture.
+void workerBackgroundRequests() {
+  const RECT area{0, 0, 1920, 1080};
+  const std::string granted = ",\"backgroundVideoProtocol\":\"background-video-v1\"";
+  const auto hide = std::string(R"({"type":"stream.background","on":true})"), show = std::string(R"({"type":"stream.background","on":false})");
+  require(host::backgroundVideoGranted(JsonParser::parse(start(granted))) && !host::backgroundVideoGranted(JsonParser::parse(start(""))) &&
+          !host::backgroundVideoGranted(JsonParser::parse(start(",\"backgroundVideoProtocol\":\"background-video-v2\""))), "The grant was not read exactly");
+  require(host::backgroundRequest(JsonParser::parse(hide)) == std::optional<bool>(true) && host::backgroundRequest(JsonParser::parse(show)) == std::optional<bool>(false) &&
+          !host::backgroundRequest(JsonParser::parse(R"({"type":"stream.background","on":"true"})")) && !host::backgroundRequest(JsonParser::parse(R"({"type":"stream.background","on":true,"x":1})")) &&
+          !host::backgroundRequest(JsonParser::parse(R"({"type":"cursor.compose","on":true})")), "The request was not read exactly");
+  Agent agent([](const std::wstring&) {}, [](bool, std::vector<uint8_t>) {}, [](INPUT&) -> UINT { return 1U; }, [area] { return area; });
+  agent.inputLatencyTestStream(JsonParser::parse(start("")), area);
+  agent.localControl(hide);
+  require(!agent.backgroundTestGranted() && !agent.backgroundTestHidden(), "An ungranted session went to the hidden pace");
+  agent.inputLatencyTestStream(JsonParser::parse(start(granted)), area);
+  require(agent.backgroundTestGranted() && !agent.backgroundTestHidden(), "A granted session started hidden");
+  agent.localControl(hide);
+  require(agent.backgroundTestHidden(), "A granted hide request was not taken");
+  agent.localControl(R"({"type":"stream.background","on":"false"})");
+  agent.localControl(R"({"type":"stream.background","on":false,"extra":1})");
+  agent.localControl("{\"type\":\"stream.background\",\"on\":false,\"sessionId\":\"other\"}");
+  require(agent.backgroundTestHidden(), "An invalid request or another session's changed the pace");
+  agent.inputLatencyTestStream(JsonParser::parse(start(granted)), area);
+  require(agent.backgroundTestHidden(), "A restart of the same session dropped the hidden pace");
+  require(!agent.publicationTestKeyFrameRequested(), "Hiding asked for an IDR");
+  agent.localControl(show);
+  require(!agent.backgroundTestHidden() && agent.publicationTestKeyFrameRequested(), "Coming back did not end the pace with an IDR");
+  agent.localControl(hide);
+  agent.localControl("{\"type\":\"session.stop\",\"sessionId\":\"" + session + "\"}");
+  require(!agent.backgroundTestHidden(), "The session's end kept the hidden pace");
+  agent.inputLatencyTestStream(JsonParser::parse(start(granted)), area);
+  agent.localControl(hide);
+  agent.inputLatencyTestStream(JsonParser::parse("{\"type\":\"session.start\",\"mode\":\"stream\",\"sessionId\":\"00000000-0000-4000-8000-0000000000c4\",\"resizeProtocol\":\"epoch-v1\",\"epoch\":0,\"monitor\":\"0\"" + granted + '}'), area);
+  require(agent.backgroundTestGranted() && !agent.backgroundTestHidden(), "Another session inherited the hidden pace");
+  // The pace: every tick while shown; while hidden one a second, the first at once.
+  host::BackgroundPace pace; const auto t0 = host::BackgroundPace::Clock::now();
+  require(pace.due(false, t0) && pace.due(false, t0), "A shown view skipped a tick");
+  require(pace.due(true, t0) && !pace.due(true, t0 + std::chrono::milliseconds(500)) && !pace.due(true, t0 + std::chrono::milliseconds(999)) && pace.due(true, t0 + std::chrono::seconds(1)), "The hidden pace is not one tick a second");
+  require(pace.due(false, t0 + std::chrono::milliseconds(1100)) && pace.due(true, t0 + std::chrono::milliseconds(1150)), "Coming back or hiding again waited");
+  // The service hands the request to its worker.
+  struct Bridge final : AgentBridge {
+    std::vector<Json> controls;
+    void start(const Json&, Send) override {}
+    void control(const Json& value) override { controls.push_back(value); }
+    void stop() override {}
+    std::string capabilities() override { return "{\"service\":true}"; }
+    void displayControl(const Json&, Send) override {}
+  } bridge;
+  Agent service([](const std::wstring&) {}, &bridge); service.publicationTestOpen();
+  service.localControl(start(granted));
+  service.localControl(hide);
+  require(bridge.controls.size() == 1 && bridge.controls[0].get("type").string() == "stream.background" && bridge.controls[0].get("on").boolean(false), "The service did not hand the request to its worker");
+}
+
 // Synthetic CPU measurement on the production path: a static 1920x1080
 // desktop, the cursor moved every tick of a simulated 60 fps clock, composed by
 // the production direct-path patch (legacy) or left out (cursor-v1), then the
@@ -1114,6 +1230,8 @@ void cpuMeasurement() {
 }
 }
 int main(int argc, char** argv) {
+  // Every channel here sees a PC with a mouse, whatever this machine has (channelNoMouse sets its own).
+  cursor::mousePresentSource() = [] { return true; };
   // The focused ordering regression uses no GDI, capture, native pointer,
   // encoder, input injection, display setting, process or network operation.
   if (argc == 2 && std::string(argv[1]) == "--channel-send-order-only") {
@@ -1146,10 +1264,10 @@ int main(int argc, char** argv) {
     return failed ? 1 : 0;
   }
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-  const struct { const char* name; void (*run)(); } cases[] = {{"conversion-per-kind", conversionPerKind}, {"extraction-lifetime", extractionLifetime}, {"records", records}, {"channel-shapes-visibility", channelShapesAndVisibility},
+  const struct { const char* name; void (*run)(); } cases[] = {{"conversion-per-kind", conversionPerKind}, {"extraction-lifetime", extractionLifetime}, {"records", records}, {"channel-shapes-visibility", channelShapesAndVisibility}, {"channel-no-mouse", channelNoMouse}, {"pointer-ask", pointerAsk},
     {"channel-cache-bounds-rates", channelCacheBoundsAndRates}, {"channel-pending-shape-send-order", channelPendingShapesPublishInOrder}, {"channel-pending-id-exhaustion", channelPendingShapeIdExhaustion}, {"channel-picture-restart", channelPictureRestart}, {"channel-warps", channelWarps}, {"channel-outputs", channelOutputs}, {"composition-switch-policy", compositionSwitchAndPolicy},
     {"echo-gating-requests", echoGatingAndRequests}, {"channel-echo", channelEcho}, {"channel-rebase", channelRebase}, {"echo-shared-ordering", echoSharedOrdering}, {"echo-poller-cadence", echoPollerCadence}, {"worker-echo-requests", workerEchoRequests},
-    {"compose-gating-requests", composeGatingAndRequests}, {"channel-compose", channelCompose}, {"worker-compose-requests", workerComposeRequests},
+    {"compose-gating-requests", composeGatingAndRequests}, {"channel-compose", channelCompose}, {"worker-compose-requests", workerComposeRequests}, {"worker-background-requests", workerBackgroundRequests},
     {"worker-negotiation-input", workerNegotiationAndInput}, {"worker-cursor-resend", workerCursorResend}, {"channel-hide-secure-desktop", channelHideForSecureDesktop}, {"worker-system-input-marker", workerSystemInputMarker}, {"cpu-measurement", cpuMeasurement}};
   unsigned passed = 0, failed = 0;
   for (const auto& value : cases) try { value.run(); ++passed; } catch (const std::exception& error) { ++failed; std::cerr << value.name << ": " << error.what() << '\n'; }

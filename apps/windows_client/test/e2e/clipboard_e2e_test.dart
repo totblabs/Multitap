@@ -34,8 +34,12 @@ class Rig {
     this.onPaste = false,
     this.dropWaiting = false,
     this.delayMs = 0,
+    this.deferred = true,
   });
   final Duration claimAfter;
+
+  /// The Host announces the deferred manifest (manifest-on-paste-v1); false starts it with --no-deferred.
+  final bool deferred;
   final String label, serverDir;
   final ClipboardPolicy policy;
   final bool sync;
@@ -74,6 +78,7 @@ class Rig {
       '${work.path}${Platform.pathSeparator}host',
       if (!onPaste) '--no-onpaste',
       if (dropWaiting) '--drop-waiting',
+      if (!deferred) '--no-deferred',
       if (delayMs > 0) ...['--emit-delay-ms', '$delayMs'],
     ]);
     await host.waitEvent((e) => e['event'] == 'started');
@@ -1421,6 +1426,57 @@ int _chunks(Rig rig) => rig.host.events
     )
     .length;
 
+/// Messages that carry a folder list (an offer's entry pages, a deferred list's counts) as the Host sent or received them.
+int _listMessages(Rig rig) => rig.host.events
+    .where(
+      (e) =>
+          (e['event'] == 'emit' || e['event'] == 'recv') &&
+          (e['type'] == 'clipboard.entries' || e['type'] == 'clipboard.manifest.begin'),
+    )
+    .length;
+
+/// A folder of [count] small files below [name], in folders of a hundred.
+Future<List<String>> _bigFolder(Rig rig, String name, int count) async {
+  final root = rig.scratch('folder-$name');
+  for (var i = 0; i < count; ++i) {
+    await writeFile(root, '$name/d${i ~/ 100}/f$i.bin', noise(1 + i % 61, i));
+  }
+  return ['${root.path}${Platform.pathSeparator}$name'];
+}
+
+/// 200,001 empty files in folders of a thousand (`Huge/<n>`). Made once (creating them takes minutes where an antivirus watches them)
+/// and kept next to the run folders.
+Future<String> _hugeFixture(Rig rig) async {
+  final sep = Platform.pathSeparator;
+  final kept = Directory('${Directory(_env['E2E_WORK']!).parent.path}${sep}fixture-200001');
+  final huge = '${kept.path}${sep}Huge';
+  if (!File('${kept.path}${sep}complete').existsSync()) {
+    if (kept.existsSync()) kept.deleteSync(recursive: true);
+    kept.createSync(recursive: true);
+    await rig.client.request(
+      {'cmd': 'makeEmptyFiles', 'root': huge, 'total': 200001, 'perFolder': 1000},
+      timeout: const Duration(minutes: 20),
+    );
+    File('${kept.path}${sep}complete').writeAsStringSync('200001');
+  }
+  return huge;
+}
+
+/// List requests the Host sent or received (each starts a walk on the offering side).
+int _listRequests(Rig rig) => rig.host.events
+    .where((e) => (e['event'] == 'emit' || e['event'] == 'recv') && e['type'] == 'clipboard.manifest')
+    .length;
+
+String _hostTrace(Rig rig) {
+  final host = rig.host.events
+      .map((e) => e['event'] == 'emit' || e['event'] == 'recv'
+          ? '${e['event']}:${e['type']}:${e['requestId']}${e['reason'] != null && e['reason'] != '' ? '(${e['reason']})' : ''}${e['type'] == 'clipboard.watch' ? '(enabled=${e['enabled']})' : ''}'
+          : '${e['event']}${e['what'] != null ? '(${e['what']})' : ''}${e['stage'] != null ? '/stage=${e['stage']}/error=${e['error']}/cause=${e['cause']}' : ''}')
+      .where((line) => !line.contains('clipboard.chunk') && !line.contains('clipboard.entries'))
+      .join(' ');
+  return 'session error: ${rig.session.error}, relay closures: ${rig.relay.closures}, host: $host';
+}
+
 Future<void> _onPasteOffer(Rig rig, bool toVm, List<String> paths) async {
   final previous = (await rig.board(!toVm))['sequence'];
   await rig.peer(toVm).request({'cmd': 'setFiles', 'paths': paths});
@@ -1535,6 +1591,213 @@ final onPasteScenarios = <String, ({Scenario run, bool dropWaiting, int delayMs}
           'dest': destination.path,
         });
         expect(await _digest(rig, !toVm, destination), expected.join('|'));
+      }
+    },
+  ),
+  'deferred: a large folder crosses without its list until a paste, both ways': (
+    dropWaiting: false,
+    delayMs: 0,
+    run: (rig) async {
+      final paths = await _bigFolder(rig, 'Big', 3000);
+      final expected = entryKeys(
+        await rig.client.request({'cmd': 'describePaths', 'paths': paths})
+            as Map,
+      );
+      for (final toVm in [true, false]) {
+        final lists = _listMessages(rig), chunks = _chunks(rig);
+        await _onPasteOffer(rig, toVm, paths);
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        expect(
+          (await rig.board(!toVm))['files'],
+          0,
+          reason: 'a deferred offer has no list until something pastes it',
+        );
+        expect(_listMessages(rig), lists, reason: 'copying must not walk or send the list');
+        expect(_chunks(rig), chunks);
+        expect(rig.session.userWaiting, isFalse);
+        final formats = await rig.peer(!toVm).request({'cmd': 'formats'}) as Map;
+        expect(formats['formats'], isNot(contains('CF_HDROP')));
+        final destination = rig.scratch('deferred-paste');
+        await rig.peer(!toVm).request({'cmd': 'paste', 'dest': destination.path});
+        expect(await _digest(rig, !toVm, destination), expected.join('|'));
+        expect(_listMessages(rig), greaterThan(lists));
+        // A second paste of the same copy reuses the list (no new walk).
+        final again = _listMessages(rig);
+        final second = rig.scratch('deferred-again');
+        await rig.peer(!toVm).request({'cmd': 'paste', 'dest': second.path});
+        expect(await _digest(rig, !toVm, second), expected.join('|'));
+        expect(_listMessages(rig), again);
+      }
+    },
+  ),
+  'a renumbered clipboard (no new copy) still pastes, small and deferred, both ways': (
+    dropWaiting: false,
+    delayMs: 0,
+    run: (rig) async {
+      // The 2026-11-13 field failure: the source clipboard's number moved without a new copy between the copy and the paste.
+      final small = await _makeFiles(rig, {'small.bin': 90000});
+      final large = await _bigFolder(rig, 'Renumbered', 400);
+      for (final paths in [small, large]) {
+        final expected = entryKeys(
+          await rig.client.request({'cmd': 'describePaths', 'paths': paths})
+              as Map,
+        );
+        for (final toVm in [true, false]) {
+          await _onPasteOffer(rig, toVm, paths);
+          await rig.peer(toVm).request({'cmd': 'renumber'});
+          await rig.peer(toVm).request({'cmd': 'renumber'});
+          final destination = rig.scratch('renumbered-paste');
+          await rig.peer(!toVm).request({'cmd': 'paste', 'dest': destination.path});
+          expect(await _digest(rig, !toVm, destination), expected.join('|'));
+        }
+      }
+    },
+  ),
+  'deferred: a newer copy before the paste is what pastes, both ways': (
+    dropWaiting: false,
+    delayMs: 0,
+    run: (rig) async {
+      final first = await _bigFolder(rig, 'First', 300);
+      final second = await _bigFolder(rig, 'Second', 350);
+      final expected = entryKeys(
+        await rig.client.request({'cmd': 'describePaths', 'paths': second})
+            as Map,
+      );
+      for (final toVm in [true, false]) {
+        await _onPasteOffer(rig, toVm, first);
+        await _onPasteOffer(rig, toVm, second);
+        final destination = rig.scratch('newer-paste');
+        await rig.peer(!toVm).request({'cmd': 'paste', 'dest': destination.path});
+        expect(await _digest(rig, !toVm, destination), expected.join('|'));
+      }
+    },
+  ),
+  'deferred: more than 200,000 entries is refused when pasted, with the entry limit': (
+    dropWaiting: false,
+    delayMs: 0,
+    run: (rig) async {
+      // 200,001 empty files: the copy is announced at once; the paste's walk meets the entry limit and says so.
+      // Made once (creating 200,001 files takes minutes where an antivirus watches them) and kept next to the run folders.
+      final paths = [await _hugeFixture(rig)];
+      for (final toVm in [true, false]) {
+        final lists = _listMessages(rig);
+        try {
+          await _onPasteOffer(rig, toVm, paths);
+        } catch (error) {
+          throw StateError('$error; host events: ${rig.host.events.map((e) => '${e['event']}:${e['type'] ?? ''}:${e['reason'] ?? ''}:${e['stage'] ?? ''}').join(' ')}; session error: ${rig.session.error}');
+        }
+        expect(_listMessages(rig), lists, reason: 'the copy itself must not walk 200,001 entries');
+        final destination = rig.scratch('too-many-paste');
+        await expectLater(
+          rig.peer(!toVm).request({'cmd': 'paste', 'dest': destination.path}),
+          throwsA(anything),
+        );
+        if (!toVm) {
+          await eventually(
+            () => rig.session.error == 'clipboard_limits_exceeded' && rig.session.errorDetail == 'entries',
+            'the entry limit named on this PC',
+          );
+        } else {
+          await eventually(
+            () => _hostReason(rig) == 'clipboard_entry_count_limit' || rig.session.errorDetail == 'entries',
+            'the entry limit named for the VM paste',
+          );
+        }
+      }
+    },
+  ),
+  // A paste under way keeps its copy from the moment it asks for the list (OfferRegistry::listing): a copy made on the offering side
+  // while the list is walked does not throw the walk away (until 1.1.6 the walked copy was dropped and the paste failed as expired).
+  'deferred: a copy made while the paste walks a large folder does not cut it off, both ways': (
+    dropWaiting: false,
+    delayMs: 0,
+    run: (rig) async {
+      final huge = await _hugeFixture(rig);
+      final folders = (Directory(huge).listSync().whereType<Directory>().map((d) => d.path).toList()..sort()).take(60).toList();
+      final files = folders.fold<int>(0, (sum, folder) => sum + Directory(folder).listSync(recursive: true).whereType<File>().length);
+      for (final toVm in [true, false]) {
+        await _onPasteOffer(rig, toVm, folders);
+        final asked = _listRequests(rig);
+        final destination = rig.scratch('walk-newer');
+        final paste = rig
+            .peer(!toVm)
+            .request({'cmd': 'paste', 'dest': destination.path}, timeout: const Duration(minutes: 15))
+            .then<Object?>((value) => value, onError: (Object error) => error);
+        await eventually(() => _listRequests(rig) > asked, 'the paste to ask for the list');
+        final newer = await _makeFiles(rig, {'newer-during-walk.bin': 777});
+        await rig.peer(toVm).request({'cmd': 'setFiles', 'paths': newer});
+        final older = await paste;
+        expect(older, isA<Map<dynamic, dynamic>>(),
+            reason: 'the paste ${toVm ? 'PC to VM' : 'VM to PC'} goes on after a copy during its walk: $older; host: ${_hostTrace(rig)}');
+        final pasted = destination.listSync(recursive: true).whereType<File>().length;
+        expect(pasted, files, reason: 'every file of the walked copy');
+        // The next paste gets the newer copy.
+        await eventually(() async => (await rig.board(!toVm))['kind'] == 'offer', 'the newer copy announced');
+        final next = rig.scratch('walk-newer-next');
+        await rig.peer(!toVm).request({'cmd': 'paste', 'dest': next.path});
+        expect(await File('${next.path}${Platform.pathSeparator}newer-during-walk.bin').readAsBytes(), await File(newer.single).readAsBytes());
+        expect(rig.session.ready, isTrue);
+      }
+    },
+  ),
+  // The user cancels a paste while its list is walked and pastes the same copy again at once: the older walk ends (the PC's walk
+  // holds its message lane; its cancel is taken as it arrives), and the newer request is answered, on the same channel.
+  'deferred: a paste cancelled during the walk, then the same copy pasted again, both ways': (
+    dropWaiting: false,
+    delayMs: 0,
+    run: (rig) async {
+      final huge = await _hugeFixture(rig);
+      final folders = (Directory(huge).listSync().whereType<Directory>().map((d) => d.path).toList()..sort()).skip(60).take(60).toList();
+      // (One folder of the fixture holds the 200,001st file alone: count what was copied.)
+      final files = folders.fold<int>(0, (sum, folder) => sum + Directory(folder).listSync(recursive: true).whereType<File>().length);
+      for (final toVm in [true, false]) {
+        await _onPasteOffer(rig, toVm, folders);
+        final asked = _listRequests(rig);
+        final first = rig.scratch('walk-cancel');
+        final paste = rig
+            .peer(!toVm)
+            .request({'cmd': 'paste', 'dest': first.path}, timeout: const Duration(minutes: 5))
+            .then<Object?>((value) => value, onError: (Object error) => error);
+        await eventually(() => _listRequests(rig) > asked, 'the paste to ask for the list');
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await rig.session.cancelTransfer();
+        expect(await paste, anyOf(isA<Exception>(), isA<Error>()), reason: 'the cancelled paste fails');
+        expect(rig.session.ready, isTrue, reason: 'the channel stays after a cancel: ${_hostTrace(rig)}');
+        final again = rig.scratch('walk-cancel-again');
+        final result = await rig
+            .peer(!toVm)
+            .request({'cmd': 'paste', 'dest': again.path}, timeout: const Duration(minutes: 15))
+            .then<Object?>((value) => value, onError: (Object error) => error);
+        expect(result, isA<Map<dynamic, dynamic>>(), reason: 'the same copy pastes again: $result; host: ${_hostTrace(rig)}');
+        expect(again.listSync(recursive: true).whereType<File>().length, files);
+        expect(rig.session.ready, isTrue);
+      }
+    },
+  ),
+  // A copy made on the side that pastes, while the paste moves bytes, is that side's next copy: the paste under way goes on (until
+  // 1.1.6 the Host ended a file or list it was serving when the PC's next copy arrived).
+  'a copy on the pasting side does not cut off a paste under way, both ways': (
+    dropWaiting: false,
+    delayMs: 20,
+    run: (rig) async {
+      for (final toVm in [true, false]) {
+        final paths = await _makeFiles(rig, {'under-way.bin': 5 * mib});
+        await _onPasteOffer(rig, toVm, paths);
+        final destination = rig.scratch('pasting-side-copy');
+        final chunks = _chunks(rig);
+        final paste = rig
+            .peer(!toVm)
+            .request({'cmd': 'paste', 'dest': destination.path})
+            .then<Object?>((value) => value, onError: (Object error) => error);
+        await eventually(() => rig.session.transferring && _chunks(rig) > chunks + 4, 'the paste to move bytes');
+        final text = 'copied on the ${toVm ? 'VM' : 'PC'} while pasting';
+        await rig.peer(!toVm).request({'cmd': 'setText', 'text': text});
+        final result = await paste;
+        expect(result, isA<Map<dynamic, dynamic>>(),
+            reason: 'the paste ${toVm ? 'PC to VM' : 'VM to PC'} goes on after a copy on its own side: $result; host: ${_hostTrace(rig)}');
+        expect(await File('${destination.path}${Platform.pathSeparator}under-way.bin').readAsBytes(), await File(paths.single).readAsBytes());
+        await rig.expectArrived(toVm: !toVm, what: 'the copy made while pasting', check: (b) => b['kind'] == 'text' && b['text'] == text);
+        expect(rig.session.ready, isTrue);
       }
     },
   ),
@@ -1796,7 +2059,10 @@ final onPasteScenarios = <String, ({Scenario run, bool dropWaiting, int delayMs}
           }
         },
       ),
-  'a newer copy interrupts a slow paste and only the newer files are served next': (
+  // A paste under way keeps its copy, as RDP locks a paste's clipboard data (OfferRegistry::pasteHold): a newer copy does not cut it
+  // off, and the next paste gets the newer files. (Until 2026-11-13 this scenario expected the older paste to fail, the opposite of
+  // that rule; it failed on the code before the deferred manifest too.)
+  'a newer copy does not cut a slow paste off, and only the newer files are served next': (
     dropWaiting: false,
     delayMs: 20,
     run: (rig) async {
@@ -1804,21 +2070,29 @@ final onPasteScenarios = <String, ({Scenario run, bool dropWaiting, int delayMs}
         final paths = await _makeFiles(rig, {'older.bin': 5 * mib});
         await _onPasteOffer(rig, toVm, paths);
         final first = rig.scratch('superseded');
+        final chunks = _chunks(rig);
         final paste = rig
             .peer(!toVm)
             .request({'cmd': 'paste', 'dest': first.path})
             .then<Object?>((value) => value, onError: (Object error) => error);
+        // Under way means bytes are moving: a copy made before the first file was even admitted is a new copy for that paste.
         await eventually(
-          () => rig.session.transferring,
-          'the older paste to start',
+          () => rig.session.transferring && _chunks(rig) > chunks + 4,
+          'the older paste to move bytes',
         );
         final newer = await _makeFiles(rig, {'newer.bin': 23456});
         await _onPasteOffer(rig, toVm, newer);
+        final older = await paste;
         expect(
-          await paste,
-          anyOf(isA<Exception>(), isA<Error>()),
+          older,
+          isA<Map<dynamic, dynamic>>(),
           reason:
-              'new copy ${toVm ? 'PC to VM' : 'VM to PC'} must interrupt the older paste',
+              'the older paste ${toVm ? 'PC to VM' : 'VM to PC'} goes on after a newer copy: $older; host events: '
+              '${rig.host.events.where((e) => e['event'] == 'emit' || e['event'] == 'recv').map((e) => '${e['event']}:${e['type']}:${e['requestId']}${e['reason'] != null && e['reason'] != '' ? '(${e['reason']})' : ''}').join(' ')}',
+        );
+        expect(
+          await File('${first.path}${Platform.pathSeparator}older.bin').readAsBytes(),
+          await File(paths.single).readAsBytes(),
         );
         final next = rig.scratch('newer');
         await rig.peer(!toVm).request({'cmd': 'paste', 'dest': next.path});
@@ -1984,7 +2258,45 @@ void main() {
             );
             return;
           }
+          if (scenario.key.startsWith('deferred:') && !rig.session.deferredManifest) {
+            markTestSkipped(
+              'This relay predates the deferred manifest; "without the deferred manifest" covers the walked offer it keeps.',
+            );
+            return;
+          }
           await scenario.value.run(rig);
+          expect(rig.relay.closures, isEmpty);
+        } finally {
+          await rig.down();
+        }
+      // The first run of the 200,001-entry scenario makes its fixture (minutes).
+      }, timeout: Timeout(Duration(minutes: scenario.key.contains('200,000') ? 25 : 4)));
+    }
+    // A Host (or relay) without the deferred manifest: a large copy keeps its list from copy time and pastes as before.
+    final withoutDeferred =
+        '${server.key}/onpaste/without the deferred manifest a large folder is walked at copy time and pastes both ways';
+    if (only.isEmpty || withoutDeferred.contains(only)) {
+      test(withoutDeferred, () async {
+        final rig = Rig(server.key, server.value, true, onPaste: true, deferred: false);
+        try {
+          await rig.up();
+          if (!rig.session.limits.onPaste) {
+            markTestSkipped('This relay predates the on-paste revision.');
+            return;
+          }
+          expect(rig.session.deferredManifest, isFalse);
+          final paths = await _bigFolder(rig, 'Walked', 600);
+          final expected = entryKeys(
+            await rig.client.request({'cmd': 'describePaths', 'paths': paths}) as Map,
+          );
+          for (final toVm in [true, false]) {
+            final lists = _listMessages(rig);
+            await _onPasteOffer(rig, toVm, paths);
+            expect(_listMessages(rig), greaterThan(lists), reason: 'without the revision the list crosses at copy time');
+            final destination = rig.scratch('walked-paste');
+            await rig.peer(!toVm).request({'cmd': 'paste', 'dest': destination.path});
+            expect(await _digest(rig, !toVm, destination), expected.join('|'));
+          }
           expect(rig.relay.closures, isEmpty);
         } finally {
           await rig.down();
@@ -2147,6 +2459,97 @@ void main() {
           await rig.down();
         }
       }, timeout: const Timeout(Duration(minutes: 3)));
+    }
+    // File permission and a large copy (announced without its list on a deferred pair): without the permission nothing is announced
+    // and text still flows; the permission revoked while the list is made ends that paste (the relay checks every list request and
+    // every message of one against the live policy, as for files being pulled).
+    for (final toVm in [true, false]) {
+      final name = '${server.key}/onpaste/file permission off: a large copy is not announced, ${toVm ? 'PC to VM' : 'VM to PC'}';
+      if (only.isNotEmpty && !name.contains(only)) continue;
+      test(name, () async {
+        final rig = Rig(server.key, server.value, true, onPaste: true,
+            policy: const ClipboardPolicy(textToRemote: true, textToLocal: true));
+        try {
+          await rig.up();
+          if (!rig.session.limits.onPaste) {
+            markTestSkipped('On-paste revision required.');
+            return;
+          }
+          final paths = await _bigFolder(rig, 'Denied', 400);
+          final sequence = (await rig.board(!toVm))['sequence'];
+          final lists = _listMessages(rig), asked = _listRequests(rig);
+          await rig.peer(toVm).request({'cmd': 'setFiles', 'paths': paths});
+          await Future<void>.delayed(const Duration(milliseconds: 1500));
+          expect((await rig.board(!toVm))['sequence'], sequence, reason: 'a copy of files must not be announced without the permission');
+          expect(_listMessages(rig), lists);
+          expect(_listRequests(rig), asked);
+          final text = 'text still flows ${toVm ? 'to the VM' : 'to the PC'}';
+          await rig.peer(toVm).request({'cmd': 'setText', 'text': text});
+          await rig.expectArrived(toVm: toVm, what: 'text', check: (b) => b['kind'] == 'text' && b['text'] == text);
+          expect(rig.session.ready, isTrue);
+          expect(rig.relay.closures, isEmpty);
+        } finally {
+          await rig.down();
+        }
+      }, timeout: const Timeout(Duration(minutes: 3)));
+    }
+    for (final toVm in [true, false]) {
+      final name = '${server.key}/onpaste/file permission revoked while a large list is made, ${toVm ? 'PC to VM' : 'VM to PC'}';
+      if (only.isNotEmpty && !name.contains(only)) continue;
+      test(name, () async {
+        final rig = Rig(server.key, server.value, true, onPaste: true);
+        try {
+          await rig.up();
+          if (!rig.session.deferredManifest) {
+            markTestSkipped('Deferred manifest (manifest-on-paste-v1) required.');
+            return;
+          }
+          final huge = await _hugeFixture(rig);
+          final folders = (Directory(huge).listSync().whereType<Directory>().map((d) => d.path).toList()..sort()).skip(120).take(60).toList();
+          // The copying side announces copies once it watches its clipboard (the Host about 100 ms after the PC's clipboard.watch on);
+          // a copy made before is the clipboard the watch starts from and is not announced. A text that arrives shows the watch is on
+          // (a readiness probe of this rig, not a retry of what the scenario checks): a new text every 2 s, ten at most.
+          var watching = false;
+          for (var attempt = 1; attempt <= 10 && !watching; ++attempt) {
+            final ready = 'watching ${toVm ? 'on the PC' : 'in the VM'} $attempt';
+            await rig.peer(toVm).request({'cmd': 'setText', 'text': ready});
+            try {
+              await eventually(() async {
+                final board = await rig.board(!toVm);
+                return board['kind'] == 'text' && board['text'] == ready;
+              }, 'a first text', timeout: const Duration(seconds: 2));
+              watching = true;
+            } catch (_) {}
+          }
+          expect(watching, isTrue, reason: 'the copying side never watched its clipboard: ${_hostTrace(rig)}');
+          try {
+            await _onPasteOffer(rig, toVm, folders);
+          } catch (error) {
+            throw StateError('$error; ${_hostTrace(rig)}');
+          }
+          final asked = _listRequests(rig);
+          final destination = rig.scratch('revoked-walk');
+          final paste = rig
+              .peer(!toVm)
+              .request({'cmd': 'paste', 'dest': destination.path}, timeout: const Duration(minutes: 5))
+              .then<Object?>((value) => value, onError: (Object error) => error);
+          await eventually(() => _listRequests(rig) > asked, 'the paste to ask for the list');
+          await rig.relay.setPolicy({'textToRemote': true, 'textToLocal': true, 'filesToRemote': false, 'filesToLocal': false});
+          expect(await paste, anyOf(isA<Exception>(), isA<Error>()), reason: 'the paste ends once files are no longer allowed: ${_hostTrace(rig)}');
+          try {
+            // (A policy change ends the pair at once as clipboard_policy_changed; a message checked against it first, as denied.)
+            await eventually(
+              () => rig.relay.closures.any((reason) => reason == 'clipboard_policy_changed' || reason == 'clipboard_policy_denied'),
+              'the relay to end the pair for the policy',
+            );
+          } catch (error) {
+            throw StateError('$error; ${_hostTrace(rig)}');
+          }
+          expect(destination.listSync(recursive: true).whereType<File>(), isEmpty, reason: 'no file of the revoked copy');
+        } finally {
+          await rig.down();
+        }
+      }, timeout: const Timeout(Duration(minutes: 5)));
     }
     for (final sync in [false, true]) {
       for (final scenario in scenarios.entries) {

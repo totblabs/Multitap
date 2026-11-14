@@ -42,6 +42,9 @@ inline bool streamObservationOk(uint32_t stage,uint32_t error)noexcept{
   // 47: the stream's sound capture (audio_capture_control.hpp): started, restarting and a changed default
   // device are observations; a failed capture is a failure, which the capture itself answers by opening again.
   if(stage==audioCaptureRecordStage)return audioCaptureRecordOk(error);
+  // 48: why a separated session's pointer was shown or hidden over a capture epoch (cursor_channel.hpp
+  // CursorDiagnosis): counts only, all observations.
+  if(stage==48)return true;
   return false;
 }
 // Stage 43 with reason 2 (gpu_capture.hpp gpuPathNoHardwareCapture): the capture ran on WARP or GDI, so the

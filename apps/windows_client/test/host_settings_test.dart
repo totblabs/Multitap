@@ -415,7 +415,7 @@ void main() {
 
   // The overview's ONE status beside the desktop's name.
   String pill(WidgetTester t) => t
-      .widget<HostReadiness>(find.byKey(const Key('host-overview-state')))
+      .widget<HostStatusPill>(find.byKey(const Key('host-overview-state')))
       .label;
 
   // The overview's server line. With a fresh acknowledgement it reads
@@ -756,7 +756,7 @@ void main() {
         expect(serverLine(t), testCase.$3 ? confirmed : isNot(confirmed));
         expect(
           pill(t),
-          testCase.$3 ? '스트리밍 가능' : isNot(contains('스트리밍')),
+          testCase.$3 ? '스트리밍할 수 있어요' : isNot(contains('스트리밍')),
         );
         await t.pumpWidget(const SizedBox());
         await pumpWork(t);
@@ -2346,8 +2346,8 @@ void main() {
       await open(t, api);
       // Unknown is said as unknown: no "stopped", no start button.
       expect(pill(t), 'Host 서비스 확인 필요');
-      // Said once, by the status beside the name (no route line repeats it).
-      expect(find.text('서비스 조회 필요'), findsNothing);
+      // The desktop's point of the route says the service's own state.
+      expect(find.text('서비스 조회 필요'), findsOneWidget);
       expect(find.text('서비스 미설치'), findsNothing);
       expect(find.byKey(const Key('host-service-start')), findsNothing);
       await nav(t, 4);

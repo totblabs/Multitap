@@ -11,7 +11,7 @@ RUN chmod 0555 /bundle && find /bundle -mindepth 1 -maxdepth 1 -type f -exec chm
 
 FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205
 
-ARG MULTITAP_VERSION=1.1.5
+ARG MULTITAP_VERSION=1.1.12
 LABEL org.opencontainers.image.title="multitap-broker" \
       org.opencontainers.image.version="${MULTITAP_VERSION}" \
       org.opencontainers.image.licenses="AGPL-3.0-only"

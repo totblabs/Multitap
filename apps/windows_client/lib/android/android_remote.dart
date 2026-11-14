@@ -16,6 +16,7 @@ import '../data/drive_session.dart';
 import '../data/relative_mouse.dart';
 import '../data/remote_session.dart';
 import '../data/session_failure.dart';
+import '../data/session_gamepads.dart';
 import '../data/stream_display_entry.dart' show restartPollInterval;
 import '../data/stream_size.dart'
     show DecoderLimits, EncodeLimit, nativeDecoderLimits;
@@ -292,6 +293,14 @@ class AndroidRemoteView extends StatefulWidget {
 class _AndroidRemoteViewState extends State<AndroidRemoteView>
     with WidgetsBindingObserver {
   RemoteSession? _session;
+  // gamepad-v1 (session_gamepads.dart, AndroidGamepad.kt).
+  SessionGamepads? _gamepads;
+  void _forgetGamepads() {
+    final gamepads = _gamepads;
+    _gamepads = null;
+    if (gamepads != null) unawaited(gamepads.stop());
+  }
+
   late final _backgroundKeeper = AndroidSessionKeepaliveOwner(
     onDisconnect: _stopFromNotification,
   );
@@ -535,6 +544,13 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     _step(37, ok: state == AppLifecycleState.resumed);
     if (state != AppLifecycleState.resumed) ++_takeoverRevision;
     _session?.setAndroidForeground(state == AppLifecycleState.resumed);
+    // background-video-v1: away (another app, the home screen, the screen
+    // off) the Host sends one picture a second; back in view, every frame.
+    _session?.setBackground(
+      state == AppLifecycleState.hidden || state == AppLifecycleState.paused,
+    );
+    // gamepad-v1: away, nothing stays pressed on the desktop.
+    _gamepads?.setActive(state == AppLifecycleState.resumed);
     switch (state) {
       case AppLifecycleState.inactive:
         // A notification shade or system dialog: keep the stream, release
@@ -758,6 +774,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     final previous = _session, previousMedia = _media;
     previous?.removeListener(_changed);
     previous?.caretUpdates.removeListener(_caretChanged);
+    _forgetGamepads();
     _release();
     _retireTyping();
     setState(() {
@@ -981,6 +998,12 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
       // exact pixel fraction of this screen (one resize after the start).
       _replan();
       unawaited(session.start());
+      // gamepad-v1: this phone's game controllers for a granted session.
+      final gamepads = _gamepads = SessionGamepads(
+        session,
+        channel: androidGamepadChannel,
+      )..setActive(_inFront);
+      unawaited(gamepads.start());
     } catch (error) {
       final failure = SessionFailure.request(error);
       if (mounted && generation == _generation) {
@@ -4352,6 +4375,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   void dispose() {
     _poorLatency.dispose();
     _tvInput.currentState?.cancel();
+    _forgetGamepads();
     ++_generation;
     _clearNotice(rebuild: false);
     _backgroundKeeper.stop();

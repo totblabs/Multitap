@@ -39,7 +39,7 @@ class _PendingNative extends Fake implements NativeClipboardBridge {
   @override
   bool get android => false;
   @override
-  void restrictFormats({required bool text, required bool files}) {}
+  void allowFormats({required bool text, required bool files}) {}
   @override
   bool get supportsPending => true;
   @override
@@ -52,6 +52,11 @@ class _PendingNative extends Fake implements NativeClipboardBridge {
   bool get supportsOnPaste => true;
   @override
   bool get supportsPullQueue => false;
+  // The deferred manifest (manifest-on-paste-v1) is not what these pending-render cases are about.
+  @override
+  bool get supportsDeferred => false;
+  @override
+  set deferred(bool value) {}
   @override
   set pullDepth(int value) {}
   @override

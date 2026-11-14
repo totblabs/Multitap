@@ -62,7 +62,15 @@ enum class UsbStage : uint32_t {
   virtualMouseSummary = 31,
   // The native PlugOut attempt failed: cause=1 returned false, cause=2 threw.
   // This is not a Windows error or evidence that the port remains present.
-  detachFailed = 32 };
+  detachFailed = 32,
+  // The Host's own pointer device for a PC with no mouse (pointer_device.hpp). pointerAttached: expected = the
+  // controller port. pointerFailed: error = why (1..7 the controller's preparation, 20 the loopback server,
+  // 21 the plug-in), expected = a Windows socket error for 20. pointerGone: Windows let go of it while the
+  // service ran (the next stream with no mouse plugs it in again).
+  pointerAttached = 33, pointerFailed = 34, pointerGone = 35,
+  // The gamepads of gamepad-v1 (gamepad_device.hpp): expected = the pad (1..4); gamepadFailed error as
+  // pointerFailed. gamepadGone: Windows let go of a pad while its session ran.
+  gamepadAttached = 36, gamepadFailed = 37, gamepadGone = 38 };
 inline void recordUsbEvent(UsbStage stage, bool ok, uint32_t error = 0, uint32_t count = 0) noexcept {
   recordHostEvent("hostAction", {{"action", 250}, {"stage", int64_t(stage)}, {"ok", ok ? 1 : 0}, {"error", int64_t(error)}, {"expected", int64_t(count)}});
 }

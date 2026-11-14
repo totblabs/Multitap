@@ -134,6 +134,71 @@ void shapes() {
   check(!cursor::extractScaled(nullptr, 1.5) && !cursor::extractShown(nullptr), "no cursor, no shape");
 }
 
+// The cursor drawn into the video (cursor-compose-v1, VideoCursor): the size, hotspot and picture Windows shows, never the session's
+// SM_CXCURSOR. Measured by drawing it into a DIB the way the capture does (DrawIconEx at the draw size) and finding what it covers.
+struct Box { int left = 1 << 30, top = 1 << 30, right = -1, bottom = -1; int width() const { return right < left ? 0 : right - left + 1; } int height() const { return bottom < top ? 0 : bottom - top + 1; } };
+Box drawnBox(HCURSOR shape, int width, int height) {
+  const int side = 300; BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER); info.bmiHeader.biWidth = side; info.bmiHeader.biHeight = -side; info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
+  void* bits = nullptr; const HDC screen = GetDC(nullptr); const HDC dc = CreateCompatibleDC(screen);
+  const HBITMAP bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, nullptr, 0); ReleaseDC(nullptr, screen);
+  Box box;
+  if (bitmap && bits) {
+    const HGDIOBJ previous = SelectObject(dc, bitmap);
+    auto* pixels = static_cast<uint32_t*>(bits); for (int i = 0; i < side * side; ++i) pixels[i] = 0x00808080;  // grey: inverting pixels show too
+    DrawIconEx(dc, 10, 10, shape, width, height, 0, nullptr, DI_NORMAL); GdiFlush();
+    for (int y = 0; y < side; ++y) for (int x = 0; x < side; ++x) if ((pixels[y * side + x] & 0x00ffffff) != 0x00808080) { box.left = std::min(box.left, x); box.top = std::min(box.top, y); box.right = std::max(box.right, x); box.bottom = std::max(box.bottom, y); }
+    SelectObject(dc, previous); DeleteObject(bitmap);
+  }
+  DeleteDC(dc); return box;
+}
+struct Icon {
+  ICONINFO value{};
+  explicit Icon(HCURSOR handle) { if (!GetIconInfo(handle, &value)) value = ICONINFO{}; }
+  ~Icon() { if (value.hbmMask) DeleteObject(value.hbmMask); if (value.hbmColor) DeleteObject(value.hbmColor); }
+};
+void video() {
+  cursor::VideoCursor video;
+  for (const auto id : {IDC_ARROW, IDC_IBEAM, IDC_HAND}) {
+    const HCURSOR handle = LoadCursorW(nullptr, id); const Icon icon(handle);
+    const auto own = cursor::extract(handle); if (!own) { check(false, "a system cursor is readable"); continue; }
+    for (const double factor : {1.0, 1.5, 2.0}) {
+      const auto shown = cursor::shownCursor(icon.value, factor);
+      const SIZE want = cursor::shownSize(own->width, own->height, factor);
+      check(shown.width == want.cx && shown.height == want.cy, "video: the cursor is drawn at the size Windows shows it");
+      check(std::abs(shown.hotspotX - double(icon.value.xHotspot) * factor) <= 1.0 && std::abs(shown.hotspotY - double(icon.value.yHotspot) * factor) <= 1.0, "video: the hotspot moves with the size (an I-beam on its point)");
+      const HCURSOR drawn = video.shape(handle, icon.value, shown.width, shown.height);
+      if (factor == 1.0) { check(drawn == handle, "video: at its own size the cursor itself is drawn"); continue; }
+      const Icon copy(drawn); BITMAP bitmap{};
+      const bool sized = copy.value.hbmColor ? GetObjectW(copy.value.hbmColor, sizeof(bitmap), &bitmap) && bitmap.bmWidth == shown.width && bitmap.bmHeight == shown.height
+                                             : GetObjectW(copy.value.hbmMask, sizeof(bitmap), &bitmap) && bitmap.bmWidth == shown.width && bitmap.bmHeight == shown.height * 2;
+      check(drawn != handle && sized, "video: a copy Windows made at the shown size is drawn");
+      check(video.shape(handle, icon.value, shown.width, shown.height) == drawn, "video: the copy is reused");
+      // What lands in the picture is that many times larger than the session's own size drew it.
+      const Box before = drawnBox(handle, own->width, own->height), after = drawnBox(drawn, shown.width, shown.height);
+      check(before.width() > 0 && after.width() > 0 && std::abs(double(after.width()) / before.width() - factor) <= 0.2 && std::abs(double(after.height()) / before.height() - factor) <= 0.2,
+            "video: the drawn cursor is that many times larger");
+      if (id == IDC_ARROW) std::printf("video arrow at %.1fx: drawn %dx%d (own size drew %dx%d)\n", factor, after.width(), after.height(), before.width(), before.height());
+    }
+  }
+  // An application's own large cursor (a game's 64 x 64): drawn at 64, not squeezed to the session's 32.
+  {
+    const auto big = make(64, 64, false); const Icon icon(big.value);
+    const auto shown = cursor::shownCursor(icon.value, 1.0);
+    check(shown.width == 64 && shown.height == 64 && shown.hotspotX == 16 && shown.hotspotY == 32, "video: a 64-pixel cursor of its own size stays 64");
+    const Box box = drawnBox(video.shape(big.value, icon.value, 64, 64), 64, 64);
+    check(box.width() == 60 && box.height() == 60, "video: all of it lands in the picture (the 2-pixel border is transparent)");
+    POINT where{}; GetCursorPos(&where);
+    const auto live = video.shown(big.value, where, icon.value);
+    check(live.width == 64 && live.height == 64, "video: a cursor that is not a system cursor keeps its size on a 100 % output under a per-monitor aware window");
+  }
+  // Many sizes: the copies are bounded (the oldest is destroyed), and each one still has its size.
+  {
+    const HCURSOR arrow = LoadCursorW(nullptr, IDC_ARROW); const Icon icon(arrow); bool all = true;
+    for (int size = 33; size < 53; ++size) { const Icon copy(video.shape(arrow, icon.value, size, size)); BITMAP bitmap{}; all = all && GetObjectW(copy.value.hbmColor ? copy.value.hbmColor : copy.value.hbmMask, sizeof(bitmap), &bitmap) && bitmap.bmWidth == size; }
+    check(all, "video: twenty sizes in a row, each drawn at its own size");
+  }
+}
+
 // On this machine, at whatever scale its output has now (read only): the
 // system arrow goes out at the nominal cursor size of that output.
 void here() {
@@ -159,7 +224,7 @@ void here() {
 
 int main() {
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);  // as the Host worker (main.cpp)
-  decision(); shapes(); here();
+  decision(); shapes(); video(); here();
   std::printf("checks=%u failed=%u\n", checks, failed);
   return failed ? 1 : 0;
 }

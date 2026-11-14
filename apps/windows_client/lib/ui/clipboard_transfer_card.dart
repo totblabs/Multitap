@@ -549,7 +549,10 @@ class ClipboardTransferController extends ChangeNotifier {
           ].join(' · ')
         : '';
     final destination = _destination?.confirmed;
-    final what = stage == TransferStage.preparing
+    // A deferred copy's list is being walked: the number of items found so far (a real count, no percentage).
+    final what = progress.listed != null
+        ? l10n.listingItems(groupDigits(progress.listed!))
+        : stage == TransferStage.preparing
         ? l10n.preparing2
         : _what(progress);
     return TransferCardView(

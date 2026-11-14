@@ -214,8 +214,61 @@ HostProblem? hostMainProblem(HostFacts f) {
 bool hostStreamable(HostFacts f) =>
     f.loaded && !hostProblems(f).any((problem) => problem.blocksStreaming);
 
-/// The tone of a status: fine, needs the user, or not known yet.
+/// The tone of a status: fine, needs the user, or not known yet; also one point or leg of the route.
 enum HostRouteState { ok, warn, idle }
+
+/// 이 데스크톱 → 서버 → 클라이언트 (the overview's route picture; removed on 2026-11-11 and back on 2026-11-14 at the owner's word).
+///
+/// The desktop is judged by what must be true on this Windows (service,
+/// install, restart, recovery, sign-in, virtual screen) and the server by the
+/// registration and its fresh acknowledgement. With the service off the Host
+/// cannot know the server's state, so the server is [HostRouteState.idle]
+/// then. The settings status says nothing about clients: the client end is
+/// [HostRouteState.ok] only when a client could connect now and is idle
+/// otherwise; it is never a problem of its own.
+class HostRoute {
+  const HostRoute({
+    required this.desktop,
+    required this.server,
+    required this.client,
+    required this.toServer,
+    required this.toClient,
+  });
+  final HostRouteState desktop, server, client, toServer, toClient;
+}
+
+HostRoute hostRoute(HostFacts f) {
+  if (!f.loaded) {
+    return const HostRoute(
+      desktop: HostRouteState.idle,
+      server: HostRouteState.idle,
+      client: HostRouteState.idle,
+      toServer: HostRouteState.idle,
+      toClient: HostRouteState.idle,
+    );
+  }
+  final problems = hostProblems(f).where((p) => p.blocksStreaming).toList();
+  bool server(HostProblem p) =>
+      p == HostProblem.serverUnregistered ||
+      p == HostProblem.serverApproval ||
+      p == HostProblem.serverOffline;
+  final desktop = problems.any((p) => !server(p))
+      ? HostRouteState.warn
+      : HostRouteState.ok;
+  final serverState = f.serviceRunning != true
+      ? HostRouteState.idle
+      : problems.any(server)
+      ? HostRouteState.warn
+      : HostRouteState.ok;
+  final open = problems.isEmpty;
+  return HostRoute(
+    desktop: desktop,
+    server: serverState,
+    client: open ? HostRouteState.ok : HostRouteState.idle,
+    toServer: open ? HostRouteState.ok : HostRouteState.warn,
+    toClient: open ? HostRouteState.ok : HostRouteState.idle,
+  );
+}
 
 /// What kind of machine this Host is, as far as the settings status tells.
 /// The status has no field for it; the only trace is the desktop id the

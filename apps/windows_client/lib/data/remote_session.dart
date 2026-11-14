@@ -13,6 +13,8 @@ import 'client_diagnostic_codes.dart';
 import 'connect_timing.dart';
 import 'input_latency.dart';
 import 'remote_cursor.dart';
+import 'background_video.dart';
+import 'gamepad.dart';
 import 'relay_inbox.dart';
 import 'notices.dart' show noticeLiveFeature;
 import 'relay_socket.dart';
@@ -1442,6 +1444,55 @@ class RemoteSession extends ChangeNotifier {
     return true;
   }
 
+  /// background-video-v1 was granted: [setBackground] tells the Host that the
+  /// remote view is hidden (one picture a second) or shown again (every
+  /// frame, starting with an IDR).
+  bool get backgroundVideo => connection.backgroundVideo;
+  bool _background = false, _backgroundHidOnce = false;
+  bool get background => _background;
+
+  /// False, with nothing sent, when not granted or closed. A repeated value
+  /// sends nothing; the Host starts every session shown. While the socket is
+  /// being replaced nothing can be sent: the value is sent again once it is
+  /// back ([_backgroundAfterResume]).
+  bool setBackground(bool hidden) {
+    if (!backgroundVideo || _closed) return false;
+    if (hidden == _background) return true;
+    _background = hidden;
+    if (hidden) _backgroundHidOnce = true;
+    _send(backgroundVideoMessage(hidden));
+    return true;
+  }
+
+  /// gamepad-v1 was granted: [sendGamepad] carries one protocol message
+  /// (gamepad.dart's GamepadForwarder makes them) and [gamepadRumble] the
+  /// Host's rumble for this session's pads.
+  bool get gamepad => connection.gamepad;
+  final _gamepadRumble = StreamController<GamepadRumble>.broadcast();
+  Stream<GamepadRumble> get gamepadRumble => _gamepadRumble.stream;
+
+  /// False, with nothing sent, when not granted, closed or not connected.
+  bool sendGamepad(Map<String, Object?> message) {
+    if (!gamepad || _closed || _socket == null || _resumingTransport) {
+      if (gamepad) _gamepadTally.message(message, taken: false);
+      return false;
+    }
+    _send(message);
+    _gamepadTally.message(message, taken: true);
+    return true;
+  }
+
+  /// gamepad-v1 counts for the statistics rows (gamepadStatsFields).
+  final _gamepadTally = GamepadTally();
+
+  /// A request sent just before the socket was lost may never have reached
+  /// the Host: a session that ever hid says where it stands again.
+  void _backgroundAfterResume() {
+    if (backgroundVideo && _backgroundHidOnce && !_closed) {
+      _send(backgroundVideoMessage(_background));
+    }
+  }
+
   /// After compose off the video still carries the VM's cursor until the
   /// Host's next tick (one round trip). Meanwhile no local cursor is shown:
   /// cursor records wait here and the view keeps its fallback pointer away.
@@ -2485,7 +2536,10 @@ class RemoteSession extends ChangeNotifier {
     } finally {
       _resumingTransport = false;
       if (!_closed) {
-        if (replaced) _channelsAfterResume();
+        if (replaced) {
+          _channelsAfterResume();
+          _backgroundAfterResume();
+        }
         notifyListeners();
       }
     }
@@ -3078,6 +3132,13 @@ class RemoteSession extends ChangeNotifier {
             textureId != null) {
           _latency?.tagged(event, _clock.elapsedMicroseconds);
         }
+      // gamepad-v1 (only relayed for a granted connection).
+      case 'gamepad.rumble':
+        if (!gamepad) return;
+        final rumble = GamepadRumble.parse(event);
+        if (rumble == null) throw const FormatException();
+        _gamepadTally.rumble();
+        if (!_gamepadRumble.isClosed) _gamepadRumble.add(rumble);
       // caret-v1 (only relayed for a granted connection).
       case 'caret':
         if (!caretSupported || event['sessionId'] != connection.sessionId) {
@@ -3953,6 +4014,7 @@ class RemoteSession extends ChangeNotifier {
       statsSink?.call({
         ...values,
         if (_tracks != null) 'monitors': _tracks.tracks.length,
+        ..._gamepadTally.take(granted: gamepad),
       });
     } catch (_) {
       // Diagnostics never affect the session.
@@ -4598,6 +4660,7 @@ class RemoteSession extends ChangeNotifier {
     _send({'type': 'input.reset'});
     if (notifyHost) _send({'type': 'session.stop'});
     _closed = true;
+    unawaited(_gamepadRumble.close());
     _mediaRevision++;
     _captureRevision++;
     final pending = _resize;

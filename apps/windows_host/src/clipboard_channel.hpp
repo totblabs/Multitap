@@ -90,7 +90,7 @@ class ClipboardChannel {
       checked(WinHttpSetOption(request.handle,WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET,nullptr,0),"Clipboard relay WebSocket");
       // A fresh attempt repeats authenticated capability negotiation. No old
       // message or transfer survives it; released relays ignore unknown headers.
-      const auto authorization=L"Authorization: Host "+wide(credentials.token)+L"\r\nX-Multitap-Clipboard-Limits: 2\r\nX-Multitap-Clipboard-Formats: 2\r\nX-Multitap-Clipboard-Pull: 1\r\nX-Multitap-Clipboard-Scale: 1\r\nX-Multitap-Clipboard-OnPaste: 1\r\nX-Multitap-Clipboard-Settled: 1\r\nX-Multitap-Clipboard-Intent: 1\r\nX-Multitap-Clipboard-PullQueue: 1\r\n";
+      const auto authorization=L"Authorization: Host "+wide(credentials.token)+L"\r\nX-Multitap-Clipboard-Limits: 2\r\nX-Multitap-Clipboard-Formats: 2\r\nX-Multitap-Clipboard-Pull: 1\r\nX-Multitap-Clipboard-Scale: 1\r\nX-Multitap-Clipboard-OnPaste: 1\r\nX-Multitap-Clipboard-Settled: 1\r\nX-Multitap-Clipboard-Intent: 1\r\nX-Multitap-Clipboard-PullQueue: 1\r\nX-Multitap-Clipboard-Deferred: 1\r\n";
       checked(WinHttpSendRequest(request.handle,authorization.c_str(),DWORD(-1),WINHTTP_NO_REQUEST_DATA,0,0,0),"Clipboard relay connect");
       checked(WinHttpReceiveResponse(request.handle,nullptr),"Clipboard relay response");
       DWORD status=0,length=sizeof(status);
@@ -100,11 +100,16 @@ class ClipboardChannel {
       if(!web)checked(FALSE,"Clipboard relay upgrade");
       {std::lock_guard lock(mutex_);if(quitting_){WinHttpCloseHandle(web);return;}socket_=web;retryAllowed_=true;}
       sender=std::thread([this]{
-        try{while(!stopped_){std::string json;
+        // How many messages of this connection reached the socket, told to the worker (clipboard.flow, never sent to the relay) every
+        // 16 messages and whenever the queue is empty: a list's pages have no window of their own, and the worker sends the next page
+        // only while few are still queued here (the bounds below would end the channel).
+        uint64_t written=0;
+        try{while(!stopped_){std::string json;bool drained=false;
           {std::unique_lock lock(mutex_);condition_.wait(lock,[this]{return stopped_||!queue_.empty();});
-            if(stopped_)break;json=std::move(queue_.front());queue_.pop_front();bytes_-=json.size();}
+            if(stopped_)break;json=std::move(queue_.front());queue_.pop_front();bytes_-=json.size();drained=queue_.empty();}
           const auto sent=sendWebSocketMessageOn(socket_.load(),true,json.data(),json.size());
           if(sent!=NO_ERROR){if(!stopped_)retryAllowed_=transientNetworkError(sent);break;}
+          if((++written%16==0||drained)&&receive_)try{receive_("{\"type\":\"clipboard.flow\",\"sent\":"+std::to_string(written)+'}');}catch(...){}
         }}catch(...){}close();
       });
       std::array<char,16384> buffer{};std::string json;

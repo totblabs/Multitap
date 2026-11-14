@@ -47,6 +47,10 @@ if (-not $SkipTests) {
     # A connection that comes back (resume, side channels dialled again), the cursor's size above 100 %, standard accounts, Console.
     # USB: descriptor policy (shared vectors), session core, controller protection sequence (no driver installed).
     'MultitapHostUsbRedirectionTest',
+    # The Host's own pointer device for a PC with no mouse (fake kernel over loopback, substituted controller).
+    'MultitapHostPointerDeviceTest',
+    # gamepad-v1: the virtual Xbox 360 controllers (fake kernel over loopback, substituted controller).
+    'MultitapHostGamepadDeviceTest',
     # The UAC helper's scope: SYSTEM on Winlogon of the unlocked session, and a security prompt in front.
     'MultitapHostSecureDesktopScopeTest','MultitapHostSecureDesktopBridgeTest',
     # Printing: queue lifecycle with a substituted spooler (a queue that cannot be deleted is quarantined), listener.

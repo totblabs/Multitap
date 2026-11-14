@@ -168,6 +168,9 @@ class _Transfer {
   /// A paste-pull offer: only the manifest crosses; the bytes follow when pasted.
   bool offer = false;
 
+  /// A deferred offer (manifest-on-paste-v1): published without a list, which the paste asks for.
+  bool deferredOffer = false;
+
   /// A received offer has been handed to the platform (its data object is on the clipboard).
   bool published = false;
   bool cancelled = false;
@@ -303,6 +306,17 @@ class ClipboardSession extends ChangeNotifier {
 
   bool _pullQueue = false;
 
+  /// Deferred manifest builds on the on-paste revision; only a bridge that can walk a copy when it is pasted announces it.
+  bool get _deferredSupported {
+    final bridge = _bridge;
+    return _onPasteSupported && bridge is ClipboardDeferredBridge && (bridge as ClipboardDeferredBridge).supportsDeferred;
+  }
+
+  bool _deferredProtocol = false;
+
+  /// Whether the relay confirmed the deferred manifest for this pair (tests, diagnostics).
+  bool get deferredManifest => _deferredProtocol;
+
   /// The on-paste bridge once the relay confirmed the revision for this pair.
   ClipboardOnPasteBridge? get _onPasteBridge =>
       _limits.onPaste && _bridge is ClipboardOnPasteBridge
@@ -323,6 +337,7 @@ class ClipboardSession extends ChangeNotifier {
     if (_intentSupported) clipboardIntentHeader: clipboardIntentHeaderValue,
     if (_pullQueueSupported)
       clipboardPullQueueHeader: clipboardPullQueueHeaderValue,
+    if (_deferredSupported) clipboardDeferredHeader: clipboardDeferredHeaderValue,
   };
 
   Future<WebSocket> _dial(Uri url, String token) => connectRelaySocket(
@@ -794,6 +809,8 @@ class ClipboardSession extends ChangeNotifier {
           // has just been published stalls behind its own
           // clipboard.complete until the user cancels it).
           final decoded = _decode(message), id = decoded?['requestId'];
+          // The end of a list this side is walking stops the walk now: the walk itself holds the pull lane.
+          if (_pulls?.endWalk(decoded) == true) return;
           if (_pulls != null &&
               id is String &&
               clipboardPullIdPattern.hasMatch(id)) {
@@ -1228,6 +1245,34 @@ class ClipboardSession extends ChangeNotifier {
             capture!.format == 'text' ||
             capture!.format == 'files',
       );
+      // Deferred manifest: files were copied and that is all that goes out now (no list); the VM's paste asks for the list, which
+      // is walked then (ClipboardPulls). The pair's limits are checked on that list.
+      if (capture!.deferred) {
+        _require(
+          _deferredProtocol &&
+              capture!.offer &&
+              capture!.format == 'tree' &&
+              capture!.items.isEmpty,
+        );
+        transfer
+          ..format = 'tree'
+          ..offer = true
+          ..entries = const []
+          ..items = const []
+          ..treeTops = capture!.tops
+          ..treeSkipped = 0
+          ..stage = 'commit';
+        status = l10n.preparingPaste;
+        _pulls?.offerSent(transfer.id, const []);
+        _send({
+          'type': 'clipboard.offer',
+          'requestId': transfer.id,
+          'format': 'tree',
+          'deferred': true,
+        });
+        notifyListeners();
+        return;
+      }
       _validateManifest(capture!.format, capture!.items, tops: capture!.tops);
       transfer.format = capture!.format;
       if (capture!.offer) {
@@ -1696,18 +1741,21 @@ class ClipboardSession extends ChangeNotifier {
           if (value.containsKey('clipboardSettled')) 'clipboardSettled',
           if (value.containsKey('clipboardIntent')) 'clipboardIntent',
           if (value.containsKey('clipboardPullQueue')) 'clipboardPullQueue',
+          if (value.containsKey('clipboardDeferred')) 'clipboardDeferred',
         ]);
         _require(
           !ready &&
               value['sessionId'] == sessionId &&
               value['protocol'] == 'clipboard-v1',
         );
-        _allowed = policy.intersect(
-          ClipboardPolicy.fromJson(value['clipboardPolicy']),
-        );
+        // The relay's policy of this pair is the administrator's setting now (it checks every message against it): an
+        // administrator who allows files while a stream runs makes the relay end the pair, and the next pair's ready
+        // carries the new setting. The stream's start (`policy`) is only a snapshot: intersected with it, a widened
+        // setting never took effect until the stream was opened again.
+        _allowed = ClipboardPolicy.fromJson(value['clipboardPolicy']);
         final native = _bridge;
         if (native is NativeClipboardBridge) {
-          native.restrictFormats(
+          native.allowFormats(
             text: _allowed.textToRemote,
             files: _allowed.filesToRemote,
           );
@@ -1758,6 +1806,16 @@ class ClipboardSession extends ChangeNotifier {
           (native as ClipboardPullQueueBridge).pullDepth = _pullQueue
               ? clipboardPullQueueDepth
               : 1;
+        }
+        _deferredProtocol = value.containsKey('clipboardDeferred');
+        _require(
+          !_deferredProtocol ||
+              (_deferredSupported &&
+                  negotiated.onPaste &&
+                  value['clipboardDeferred'] == clipboardDeferredProtocol),
+        );
+        if (native is ClipboardDeferredBridge) {
+          (native as ClipboardDeferredBridge).deferred = _deferredProtocol;
         }
         _limits = negotiated;
         if (native is ClipboardFormatsBridge) {
@@ -1824,6 +1882,9 @@ class ClipboardSession extends ChangeNotifier {
             linger: pullLinger,
             onPaste: _onPasteBridge,
             depth: _pullQueue ? clipboardPullQueueDepth : 1,
+            deferred: _deferredProtocol ? native as ClipboardDeferredBridge : null,
+            validateTree: (entries, tops) => _validateManifest('tree', entries, tops: tops),
+            wireReason: (code, detail) => _wireReason(code, detail),
           )..start();
         }
         ready = true;
@@ -2175,6 +2236,24 @@ class ClipboardSession extends ChangeNotifier {
           );
           // A newer copy replaces what an application may be blocked on (it would hold up the platform thread we publish on).
           await _onPasteBridge?.pullSupersede(_owner);
+          // A deferred copy: published at once without a list; the paste asks the Host for it (ClipboardPulls).
+          if (value.containsKey('deferred')) {
+            _fields(value, ['type', 'requestId', 'format', 'deferred']);
+            _require(
+              _deferredProtocol &&
+                  offerFormat == 'tree' &&
+                  value['deferred'] == true,
+            );
+            active
+              ..format = 'tree'
+              ..offer = true
+              ..deferredOffer = true
+              ..items = const []
+              ..entries = const [];
+            totalBytes = 0;
+            await _publishOffer(active);
+            break;
+          }
           if (offerFormat == 'tree') {
             _beginTree(active, value, offer: true);
             status = l10n.preparingPaste;
@@ -2497,16 +2576,23 @@ class ClipboardSession extends ChangeNotifier {
     active.step = 7;
     final onPaste = _onPasteBridge;
     final prepared = active.pendingBound;
+    void register() => active.deferredOffer
+        ? _pulls?.offerPublishedDeferred(active.id)
+        : _pulls?.offerPublished(active.id, active.entries, format: active.format);
     if (prepared) {
       // A consumer is already waiting in GetData. Its first pull may race the
       // native publication reply, so validated metadata must exist beforehand.
       // This registers no bytes and reports no publication acknowledgement.
-      _pulls?.offerPublished(active.id, active.entries, format: active.format);
+      register();
     }
     try {
       await _deliver(active, () async {
         if (_current(active)) {
-          if (onPaste != null) {
+          if (active.deferredOffer) {
+            // Registered before publishing: the first paste may ask for the list before the reply returns.
+            if (!prepared) register();
+            await (_bridge as ClipboardDeferredBridge).publishDeferredOffer(_owner, active.id);
+          } else if (onPaste != null) {
             await onPaste.publishOfferOnPaste(
               _owner,
               active.id,
@@ -2542,7 +2628,7 @@ class ClipboardSession extends ChangeNotifier {
         }
       });
     } catch (_) {
-      if (prepared) {
+      if (prepared || active.deferredOffer) {
         _pulls?.offerWithdrawn(active.id);
         try {
           await _onPasteBridge?.pullRetire(_owner, active.id);
@@ -2551,9 +2637,7 @@ class ClipboardSession extends ChangeNotifier {
       rethrow;
     }
     if (!_current(active)) return;
-    if (!prepared) {
-      _pulls?.offerPublished(active.id, active.entries, format: active.format);
-    }
+    if (!prepared && !active.deferredOffer) register();
     active.stage = 'commit';
     _send({'type': 'clipboard.applied', 'requestId': active.id});
     status = active.format == 'tree' ? l10n.filesArriveWhenYouPaste : l10n.arrivesWhenYouPaste;
@@ -2789,12 +2873,14 @@ class ClipboardSession extends ChangeNotifier {
   /// [record] is false for a served range that failed together with an
   /// earlier one of the same paste: the user still sees it, the log has the
   /// first one only.
-  void _pullFailed(String code, {bool sending = false, bool record = true}) {
+  void _pullFailed(String reason, {bool sending = false, bool record = true}) {
     if (_closed) return;
+    // A deferred list request ends with the limit its walk met (entries, path, depth): the limits message names it.
+    final (code, detail) = specificLimit(reason);
     error = code;
-    errorDetail = null;
+    errorDetail = detail;
     failureQuiet = false;
-    status = _failureStatus(code);
+    status = _failureStatus(code, detail);
     if (record) {
       // action 8: a pulled file did not arrive. Pull-wire reasons the
       // diagnostic code set lacks (clipboard_offer_expired,

@@ -25,6 +25,13 @@ using Bytes = std::vector<uint8_t>;
 inline constexpr uint16_t vendor = 0x1209, product = 0x0001;
 inline constexpr uint8_t endpoint = 0x81;
 inline constexpr size_t reportLength = 7;
+// Which of Multitap's two virtual mice answers: the game mouse above (relayed from the client, usb_core.hpp)
+// or the Host's own pointer device (pointer_device.hpp), the same mouse that never moves, which a PC with no
+// mouse attached gets so that Windows shows its pointer. Only the product number and the strings differ, so
+// Windows never takes one for the other (vmDeviceState looks a device up by vendor and product).
+struct Identity { uint16_t product; const char* name; const char* serial; };
+inline constexpr Identity gameMouse{product, "Multitap Game Mouse", "MULTITAP-GAME-MOUSE"};
+inline constexpr Identity pointer{0x0002, "Multitap Pointer", "MULTITAP-POINTER"};
 
 inline const Bytes& reportDescriptor() {
   static const Bytes bytes{
@@ -37,8 +44,8 @@ inline const Bytes& reportDescriptor() {
       0xC0, 0xC0};
   return bytes;
 }
-inline Bytes deviceDescriptor() {
-  return {18, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 64, vendor & 0xFF, vendor >> 8, product & 0xFF, product >> 8, 0x00, 0x01, 1, 2, 3, 1};
+inline Bytes deviceDescriptor(const Identity& who = gameMouse) {
+  return {18, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 64, vendor & 0xFF, vendor >> 8, uint8_t(who.product & 0xFF), uint8_t(who.product >> 8), 0x00, 0x01, 1, 2, 3, 1};
 }
 // Configuration, interface, HID and endpoint descriptors together (34 bytes).
 inline Bytes configurationDescriptor() {
@@ -58,9 +65,9 @@ inline bool matches(const uint8_t* data, size_t size) { return data && size == d
 
 // String 0 is the language list (US English); 1 maker, 2 product, 3 serial
 // (one fixed serial, so the VM keeps one device instance across sessions).
-inline std::optional<Bytes> stringDescriptor(unsigned index) {
+inline std::optional<Bytes> stringDescriptor(unsigned index, const Identity& who = gameMouse) {
   if (index == 0) return Bytes{4, 0x03, 0x09, 0x04};
-  const char* text = index == 1 ? "ToTB" : index == 2 ? "Multitap Game Mouse" : index == 3 ? "MULTITAP-GAME-MOUSE" : nullptr;
+  const char* text = index == 1 ? "ToTB" : index == 2 ? who.name : index == 3 ? who.serial : nullptr;
   if (!text) return std::nullopt;
   Bytes out{0, 0x03};
   for (const char* c = text; *c; ++c) { out.push_back(uint8_t(*c)); out.push_back(0); }
@@ -85,15 +92,15 @@ inline bool join(Bytes& into, const Bytes& next) {
 // The answer to one control request: status 0 or -EPIPE (stall), and the
 // bytes of an IN transfer (at most wLength). [last]: the newest report.
 struct ControlAnswer { int32_t status = -32; Bytes data; };
-inline ControlAnswer control(const uint8_t* setup, const Bytes& last) {
+inline ControlAnswer control(const uint8_t* setup, const Bytes& last, const Identity& who = gameMouse) {
   const unsigned type = setup[0], request = setup[1], value = unsigned(setup[2] | setup[3] << 8), length = unsigned(setup[6] | setup[7] << 8);
   std::optional<Bytes> data;
   bool ok = true;
   if (type == 0x80 && request == 6) {
     const unsigned kind = value >> 8, index = value & 0xFF;
-    if (kind == 1 && index == 0) data = deviceDescriptor();
+    if (kind == 1 && index == 0) data = deviceDescriptor(who);
     else if (kind == 2 && index == 0) data = configurationDescriptor();
-    else if (kind == 3) data = stringDescriptor(index);
+    else if (kind == 3) data = stringDescriptor(index, who);
     ok = data.has_value();
   } else if (type == 0x81 && request == 6) {
     if (value >> 8 == 0x22) data = reportDescriptor();

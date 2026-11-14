@@ -80,6 +80,8 @@
 #include "display_scale.hpp"
 #include "print_redirection.hpp"
 #include "usb_redirection.hpp"
+#include "pointer_device.hpp"
+#include "gamepad_device.hpp"
 #include "desktop_name.hpp"
 #include "ime_state_native.hpp"
 
@@ -684,7 +686,7 @@ class ServiceBridge final : public AgentBridge {
     // rdpSupported and rdpEnabled are always false: the Host has no RDP, and the
     // broker requires both booleans in every capability report.
     // keyframe-v1: stream.keyframe reaches the worker as an IDR request (keyFrame()).
-    const auto original="{\"observabilityProtocol\":\"stream-observability-v1\",\"streamSizeProtocol\":\"stream-size-v1\",\"streamSizeProtocols\":[\"stream-size-v1\",\"stream-size-v2\"],\"sessionStopProtocol\":\"stop-v1\",\"keyFrameProtocol\":\"" + std::string(keyFrameProtocol) + "\",\"hostResumeProtocol\":\"" + std::string(hostResumeProtocol) + "\",\"hostChannelResumeProtocol\":\"" + std::string(channelResumeProtocol) + "\",\"udpMediaProtocol\":\"" + std::string(udpMediaProtocol) + "\",\"udpDirectHostProtocol\":\"udp-direct-v1\",\"udpTracksHostProtocol\":\"udp-tracks-v1\",\"audioCodecProtocol\":\"" + std::string(audioOpusProtocol) + "\",\"audioCodecTracksProtocol\":\"" + std::string(audioOpusTracksProtocol) + "\",\"trackResumeProtocol\":\"" + std::string(trackResumeProtocol) + "\",\"bitrateProtocol\":\"" + std::string(bitrateAdaptiveProtocol) + "\",\"maxBitrate\":" + std::to_string(adaptiveMaximumBitrate) + ",\"inputLatencyProtocol\":\"" + std::string(inputLatencyProtocol) + "\",\"cursorProtocol\":\"" + std::string(cursor::protocol) + "\",\"cursorTracksProtocol\":\"" + std::string(cursor::tracksProtocol) + "\",\"cursorEchoProtocol\":\"" + std::string(cursor::echoProtocol) + "\",\"cursorComposeProtocol\":\"" + std::string(cursor::composeProtocol) + "\",\"textInputProtocol\":\"" + std::string(textInputProtocol) + "\",\"displayScaleProtocol\":\"" + std::string(displayScaleProtocolName) + "\",\"displayScaleOutputsProtocol\":\"" + std::string(displayScaleOutputsProtocolName) + "\",\"touchInputProtocol\":\"" + std::string(touchInputProtocol) + "\",\"relativeMouseProtocol\":\"" + std::string(relativeMouseProtocol) + "\",\"relativeMouseTracksProtocol\":\"" + std::string(relativeMouseTracksProtocol) + "\",\"caretProtocol\":\"" + std::string(caretProtocol) + "\"" + printCapabilityFields() + usbCapabilityFields() + (interactive && driveCapable() ? ",\"driveProtocol\":\"" + std::string(drive::protocol) + "\"" + (driveFsCapable() ? ",\"driveFs\":true" : "") : std::string()) + (interactive && !driveCapable() ? ",\"driveUnavailableReason\":\"drive_webclient_unavailable\"" : std::string()) + ",\"diagnosticsSupported\":true,\"imeStateProtocol\":\"" + std::string(ime::protocol) + "\",\"service\":true,\"interactiveSession\":" + std::string(interactive ? "true" : "false") + ",\"streaming\":" + (!maintenance&&interactive && display.ready() && captureAvailable ? "true" : "false") + ",\"rdpSupported\":false,\"rdpEnabled\":false,\"virtualDisplayReady\":" + (!maintenance&&display.ready() ? "true" : "false") + ",\"clipboard\":" + (!maintenance&&interactive && captureAvailable && display.ready() && display.clipboardSupported ? "true" : "false") + ",\"clipboardSync\":" + (!maintenance&&interactive && captureAvailable && display.ready() && display.clipboardSupported ? "true" : "false") + ",\"virtualMonitorControl\":" + (!maintenance&&interactive && captureAvailable && console && display.ready() && display.monitorControlSupported ? "true" : "false") + ",\"dynamicResolution\":"+(viewport?"true":"false")+",\"viewportProvisioning\":"+(viewport?"true":"false")+",\"viewportFailureReason\":"+jsonQuote(viewportReason)+(viewport?",\"resizeProtocol\":\"epoch-v1\"":"")+consoleFields+thumbnailFields+",\"monitors\":"+monitors+'}';
+    const auto original="{\"observabilityProtocol\":\"stream-observability-v1\",\"streamSizeProtocol\":\"stream-size-v1\",\"streamSizeProtocols\":[\"stream-size-v1\",\"stream-size-v2\"],\"sessionStopProtocol\":\"stop-v1\",\"keyFrameProtocol\":\"" + std::string(keyFrameProtocol) + "\",\"hostResumeProtocol\":\"" + std::string(hostResumeProtocol) + "\",\"hostChannelResumeProtocol\":\"" + std::string(channelResumeProtocol) + "\",\"udpMediaProtocol\":\"" + std::string(udpMediaProtocol) + "\",\"udpDirectHostProtocol\":\"udp-direct-v1\",\"udpTracksHostProtocol\":\"udp-tracks-v1\",\"audioCodecProtocol\":\"" + std::string(audioOpusProtocol) + "\",\"audioCodecTracksProtocol\":\"" + std::string(audioOpusTracksProtocol) + "\",\"trackResumeProtocol\":\"" + std::string(trackResumeProtocol) + "\",\"bitrateProtocol\":\"" + std::string(bitrateAdaptiveProtocol) + "\",\"maxBitrate\":" + std::to_string(adaptiveMaximumBitrate) + ",\"inputLatencyProtocol\":\"" + std::string(inputLatencyProtocol) + "\",\"cursorProtocol\":\"" + std::string(cursor::protocol) + "\",\"cursorTracksProtocol\":\"" + std::string(cursor::tracksProtocol) + "\",\"cursorEchoProtocol\":\"" + std::string(cursor::echoProtocol) + "\",\"cursorComposeProtocol\":\"" + std::string(cursor::composeProtocol) + "\",\"backgroundVideoProtocol\":\"" + std::string(backgroundVideoProtocol) + "\",\"textInputProtocol\":\"" + std::string(textInputProtocol) + "\",\"displayScaleProtocol\":\"" + std::string(displayScaleProtocolName) + "\",\"displayScaleOutputsProtocol\":\"" + std::string(displayScaleOutputsProtocolName) + "\",\"touchInputProtocol\":\"" + std::string(touchInputProtocol) + "\",\"relativeMouseProtocol\":\"" + std::string(relativeMouseProtocol) + "\",\"relativeMouseTracksProtocol\":\"" + std::string(relativeMouseTracksProtocol) + "\",\"caretProtocol\":\"" + std::string(caretProtocol) + "\"" + printCapabilityFields() + usbCapabilityFields() + gamepadCapabilityFields() + (interactive && driveCapable() ? ",\"driveProtocol\":\"" + std::string(drive::protocol) + "\"" + (driveFsCapable() ? ",\"driveFs\":true" : "") : std::string()) + (interactive && !driveCapable() ? ",\"driveUnavailableReason\":\"drive_webclient_unavailable\"" : std::string()) + ",\"diagnosticsSupported\":true,\"imeStateProtocol\":\"" + std::string(ime::protocol) + "\",\"service\":true,\"interactiveSession\":" + std::string(interactive ? "true" : "false") + ",\"streaming\":" + (!maintenance&&interactive && display.ready() && captureAvailable ? "true" : "false") + ",\"rdpSupported\":false,\"rdpEnabled\":false,\"virtualDisplayReady\":" + (!maintenance&&display.ready() ? "true" : "false") + ",\"clipboard\":" + (!maintenance&&interactive && captureAvailable && display.ready() && display.clipboardSupported ? "true" : "false") + ",\"clipboardSync\":" + (!maintenance&&interactive && captureAvailable && display.ready() && display.clipboardSupported ? "true" : "false") + ",\"virtualMonitorControl\":" + (!maintenance&&interactive && captureAvailable && console && display.ready() && display.monitorControlSupported ? "true" : "false") + ",\"dynamicResolution\":"+(viewport?"true":"false")+",\"viewportProvisioning\":"+(viewport?"true":"false")+",\"viewportFailureReason\":"+jsonQuote(viewportReason)+(viewport?",\"resizeProtocol\":\"epoch-v1\"":"")+consoleFields+thumbnailFields+",\"monitors\":"+monitors+'}';
     return original;
   }
   // thumbnail-capture-v1 (thumbnail_capture.hpp). The privacy ticket is taken
@@ -1100,7 +1102,7 @@ class ServiceBridge final : public AgentBridge {
       nativeProbeLock.lock();probeStopped_=true;if(probe_.joinable())probe_.join();
       try{const auto snapshot=nativeDisplayLeaseSnapshot();profileSnapshot=snapshot;profileLease=nativeDisplayLeaseKey(snapshot);nativeReady=nativeActivationPublished(snapshot)&&nativeActivationGate_.readinessAllowed(std::to_string(interactiveSession())+":"+profileLease);}catch(...){nativeReady=false;}
     }
-    pendingBitrate_=0;pendingScale_=0;pendingCaret_=0;pendingCursorEcho_=0;pendingCursorCompose_=0;pendingKeyFrame_=false;pendingCursorResend_=false;pendingRecover_=0;send_ = std::move(send); id_ = request.get("sessionId").string(); streaming_ = true;sessionModeIsStream_=streaming_;rejectedStream_.reset();workerCreatedForSession_=false;sessionHadProfile_=false;v2Session_=false;nativeStopGuard_=sessionModeIsStream_&&nativeDisplaySelected();nativeStopInstance_=profileSnapshot.get("deviceInstanceId").string();if(sessionModeIsStream_)lastSessionStop_.reset();epochMedia_=request.get("resizeProtocol").string()=="epoch-v1";streamSizesV2_=streamSizeV2(request);streamMonitor_=request.get("monitor").string();currentEpoch_=0;
+    pendingBitrate_=0;pendingScale_=0;pendingCaret_=0;pendingCursorEcho_=0;pendingCursorCompose_=0;pendingBackground_=0;pendingKeyFrame_=false;pendingCursorResend_=false;pendingRecover_=0;send_ = std::move(send); id_ = request.get("sessionId").string(); streaming_ = true;sessionModeIsStream_=streaming_;rejectedStream_.reset();workerCreatedForSession_=false;sessionHadProfile_=false;v2Session_=false;nativeStopGuard_=sessionModeIsStream_&&nativeDisplaySelected();nativeStopInstance_=profileSnapshot.get("deviceInstanceId").string();if(sessionModeIsStream_)lastSessionStop_.reset();epochMedia_=request.get("resizeProtocol").string()=="epoch-v1";streamSizesV2_=streamSizeV2(request);streamMonitor_=request.get("monitor").string();currentEpoch_=0;
     sessionActivity_=std::move(activity);
     try{pendingEncoderLimits_.reset();encoderLimits_=viewportEncoderLimits(request);if(encoderLimits_&&!hasInitialViewport(request))throw std::runtime_error("initial_viewport_invalid");}catch(...){unavailable("virtual_display_required");return;}
     if(!nativeReady){unavailable("virtual_display_required");return;}
@@ -1318,6 +1320,8 @@ class ServiceBridge final : public AgentBridge {
         if(!stopped_&&request.get("driveProtocol").string()==drive::protocol&&!request.get("driveUrl").string().empty())try{drives_.start(credentials_,id_,request.get("driveUrl").string(),session_,request.get("driveFs").boolean());}catch(...){}
         // usb-v1: the broker granted this session's usbDevices permission (the devices attach to the VM, not to this Windows user).
         if(!stopped_){const auto usbUrl=usbSessionUrl(request,id_);if(!usbUrl.empty())try{usb_.start(credentials_,id_,usbUrl,usbSessionGrant(request));}catch(...){recordUsbEvent(UsbStage::channelClosed,false);}}
+        // gamepad-v1 (gamepad_device.hpp): the pads live in this service; their rumble goes to the broker as this session's.
+        gamepadsStart(gamepadGranted(request));
         bool text = false, terminal = false,relayRead=false; auto lastVideo=Clock::now();std::vector<uint8_t> bytes;
         // Role::secure (secure_desktop_service.hpp): while a UAC prompt of this unlocked session shows, the user
         // worker asks this service to launch the Winlogon-desktop helper. Every worker.secure.* message is
@@ -1395,7 +1399,7 @@ class ServiceBridge final : public AgentBridge {
             return true;
           }
           if(trackSession||prepareStage<10||terminal)return true;
-          if(!pendingBitrate_.load()&&!pendingKeyFrame_.load()&&!pendingRecover_.load()&&!pendingDecoder_.load()&&!pendingScale_.load()&&!pendingCaret_.load()&&!pendingCursorEcho_.load()&&!pendingCursorCompose_.load())return true;
+          if(!pendingBitrate_.load()&&!pendingKeyFrame_.load()&&!pendingRecover_.load()&&!pendingDecoder_.load()&&!pendingScale_.load()&&!pendingCaret_.load()&&!pendingCursorEcho_.load()&&!pendingCursorCompose_.load()&&!pendingBackground_.load())return true;
           std::lock_guard lock(resizeMutex_);
           if(stopping_||pendingResize_||pendingTrack_||initialCompletion_.pending())return true;
           if(const int target=pendingBitrate_.exchange(0))if(!sendCommand("{\"type\":\"stream.bitrate\",\"sessionId\":"+jsonQuote(id_)+",\"bitrate\":"+std::to_string(target)+'}'))return false;
@@ -1409,6 +1413,7 @@ class ServiceBridge final : public AgentBridge {
           if(const int watch=pendingCaret_.exchange(0))if(!sendCommand("{\"type\":\"caret.watch\",\"sessionId\":"+jsonQuote(id_)+",\"on\":"+(watch==1?"true":"false")+'}'))return false;
           if(const int echo=pendingCursorEcho_.exchange(0))if(!sendCommand("{\"type\":\"cursor.echo\",\"sessionId\":"+jsonQuote(id_)+",\"on\":"+(echo==1?"true":"false")+'}'))return false;
           if(const int compose=pendingCursorCompose_.exchange(0))if(!sendCommand("{\"type\":\"cursor.compose\",\"sessionId\":"+jsonQuote(id_)+",\"on\":"+(compose==1?"true":"false")+'}'))return false;
+          if(const int hidden=pendingBackground_.exchange(0))if(!sendCommand("{\"type\":\"stream.background\",\"sessionId\":"+jsonQuote(id_)+",\"on\":"+(hidden==1?"true":"false")+'}'))return false;
           return true;
         };
         const PipeWake pendingWake{relayWake_.value,deliverPending};
@@ -1423,6 +1428,8 @@ class ServiceBridge final : public AgentBridge {
               // observations are all consumed here and never reach the broker.
               consumeV2Trace(value);
               if(value.get("type").string()=="worker.encoder.usage"){observeEncoderUsage(value,encoderTicket);return ControlAction::handled;}
+              // pointer_device.hpp: no mouse on this PC, so Windows hides the pointer. The Host's own mouse is plugged in off this thread.
+              if(value.get("type").string()=="worker.pointer.absent"){if(value.get("sessionId").string()==id_)if(auto* pointer=usb::servicePointerDevice().load())pointer->ask();return ControlAction::handled;}
               // Role::secure: request / active / stop, and anything else under worker.secure.*, end here.
               if(secureTracks?secureTracks->consume(value):secureService->consume(value))return ControlAction::handled;
               // System input: the worker's rectangle for the injector (worker.input.*), consumed whether or not one runs.
@@ -1473,10 +1480,10 @@ class ServiceBridge final : public AgentBridge {
         relayFacts.readEnded(stopped_||stopping_,relayRead);
         relayProbe.capture();
         endChannelRedials();
-        clipboard_.stop();print_.stop();drives_.stop();usb_.stop();
+        clipboard_.stop();print_.stop();drives_.stop();usb_.stop();gamepadsEnd();
         const bool wasStopped=stopped_.exchange(true);const bool unexpected=!wasStopped&&!stopping_;streaming_=false;if(unexpected){invalidateDisplay();if(!terminal)unavailable("worker_failed");}
         pipe_=nullptr;
-      } catch (...) { relayFacts.ended(WorkerRelayCause::exception);if(!relayFacts.captured)relayFacts.requested=stopped_||stopping_;preparationLog(false,prepareStage);if(trackSession)tracks_.stop();endChannelRedials();clipboard_.stop();print_.stop();drives_.stop();usb_.stop();pipe_=nullptr;const bool wasStopped=stopped_.exchange(true);const bool unexpected=!wasStopped&&!stopping_;streaming_=false;if(unexpected){invalidateDisplay();unavailable(initialFallback?"host_maintenance":initialSdkUnsupported?"unsupported_display_mode":"worker_failed");} }
+      } catch (...) { relayFacts.ended(WorkerRelayCause::exception);if(!relayFacts.captured)relayFacts.requested=stopped_||stopping_;preparationLog(false,prepareStage);if(trackSession)tracks_.stop();endChannelRedials();clipboard_.stop();print_.stop();drives_.stop();usb_.stop();gamepadsEnd();pipe_=nullptr;const bool wasStopped=stopped_.exchange(true);const bool unexpected=!wasStopped&&!stopping_;streaming_=false;if(unexpected){invalidateDisplay();unavailable(initialFallback?"host_maintenance":initialSdkUnsupported?"unsupported_display_mode":"worker_failed");} }
       v2Rpc_=false;
       if(nativeDisplay_)nativeDisplay_->cancelViewportSession(id_);
     });
@@ -1531,6 +1538,10 @@ class ServiceBridge final : public AgentBridge {
     if(type=="cursor.echo"){if(const auto on=cursor::echoRequest(value);on&&streaming_&&value.get("sessionId").string()==id_){pendingCursorEcho_.store(*on?1:2);SetEvent(relayWake_.value);}return;}
     // cursor-compose-v1: likewise only the latest request.
     if(type=="cursor.compose"){if(const auto on=cursor::composeRequest(value);on&&streaming_&&value.get("sessionId").string()==id_){pendingCursorCompose_.store(*on?1:2);SetEvent(relayWake_.value);}return;}
+    // background-video-v1: likewise only the latest request.
+    if(type=="stream.background"){if(const auto on=backgroundRequest(value);on&&streaming_&&value.get("sessionId").string()==id_){pendingBackground_.store(*on?1:2);SetEvent(relayWake_.value);}return;}
+    // gamepad-v1: the pads are this service's own devices; nothing reaches the worker.
+    if(type=="gamepad.state"||type=="gamepad.remove"){if(gamepadsGranted_&&streaming_&&value.get("sessionId").string()==id_)gamepadMessage(value);return;}
     // stream.lossless: the client's tiles-v1 opt-in (see Agent ping), for the worker.
     if(type!="stream.resize"&&type!="input"&&type!="input.reset"&&type!="stream.lossless")return;
     if(type=="stream.resize") {
@@ -1825,6 +1836,28 @@ class ServiceBridge final : public AgentBridge {
   std::atomic<int> pendingCaret_{0};  // caret-v1 watch request for the worker (1 on, 2 off, 0 none)
   std::atomic<int> pendingCursorEcho_{0};  // cursor-echo-v1 request for the worker (1 on, 2 off, 0 none)
   std::atomic<int> pendingCursorCompose_{0};  // cursor-compose-v1 request for the worker (1 on, 2 off, 0 none)
+  std::atomic<int> pendingBackground_{0};     // background-video-v1 request for the worker (1 hidden, 2 shown, 0 none)
+  // gamepad-v1 (gamepad_device.hpp): granted for the running session; the last rumble sent per pad (only a change
+  // is sent: a game may set the same rumble every frame).
+  std::atomic<bool> gamepadsGranted_{false}; std::mutex rumbleMutex_; std::array<int, usb::xpad::maxPads> rumbleSent_{};
+  void gamepadsStart(bool granted){
+    gamepadsGranted_=granted;{std::lock_guard lock(rumbleMutex_);rumbleSent_.fill(-1);}
+    auto* pads=usb::serviceGamepads().load();if(!pads||!granted)return;
+    pads->removeAll();  // nothing of an earlier session stays
+    pads->onRumble([this,session=id_,send=send_](int pad,uint8_t low,uint8_t high){
+      const int packed=int(low)<<8|high;
+      {std::lock_guard lock(rumbleMutex_);if(pad<0||pad>=usb::xpad::maxPads||rumbleSent_[pad]==packed)return;rumbleSent_[pad]=packed;}
+      if(!send)return;const auto message=gamepadRumbleMessage(session,pad,low,high);send(true,{message.begin(),message.end()});});
+  }
+  void gamepadsEnd(){
+    const bool had=gamepadsGranted_.exchange(false);auto* pads=usb::serviceGamepads().load();if(!pads||!had)return;
+    pads->onRumble({});pads->removeAll();
+  }
+  void gamepadMessage(const Json& value){
+    auto* pads=usb::serviceGamepads().load();if(!pads)return;
+    if(const auto state=gamepadStateMessage(value))pads->state(state->first,state->second);
+    else if(const auto pad=gamepadRemoveMessage(value))pads->remove(*pad);
+  }
   std::atomic<int> pendingScale_{0};  // display-scale-v1 request for the worker (0 = none)
   std::atomic<bool> pendingKeyFrame_{false};  // an IDR for the worker (dropped video)
   std::atomic<bool> pendingCursorResend_{false};  // the worker sends its cursor shapes and state again with that IDR (host-resume-v1)
@@ -3213,6 +3246,10 @@ inline void WINAPI serviceMain(DWORD, LPWSTR*) {
   auto printSweep=std::make_unique<PrintLeftoverSweep>();
   // usb-v1: ports a crashed run left attached (a short, bounded sweep at start).
   auto usbSweep=std::make_unique<UsbLeftoverSweep>();
+  // pointer_device.hpp: the Host's own mouse for a PC with none, plugged in when a stream asks (after the bridge goes at exit).
+  std::unique_ptr<usb::PointerDevice> pointerDevice;
+  // gamepad_device.hpp: the virtual controllers of gamepad-v1 sessions (likewise).
+  std::unique_ptr<usb::GamepadDevices> gamepads;
   // Guards bridge replacement against the administrator reset conversation.
   std::mutex bridgeLifetime;
 #ifdef MULTITAP_NATIVE_DISPLAY
@@ -3275,6 +3312,8 @@ inline void WINAPI serviceMain(DWORD, LPWSTR*) {
     if(!qaService)windowsAutologonRecovery.start(serviceStopEvent);
     if(!qaService)printSweep->start(serviceStopEvent);
     if(!qaService)usbSweep->start();
+    if(!qaService){pointerDevice=std::make_unique<usb::PointerDevice>();usb::servicePointerDevice()=pointerDevice.get();}
+    if(!qaService){gamepads=std::make_unique<usb::GamepadDevices>();usb::serviceGamepads()=gamepads.get();}
     // The display probe's change signals (display_change_signals.hpp).
     std::optional<DisplayChangeSignals> displaySignals;if(!qaService)displaySignals.emplace();
     bool loaded = false; HANDLE events[] = {serviceStopEvent, serviceChangeEvent};if(!qaService)pendingConnection=std::make_unique<PendingConnectionWorker>([]{serviceConfigurationChanges.request(hostServiceReloadControl);SetEvent(serviceChangeEvent);});
@@ -3336,7 +3375,7 @@ inline void WINAPI serviceMain(DWORD, LPWSTR*) {
     resetServer.reset();
     closePrivateDiagnostics();
 #endif
-    if(catalogMaintenance)catalogMaintenance->shutdown();brokerStatus.stop();pendingConnection.reset();if (agent) agent->stop(); agent.reset();if(bridge)bridge->closeSchedulingAndJoin();if(signinRuntime)signinRuntime->closeSchedulingAndJoin();physicalWorkers.drain([](const service_workers::DrainFacts&){});bridge.reset();signinRuntime.reset();profileCleanupHeartbeat.stop();catalogMaintenance.reset();brokerStatusServer.reset();nativeDisplay.shutdown(); WSACleanup(); if(runMarker)runMarker->stopped();stopHeartbeat->stop(); reportService(SERVICE_STOPPED);
+    if(catalogMaintenance)catalogMaintenance->shutdown();brokerStatus.stop();pendingConnection.reset();if (agent) agent->stop(); agent.reset();if(bridge)bridge->closeSchedulingAndJoin();if(signinRuntime)signinRuntime->closeSchedulingAndJoin();physicalWorkers.drain([](const service_workers::DrainFacts&){});bridge.reset();usb::servicePointerDevice()=nullptr;pointerDevice.reset();usb::serviceGamepads()=nullptr;gamepads.reset();signinRuntime.reset();profileCleanupHeartbeat.stop();catalogMaintenance.reset();brokerStatusServer.reset();nativeDisplay.shutdown(); WSACleanup(); if(runMarker)runMarker->stopped();stopHeartbeat->stop(); reportService(SERVICE_STOPPED);
   } catch (...) {
     nativeDisplay.setRenderRearmIdle({});
     physicalWorkers.closeAdmission();serviceStopRequested=true;SetEvent(serviceStopEvent);
@@ -3345,7 +3384,7 @@ inline void WINAPI serviceMain(DWORD, LPWSTR*) {
     resetServer.reset();
     closePrivateDiagnostics();
 #endif
-    profileCleanupHeartbeat.start([&]{return nativeDisplay.refreshOwnedCleanupLease();});if(catalogMaintenance)catalogMaintenance->shutdown();brokerStatus.stop();pendingConnection.reset(); if(agent)agent->stop();agent.reset();if(bridge)bridge->closeSchedulingAndJoin();if(signinRuntime)signinRuntime->closeSchedulingAndJoin();physicalWorkers.drain([](const service_workers::DrainFacts&){});bridge.reset();signinRuntime.reset();profileCleanupHeartbeat.stop();catalogMaintenance.reset();brokerStatusServer.reset();nativeDisplay.shutdown();if(runMarker)runMarker->failed(ERROR_SERVICE_SPECIFIC_ERROR);stopHeartbeat->stop();reportService(SERVICE_STOPPED, ERROR_SERVICE_SPECIFIC_ERROR); }
+    profileCleanupHeartbeat.start([&]{return nativeDisplay.refreshOwnedCleanupLease();});if(catalogMaintenance)catalogMaintenance->shutdown();brokerStatus.stop();pendingConnection.reset(); if(agent)agent->stop();agent.reset();if(bridge)bridge->closeSchedulingAndJoin();if(signinRuntime)signinRuntime->closeSchedulingAndJoin();physicalWorkers.drain([](const service_workers::DrainFacts&){});bridge.reset();usb::servicePointerDevice()=nullptr;pointerDevice.reset();usb::serviceGamepads()=nullptr;gamepads.reset();signinRuntime.reset();profileCleanupHeartbeat.stop();catalogMaintenance.reset();brokerStatusServer.reset();nativeDisplay.shutdown();if(runMarker)runMarker->failed(ERROR_SERVICE_SPECIFIC_ERROR);stopHeartbeat->stop();reportService(SERVICE_STOPPED, ERROR_SERVICE_SPECIFIC_ERROR); }
   CloseHandle(serviceStopEvent); CloseHandle(serviceChangeEvent); serviceStopEvent = serviceChangeEvent = nullptr;
 }
 inline int runService(const std::wstring& name, bool qa) { if (name.empty() || name.size() > 64 || name.find_first_not_of(L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_") != std::wstring::npos) throw std::runtime_error("Invalid host service name"); serviceName = name; qaService = qa; SERVICE_TABLE_ENTRYW table[] = {{serviceName.data(), serviceMain}, {nullptr, nullptr}}; winCheck(StartServiceCtrlDispatcherW(table), "Start Windows service dispatcher"); return 0; }

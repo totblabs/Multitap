@@ -48,12 +48,15 @@ inline DWORD loopbackPeerProcess(SOCKET socket) {
 inline constexpr DWORD systemProcessId = 4;
 
 // --- the loopback USB/IP server --------------------------------------------------------
-class UsbIpServer {
+// [Core]: a session's devices (UsbSessionCore) or the Host's own pointer device (pointer_device.hpp); both
+// answer importDevice / submit / unlink / kernelClosed the same way.
+struct UsbIpAccess { std::function<bool(SOCKET)> trusted = [](SOCKET socket) { return loopbackPeerProcess(socket) == systemProcessId; }; };
+template <class Core> class BasicUsbIpServer {
  public:
-  struct Access { std::function<bool(SOCKET)> trusted = [](SOCKET socket) { return loopbackPeerProcess(socket) == systemProcessId; }; };
-  ~UsbIpServer() { stop(); }
+  using Access = UsbIpAccess;
+  ~BasicUsbIpServer() { stop(); }
   // Listens on 127.0.0.1 at a free port and serves [core]; returns the port, or 0.
-  uint16_t start(UsbSessionCore& core, Access access = {}) {
+  uint16_t start(Core& core, Access access = {}) {
     stop();
     SOCKET listener = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT | WSA_FLAG_OVERLAPPED);
     if (listener == INVALID_SOCKET) return 0;
@@ -82,7 +85,7 @@ class UsbIpServer {
   uint32_t refused() const { return refused_; }
  private:
   struct Connection { SOCKET socket = INVALID_SOCKET; std::thread thread; std::mutex write; std::atomic<bool> finished{false}; };
-  UsbSessionCore* core_ = nullptr; Access access_; SOCKET listener_ = INVALID_SOCKET; std::atomic<bool> stopped_{true}; std::thread thread_;
+  Core* core_ = nullptr; Access access_; SOCKET listener_ = INVALID_SOCKET; std::atomic<bool> stopped_{true}; std::thread thread_;
   std::mutex mutex_; std::vector<std::unique_ptr<Connection>> connections_; std::atomic<uint32_t> refused_{0};
 
   void run() {
@@ -150,7 +153,7 @@ class UsbIpServer {
     uint8_t busIdBytes[usbipBusIdSize];
     if (!receiveAll(connection.socket, busIdBytes, sizeof(busIdBytes), stopped_)) return;
     const auto busId = decodeBusId(busIdBytes);
-    std::optional<UsbSessionCore::Imported> imported;
+    std::optional<typename Core::Imported> imported;
     if (busId && core_) imported = core_->importDevice(*busId, [this, &connection](const Bytes& bytes) { return send(connection, bytes); }, [&connection] { shutdown(connection.socket, SD_BOTH); });
     if (!imported) { send(connection, encodeOpCommon(opRepImport, stNoDev)); return; }
     const uint8_t id = imported->id;
@@ -174,6 +177,7 @@ class UsbIpServer {
     core_->kernelClosed(id);
   }
 };
+using UsbIpServer = BasicUsbIpServer<UsbSessionCore>;
 
 // --- the Host's side of the session's relay socket pair ----------------------------------
 class UsbChannel {

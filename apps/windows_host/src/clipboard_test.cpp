@@ -351,7 +351,8 @@ void pullScenarios(Isolated& station,const std::filesystem::path& root){
       else if(type=="clipboard.applied"){std::lock_guard lock(m);errors["applied:"+id]="1";}
     };
     protocol.send(R"({"type":"clipboard.read","requestId":"offer-vm"})");
-    for(int i=0;i<200;++i){{std::lock_guard lock(m);if(!entries.empty())break;}pumpFor(std::chrono::milliseconds(10));}
+    // Both pages (302 entries, 200 per page): the check below needs the second, which may follow the first a moment later.
+    for(int i=0;i<200;++i){{std::lock_guard lock(m);if(entries.size()>=2)break;}pumpFor(std::chrono::milliseconds(10));}
     {std::lock_guard lock(m);require(offerMessage.get("format").string()=="tree"&&offerMessage.get("files").number()==301&&offerMessage.get("entries").number()==302,"The large copy was not offered as a tree manifest");require(entries.size()>=2,"The manifest entries were not paged");
       const auto* page=std::get_if<Json::Array>(&entries[0].get("entries").value);require(page&&page->size()==200&&page->at(0).get("mtime").number()>1.0e12,"Offer entries carry no write time");}
     for(int i=0;i<50&&!pulled.empty();++i)pumpFor(std::chrono::milliseconds(10));require(pulled.empty(),"The offered copy sent file data on its own");

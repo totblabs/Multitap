@@ -167,6 +167,17 @@ inline std::string sha256File(const fs::path& path) {
   return h.finish();
 }
 
+// `total` empty files below `root`, `perFolder` to a folder (d0, d1, ...): a tree of 200,000 entries in seconds.
+inline void makeEmptyFiles(const fs::path& root, size_t total, size_t perFolder) {
+  for (size_t at = 0; at < total; ++at) {
+    const auto folder = root / (L"d" + std::to_wstring(at / perFolder));
+    if (at % perFolder == 0) fs::create_directories(clip::longPath(folder));
+    const HANDLE file = CreateFileW(clip::longPath(folder / (L"f" + std::to_wstring(at))).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) throw std::runtime_error("makeEmptyFiles");
+    CloseHandle(file);
+  }
+}
+
 // ---- stand-in clipboard --------------------------------------------------------------------------------------
 // Mirrors what the clipboard library reads and publishes. Whoever publishes passes its window, which becomes the
 // owner (the echo checks compare it); a copy by "the user" has the owner `user()`.
@@ -256,16 +267,26 @@ class Board {
   // A copy of virtual files only (no CF_HDROP): a synthetic OLE data object, as a .zip folder or a mail attachment publishes.
   void userVirtual(std::vector<vsrc::Item> items) { set(user(), std::nullopt, [&] { virtual_ = new vsrc::Source(std::move(items)); }); }
   void userClear() { set(user(), std::nullopt, [&] {}); }
+  // Windows renumbering the clipboard without a new copy and without a change notification (another program adding a format, a
+  // delayed render): the content stays, only the sequence moves. The 2026-11-13 field failure of a 22,661-file paste.
+  void renumber() { std::lock_guard lock(m_); const bool offer = offerSeq_ == seq_ && offerSeq_ != 0; ++seq_; if (offer) offerSeq_ = seq_; }
   // The entries of the given top-level paths (folders walked) in the form describe() reports them, without touching the clipboard.
   static JV describePaths(const std::vector<fs::path>& tops) { JArray list; for (const auto& top : tops) listInto(top, top.filename().wstring(), list); return object({{"entries", std::move(list)}}); }
   // The content as the test checks it: kind, text, html and image digests, and every file (folders walked) with SHA-256.
   JV describe() {
-    std::lock_guard lock(m_); JObject o;
+    std::unique_lock lock(m_); JObject o;
     o.emplace_back("sequence", int64_t(seq_));
     if (virtual_) { o.emplace_back("kind", "virtual"); return JV(std::move(o)); }
     if (tree_ && seq_ == offerSeq_) { o.emplace_back("kind", "localTree"); return JV(std::move(o)); }
     if (offer_ && seq_ == offerSeq_) { o.emplace_back("kind", "offer"); o.emplace_back("offerFormat", offer_->format()); o.emplace_back("files", int64_t(offer_->fileCount())); o.emplace_back("bytes", int64_t(offer_->totalBytes())); return JV(std::move(o)); }
-    if (!files_.empty()) { o.emplace_back("kind", "files"); JArray list; for (const auto& top : files_) listInto(top, top.filename().wstring(), list); o.emplace_back("entries", std::move(list)); return JV(std::move(o)); }
+    if (!files_.empty()) {
+      // The walk runs without the lock (a copy of a large folder would hold every publication up for as long), and stops after
+      // describeLimit entries (a tree of 200,000 is reported as truncated, not hashed file by file).
+      const auto tops = files_; lock.unlock();
+      o.emplace_back("kind", "files"); JArray list; size_t budget = describeLimit;
+      for (const auto& top : tops) listInto(top, top.filename().wstring(), list, budget);
+      o.emplace_back("entries", std::move(list)); if (!budget) o.emplace_back("truncated", true); return JV(std::move(o));
+    }
     if (image_) { o.emplace_back("kind", "image"); o.emplace_back("pngSha", sha256(image_->png)); o.emplace_back("width", int64_t(image_->width)); o.emplace_back("height", int64_t(image_->height)); return JV(std::move(o)); }
     if (text_) {
       o.emplace_back("kind", html_ ? "richtext" : "text");
@@ -290,13 +311,17 @@ class Board {
   }
   void clearLocked() { text_.reset(); html_.reset(); image_.reset(); files_.clear(); offer_.reset(); if (virtual_) { virtual_->Release(); virtual_ = nullptr; } if (tree_) { tree_->Release(); tree_ = nullptr; } }
   void notify() { if (changed) changed(); }
-  static void listInto(const fs::path& path, const std::wstring& relative, JArray& out) {
+  static constexpr size_t describeLimit = 20000;
+  static void listInto(const fs::path& path, const std::wstring& relative, JArray& out) { size_t budget = SIZE_MAX; listInto(path, relative, out, budget); }
+  static void listInto(const fs::path& path, const std::wstring& relative, JArray& out, size_t& budget) {
+    if (!budget) return;
+    --budget;
     std::error_code ec;
     if (fs::is_directory(clip::longPath(path), ec)) {
       out.push_back(object({{"path", utf8(relative)}, {"dir", true}}));
       std::vector<fs::path> children; for (const auto& e : fs::directory_iterator(clip::longPath(path), ec)) children.push_back(path / e.path().filename());
       std::sort(children.begin(), children.end());
-      for (const auto& child : children) listInto(child, relative + L"/" + child.filename().wstring(), out);
+      for (const auto& child : children) { if (!budget) return; listInto(child, relative + L"/" + child.filename().wstring(), out, budget); }
     } else out.push_back(object({{"path", utf8(relative)}, {"size", int64_t(fs::file_size(clip::longPath(path), ec))}, {"sha", sha256File(path)}}));
   }
   std::mutex m_; DWORD seq_ = 1; HWND owner_ = nullptr; DWORD offerSeq_ = 0;

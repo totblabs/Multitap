@@ -30,7 +30,9 @@ const udpProbeBounds = Object.freeze({ udpProbe: 5, udpRttP50Ms: 60000, udpRttP9
   // stream-stall-v1 rows: 1 no frame was published (decode side), 2 a frame waited for the client's
   // presentation; the frame that ended the gap was a key frame (1).
   stallKind: 2, stallKey: 1 });
-const diagnosticBounds = { ...observabilityDiagnosticBounds, ...udpProbeBounds };
+// gamepad-v1 (client lib/data/gamepad.dart GamepadTally): the pads the Host was asked to hold (gamepad.dart gamepadMaxPads).
+const gamepadBounds = Object.freeze({ gamepadPads: 4 });
+const diagnosticBounds = { ...observabilityDiagnosticBounds, ...udpProbeBounds, ...gamepadBounds };
 const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samples', 'windowMs', 'srcWidth', 'srcHeight', 'decodeFps10', 'decodeFpsMin10', 'textureFps10', 'captureFps10', 'encodeFps10',
   // tracks-v1 clients: the slowest output's rates (the others are summed over outputs).
   'decodeFpsLow10', 'captureFpsLow10', 'encodeFpsLow10', 'receiveKbps', 'bitrateKbps', 'targetKbps', 'networkDelayMs', 'rttMs', 'rttMaxMs', 'hostWorkUs', 'hostP95Us', 'hostMaxUs', 'captureUs', 'convertUs', 'encodeUs', 'decodeUs', 'decodeMaxUs', 'queueMaxMs', 'skipped', 'losslessTiles', 'losslessKbps', 'inputHostP50Us', 'inputHostP95Us', 'inputFrameP50Us', 'inputFrameP95Us',
@@ -125,7 +127,10 @@ const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samp
   // (bits: 1 KEY_LOW_LATENCY, 2 real-time priority, 4 operating rate, 8 vendor
   // keys, 16 the decoder declares FEATURE_LowLatency) and the vendor key set
   // its name matched (0 none, 1 Qualcomm, 2 Exynos, 3 Kirin, 4 Amlogic, 5 MediaTek).
-  'decoderLowLatency', 'decoderVendorKeys'];
+  'decoderLowLatency', 'decoderVendorKeys',
+  // gamepad-v1 (counts only, never a button, an axis or a controller's name): pads the Host was asked to hold at the
+  // window's end, states sent, states the session could not take, rumbles received; `gamepad` (granted) is in `boolean`.
+  'gamepadPads', 'gamepadStates', 'gamepadRefused', 'gamepadRumbles'];
 // One streamStall row (client lib/data/stream_stall.dart): the client engine's gap record (ms, queue depths,
 // packets offered/refused, decode calls and the longest in us, frames waiting/skipped, wait for presentation),
 // the longest arrival gap, UDP leg counts during it, the Host windows that cover it (gaps and stage times in ms,
@@ -162,7 +167,9 @@ const numeric = new Set(['action', 'stage', 'monitors', 'width', 'height', 'erro
 // client): its decoder started before the stream info (decoder-prestart-v1).
 const boolean = new Set(['ok', 'active', 'pending', 'recovery', 'remote', 'running', 'online', 'changed', 'available', 'auto', 'gpuHardware', 'remoteSession', 'textInput', 'touchInput', 'decoderPrestarted',
   // audio-path-v1 flags (see streamStatsNumeric).
-  'audioOutFloat', 'audioBufferFollows', 'audioFastTrack', 'audioMuted', 'audioOpusUnusable']);
+  'audioOutFloat', 'audioBufferFollows', 'audioFastTrack', 'audioMuted', 'audioOpusUnusable',
+  // gamepad-v1: the session was granted (see streamStatsNumeric).
+  'gamepad']);
 // Independent outputs (모든 모니터), media engine and power codes.
 const codes = new Set(['unknown_failure', 'network_error', 'invalid_response', 'request_failed', 'authentication_required', 'session_expired', 'desktop_not_found', 'host_unavailable', 'host_disconnected', 'host_offline', 'host_maintenance', 'session_cleanup_pending', 'capabilities_pending', 'virtual_display_required', 'no_interactive_session', 'streaming_unavailable', 'display_control_unavailable', 'display_not_supported', 'display_busy', 'display_in_progress', 'display_operation_failed', 'display_operation_unknown', 'display_operation_timeout', 'display_operation_not_found', 'display_configuration_failed', 'display_count_mismatch', 'display_timeout', 'worker_failed', 'operation_cancelled', 'invalid_display_request', 'invalid_display_count', 'too_many_display_attempts', 'power_in_progress', 'rdp_not_supported', 'desktop_busy', 'session_busy', 'controller_in_use', 'taken_over', 'other_user', 'initial_viewport_unavailable', 'invalid_initial_viewport', 'viewport_encoder_limits_unavailable', 'invalid_viewport_encoder_limits', 'track_streaming_unavailable', 'local_display_layout_unavailable', 'local_display_layout_unsupported', 'console_preparation_failed', 'console_preparation_timeout', 'native_display_not_ready', 'native_topology_recovery_required', 'initial_track_viewport_timeout', 'track_resize_timeout', 'track_resize_failed', 'invalid_stream_message', 'websocket_handshake_or_transport', 'media_platform_error', 'media_timeout', 'independent_outputs_unavailable', 'engine_busy', 'invalid_stream', 'media_backpressure', 'multiple_monitors_required', 'presentation_failed', 'power_status_unavailable', 'invalid_power_state', 'power_task_failed', 'too_many_power_attempts', 'power_busy', 'proxmox_unreachable', 'proxmox_invalid_response', 'power_task_not_found', 'invalid_power_action', 'session_replaced', 'window_closed', 'resize_failed', 'display_change_failed', 'unsupported_display_mode', 'monitor_not_available', 'administrator_required', 'console_binding_changed', 'console_busy', 'console_in_use', 'console_ready', 'console_timeout', 'console_transfer_failed', 'console_transfer_pending', 'console_unavailable', 'native_provider_required', 'rdp_session_active', 'rdp_session_disconnected', 'reboot_required', 'virtual_device_not_ready', 'windows_identity_mismatch', 'windows_identity_required', 'windows_login_required', 'windows_session_ambiguous', 'windows_session_locked', 'windows_session_unknown', 'takeover_context_stale', 'takeover_context_expired', 'invalid_takeover_context', 'invalid_context_protocol', 'session_context_unavailable']);
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value);

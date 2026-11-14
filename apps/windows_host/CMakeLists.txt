@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.5 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.11 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -385,6 +385,29 @@ add_executable(MultitapHostUsbRedirectionTest EXCLUDE_FROM_ALL src/usb_redirecti
 target_compile_definitions(MultitapHostUsbRedirectionTest PRIVATE "MULTITAP_USB_VECTORS=\"${CMAKE_CURRENT_SOURCE_DIR}/../../server/test/fixtures/usb-descriptor-vectors.json\"")
 target_link_libraries(MultitapHostUsbRedirectionTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi newdev cfgmgr32 wintrust)
 target_compile_options(MultitapHostUsbRedirectionTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# The Host's own pointer device for a PC with no mouse (pointer_device.hpp): the
+# device's answers, the loopback server with a fake kernel and the service's owner
+# with a substituted controller. Nothing is installed or attached.
+add_executable(MultitapHostPointerDeviceTest EXCLUDE_FROM_ALL src/pointer_device_test.cpp)
+target_link_libraries(MultitapHostPointerDeviceTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi newdev cfgmgr32 wintrust)
+target_compile_options(MultitapHostPointerDeviceTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# gamepad-v1 (gamepad_device.hpp): the controller's descriptors and reports, four
+# pads with a fake kernel over loopback, the service's owner with a substituted
+# controller, the relayed messages. Nothing is installed or attached.
+add_executable(MultitapHostGamepadDeviceTest EXCLUDE_FROM_ALL src/gamepad_device_test.cpp)
+target_link_libraries(MultitapHostGamepadDeviceTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi newdev cfgmgr32 wintrust)
+target_compile_options(MultitapHostGamepadDeviceTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# Explicit probe only (administrator, signed-in session): plugs a virtual Xbox 360
+# controller (gamepad_device.hpp) into this PC's controller, reads it back through
+# XInput, sends rumble, unplugs it.
+add_executable(MultitapHostGamepadDeviceProbe EXCLUDE_FROM_ALL src/gamepad_device_probe.cpp)
+target_link_libraries(MultitapHostGamepadDeviceProbe PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi newdev cfgmgr32 wintrust)
+target_compile_options(MultitapHostGamepadDeviceProbe PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# Explicit probe only (administrator): plugs the pointer device into this PC's own
+# controller, checks Windows starts it as a mouse, and unplugs it.
+add_executable(MultitapHostPointerDeviceProbe EXCLUDE_FROM_ALL src/pointer_device_probe.cpp)
+target_link_libraries(MultitapHostPointerDeviceProbe PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi setupapi newdev cfgmgr32 wintrust)
+target_compile_options(MultitapHostPointerDeviceProbe PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # 게임 마우스: the Host's own share of input latency on the virtual USB mouse path
 # (inbox, core, real loopback USB/IP to a fake kernel) and on the SendInput path
 # (worker Agent, substituted injector). Measures; injects and installs nothing.
@@ -795,6 +818,11 @@ target_include_directories(MultitapHostCapturePathProbe PRIVATE "${CMAKE_CURRENT
 target_compile_definitions(MultitapHostCapturePathProbe PRIVATE MULTITAP_CAPTURE_PATH_PROBE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
 target_link_libraries(MultitapHostCapturePathProbe PRIVATE mfplat mf mfuuid wmcodecdspuuid ole32 oleaut32 gdi32 user32 uuid d3d11 dxgi windowsapp cfgmgr32 secur32 winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
 target_compile_options(MultitapHostCapturePathProbe PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# The cursor drawn into the video at 100, 150 and 200 % of this desktop's primary output (changes the display scale while it runs and
+# puts it back): the real Capture direct and DIB paths, the system arrow and a 64-pixel cursor of its own.
+add_executable(MultitapHostCursorVideoProbe EXCLUDE_FROM_ALL src/cursor_video_probe.cpp)
+target_link_libraries(MultitapHostCursorVideoProbe PRIVATE host_engine winhttp crypt32)
+target_compile_options(MultitapHostCursorVideoProbe PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostClipboardTest src/clipboard_test.cpp)
 add_executable(MultitapHostClipboardPullCancelTest src/clipboard_pull_cancel_test.cpp)
 # Received clipboard files on disk: relative-to-handle creation and removal, links refused.

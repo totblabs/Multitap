@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/remote_session.dart';
+import '../data/session_gamepads.dart';
 import '../data/broker_api.dart';
 import '../data/connect_timing.dart';
 import '../data/connection_feedback.dart';
@@ -1747,6 +1748,27 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     }
   }
 
+  /// gamepad-v1: this PC's gamepads for the current session (session_gamepads.dart).
+  SessionGamepads? _gamepads;
+  void _startGamepads(RemoteSession session) {
+    _forgetGamepads();
+    final gamepads = _gamepads = SessionGamepads(
+      session,
+      channel: windowsGamepadChannel,
+    );
+    gamepads.setActive(
+      WidgetsBinding.instance.lifecycleState == null ||
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+    );
+    unawaited(gamepads.start());
+  }
+
+  void _forgetGamepads() {
+    final gamepads = _gamepads;
+    _gamepads = null;
+    if (gamepads != null) unawaited(gamepads.stop());
+  }
+
   void _forgetPrinter({bool disposing = false}) {
     _closePrintBar(disposing: disposing);
     _watchedPrinter?.removeListener(_printChanged);
@@ -2724,6 +2746,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
           previous?.removeListener(_changed);
           _forgetClipboard();
           _forgetPrinter();
+          _forgetGamepads();
           _release();
           await previous?.close();
           if (!current()) throw const BrokerException('operation_cancelled');
@@ -3431,6 +3454,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     previous?.removeListener(_changed);
     _forgetClipboard();
     _forgetPrinter();
+    _forgetGamepads();
     setState(() {
       _reconnecting = true;
       _error = null;
@@ -3819,6 +3843,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
       session.addListener(_changed);
       _transitionStage(ScreenTransitionStage.firstPicture);
       unawaited(session.start());
+      _startGamepads(session);
     } catch (error) {
       if (current()) {
         _clearInitialViewportEntry();
@@ -4391,6 +4416,13 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // background-video-v1: minimised, the Host sends one picture a second;
+    // shown again (focused or not), every frame.
+    _session?.setBackground(
+      state == AppLifecycleState.hidden || state == AppLifecycleState.paused,
+    );
+    // gamepad-v1: only the focused window's pads drive the desktop.
+    _gamepads?.setActive(state == AppLifecycleState.resumed);
     if (state != AppLifecycleState.resumed) {
       _release();
       // A press whose release never comes back must not leave the toolbar
@@ -4617,6 +4649,7 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
     final notice = _noticeWindow;
     if (notice is NativeTransferNoticeWindow) notice.dispose();
     _forgetPrinter(disposing: true);
+    _forgetGamepads();
     _relativeMouse?.dispose();
     _gameMouseUsb
       ?..removeListener(_gameMouseUsbChanged)

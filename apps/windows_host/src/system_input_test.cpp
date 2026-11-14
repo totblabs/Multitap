@@ -60,7 +60,7 @@ void decision() {
   expect(!secure::inputUnreachable(2, 2) && !secure::inputUnreachable(3, 2) && !secure::inputUnreachable(3, 3) && !secure::inputUnreachable(2, 0) && !secure::inputUnreachable(4, integrityUnknown), "same or lower, nothing in front, or a SYSTEM injector: reachable");
   expect(secure::input246Reach(2, 4) == (10u | (0x42u << 8)) && secure::input246Reach(3, 15) == (10u | (0xf3u << 8)), "record 246 kind 10 packs worker and window level");
   expect(secure::input246(1, 0) == 1 && secure::input246(12, 300) == (12u | (300u << 8)) && secure::input246(6, 0xffffffffu) == (6u | (0xffffffu << 8)), "record 246 = kind | value << 8, value capped");
-  expect(streamObservationOk(46, secure::input246Reach(2, 4)) && streamObservationOk(46, secure::input246(record246StartFailed, 2)) && streamObservationOk(44, 5) && !streamObservationOk(44, 3) && !streamObservationOk(47, 1), "stage 46 records are observations; 44 and unknown stages as before");
+  expect(streamObservationOk(46, secure::input246Reach(2, 4)) && streamObservationOk(46, secure::input246(record246StartFailed, 2)) && streamObservationOk(44, 5) && !streamObservationOk(44, 3) && streamObservationOk(48, 1) && !streamObservationOk(49, 1), "stage 46 records are observations; 44 and unknown stages as before (47 is the sound capture, 48 the pointer's reasons)");
 }
 
 // The injector's loop with fake Windows.

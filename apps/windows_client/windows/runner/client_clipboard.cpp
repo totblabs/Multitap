@@ -187,6 +187,10 @@ struct ClientClipboardState::State {
   std::shared_ptr<clip::Storage> offerStore;  // receipts of the files staged for CF_HDROP (on-paste revision)
   std::map<uint64_t, std::weak_ptr<clip::PullOffer>> ranges;
   std::atomic<uint64_t> nextOperation{0};
+  // The walks of deferred copies no longer wanted (manifestCancel), by the VM's request id: a walk (manifestWalk, on the serve thread)
+  // stops at its next step, also when the cancel came before it started. The latest few are kept.
+  std::mutex walkMutex; std::deque<std::string> cancelledWalks;
+  bool WalkCancelled(const std::string& walk) { std::lock_guard lock(walkMutex); return std::find(cancelledWalks.begin(),cancelledWalks.end(),walk)!=cancelledWalks.end(); }
   std::mutex eventMutex; std::deque<PullEvent> events; std::function<void()> notify;
   std::atomic<DWORD>* ownSequence = nullptr;
   void Post(PullEvent event) { std::lock_guard lock(eventMutex); events.push_back(std::move(event)); if (notify) notify(); }
@@ -224,7 +228,11 @@ std::shared_ptr<clip::PullOffer> ClientClipboardState::State::MakeOffer(const M&
     Require(offerFormat=="tree"||offerFormat=="text"||offerFormat=="richtext"||offerFormat=="image");
     // The on-paste revision: our card is the only progress (the descriptors carry no FD_PROGRESSUI) and a small set is also CF_HDROP.
     bool ownProgress=false; if(args.find(V("ownProgress"))!=args.end()) { const auto* value=std::get_if<bool>(&Argument(args,"ownProgress")); Require(value!=nullptr); ownProgress=*value; }
-    const auto* list=std::get_if<flutter::EncodableList>(&Argument(args,"items")); Require(list&&!list->empty()&&list->size()<=clip::maxEntries);
+    // A deferred copy (manifest-on-paste-v1): no list yet; the paste asks for it (a "manifest" pull event).
+    bool deferred=false; if(args.find(V("deferred"))!=args.end()) { const auto* value=std::get_if<bool>(&Argument(args,"deferred")); Require(value!=nullptr); deferred=*value; }
+    Require(!deferred||offerFormat=="tree");
+    const flutter::EncodableList noItems;
+    const auto* list=deferred?&noItems:std::get_if<flutter::EncodableList>(&Argument(args,"items")); Require(list&&(deferred||!list->empty())&&list->size()<=clip::maxEntries);
     std::vector<clip::Item> entries; std::vector<int64_t> mtimes;
     for(const auto& value:*list) {
       const auto* item=std::get_if<M>(&value); Require(item!=nullptr);
@@ -259,10 +267,15 @@ std::shared_ptr<clip::PullOffer> ClientClipboardState::State::MakeOffer(const M&
       if(!started)*operation=0;
       st->Post(std::move(event));
     };
+    hooks.manifest=[st](const std::string& offer) { PullEvent event; event.kind="manifest"; event.offerId=offer; st->Post(std::move(event)); };
+    hooks.manifestCancel=[st](const std::string& offer,const std::string& reason) { PullEvent event; event.kind="manifestCancel"; event.offerId=offer; event.reason=reason; st->Post(std::move(event)); };
     std::shared_ptr<clip::PullOffer> offer;
     // The relay's pull queue: files asked for ahead of their reader (1 when absent: one pull at a time).
     size_t prefetchDepth=1; if(args.find(V("prefetchDepth"))!=args.end()) { const auto depth=Number(args,"prefetchDepth"); Require(depth>=1&&depth<=clip::maxPrefetchDepth); prefetchDepth=size_t(depth); }
-    if(offerFormat=="tree") {
+    if(deferred) {
+      clip::PullOptions options; options.explorerProgress=!ownProgress; options.prefetchDepth=prefetchDepth;
+      offer=clip::PullOffer::createDeferred(offerId,std::move(hooks),{},options);
+    } else if(offerFormat=="tree") {
       clip::PullOptions options; options.explorerProgress=!ownProgress; options.prefetchDepth=prefetchDepth;
       if(ownProgress) { if(!s.offerStore) s.offerStore=std::make_shared<clip::Storage>(s.Parent()); options.stagingParent=s.offerStore->parent(); options.storage=s.offerStore; }
       offer=clip::PullOffer::create(offerId,std::move(entries),std::move(mtimes),std::move(hooks),{},options);
@@ -355,7 +368,7 @@ V ClientClipboardState::Run(const std::string& method, const M& args, HWND owner
   }
   if (method=="capture") {
     Require(s.source_owner.empty() || s.source_owner==scope);
-    AllowedFields(args,{"owner","allowedText","allowedFiles","skipOwn","formats","pull","offerId","onPaste","richBytes"});
+    AllowedFields(args,{"owner","allowedText","allowedFiles","skipOwn","formats","pull","offerId","onPaste","richBytes","deferred"});
     bool allowedText=true,allowedFiles=true;
     if(args.find(V("allowedText"))!=args.end()||args.find(V("allowedFiles"))!=args.end()) {
       const auto* text=std::get_if<bool>(&Argument(args,"allowedText"));
@@ -372,6 +385,8 @@ V ClientClipboardState::Run(const std::string& method, const M& args, HWND owner
     if(args.find(V("offerId"))!=args.end()) { offerId=String(args,"offerId"); Require(Identifier(offerId)); }
     // The on-paste revision: a copy is silent. Files and folders are always offered; text, rich text and images only when they are too big to push.
     bool onPaste=false; if(args.find(V("onPaste"))!=args.end()) { const auto* value=std::get_if<bool>(&Argument(args,"onPaste")); Require(value!=nullptr); onPaste=*value; }
+    // Deferred manifest (manifest-on-paste-v1): a copy of files that is not small is offered without walking it.
+    bool deferred=false; if(args.find(V("deferred"))!=args.end()) { const auto* value=std::get_if<bool>(&Argument(args,"deferred")); Require(value!=nullptr); deferred=*value; }
     // Validate even when skipOwn will return before reading any data. Failed
     // pre-admission options preserve the old source and consume no receipt.
     clip::ReadOptions readOptions{allowedText,allowedFiles,allowedText,allowedFiles,true};
@@ -419,6 +434,15 @@ V ClientClipboardState::Run(const std::string& method, const M& args, HWND owner
       s.ReleaseSource(); return V(M{{V("own"),V(true)},{V("sequence"),V(int64_t(snapshot.sequence))}});
     }
     if(!((allowedFiles||snapshot.files.empty())&&(allowedText||!snapshot.text)))throw std::runtime_error("clipboard_policy_denied");
+    // Not small: only that files were copied goes out now; the list is walked when the VM pastes (manifestWalk). Staged virtual files
+    // are already local and keep their walked offer.
+    if(formats&&pull&&onPaste&&deferred&&!offerId.empty()&&!snapshot.files.empty()&&!snapshot.staged&&
+       !clip::treeFitsWithin(snapshot.files,clip::Bounds::scale(),clip::eagerManifestEntries,clip::eagerManifestBytes)) {
+      s.offers.addDeferred(offerId,snapshot.files,snapshot.sequence);
+      s.source_owner=scope;s.sourceKind=State::SourceKind::offerOnly;
+      return V(M{{V("format"),V("tree")},{V("deferred"),V(true)},{V("items"),V(flutter::EncodableList{})},{V("sequence"),V(int64_t(snapshot.sequence))},
+                 {V("tops"),V(int64_t(snapshot.files.size()))},{V("skipped"),V(int64_t(0))},{V("offer"),V(true)}});
+    }
     if(formats&&pull&&!offerId.empty()&&!snapshot.files.empty()) {
       auto scan=clip::scanTree(snapshot.files,clip::Bounds::scale());
       if(clip::shouldOffer(scan,onPaste)) {
@@ -621,13 +645,44 @@ void ClientClipboardState::Pull(const std::string& method, const M& args) {
   }
   if (method=="pullAbort"||method=="pullSupersede") {
     std::vector<std::shared_ptr<clip::PullOffer>> live; { std::lock_guard lock(s.pullMutex); for(const auto& offer:s.pullOffers)if(owner.empty()||s.pullOwners[offer.get()]==owner)live.push_back(offer); }
-    for (auto& offer:live) offer->abortRenders(method=="pullAbort"?"clipboard_cancelled":"clipboard_offer_expired",method=="pullAbort");
+    // A newer copy passes over a paste already waiting for a deferred offer's list (it has begun); the user's cancel ends it too.
+    for (auto& offer:live) { if (method=="pullAbort") offer->abortRenders("clipboard_cancelled",true); else offer->supersedeRenders("clipboard_offer_expired"); }
     return;
   }
   if (method=="pullRetire") {
     const auto offerId=String(args,"offerId"); std::shared_ptr<clip::PullOffer> found;
     { std::lock_guard lock(s.pullMutex); for (auto& offer:s.pullOffers) if (offer->id()==offerId&&(owner.empty()||s.pullOwners[offer.get()]==owner)) found=offer; }
     if (found) { found->abortRenders("clipboard_offer_expired",true); found->shutdown("clipboard_offer_expired"); }
+    return;
+  }
+  // The walk of this client's deferred copy for the VM's paste (manifestWalk) is no longer wanted: it stops at its next step.
+  if (method=="manifestCancel") {
+    const auto walk=String(args,"walk"); Require(!walk.empty()&&walk.size()<=64);
+    std::lock_guard lock(s.walkMutex); s.cancelledWalks.push_back(walk); while(s.cancelledWalks.size()>32) s.cancelledWalks.pop_front();
+    return;
+  }
+  // The VM's answer to a list request of its deferred offer: the list, a failure, or progress (the wait's idle clock restarts).
+  if (method=="manifestDeliver"||method=="manifestFail"||method=="manifestProgress") {
+    const auto offerId=String(args,"offerId"); std::shared_ptr<clip::PullOffer> found;
+    { std::lock_guard lock(s.pullMutex); for (auto& offer:s.pullOffers) if (offer->id()==offerId&&(owner.empty()||s.pullOwners[offer.get()]==owner)) found=offer; }
+    if (!found) return;
+    if (method=="manifestProgress") { found->manifestProgress(); return; }
+    if (method=="manifestFail") { found->failManifest(String(args,"reason")); return; }
+    const auto* list=std::get_if<flutter::EncodableList>(&Argument(args,"items"));
+    if (!list||list->empty()||list->size()>clip::maxEntries) { found->failManifest("clipboard_transfer_failed"); return; }
+    std::vector<clip::Item> entries; std::vector<int64_t> mtimes;
+    try {
+      for (const auto& value:*list) {
+        const auto* item=std::get_if<M>(&value); Require(item!=nullptr);
+        clip::Item part; part.size=Number(*item,"size"); part.kind=String(*item,"kind"); Require(part.kind=="file"||part.kind=="dir");
+        part.name=clip::treePathFromWire(Wide(String(*item,"name"))); part.attributes=static_cast<DWORD>(Number(*item,"attrs"))&0x27;
+        mtimes.push_back(static_cast<int64_t>(Number(*item,"mtime"))); entries.push_back(std::move(part));
+      }
+    } catch (const clip::PathTooLongError&) { found->failManifest("clipboard_path_too_long"); return; }
+    catch (...) { found->failManifest("clipboard_transfer_failed"); return; }
+    // A list the data object refuses fails its paste; the session hears why (the copy stays deferred: the next paste asks again).
+    const auto refused=found->deliverManifest(std::move(entries),std::move(mtimes));
+    if (!refused.empty()) throw std::runtime_error(refused);
     return;
   }
   const auto range=Number(args,"rangeId");
@@ -648,11 +703,51 @@ void ClientClipboardState::Pull(const std::string& method, const M& args) {
 // Serving the peer's pull of an offer this client kept: one file at a time, from an offset, hashed as it is read.
 V ClientClipboardState::Serve(const std::string& method, const M& args) {
   auto& s=*state_; Require(Identifier(String(args,"owner")));
+  // The VM pastes a deferred copy of this client: it must still be the copy selected (the same clipboard sequence, or the clipboard
+  // naming the same paths), then it is walked now, progress every second (a "manifestProgress" pull event), and the walked offer takes
+  // its place. The copy is pasting from the start of the walk (a newer copy on the PC does not drop it). The list comes back for the
+  // session to send as clipboard.manifest.begin and the entry pages. A copy asked for again (the first answer was cut off or refused)
+  // answers with the list walked before. The walk holds no lock the clipboard thread takes (dropOffers, closeOffers).
+  if (method=="manifestWalk") {
+    const auto offerId=String(args,"offerId"),walk=String(args,"walk"); Require(Identifier(offerId)&&!walk.empty()&&walk.size()<=64);
+    const auto stub=s.offers.deferred(offerId);
+    if (!stub) throw std::runtime_error("clipboard_offer_expired");
+    std::shared_ptr<clip::SourceOffer> offer=stub->listed;
+    if (!offer||!(s.offers.pasting(offerId)||s.access.sequence()==stub->sequence||clip::sameSelection(CurrentFiles(s.access,nullptr),stub->selection))) {
+      if (s.access.sequence()!=stub->sequence&&!clip::sameSelection(CurrentFiles(s.access,nullptr),stub->selection)) throw std::runtime_error("clipboard_offer_expired");
+      if (!s.offers.listing(offerId)) throw std::runtime_error("clipboard_offer_expired");
+      auto last=std::chrono::steady_clock::now();
+      const auto alive=[&](size_t entries) {
+        if (s.WalkCancelled(walk)) throw std::runtime_error("clipboard_cancelled");
+        const auto now=std::chrono::steady_clock::now(); if (now-last<clip::manifestProgressEvery) return; last=now;
+        PullEvent event; event.kind="manifestProgress"; event.offerId=offerId; event.index=entries; s.Post(std::move(event));
+      };
+      clip::TreeScanControl control; control.progress=alive;
+      auto scan=clip::scanTree(stub->selection,clip::Bounds::scale(),control);
+      if (!clip::shouldOffer(scan,true)) throw clip::PathTooLongError(scan.longestPath,clip::maxPasteChars);
+      const size_t walked=scan.entries.size();
+      offer=std::shared_ptr<clip::SourceOffer>(clip::SourceOffer::fromScan(offerId,std::move(scan),[&](size_t){alive(walked);}));
+      if (!s.offers.materialize(offerId,offer)) throw std::runtime_error("clipboard_offer_expired");
+      const auto kept=s.offers.deferred(offerId); if (kept&&kept->listed) offer=kept->listed;
+    } else s.offers.listing(offerId);
+    if (s.WalkCancelled(walk)) throw std::runtime_error("clipboard_cancelled");
+    flutter::EncodableList items;
+    for (size_t at=0;at<offer->items().size();++at) {
+      const auto& item=offer->items()[at];
+      std::wstring wire=item.name; std::replace(wire.begin(),wire.end(),L'\\',L'/');
+      items.emplace_back(M{{V("size"),V(static_cast<int64_t>(item.size))},{V("kind"),V(item.kind)},{V("name"),V(Utf8(wire))},
+          {V("attrs"),V(static_cast<int64_t>(item.attributes))},{V("mtime"),V(offer->mtimeMs(at))}});
+    }
+    return V(M{{V("items"),V(std::move(items))},{V("tops"),V(static_cast<int64_t>(offer->tops()))},{V("skipped"),V(static_cast<int64_t>(offer->skipped()))}});
+  }
   std::lock_guard lock(s.serveMutex);
   if (method=="pullOpen") {
     const auto offer=s.offers.find(String(args,"offerId"));
     if (!offer) throw std::runtime_error("clipboard_offer_expired");
-    auto reader=s.offers.openCurrent(offer->id(),static_cast<size_t>(Number(args,"index")),Number(args,"offset"),s.access.sequence);
+    // Still the copy selected: the same clipboard sequence, or the clipboard naming the same paths (Windows renumbers it for more than a
+    // new copy).
+    auto reader=s.offers.openCurrent(offer->id(),static_cast<size_t>(Number(args,"index")),Number(args,"offset"),s.access.sequence,
+                                     [&s]{ return CurrentFiles(s.access,nullptr); });
     s.reader=std::move(reader); s.readerOffer=offer->id();
     return V(static_cast<int64_t>(s.reader->size()));
   }
@@ -744,7 +839,7 @@ struct ClientClipboardChannel::State {
   std::thread thread, serveThread,pendingThread;
   ~State() { if(wake)CloseHandle(wake); }
   static void Pump() { MSG message; while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); } }
-  static bool IsServe(const std::string& method) { return method=="pullOpen"||method=="pullRead"||method=="pullDigest"||method=="pullClose"; }
+  static bool IsServe(const std::string& method) { return method=="pullOpen"||method=="pullRead"||method=="pullDigest"||method=="pullClose"||method=="manifestWalk"; }
   void Finish(Job& job) { {std::lock_guard lock(mutex);complete.push_back(std::move(job));} PostMessageW(window,ClientClipboardChannel::completed_message,0,0); }
   // The thread that owns the clipboard: an STA with a message loop, because the virtual files published for a
   // paste are an OLE data object that Explorer calls into for as long as they are on the clipboard.
@@ -802,7 +897,10 @@ struct ClientClipboardChannel::State {
     for(;;) {
       Job job; {std::unique_lock lock(mutex); serveChanged.wait(lock,[this]{return stopped||!serveJobs.empty();}); if(stopped&&serveJobs.empty())break; job=std::move(serveJobs.front()); serveJobs.pop_front();}
       try { if(stopped)throw std::runtime_error("clipboard_transfer_failed"); job.value=core.Serve(job.method,job.args); }
-      catch(const std::exception& e) { job.error=FailureCode(e.what(),false,job.detail,true); }
+      catch(const std::exception& e) { job.error=FailureCode(e.what(),false,job.detail,true);
+        // A walk that met a path above what can be pasted names its length: "path:<characters>".
+        if(job.detail=="path") if(const auto* longPath=dynamic_cast<const clip::PathTooLongError*>(&e)) job.detail="path:"+std::to_string(longPath->chars);
+        if(std::string(e.what())=="clipboard_cancelled") job.error="clipboard_cancelled"; }
       Finish(job);
     }
   }
@@ -832,9 +930,15 @@ void ClientClipboardChannel::Enqueue(const flutter::MethodCall<V>& call,std::uni
   const auto& method=call.method_name();
   // Data, end and failure notices of a pulled range go straight to the library: they must not wait behind a read
   // that is waiting for exactly them.
-  if(method=="pullData"||method=="pullEnd"||method=="pullFail"||method=="pullShutdown"||method=="pullAbort"||method=="pullSupersede"||method=="pullRetire") {
+  if(method=="pullData"||method=="pullEnd"||method=="pullFail"||method=="pullShutdown"||method=="pullAbort"||method=="pullSupersede"||method=="pullRetire"||
+     method=="manifestCancel"||method=="manifestDeliver"||method=="manifestFail"||method=="manifestProgress") {
     try { state_->core.Pull(method,*args); result->Success(); }
-    catch(const std::exception&) { result->Error("clipboard_transfer_failed","Windows clipboard operation failed."); }
+    catch(const std::exception& e) {
+      // A list the data object refused (manifestDeliver) names its clipboard_* reason; anything else is a failed operation.
+      const std::string reason=e.what();
+      if(method=="manifestDeliver"&&reason.rfind("clipboard_",0)==0&&reason.size()<=64){std::string detail;const auto code=FailureCode(reason,false,detail);result->Error(code,detail.empty()?"Windows clipboard operation failed.":detail);}
+      else result->Error("clipboard_transfer_failed","Windows clipboard operation failed.");
+    }
     return;
   }
   if(method=="observePendingSequence"){

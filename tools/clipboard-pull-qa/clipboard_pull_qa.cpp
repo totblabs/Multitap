@@ -225,6 +225,7 @@ int pasteMode(const fs::path& dir, const fs::path& destination) {
 }
 
 #include "onpaste_qa.inl"
+#include "deferred_qa.inl"
 
 int wmain(int argc, wchar_t** argv) {
   try {
@@ -655,6 +656,7 @@ int wmain(int argc, wchar_t** argv) {
       require(result == S_OK && attempts == 2, "OLE retry did not recover from unchanged transient contention"); ++checks;
     }
     onPasteChecks(root, checks);
+    deferredChecks(root, checks, useClipboard);
     fs::remove_all(root);
     OleUninitialize();
     std::cout << "{\"passed\":true,\"checks\":" << checks << ",\"clipboardTouched\":" << (useClipboard ? "true" : "false") << "}\n";

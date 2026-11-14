@@ -191,7 +191,7 @@ void main() {
           ),
           findsNothing,
         );
-        expect(find.text('스트리밍 가능'), findsNothing);
+        expect(find.text('스트리밍할 수 있어요'), findsNothing);
         await tester.pumpWidget(const SizedBox.shrink());
       }
     },
@@ -355,13 +355,14 @@ void main() {
       );
       expect(
         tester
-            .widget<HostReadiness>(
+            .widget<HostStatusPill>(
               find.byKey(const Key('host-overview-state')),
             )
             .label,
         isNot(isEmpty),
       );
-      expect(find.byType(HostStatusPill), findsNothing);
+      // The overview's one status pill, beside the name; no pill on the rows.
+      expect(find.byType(HostStatusPill), findsOneWidget);
       // One banner for one problem; none when all is well.
       expect(find.byType(HostProblemBanner), findsNothing);
       // Long connection times are diagnostics, not overview material.

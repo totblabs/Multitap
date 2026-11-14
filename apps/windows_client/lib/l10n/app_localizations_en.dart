@@ -5610,6 +5610,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get richText => 'Rich text';
 
   @override
+  String listingItems(Object count) {
+    return 'Listing · $count items';
+  }
+
+  @override
   String ofLabel(Object fileCount, Object progress) {
     return '$progress of $fileCount';
   }
@@ -7769,6 +7774,45 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get readyStream => 'Ready to stream';
+
+  @override
+  String get readyConnect2 => 'Ready to connect';
+
+  @override
+  String autoSign2(Object accountLabel) {
+    return '$accountLabel · auto sign-in';
+  }
+
+  @override
+  String get signedWindows => 'Signed in to Windows';
+
+  @override
+  String get noVirtualDisplayDriver => 'No virtual display driver';
+
+  @override
+  String get virtualDisplayRecoveryNeeded => 'Virtual display recovery needed';
+
+  @override
+  String get windowsSignNeeded2 => 'Windows sign-in needed';
+
+  @override
+  String get streamingScreenSwitchNeeded => 'Streaming screen switch needed';
+
+  @override
+  String get preparingVirtualDisplay3 => 'Preparing virtual display';
+
+  @override
+  String server3(Object serverDetail) {
+    return 'Server$serverDetail';
+  }
+
+  @override
+  String client(Object clientDetail) {
+    return 'Client$clientDetail';
+  }
+
+  @override
+  String get client2 => 'Client';
 
   @override
   String get checkingStatus2 => 'Checking status';

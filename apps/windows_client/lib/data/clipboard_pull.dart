@@ -32,7 +32,30 @@ const _pullWireReasons = {
   'clipboard_file_locked',
   'clipboard_selected_file_changed',
   'clipboard_offer_expired',
+  // A deferred list request may end with the limit its walk met (an on-paste pair is a scale pair).
+  'clipboard_path_too_long',
+  'clipboard_entry_count_limit',
+  'clipboard_depth_limit',
 };
+
+/// A list this side asked the peer for (deferred manifest): the counts once announced and the entries so far.
+class _ManifestIn {
+  _ManifestIn(this.requestId, this.offerId);
+  final String requestId, offerId;
+  bool begun = false;
+  int entries = 0, files = 0, bytes = 0, tops = 0, walked = 0;
+  final items = <ClipboardItem>[];
+}
+
+/// A list this side walks for the peer's paste of its deferred copy.
+class _ManifestServe {
+  _ManifestServe(this.requestId, this.offerId);
+  final String requestId, offerId;
+  // `done`: the walk returned; a progress event that arrives after it (another platform message) is not sent any more: the relay
+  // accepts progress only before the counts.
+  bool cancelled = false, done = false;
+  int walked = 0, observation = 0;
+}
 
 class ClipboardPullViolation implements Exception {
   const ClipboardPullViolation();
@@ -144,7 +167,18 @@ class ClipboardPulls {
     this.onPaste,
     this.observed,
     this.depth = 1,
+    this.deferred,
+    this.validateTree,
+    this.wireReason,
   });
+
+  /// The deferred manifest (manifest-on-paste-v1) once the relay confirmed it for the pair.
+  final ClipboardDeferredBridge? deferred;
+
+  /// The session's checks of a folder tree against the pair's limits (throws PlatformException clipboard_limits_exceeded with the
+  /// detail, or a protocol violation), and its reason for the relay of a failure code and detail.
+  final void Function(List<ClipboardItem> entries, int tops)? validateTree;
+  final String Function(String code, String? detail)? wireReason;
 
   /// Pulls this side may have outstanding: 1, or the relay's pull queue (clipboardPullQueueDepth). With a pull queue the relay also
   /// checks every chunk's base64 is canonical before it forwards it, and each pull's window is the queue's.
@@ -213,6 +247,10 @@ class ClipboardPulls {
   int _touchOperation(String offerId) =>
       _operationRevisions[offerId] = ++_operationRevision;
   final _queue = <_Pull>[];
+  // Deferred manifest: offers published without a list, the list asked for (one at a time) and the list being walked for the peer.
+  final _deferredOffers = <String>{};
+  _ManifestIn? _manifestIn;
+  _ManifestServe? _manifestServe;
   // Bounded observation correlation for a platform failure following its cancel
   // notice. These local range IDs never enter diagnostics.
   final _rangeObservations = <int, int>{};
@@ -240,6 +278,9 @@ class ClipboardPulls {
           _active != null ||
           _queue.isNotEmpty ||
           _lingering ||
+          // A paste here waits for the list of a deferred copy; the VM's paste waits for this side's list.
+          _manifestIn != null ||
+          (_manifestServe != null && (onPaste == null || _pasteWaiting)) ||
           (_serve != null && (onPaste == null || _pasteWaiting)) ||
           (onPaste != null && _pasteWaiting));
 
@@ -280,6 +321,9 @@ class ClipboardPulls {
   /// The peer withdrew [offerId] (its clipboard changed): it is no longer answerable here.
   void offerWithdrawn(String offerId) {
     _operationRevisions.remove(offerId);
+    _deferredOffers.remove(offerId);
+    // The relay has already failed a list request for it; the platform's wait for that list ends with the withdrawal (pullRetire).
+    if (_manifestIn?.offerId == offerId) _manifestIn = null;
     _offers.remove(offerId);
     _receivedOffers.remove(offerId);
     _retireOperation(offerId);
@@ -306,6 +350,8 @@ class ClipboardPulls {
           _active != null ||
           _queue.isNotEmpty ||
           _serve != null ||
+          _manifestIn != null ||
+          _manifestServe != null ||
           _lingering);
 
   String? get _progressOfferId {
@@ -317,6 +363,20 @@ class ClipboardPulls {
 
   ClipboardProgress? get progress {
     if (!active) return null;
+    // The list of a deferred copy is walked (by the peer for a paste here, or here for the peer's paste): how many items so far.
+    final listing = _active == null && _serve == null ? (_manifestIn ?? _manifestServe) : null;
+    if (listing != null) {
+      final sending = listing is _ManifestServe;
+      return ClipboardProgress(
+        sending: sending,
+        format: 'tree',
+        fileCount: 0,
+        fileIndex: 0,
+        transferred: 0,
+        total: 0,
+        listed: listing is _ManifestIn ? listing.walked : (listing as _ManifestServe).walked,
+      );
+    }
     final serve = _serve;
     final pull = _active ?? (_queue.isEmpty ? null : _queue.first);
     final received =
@@ -371,6 +431,7 @@ class ClipboardPulls {
           keys.first;
       _rangeEndedAt.remove(id);
       _offers.remove(id);
+      _deferredOffers.remove(id);
       _receivedOffers.remove(id);
       _retireOperation(id);
       _operationFloors.remove(id);
@@ -489,6 +550,16 @@ class ClipboardPulls {
     _trimOffers();
   }
 
+  /// The platform published the peer's deferred offer (no list yet): a paste asks for the list ([ClipboardPullManifest]).
+  void offerPublishedDeferred(String offerId) {
+    _offers[offerId] = _Received(offerId, const [], 0, const [], 'tree');
+    _deferredOffers.add(offerId);
+    _receivedOffers.add(offerId);
+    _touchOperation(offerId);
+    _current = offerId;
+    _trimOffers();
+  }
+
   /// Declares what this side offered so progress can describe pulls served for it.
   void offerSent(
     String offerId,
@@ -542,9 +613,159 @@ class ClipboardPulls {
           );
           failed(event.reason);
           changed();
+        case ClipboardPullManifest():
+          await _requestManifest(event.offerId);
+        case ClipboardPullManifestCancel():
+          final asked = _manifestIn;
+          if (asked != null && asked.offerId == event.offerId) {
+            _manifestIn = null;
+            send({'type': 'clipboard.cancel', 'requestId': asked.requestId});
+            // The peer was silent too long: that paste failed (a paste that gave up is no failure to report).
+            if (event.reason == 'clipboard_timeout') failed('clipboard_timeout');
+            changed();
+          }
+        case ClipboardPullManifestProgress():
+          final walking = _manifestServe;
+          if (walking != null && walking.offerId == event.offerId && !walking.cancelled && !walking.done) {
+            walking.walked = event.entries;
+            send({'type': 'clipboard.manifest.progress', 'requestId': walking.requestId, 'entries': event.entries});
+            changed();
+          }
       }
     } catch (_) {
       // A closed channel: the session reports it.
+    }
+  }
+
+  /// Something on this PC pastes the peer's deferred offer: ask the peer for its list (one request at a time).
+  Future<void> _requestManifest(String offerId) async {
+    final bridge = deferred;
+    if (bridge == null) return;
+    Future<void> refuse(String reason) async {
+      try {
+        await bridge.manifestFail(owner, offerId, reason);
+      } catch (_) {}
+    }
+
+    if (!_deferredOffers.contains(offerId) || !_offers.containsKey(offerId)) return refuse('clipboard_offer_expired');
+    final asked = _manifestIn;
+    if (asked != null) {
+      if (asked.offerId == offerId) return;  // already asked (the platform asks once per attempt)
+      return refuse('clipboard_busy');
+    }
+    if (_counter >= 999999999) return refuse('clipboard_session_limit');
+    final request = _ManifestIn('$idPrefix-${++_counter}', offerId);
+    _manifestIn = request;
+    _current = offerId;
+    _lingering = false;
+    _lingerTimer?.cancel();
+    started();
+    send({'type': 'clipboard.manifest', 'requestId': request.requestId, 'offerId': offerId});
+    changed();
+  }
+
+  /// The peer's answer to this side's list request: progress, the counts, the entry pages, or its error.
+  Future<void> _manifestMessage(_ManifestIn request, Map<String, dynamic> value) async {
+    final bridge = deferred!;
+    final type = value['type'];
+    Future<void> end(String reason) async {
+      if (identical(_manifestIn, request)) _manifestIn = null;
+      try {
+        await bridge.manifestFail(owner, request.offerId, reason);
+      } catch (_) {}
+      if (reason != 'clipboard_cancelled') failed(reason);
+      changed();
+    }
+
+    switch (type) {
+      case 'clipboard.manifest.progress':
+        _fields(value, ['type', 'requestId', 'entries']);
+        final entries = value['entries'];
+        if (entries is! int || entries < 0 || entries > limits().maxEntries) throw const ClipboardPullViolation();
+        request.walked = entries;
+        await bridge.manifestProgress(owner, request.offerId);
+        changed();
+      case 'clipboard.manifest.begin':
+        _fields(value, ['type', 'requestId', 'offerId', 'entries', 'files', 'bytes', 'tops', 'skipped']);
+        final counts = [value['entries'], value['files'], value['bytes'], value['tops'], value['skipped']];
+        if (request.begun || value['offerId'] != request.offerId || counts.any((count) => count is! int || count < 0)) {
+          throw const ClipboardPullViolation();
+        }
+        request
+          ..begun = true
+          ..entries = value['entries'] as int
+          ..files = value['files'] as int
+          ..bytes = value['bytes'] as int
+          ..tops = value['tops'] as int
+          ..walked = value['entries'] as int;
+        if (request.entries < 1 || request.tops < 1 || request.files > request.entries) throw const ClipboardPullViolation();
+        await bridge.manifestProgress(owner, request.offerId);
+        changed();
+      case 'clipboard.entries':
+        _fields(value, ['type', 'requestId', 'start', 'entries']);
+        final page = value['entries'];
+        if (!request.begun || value['start'] != request.items.length || page is! List || page.isEmpty || page.length > 256 ||
+            request.items.length + page.length > request.entries) {
+          throw const ClipboardPullViolation();
+        }
+        for (final entry in page) {
+          if (entry is! Map) throw const ClipboardPullViolation();
+          final kind = entry['kind'], path = entry['path'], attrs = entry['attrs'], mtime = entry['mtime'];
+          final file = kind == 'file';
+          if ((kind != 'file' && kind != 'dir') || path is! String || attrs is! int || mtime is! int ||
+              entry.length != (file ? 5 : 4) || (file && entry['size'] is! int)) {
+            throw const ClipboardPullViolation();
+          }
+          request.items.add(
+            ClipboardItem(size: file ? entry['size'] as int : 0, name: path, kind: kind as String, attributes: attrs, mtime: mtime),
+          );
+        }
+        await bridge.manifestProgress(owner, request.offerId);
+        if (request.items.length < request.entries) return;
+        final files = [for (final item in request.items) if (!item.isDirectory) item];
+        final tops = request.items.where((item) => !(item.name ?? '').contains('/')).length;
+        if (files.length != request.files || files.fold<int>(0, (sum, item) => sum + item.size) != request.bytes || tops != request.tops) {
+          throw const ClipboardPullViolation();
+        }
+        try {
+          validateTree?.call(request.items, request.tops);
+        } on PlatformException catch (failure) {
+          // Beyond this pair's limits: the paste fails with the limit's own reason (the relay has already ended the request).
+          final reason = wireReason?.call(failure.code, failure.message) ?? failure.code;
+          return end(_safe(reason));
+        }
+        if (!identical(_manifestIn, request)) return;
+        _manifestIn = null;
+        if (!_offers.containsKey(request.offerId)) return;  // withdrawn meanwhile
+        // The data object checks the list too: one it refuses fails this paste with its reason, and the copy stays deferred (the
+        // next paste asks again) instead of looking listed.
+        try {
+          await bridge.manifestDeliver(owner, request.offerId, request.items);
+        } on PlatformException catch (refused) {
+          final reason = wireReason?.call(refused.code, refused.message) ?? refused.code;
+          failed(_safe(reason));
+          changed();
+          return;
+        }
+        if (!_offers.containsKey(request.offerId)) return;
+        _offers[request.offerId] = _Received(
+          request.offerId,
+          [for (final item in files) item.size],
+          request.items.length - files.length,
+          [for (final item in files) item.name ?? ''],
+        );
+        _deferredOffers.remove(request.offerId);
+        changed();
+      case 'clipboard.error':
+        _fields(value, ['type', 'requestId', 'reason']);
+        await end(_safe(value['reason']));
+      case 'clipboard.cancel':
+        // The offering peer answers a list request with the list or an error, never a cancel: a cancel is the relay ending a
+        // request nobody answered within its idle bound, so the paste failed.
+        _fields(value, ['type', 'requestId']);
+        await end('clipboard_timeout');
+      default:
+        throw const ClipboardPullViolation();
     }
   }
 
@@ -775,8 +996,20 @@ class ClipboardPulls {
   Future<void> _handle(Map<String, dynamic> value) async {
     final type = value['type'];
     final id = value['requestId'];
-    if (type == 'clipboard.pull') {
+    if (type == 'clipboard.pull' || type == 'clipboard.manifest') {
       await _servePull(value);
+      return;
+    }
+    // Deferred manifest: the answer to this side's list request, or the peer ending the list this side walks.
+    final asked = _manifestIn;
+    if (asked != null && asked.requestId == id) {
+      await _manifestMessage(asked, value);
+      return;
+    }
+    final walking = _manifestServe;
+    if (walking != null && walking.requestId == id) {
+      if (type != 'clipboard.cancel' && type != 'clipboard.error') throw const ClipboardPullViolation();
+      endWalk(value);
       return;
     }
     final serve = _serve;
@@ -906,36 +1139,145 @@ class ClipboardPulls {
   // ---- Offering -----------------------------------------------------------------------------------
 
   Future<void> _servePull(Map<String, dynamic> value) async {
-    _fields(value, ['type', 'requestId', 'offerId', 'index', 'offset']);
+    final manifest = value['type'] == 'clipboard.manifest';
+    if (manifest) {
+      _fields(value, ['type', 'requestId', 'offerId']);
+    } else {
+      _fields(value, ['type', 'requestId', 'offerId', 'index', 'offset']);
+    }
     final id = value['requestId'], offerId = value['offerId'];
     final index = value['index'], offset = value['offset'];
     if (id is! String ||
         !clipboardPullIdPattern.hasMatch(id) ||
         offerId is! String ||
-        index is! int ||
-        offset is! int ||
-        index < 0 ||
-        offset < 0 ||
+        (!manifest && (index is! int || offset is! int || index < 0 || offset < 0)) ||
+        (manifest && deferred == null) ||
         !limits().pull) {
       throw const ClipboardPullViolation();
     }
-    // A pull queue: the Host asks for several files at once; they are served in order.
-    if (_serve != null && _queued && _serveQueue.length < depth) {
+    // A pull queue: the Host asks for several files at once; they are served in order (a list request takes its turn like a pull).
+    if ((_serve != null || _manifestServe != null) && _queued && _serveQueue.length < depth) {
       _serveQueue.add(value);
       return;
     }
-    await _serveOne(id, offerId, index, offset);
+    await _serveAny(value);
     // A queued pull that was refused (its file could not be opened) must not
     // hold up the ones behind it: they are answered in order, served or
     // refused, instead of waiting for a serve that never comes.
-    while (_serve == null && _serveQueue.isNotEmpty && !_closed) {
-      final next = _serveQueue.removeAt(0);
-      await _serveOne(
-        next['requestId'] as String,
-        next['offerId'] as String,
-        next['index'] as int,
-        next['offset'] as int,
-      );
+    while (_serve == null && _manifestServe == null && _serveQueue.isNotEmpty && !_closed) {
+      await _serveAny(_serveQueue.removeAt(0));
+    }
+  }
+
+  Future<void> _serveAny(Map<String, dynamic> value) => value['type'] == 'clipboard.manifest'
+      ? _serveManifest(value['requestId'] as String, value['offerId'] as String)
+      : _serveOne(
+          value['requestId'] as String,
+          value['offerId'] as String,
+          value['index'] as int,
+          value['offset'] as int,
+        );
+
+  /// The relay or the peer ends the list this side is walking ([value] a clipboard.cancel or clipboard.error of its request). The walk
+  /// holds the pull lane until it returns, so the session calls this as the message arrives, ahead of the lane: the walk stops at its
+  /// next step. True when [value] was that; anything else (and a walk already answered) goes through the lane as usual.
+  bool endWalk(Map<String, dynamic>? value) {
+    final walking = _manifestServe, type = value?['type'];
+    if (walking == null || walking.cancelled || walking.done || value?['requestId'] != walking.requestId) return false;
+    if (type != 'clipboard.cancel' && type != 'clipboard.error') return false;
+    walking.cancelled = true;
+    _sendingObservation.failed(walking.observation, type == 'clipboard.cancel' ? 'clipboard_cancelled' : _safe(value?['reason']));
+    unawaited(deferred?.manifestCancel(owner, walking.requestId).catchError((Object _) {}));
+    return true;
+  }
+
+  /// The peer pastes this side's deferred copy: walk it now and answer with the counts and the entry pages (or the reason it failed).
+  Future<void> _serveManifest(String id, String offerId) async {
+    final bridge = deferred!;
+    final observation = _sendingObservation.request();
+    void refuse(String reason) {
+      _sendingObservation.failed(observation, reason);
+      send({'type': 'clipboard.error', 'requestId': id, 'reason': reason});
+    }
+
+    if (!mayServe('tree')) return refuse('clipboard_policy_denied');
+    if (_serve != null || _manifestServe != null) return refuse('clipboard_busy');
+    final walking = _ManifestServe(id, offerId)..observation = observation;
+    _manifestServe = walking;
+    _serving = true;
+    started();
+    changed();
+    String? failure;
+    ClipboardManifest? manifest;
+    try {
+      manifest = await bridge.manifestWalk(owner, offerId, id);
+    } on PlatformException catch (error) {
+      failure = wireReason?.call(error.code, error.message) ?? error.code;
+    }
+    walking.done = true;
+    try {
+      if (walking.cancelled || !identical(_manifestServe, walking) || _closed) return;
+      if (manifest != null) {
+        // A list this side cannot send fails this paste only (as a copy that cannot be offered does), never the channel.
+        try {
+          validateTree?.call(manifest.items, manifest.tops);
+        } on PlatformException catch (error) {
+          failure = wireReason?.call(error.code, error.message) ?? error.code;
+        } catch (_) {
+          failure = 'clipboard_transfer_failed';
+        }
+      }
+      if (failure != null || manifest == null) {
+        final reason = _safe(failure);
+        refuse(reason);
+        _servingFailed(observation, reason);
+        return;
+      }
+      final items = manifest.items;
+      final files = [for (final item in items) if (!item.isDirectory) item];
+      send({
+        'type': 'clipboard.manifest.begin',
+        'requestId': id,
+        'offerId': offerId,
+        'entries': items.length,
+        'files': files.length,
+        'bytes': files.fold<int>(0, (sum, item) => sum + item.size),
+        'tops': manifest.tops,
+        'skipped': manifest.skipped,
+      });
+      // Pages the relay and the peer accept: at most 200 entries or about 40 KB each.
+      var start = 0, size = 0;
+      var page = <Map<String, Object?>>[];
+      void flush() {
+        if (page.isEmpty) return;
+        send({'type': 'clipboard.entries', 'requestId': id, 'start': start, 'entries': page});
+        start += page.length;
+        page = [];
+        size = 0;
+      }
+
+      for (final item in items) {
+        final entry = <String, Object?>{
+          'path': item.name,
+          'kind': item.kind,
+          if (!item.isDirectory) 'size': item.size,
+          'attrs': item.attributes,
+          'mtime': item.mtime ?? 0,
+        };
+        page.add(entry);
+        size += (item.name ?? '').length * 3 + 80;
+        if (page.length >= 200 || size > 40000) flush();
+      }
+      flush();
+      _sendingObservation.rangeEnded(observation);
+      offerSent(offerId, items);
+    } finally {
+      if (identical(_manifestServe, walking)) {
+        _manifestServe = null;
+        _serving = false;
+        _settled();
+        changed();
+      }
     }
   }
 
@@ -1185,6 +1527,26 @@ class ClipboardPulls {
       }
       _lastServedOfferId = null;
     }
+    // A list asked for or being walked ends too.
+    final asked = _manifestIn, walking = _manifestServe;
+    _manifestIn = null;
+    if (asked != null) {
+      try {
+        send({'type': 'clipboard.cancel', 'requestId': asked.requestId});
+      } catch (_) {}
+      try {
+        await deferred?.manifestFail(owner, asked.offerId, 'clipboard_cancelled');
+      } catch (_) {}
+    }
+    if (walking != null && !walking.cancelled) {
+      walking.cancelled = true;
+      try {
+        send({'type': 'clipboard.error', 'requestId': walking.requestId, 'reason': 'clipboard_cancelled'});
+      } catch (_) {}
+      try {
+        await deferred?.manifestCancel(owner, walking.requestId);
+      } catch (_) {}
+    }
     // What is blocked waiting for data in the platform ends first (a render between two pulls would otherwise start the next one).
     try {
       await onPaste?.pullAbort(owner);
@@ -1251,6 +1613,16 @@ class ClipboardPulls {
     await _events?.cancel();
     _active = null;
     _queue.clear();
+    _manifestIn = null;
+    final walking = _manifestServe;
+    walking?.cancelled = true;
+    _manifestServe = null;
+    _deferredOffers.clear();
+    if (walking != null) {
+      try {
+        await deferred?.manifestCancel(owner, walking.requestId);
+      } catch (_) {}
+    }
     _serve = null;
     _serving = false;
     _lingering = false;

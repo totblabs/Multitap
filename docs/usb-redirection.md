@@ -40,6 +40,36 @@ protected ones) read an ordinary USB mouse:
   the VM or with an older Host, 마우스 잠금 uses injected relative movement
   (`relative-mouse-v1`) instead.
 
+## The Host's own pointer device (a desktop with no mouse)
+
+Windows removes its pointer on a computer with no mouse attached
+(`SM_MOUSEPRESENT` 0): `GetCursorInfo` has no `CURSOR_SHOWING` and no cursor
+handle, and the absolute positions the Host injects while the mouse is free do
+not bring it back (the relative moves of 마우스 잠금 do). A VM always has a mouse
+(QEMU's PS/2 mouse and USB tablet); a Host on a physical computer without one
+showed no pointer with the mouse free (field records of 2026-11-14: hostAction
+200 stage 248 kinds 3 and 13 on every tick). So the Host plugs in a mouse of its
+own (`apps/windows_host/src/pointer_device.hpp`):
+
+- The stream's worker reads `SM_MOUSEPRESENT` at most once a second and, when it
+  is 0, sends `worker.pointer.absent` once per capture epoch. Only then does the
+  service act; a desktop with a mouse never gets the device, and the controller
+  is not installed for it there.
+- The service prepares the same pinned controller as usb-v1 (install if
+  missing, protect, prove), without sweeping ports, and plugs in a device served
+  by its own loopback USB/IP server (`BasicUsbIpServer<PointerDeviceCore>`, the
+  same PID 4 rule). The device is the virtual mouse's descriptors under product
+  1209:0002, "Multitap Pointer", serial `MULTITAP-POINTER`, full speed. It answers
+  every control request itself and sends no report: Windows' interrupt reads
+  wait until Windows cancels them.
+- It stays while the service runs and is unplugged when the service stops. Its
+  port is kept out of every sweep of ports left attached (`keptPort`); one
+  controller preparation runs at a time (`controllerLock`), and the device holds
+  it until its port is kept. If Windows lets go of the device, the next stream
+  with no mouse plugs it in again. A process that ends without unplugging leaves
+  nothing: the controller unplugs the device when the connection drops (checked
+  on a test desktop with `MultitapHostPointerDeviceProbe killed`).
+
 ## Permission and negotiation
 
 - `usbDevices`, per assignment (user × VM), default denied (stored in the
@@ -299,7 +329,10 @@ they are held in memory and not kept.
   (`error` 0 client confirmed, 1 fallback after 3 s), 26 control request
   unanswered for 5 s, 27 per-device summary (`items` requests, `kib`, `cause`
   failed, `expected` cancelled), 28 the VM's device node did not start (`error`
-  Windows problem code, `expected` seconds since attach).
+  Windows problem code, `expected` seconds since attach). Stages 33-35 are the
+  pointer device: 33 plugged in (`expected` the controller port), 34 not plugged
+  in (`error` 1-7 the controller's preparation, 20 the loopback server, 21 the
+  plug-in), 35 Windows let go of it while the service ran.
 - Client `usb` event: counts (`usbDevices`, `usbUrbs`, `usbKib`, `usbClass`)
   and a fixed `usb_*` code. Stages 7/8 attach requested/accepted; 9 per-device
   summary (`usbUrbs`, `usbKib`, `usbStalls`, `usbFailed`, `usbTimeouts`,
@@ -388,7 +421,12 @@ referenced by the app. A native connection would give it real statuses.
 - Host: `MultitapHostUsbRedirectionTest` (`usb_redirection_test.cpp`: fake kernel
   and client for the core, substituted Windows for preparation and controller
   ownership, real loopback sockets, the VHCI ABI, and with `MULTITAP_USB_PACKAGE`
-  the pinned files' hashes, signatures and catalogs).
+  the pinned files' hashes, signatures and catalogs). `MultitapHostPointerDeviceTest`
+  (the pointer device's answers, its loopback server with a fake kernel, the
+  service's owner with a substituted controller). `MultitapHostPointerDeviceProbe`
+  (administrator, explicit only): plugs the pointer into this computer's real
+  controller, checks Windows starts it as a mouse, unplugs it; `killed` ends the
+  process with it plugged in, `state` reads what is left.
 - Client: `test/usb_redirection_test.dart`, `usb_negotiation_test.dart`,
   `usb_panel_test.dart`, `usb_picker_test.dart`, `usb_reconnect_test.dart`,
   `usb_takeover_return_test.dart`, `usb_game_mouse_test.dart`,

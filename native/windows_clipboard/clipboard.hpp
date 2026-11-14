@@ -314,6 +314,20 @@ struct TreeScan {
 // clipboard_total_size_limit, clipboard_file_count_limit or clipboard_selected_file_unavailable.
 // A top-level name that repeats (same leaf from different folders) gets " (2)", " (3)"... appended.
 TreeScan scanTree(const std::vector<std::filesystem::path>& roots, const Bounds& bounds);
+// How a walk may be cut short or followed. `stopAbove*`: the walk ends with TreeExceeds as soon as it has seen more entries or file
+// bytes than that (0: no such stop), so a copy can tell "small" from "large" without walking a large tree. `progress` is called with
+// the number of entries walked so far, at least every 256 entries and at the end of every folder listing; it may throw to abort.
+struct TreeScanControl {
+  size_t stopAboveEntries = 0;
+  uint64_t stopAboveBytes = 0;
+  std::function<void(size_t entries)> progress;
+};
+// The walk passed TreeScanControl::stopAboveEntries / stopAboveBytes.
+struct TreeExceeds : std::runtime_error { TreeExceeds() : std::runtime_error("clipboard_tree_exceeds_probe") {} };
+TreeScan scanTree(const std::vector<std::filesystem::path>& roots, const Bounds& bounds, const TreeScanControl& control);
+// Whether the copy of these paths holds at most `entries` entries and `bytes` of file data, found by walking at most that far.
+// Any other condition (a file that has gone, a limit) answers true: the full walk that follows reports it with its own reason.
+bool treeFitsWithin(const std::vector<std::filesystem::path>& roots, const Bounds& bounds, size_t entries, uint64_t bytes);
 // A relative tree path from the wire ('/'-separated) as a native one; throws unless every component
 // passes safeLeaf, with no empty, "." or ".." component, within the depth and length limits (the library ceilings by default;
 // clipboard_path_too_long, clipboard_depth_limit).

@@ -21,7 +21,12 @@ class ClipboardProgress {
     this.fileName,
     this.asyncConsumer = false,
     this.topLevel = const [],
+    this.listed,
   });
+
+  /// A copy whose list is walked when it is pasted (deferred manifest): the number of items walked so far while that runs; null
+  /// otherwise.
+  final int? listed;
   final bool sending;
   final String format;
   final int fileCount, fileIndex, transferred, total, folderCount;

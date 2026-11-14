@@ -6,11 +6,11 @@ import 'app_theme.dart' show uiText;
 import 'host_settings_navigation.dart';
 import 'korean_text.dart';
 
-/// The pieces of the Host settings overview (개요): the readiness said once
-/// in plain words beside the desktop's name, one banner for one problem and
-/// plain rows that open a page (a route picture and a "정상" on every row
-/// would say the same thing three times). They only
-/// draw what they are given; host_overview.dart decides it.
+/// The pieces of the Host settings overview (개요): one status pill beside the
+/// desktop's name, the route of three points (이 데스크톱 → 서버 → 클라이언트;
+/// removed on 2026-11-11, back on 2026-11-14: the owner likes it), one banner
+/// for one problem and plain rows that open a page (a fine row says nothing
+/// more). They only draw what they are given; host_overview.dart decides it.
 
 Color _routeColor(AppPalette p, HostRouteState state) => switch (state) {
   HostRouteState.ok => p.green,
@@ -18,33 +18,7 @@ Color _routeColor(AppPalette p, HostRouteState state) => switch (state) {
   HostRouteState.idle => p.faint,
 };
 
-/// The readiness beside the desktop's name, as plain words: "스트리밍 가능",
-/// the one problem, or that the status is being read.
-class HostReadiness extends StatelessWidget {
-  const HostReadiness({super.key, required this.state, required this.label});
-  final HostRouteState state;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = AppPalette.of(context);
-    return KeepAllText(
-      label,
-      style: uiText(
-        size: 14,
-        weight: FontWeight.w500,
-        color: switch (state) {
-          HostRouteState.ok => p.green,
-          HostRouteState.warn => p.amberInk,
-          HostRouteState.idle => p.muted,
-        },
-        height: 1.3,
-      ),
-    );
-  }
-}
-
-/// A page's problem beside its title (a page that is fine shows nothing).
+/// The status beside the desktop's name on the overview, and a page's problem beside its title (a page that is fine shows nothing).
 class HostStatusPill extends StatelessWidget {
   const HostStatusPill({super.key, required this.state, required this.label});
   final HostRouteState state;
@@ -98,6 +72,184 @@ class HostStatusPill extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One point of the route: its ring, its name and one line of detail.
+class HostRoutePoint {
+  const HostRoutePoint({
+    required this.name,
+    required this.detail,
+    required this.state,
+  });
+  final String name, detail;
+  final HostRouteState state;
+}
+
+/// 이 데스크톱 → 서버 → 클라이언트: three rings joined by two legs. A leg is
+/// solid green when it carries a stream, dashed amber where it is broken and
+/// a quiet hairline when there is nothing to say about it.
+class HostRouteDiagram extends StatelessWidget {
+  const HostRouteDiagram({
+    super.key,
+    required this.points,
+    required this.toServer,
+    required this.toClient,
+    required this.label,
+  }) : assert(points.length == 3);
+  final List<HostRoutePoint> points;
+  final HostRouteState toServer, toClient;
+
+  /// What the picture says, for a screen reader.
+  final String label;
+
+  static const _ring = 33.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = AppPalette.of(context);
+    return Semantics(
+      container: true,
+      image: true,
+      label: label,
+      child: ExcludeSemantics(
+        child: CustomPaint(
+          painter: _LegPainter(
+            toServer: toServer,
+            toClient: toClient,
+            ok: Color.alphaBlend(
+              p.green.withValues(alpha: p.dark ? .55 : .70),
+              p.canvas,
+            ),
+            warn: Color.alphaBlend(
+              p.amber.withValues(alpha: p.dark ? .80 : .95),
+              p.canvas,
+            ),
+            idle: p.line,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final (index, point) in points.indexed)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Column(
+                      children: [
+                        Container(
+                          key: Key('host-route-ring-$index'),
+                          width: _ring,
+                          height: _ring,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: p.canvas,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: _routeColor(p, point.state),
+                              width: 3,
+                            ),
+                          ),
+                          child: Container(
+                            width: 9,
+                            height: 9,
+                            decoration: BoxDecoration(
+                              color: _routeColor(p, point.state),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        KeepAllText(
+                          point.name,
+                          key: Key('host-route-name-$index'),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: uiText(
+                            size: 14,
+                            weight: FontWeight.w600,
+                            color: p.ink,
+                            height: 1.3,
+                          ),
+                        ),
+                        if (point.detail.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          KeepAllText(
+                            point.detail,
+                            key: Key('host-route-detail-$index'),
+                            textAlign: TextAlign.center,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: uiText(
+                              size: 12,
+                              color: point.state == HostRouteState.warn
+                                  ? p.amberInk
+                                  : p.muted,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LegPainter extends CustomPainter {
+  const _LegPainter({
+    required this.toServer,
+    required this.toClient,
+    required this.ok,
+    required this.warn,
+    required this.idle,
+  });
+  final HostRouteState toServer, toClient;
+  final Color ok, warn, idle;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const y = HostRouteDiagram._ring / 2;
+    final third = size.width / 3;
+    void leg(double from, double to, HostRouteState state) {
+      final paint = Paint()
+        ..strokeWidth = 3
+        ..color = switch (state) {
+          HostRouteState.ok => ok,
+          HostRouteState.warn => warn,
+          HostRouteState.idle => idle,
+        };
+      if (state != HostRouteState.warn) {
+        canvas.drawLine(Offset(from, y), Offset(to, y), paint);
+        return;
+      }
+      // The broken leg: dashes of 8 with gaps of 6, clear of both rings.
+      for (var x = from + 5; x < to - 5; x += 14) {
+        canvas.drawLine(
+          Offset(x, y),
+          Offset((x + 8).clamp(from, to - 5), y),
+          paint,
+        );
+      }
+    }
+
+    // From ring to ring: each end tucks under the ring's own edge.
+    const inset = HostRouteDiagram._ring / 2 - 1;
+    leg(third / 2 + inset, third * 1.5 - inset, toServer);
+    leg(third * 1.5 + inset, third * 2.5 - inset, toClient);
+  }
+
+  @override
+  bool shouldRepaint(_LegPainter old) =>
+      old.toServer != toServer ||
+      old.toClient != toClient ||
+      old.ok != ok ||
+      old.warn != warn ||
+      old.idle != idle;
 }
 
 /// One problem: one or two short sentences (what happened, what to do) and

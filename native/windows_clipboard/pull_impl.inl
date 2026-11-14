@@ -98,6 +98,7 @@ bool shouldOffer(const TreeScan& scan, bool onPaste) {
 
 struct SourceOffer::State {
   std::string id, format = "tree"; std::vector<Item> items; std::vector<int64_t> mtimes; std::vector<std::filesystem::path> sources;
+  std::vector<std::filesystem::path> selection;  // the copied paths themselves (the top-level entries' sources)
   std::vector<size_t> files;  // entry index per file ordinal
   std::vector<Identity> identities;  // per entry
   size_t tops = 0, skipped = 0; uint64_t total = 0;
@@ -119,11 +120,13 @@ size_t SourceOffer::fileCount() const { return state_->files.size(); }
 size_t SourceOffer::entryOfFile(size_t ordinal) const { require(ordinal < state_->files.size(), "clipboard_transfer_not_active"); return state_->files[ordinal]; }
 uint64_t SourceOffer::fileSize(size_t ordinal) const { return state_->items[entryOfFile(ordinal)].size; }
 
-std::unique_ptr<SourceOffer> SourceOffer::fromScan(const std::string& id, TreeScan scan) {
+std::unique_ptr<SourceOffer> SourceOffer::fromScan(const std::string& id, TreeScan scan) { return fromScan(id, std::move(scan), {}); }
+std::unique_ptr<SourceOffer> SourceOffer::fromScan(const std::string& id, TreeScan scan, const std::function<void(size_t entries)>& progress) {
   require(!id.empty() && !scan.entries.empty(), "clipboard_empty");
   std::unique_ptr<SourceOffer> out(new SourceOffer()); auto& s = *out->state_;
   s.id = id; s.tops = scan.tops; s.skipped = scan.skipped;
   for (auto& entry : scan.entries) {
+    if (progress && !s.items.empty() && (s.items.size() & 255) == 0) progress(s.items.size());
     const Identity identity = identityOfPath(entry.source);
     require(identity.directory == entry.directory, "clipboard_selected_file_changed");
     Item item; item.kind = entry.directory ? "dir" : "file"; item.name = entry.relative; item.attributes = entry.attributes;
@@ -132,9 +135,24 @@ std::unique_ptr<SourceOffer> SourceOffer::fromScan(const std::string& id, TreeSc
       s.total += identity.size; s.files.push_back(s.items.size());
     }
     s.mtimes.push_back(fileTimeToMs(identity.written)); s.identities.push_back(identity);
+    if (entry.relative.find(L'\\') == std::wstring::npos) s.selection.push_back(entry.source);
     s.sources.push_back(entry.source); s.items.push_back(std::move(item));
   }
   return out;
+}
+const std::vector<std::filesystem::path>& SourceOffer::selection() const { return state_->selection; }
+bool sameSelection(const std::vector<std::filesystem::path>& a, const std::vector<std::filesystem::path>& b) {
+  if (a.empty() || a.size() != b.size()) return false;
+  const auto key = [](const std::filesystem::path& path) {
+    std::wstring text = path.lexically_normal().wstring();
+    while (text.size() > 3 && (text.back() == L'\\' || text.back() == L'/')) text.pop_back();
+    return folded(text);
+  };
+  std::vector<std::wstring> left, right;
+  for (const auto& path : a) left.push_back(key(path));
+  for (const auto& path : b) right.push_back(key(path));
+  std::sort(left.begin(), left.end()); std::sort(right.begin(), right.end());
+  return left == right;
 }
 std::unique_ptr<SourceOffer> SourceOffer::capture(const std::string& id, const std::vector<std::filesystem::path>& roots, const Bounds& bounds) {
   return fromScan(id, scanTree(roots, bounds));
@@ -232,9 +250,7 @@ std::unique_ptr<SourceOffer::Reader> SourceOffer::open(size_t ordinal, uint64_t 
 bool OfferRegistry::pastingLocked(const Kept& kept) const {
   return kept.servedAt && now_() - *kept.servedAt < pasteHold;
 }
-void OfferRegistry::add(std::shared_ptr<SourceOffer> offer, std::optional<DWORD> sequence) {
-  std::lock_guard lock(mutex_);
-  offers_.push_back({std::move(offer), sequence, std::nullopt});
+void OfferRegistry::trimLocked() {
   // The oldest offer no paste is using goes first; the new one always stays. Only when every older one is
   // pasting does the oldest go anyway (the bound holds).
   while (offers_.size() > maxLiveOffers) {
@@ -243,40 +259,80 @@ void OfferRegistry::add(std::shared_ptr<SourceOffer> offer, std::optional<DWORD>
     offers_.erase(victim);
   }
 }
+void OfferRegistry::add(std::shared_ptr<SourceOffer> offer, std::optional<DWORD> sequence) {
+  std::lock_guard lock(mutex_);
+  const std::string id = offer->id(); auto selection = offer->selection();
+  offers_.push_back({id, std::move(offer), sequence, std::nullopt, std::move(selection)});
+  trimLocked();
+}
+void OfferRegistry::addDeferred(const std::string& id, std::vector<std::filesystem::path> selection, DWORD sequence) {
+  require(!id.empty() && !selection.empty(), "clipboard_empty");
+  std::lock_guard lock(mutex_);
+  offers_.push_back({id, nullptr, sequence, std::nullopt, std::move(selection), true});
+  trimLocked();
+}
+std::optional<OfferRegistry::Deferred> OfferRegistry::deferred(const std::string& id) const {
+  std::lock_guard lock(mutex_);
+  for (const auto& kept : offers_) if (kept.id == id && kept.deferred) return Deferred{kept.selection, kept.sequence.value_or(0), kept.offer};
+  return std::nullopt;
+}
+bool OfferRegistry::listing(const std::string& id) {
+  std::lock_guard lock(mutex_);
+  for (auto& kept : offers_) if (kept.id == id && kept.deferred) { kept.servedAt = now_(); return true; }
+  return false;
+}
+bool OfferRegistry::materialize(const std::string& id, std::shared_ptr<SourceOffer> offer) {
+  require(offer && offer->id() == id, "clipboard_offer_expired");
+  std::lock_guard lock(mutex_);
+  for (auto& kept : offers_) if (kept.id == id && kept.deferred) {
+    if (!kept.offer) kept.offer = std::move(offer);  // two walks of one copy: the first list stays the one served
+    kept.servedAt = now_(); return true;
+  }
+  return false;
+}
 void OfferRegistry::served(const std::string& id) const {
   std::lock_guard lock(mutex_);
-  for (const auto& kept : offers_) if (kept.offer->id() == id) kept.servedAt = now_();
+  for (const auto& kept : offers_) if (kept.id == id && kept.offer) kept.servedAt = now_();
 }
 bool OfferRegistry::pasting(const std::string& id) const {
   std::lock_guard lock(mutex_);
-  for (const auto& kept : offers_) if (kept.offer->id() == id) return pastingLocked(kept);
+  for (const auto& kept : offers_) if (kept.id == id) return pastingLocked(kept);
   return false;
 }
 std::vector<std::string> OfferRegistry::dropIdle() {
   std::lock_guard lock(mutex_); std::vector<std::string> out;
   for (auto at = offers_.begin(); at != offers_.end();) {
     if (pastingLocked(*at)) { ++at; continue; }
-    out.push_back(at->offer->id()); at = offers_.erase(at);
+    out.push_back(at->id); at = offers_.erase(at);
   }
   return out;
 }
 std::shared_ptr<SourceOffer> OfferRegistry::find(const std::string& id) const {
   std::lock_guard lock(mutex_);
-  for (const auto& kept : offers_) if (kept.offer->id() == id) return kept.offer;
+  for (const auto& kept : offers_) if (kept.id == id) return kept.offer;
   return nullptr;
 }
 std::unique_ptr<SourceOffer::Reader> OfferRegistry::openCurrent(const std::string& id, size_t ordinal, uint64_t offset,
-                                                              const std::function<DWORD()>& currentSequence) const {
+                                                              const std::function<DWORD()>& currentSequence,
+                                                              const std::function<std::vector<std::filesystem::path>()>& currentSelection) const {
   Kept selected;
   {
     std::lock_guard lock(mutex_);
-    for (const auto& kept : offers_) if (kept.offer->id() == id) { selected = kept; break; }
+    for (const auto& kept : offers_) if (kept.id == id) { selected = kept; break; }
   }
   require(selected.offer != nullptr, "clipboard_offer_expired");
   // A paste already reading this offer goes on after a newer copy (its next file, its next offset).
   bool pastingNow = false;
   { std::lock_guard lock(mutex_); for (const auto& kept : offers_) if (kept.offer == selected.offer) { pastingNow = pastingLocked(kept); break; } }
-  const auto unchanged = [&] { return pastingNow || !selected.sequence || (currentSequence && currentSequence() == *selected.sequence); };
+  // The copy is still the one selected: the same clipboard sequence, or (the number moved without a new copy, or the same items were
+  // copied again) the clipboard names exactly the copied paths. Read once per admission, not per check.
+  std::optional<bool> sameItems;
+  const auto unchanged = [&] {
+    if (pastingNow || !selected.sequence || (currentSequence && currentSequence() == *selected.sequence)) return true;
+    if (!currentSelection || selected.selection.empty()) return false;
+    if (!sameItems) { try { sameItems = sameSelection(currentSelection(), selected.selection); } catch (...) { sameItems = false; } }
+    return *sameItems;
+  };
   require(unchanged(), "clipboard_offer_expired");
   auto reader = selected.offer->open(ordinal, offset);
   require(unchanged(), "clipboard_offer_expired");
@@ -290,11 +346,11 @@ std::unique_ptr<SourceOffer::Reader> OfferRegistry::openCurrent(const std::strin
 }
 void OfferRegistry::remove(const std::string& id) {
   std::lock_guard lock(mutex_);
-  for (auto at = offers_.begin(); at != offers_.end(); ++at) if (at->offer->id() == id) { offers_.erase(at); return; }
+  for (auto at = offers_.begin(); at != offers_.end(); ++at) if (at->id == id) { offers_.erase(at); return; }
 }
 void OfferRegistry::clear() { std::lock_guard lock(mutex_); offers_.clear(); }
 size_t OfferRegistry::size() const { std::lock_guard lock(mutex_); return offers_.size(); }
-std::vector<std::string> OfferRegistry::ids() const { std::lock_guard lock(mutex_); std::vector<std::string> out; for (const auto& kept : offers_) out.push_back(kept.offer->id()); return out; }
+std::vector<std::string> OfferRegistry::ids() const { std::lock_guard lock(mutex_); std::vector<std::string> out; for (const auto& kept : offers_) out.push_back(kept.id); return out; }
 
 // ---------------------------------------------------------------------------------------------------------
 // The receiver
@@ -334,6 +390,7 @@ static uint64_t nextRangeId() { static std::atomic<uint64_t> counter{1}; return 
 struct RenderJob {
   EventHandle done;                   // manual reset: the job ended
   std::atomic<bool> finished{false}, abandon{false};
+  bool pasting = false;               // a deferred offer's list wait: a paste that has begun (supersedeRenders passes it over)
   std::string failure;                // empty on success
   std::vector<std::vector<uint8_t>> blobs;       // the pulled items (text, html, png)
   std::vector<std::filesystem::path> paths;      // CF_HDROP: the top-level staged items
@@ -353,7 +410,8 @@ struct PullOffer::Impl : std::enable_shared_from_this<PullOffer::Impl> {
   uint64_t delivered = 0, consumed = 0; bool dead = false; std::string deadReason; int readers = 0;
   // Blocking renders. `abortGeneration` counts the abortRenders() calls; a render that started before one gives up with `abortReason`.
   std::function<bool()> isCurrent;
-  uint64_t abortGeneration = 0; std::string abortReason;
+  // Every abort counts in abortGeneration; one that ends a paste under way too (the user's cancel, a withdrawn offer) also in hardAborts.
+  uint64_t abortGeneration = 0, hardAborts = 0; std::string abortReason, hardReason;
   std::chrono::steady_clock::time_point refuseStreamsUntil{}; std::string refuseReason;
   std::map<std::string, std::shared_ptr<RenderJob>> jobs;
   struct Cached { std::chrono::steady_clock::time_point at; std::vector<uint8_t> bytes; };
@@ -362,6 +420,104 @@ struct PullOffer::Impl : std::enable_shared_from_this<PullOffer::Impl> {
   std::optional<Staged> staged;
   int waiters = 0;
   bool hdropOffered = false;
+  // Deferred manifest: `deferred` until the list arrives (`listed`); a request in flight fails with `manifestFailure`. `manifestHeard`
+  // is the last word from the offering side (the request, a progress message), for the idle bound.
+  bool deferred = false, listed = true; std::string manifestFailure; std::chrono::steady_clock::time_point manifestHeard{};
+  EventHandle manifestEvent;
+  // One list request at a time per copy (the hooks name the copy, not the attempt): `manifestAsking` while one is out, owned by attempt
+  // `manifestOwner`. An attempt that starts while an abandoned one still winds down takes its request over (the older one then leaves
+  // without cancelling it); `manifestCancelling` while the owner's cancel is on its way, so no newer request can overtake it.
+  bool manifestAsking = false, manifestCancelling = false; uint64_t manifestAttempts = 0, manifestOwner = 0;
+  // The validated list: entries, write times, the file ordinals (shared by create() and deliverManifest()). Lock held or not yet shared.
+  void setEntries(std::vector<Item> list, std::vector<int64_t> mtimeMs) {
+    require(!list.empty() && list.size() <= maxEntries && mtimeMs.size() == list.size(), "clipboard_entry_count_limit");
+    std::set<std::wstring> seen, directories; size_t tops = 0; uint64_t sum = 0;
+    std::vector<size_t> files; std::vector<int64_t> ordinals;
+    for (size_t i = 0; i < list.size(); ++i) {
+      auto& item = list[i];
+      std::wstring wire = item.name; std::replace(wire.begin(), wire.end(), L'\\', L'/');
+      if (item.name.size() > maxDescriptorChars) throw PathTooLongError(item.name.size(), maxDescriptorChars);
+      require((item.kind == "file" || item.kind == "dir") && treePathFromWire(wire) == item.name, "clipboard_selected_file_unavailable");
+      const auto key = folded(item.name); const auto slash = item.name.rfind(L'\\');
+      if (slash == std::wstring::npos) ++tops; else require(directories.count(folded(item.name.substr(0, slash))) != 0, "clipboard_selected_file_unavailable");
+      require(seen.insert(key).second, "clipboard_duplicate_file_name");
+      item.attributes &= transferableAttributes;
+      if (item.kind == "dir") { directories.insert(key); item.size = 0; ordinals.push_back(-1); }
+      else {
+        require(item.size <= scaleBytes && item.size <= scaleBytes - sum, "clipboard_total_size_limit"); sum += item.size;
+        ordinals.push_back(int64_t(files.size())); files.push_back(i);
+      }
+    }
+    require(tops >= 1, "clipboard_file_count_limit");
+    entries = std::move(list); mtimes = std::move(mtimeMs); fileEntry = std::move(files); ordinalOfEntry = std::move(ordinals); total = sum;
+  }
+  // The list for the data object, asked for (once per attempt) when there is none yet. nullptr with the clipboard_* reason on failure.
+  struct Listing { std::vector<Item> entries; std::vector<int64_t> mtimes, ordinalOfEntry; };
+  std::shared_ptr<const Listing> listing;
+  std::shared_ptr<const Listing> manifest(std::string& failure) {
+    { std::lock_guard lock(m); if (listing) return listing; if (dead) { failure = deadReason; return nullptr; } }
+    auto render = job("manifest", [self = shared_from_this()](RenderJob&, const std::function<bool()>& abandoned) { self->awaitManifest(abandoned); });
+    failure = await(render);
+    if (!failure.empty()) return nullptr;
+    std::lock_guard lock(m);
+    if (!listing) failure = dead ? deadReason : std::string("clipboard_transfer_failed");
+    return listing;
+  }
+  // Render thread: one request for the list, waited for until it arrives, fails, goes quiet for manifestIdle, or nobody wants it.
+  void awaitManifest(const std::function<bool()>& abandoned) {
+    if (!hooks.manifest) throw std::runtime_error("clipboard_transfer_failed");
+    uint64_t mine = 0; bool ask = false;
+    for (;;) {
+      {
+        std::lock_guard lock(m);
+        if (listed) return;
+        if (dead) throw std::runtime_error(deadReason);
+        if (!manifestCancelling) {
+          mine = ++manifestAttempts; manifestOwner = mine;
+          if (!manifestAsking) {
+            manifestAsking = true; ask = true;
+            manifestFailure.clear(); manifestHeard = std::chrono::steady_clock::now(); ResetEvent(manifestEvent.value);
+          }
+          break;
+        }
+      }
+      if (abandoned()) throw std::runtime_error("clipboard_cancelled");
+      Sleep(10);  // an older attempt's cancel is on its way: this request must follow it
+    }
+    // The request ends (answered, failed or cancelled) only by its owner; an attempt that was taken over leaves it running.
+    const auto finish = [&](const char* reason) {
+      {
+        std::lock_guard lock(m);
+        if (manifestOwner != mine) throw std::runtime_error("clipboard_cancelled");
+        manifestAsking = false;
+        if (listed) return;
+        if (!manifestFailure.empty()) throw std::runtime_error(manifestFailure);
+        if (dead) throw std::runtime_error(deadReason);
+        manifestCancelling = true;
+      }
+      if (hooks.manifestCancel) { try { hooks.manifestCancel(id, reason); } catch (...) {} }
+      std::lock_guard lock(m);
+      manifestCancelling = false;
+      if (!listed) throw std::runtime_error(reason);  // the list may have arrived while the cancel went out: it is used
+    };
+    if (ask) {
+      try { hooks.manifest(id); }
+      catch (...) { std::lock_guard lock(m); if (manifestOwner == mine) manifestAsking = false; throw; }
+    }
+    for (;;) {
+      WaitForSingleObject(manifestEvent.value, 250);
+      {
+        std::lock_guard lock(m);
+        if (manifestOwner != mine) throw std::runtime_error("clipboard_cancelled");
+        if (listed || !manifestFailure.empty() || dead) { /* the owner ends the request below */ }
+        else {
+          ResetEvent(manifestEvent.value);
+          if (std::chrono::steady_clock::now() - manifestHeard < manifestIdle && !abandoned()) continue;
+        }
+      }
+      return finish(abandoned() ? "clipboard_cancelled" : "clipboard_timeout");
+    }
+  }
   // Small files asked for before anybody reads them (see prefetchAfter), in the order they were asked for; a reader that asks for one
   // of them takes it over. At most depth() of them.
   std::deque<std::shared_ptr<PullRange>> prefetched;
@@ -578,7 +734,7 @@ struct PullOffer::Impl : std::enable_shared_from_this<PullOffer::Impl> {
       if (dead) { auto failed = std::make_shared<RenderJob>(); failed->failure = deadReason; failed->finished = true; SetEvent(failed->done.value); return failed; }
       const auto found = jobs.find(key);
       if (found != jobs.end() && !found->second->finished && !found->second->abandon) return found->second;
-      created = std::make_shared<RenderJob>(); jobs[key] = created;
+      created = std::make_shared<RenderJob>(); created->pasting = key == "manifest"; jobs[key] = created;
     }
     auto self = shared_from_this();
     auto runRender = [self, created, key, work = std::move(work)] {
@@ -596,7 +752,7 @@ struct PullOffer::Impl : std::enable_shared_from_this<PullOffer::Impl> {
   // Waits on the apartment thread for a render, serving COM calls meanwhile. Returns "" on success or the clipboard_* reason it ended with.
   // Gives up when the offer is no longer the clipboard (clipboard_changed) or abortRenders() was called (its reason).
   std::string await(const std::shared_ptr<RenderJob>& render) {
-    uint64_t generation; { std::lock_guard lock(m); generation = abortGeneration; }
+    uint64_t generation, hard; { std::lock_guard lock(m); generation = abortGeneration; hard = hardAborts; }
     WaitScope waiting(this); waiting.begin();
     for (;;) {
       if (render->finished) return render->failure;
@@ -605,18 +761,25 @@ struct PullOffer::Impl : std::enable_shared_from_this<PullOffer::Impl> {
       constexpr HRESULT timedOut = HRESULT(0x80010115L);
       if (woke != S_OK && woke != timedOut) WaitForSingleObject(handle, 100);
       if (render->finished) return render->failure;
-      { std::lock_guard lock(m); if (abortGeneration != generation) { render->abandon = true; return abortReason; } if (dead) { render->abandon = true; return deadReason; } }
+      {
+        std::lock_guard lock(m);
+        // A paste waiting for its list outlives a newer copy (supersedeRenders, the clipboard changing); not a hard abort.
+        if (hardAborts != hard) { render->abandon = true; return hardReason; }
+        if (abortGeneration != generation && !render->pasting) { render->abandon = true; return abortReason; }
+        if (dead) { render->abandon = true; return deadReason; }
+      }
+      if (render->pasting) continue;
       std::function<bool()> check; { std::lock_guard lock(m); check = isCurrent; }
       if (check) { bool current = true; try { current = check(); } catch (...) {} if (!current) { render->abandon = true; return "clipboard_changed"; } }
     }
   }
-  void abortAll(const std::string& reason, bool streams) {
+  void abortAll(const std::string& reason, bool streams, bool keepPasting = false) {
     std::vector<std::shared_ptr<RenderJob>> running; std::vector<std::shared_ptr<PullRange>> live;
     {
       std::lock_guard lock(m);
-      ++abortGeneration; abortReason = reason;
+      ++abortGeneration; abortReason = reason; if (!keepPasting) { ++hardAborts; hardReason = reason; }
       if (streams) prefetched.clear();
-      for (auto& entry : jobs) { entry.second->abandon = true; running.push_back(entry.second); }
+      for (auto& entry : jobs) { if (keepPasting && entry.second->pasting) continue; entry.second->abandon = true; running.push_back(entry.second); }
       if (streams) {
         refuseReason = reason; refuseStreamsUntil = std::chrono::steady_clock::now() + std::chrono::seconds(4);
         for (auto& entry : ranges) live.push_back(entry.second);
@@ -866,6 +1029,9 @@ inline bool privacyFormat(UINT format) { return format == cfNoMonitor() || forma
 // out a pulling stream per file. Formats the target writes back (Performed DropEffect ...) are accepted and ignored.
 struct VirtualTree {
   std::vector<Item> entries; std::vector<int64_t> mtimes, ordinalOfEntry;  // ordinal among files per entry, -1 for folders
+  // A deferred offer has no list when it is published: `listing` returns it (asking for it and waiting the first time), or nullptr with
+  // the reason. Unset: the fields above are the list.
+  std::function<std::shared_ptr<const PullOffer::Impl::Listing>(std::string& failure)> listing;
   std::function<IStream*(size_t ordinal)> open;  // a new stream of file `ordinal` (an AddRef'd IStream), nullptr on failure
   std::function<void(bool started)> operation;  // Explorer's own copy operation started / ended (its dialog is the progress); may be empty
   std::function<void(bool started, HRESULT result)> operationState;
@@ -912,17 +1078,26 @@ class PullDataObject final : public IDataObject, public IDataObjectAsyncCapabili
       if (!memory) return failure == "clipboard_cancelled" || failure == "clipboard_changed" || failure == "clipboard_offer_expired" ? E_ABORT : hresultOfReason(failure.empty() ? "clipboard_transfer_failed" : failure);
       medium->tymed = TYMED_HGLOBAL; medium->hGlobal = memory; return S_OK;
     }
-    if (format->cfFormat == cfContents()) {
+    if (format->cfFormat == cfContents() || format->cfFormat == cfDescriptor()) {
+      // The list: fixed, or (a deferred offer) asked for now and waited for.
+      std::shared_ptr<const PullOffer::Impl::Listing> held; const std::vector<Item>* entries = &tree_->entries;
+      const std::vector<int64_t>* mtimes = &tree_->mtimes; const std::vector<int64_t>* ordinals = &tree_->ordinalOfEntry;
+      if (tree_->listing) {
+        std::string failure;
+        try { held = tree_->listing(failure); } catch (const std::exception& error) { failure = error.what(); } catch (...) { failure = "clipboard_transfer_failed"; }
+        if (!held) return failure == "clipboard_cancelled" || failure == "clipboard_changed" || failure == "clipboard_offer_expired" ? E_ABORT : hresultOfReason(failure.empty() ? "clipboard_transfer_failed" : failure);
+        entries = &held->entries; mtimes = &held->mtimes; ordinals = &held->ordinalOfEntry;
+      }
+      if (format->cfFormat == cfDescriptor()) { medium->tymed = TYMED_HGLOBAL; medium->hGlobal = descriptor(*entries, *mtimes); return medium->hGlobal ? S_OK : E_OUTOFMEMORY; }
       const LONG lindex = format->lindex;
-      if (lindex < 0 || size_t(lindex) >= tree_->entries.size()) return DV_E_LINDEX;
-      const int64_t ordinal = tree_->ordinalOfEntry[size_t(lindex)];
+      if (lindex < 0 || size_t(lindex) >= entries->size()) return DV_E_LINDEX;
+      const int64_t ordinal = (*ordinals)[size_t(lindex)];
       if (ordinal < 0) return DV_E_LINDEX;  // a folder has no contents
       medium->tymed = TYMED_ISTREAM; medium->pstm = tree_->open(size_t(ordinal));
       return medium->pstm ? S_OK : STG_E_FILENOTFOUND;
     }
     medium->tymed = TYMED_HGLOBAL;
     if (privacyFormat(format->cfFormat)) medium->hGlobal = dword(0);
-    else if (format->cfFormat == cfDescriptor()) medium->hGlobal = descriptor();
     else medium->hGlobal = dword(format->cfFormat == cfPreferred() ? DWORD(DROPEFFECT_COPY) : zoneInternet);
     return medium->hGlobal ? S_OK : E_OUTOFMEMORY;
   }
@@ -984,8 +1159,8 @@ class PullDataObject final : public IDataObject, public IDataObjectAsyncCapabili
     return memory;
   }
   // FILEGROUPDESCRIPTORW with every entry, folders included, as relative paths (parents first).
-  HGLOBAL descriptor() {
-    const auto& entries = tree_->entries; const SIZE_T bytes = sizeof(UINT) + entries.size() * sizeof(FILEDESCRIPTORW);
+  HGLOBAL descriptor(const std::vector<Item>& entries, const std::vector<int64_t>& mtimes) {
+    const SIZE_T bytes = sizeof(UINT) + entries.size() * sizeof(FILEDESCRIPTORW);
     HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes); if (!memory) return nullptr;
     auto* group = static_cast<FILEGROUPDESCRIPTORW*>(GlobalLock(memory)); if (!group) { GlobalFree(memory); return nullptr; }
     group->cItems = UINT(entries.size());
@@ -993,7 +1168,7 @@ class PullDataObject final : public IDataObject, public IDataObjectAsyncCapabili
       FILEDESCRIPTORW& d = group->fgd[i]; const Item& item = entries[i]; const bool dir = item.kind == "dir";
       d.dwFlags = FD_ATTRIBUTES | FD_WRITESTIME | (tree_->progressUi ? FD_PROGRESSUI : 0) | (dir ? 0 : FD_FILESIZE);
       d.dwFileAttributes = dir ? (FILE_ATTRIBUTE_DIRECTORY | item.attributes) : (item.attributes ? item.attributes : FILE_ATTRIBUTE_NORMAL);
-      d.ftLastWriteTime = msToFileTime(tree_->mtimes[i]);
+      d.ftLastWriteTime = msToFileTime(mtimes[i]);
       if (!dir) { d.nFileSizeHigh = DWORD(item.size >> 32); d.nFileSizeLow = DWORD(item.size & 0xffffffffu); }
       wcsncpy_s(d.cFileName, item.name.c_str(), _TRUNCATE);
     }
@@ -1034,24 +1209,8 @@ PullOffer::PullOffer() = default;
 std::shared_ptr<PullOffer> PullOffer::create(std::string offerId, std::vector<Item> entries, std::vector<int64_t> mtimeMs, PullHooks hooks, PullTimeouts timeouts, PullOptions options) {
   require(!offerId.empty() && !entries.empty() && entries.size() <= maxEntries && mtimeMs.size() == entries.size(), "clipboard_entry_count_limit");
   std::shared_ptr<PullOffer> offer(new PullOffer()); offer->impl_ = std::make_shared<PullOffer::Impl>(); auto& s = *offer->impl_;
-  std::set<std::wstring> seen, directories; size_t tops = 0;
-  for (size_t i = 0; i < entries.size(); ++i) {
-    auto& item = entries[i];
-    std::wstring wire = item.name; std::replace(wire.begin(), wire.end(), L'\\', L'/');
-    if (item.name.size() > maxDescriptorChars) throw PathTooLongError(item.name.size(), maxDescriptorChars);
-    require((item.kind == "file" || item.kind == "dir") && treePathFromWire(wire) == item.name, "clipboard_selected_file_unavailable");
-    const auto key = folded(item.name); const auto slash = item.name.rfind(L'\\');
-    if (slash == std::wstring::npos) ++tops; else require(directories.count(folded(item.name.substr(0, slash))) != 0, "clipboard_selected_file_unavailable");
-    require(seen.insert(key).second, "clipboard_duplicate_file_name");
-    item.attributes &= transferableAttributes;
-    if (item.kind == "dir") { directories.insert(key); item.size = 0; s.ordinalOfEntry.push_back(-1); }
-    else {
-      require(item.size <= scaleBytes && item.size <= scaleBytes - s.total, "clipboard_total_size_limit"); s.total += item.size;
-      s.ordinalOfEntry.push_back(int64_t(s.fileEntry.size())); s.fileEntry.push_back(i);
-    }
-  }
-  require(tops >= 1, "clipboard_file_count_limit");
-  s.id = std::move(offerId); s.entries = std::move(entries); s.mtimes = std::move(mtimeMs); s.hooks = std::move(hooks); s.timeouts = timeouts; s.options = options;
+  s.setEntries(std::move(entries), std::move(mtimeMs));
+  s.id = std::move(offerId); s.hooks = std::move(hooks); s.timeouts = timeouts; s.options = options;
   // CF_HDROP as well, for applications that cannot take virtual files: only for a small set whose staged paths stay below MAX_PATH.
   if (!options.stagingParent.empty() && options.storage && s.total <= hdropCompatBytes && s.entries.size() <= hdropCompatEntries) {
     const size_t base = options.stagingParent.wstring().size() + 1 + 41 + 1;  // <parent>\transfer-<32 hex>\<relative>
@@ -1080,6 +1239,48 @@ std::shared_ptr<PullOffer> PullOffer::create(std::string offerId, std::vector<It
   offer->object_ = new PullDataObject(tree);
   return offer;
 }
+std::shared_ptr<PullOffer> PullOffer::createDeferred(std::string offerId, PullHooks hooks, PullTimeouts timeouts, PullOptions options) {
+  require(!offerId.empty() && hooks.manifest, "clipboard_transfer_failed");
+  std::shared_ptr<PullOffer> offer(new PullOffer()); offer->impl_ = std::make_shared<PullOffer::Impl>(); auto& s = *offer->impl_;
+  s.id = std::move(offerId); s.hooks = std::move(hooks); s.timeouts = timeouts; s.options = options;
+  s.deferred = true; s.listed = false;  // never CF_HDROP: a deferred copy is larger than the CF_HDROP bounds
+  auto tree = std::make_shared<VirtualTree>();
+  tree->listing = [impl = offer->impl_](std::string& failure) { return impl->manifest(failure); };
+  tree->status = [impl = offer->impl_]() -> HRESULT {
+    std::lock_guard lock(impl->m);
+    return impl->dead ? hresultOfReason(impl->deadReason) : S_OK;
+  };
+  tree->progressUi = options.explorerProgress;
+  tree->open = [impl = offer->impl_](size_t ordinal) -> IStream* {
+    { std::lock_guard lock(impl->m); if (!impl->listed || ordinal >= impl->fileEntry.size()) return nullptr; }
+    return new PullStream(impl, ordinal);
+  };
+  tree->operation = [impl = offer->impl_](bool started) { if (impl->hooks.operation) impl->hooks.operation(started); };
+  tree->operationState = [impl = offer->impl_](bool started, HRESULT result) { if (impl->hooks.operationState) impl->hooks.operationState(started, result); };
+  offer->object_ = new PullDataObject(tree);
+  return offer;
+}
+std::string PullOffer::deliverManifest(std::vector<Item> entries, std::vector<int64_t> mtimeMs) {
+  auto& s = *impl_;
+  std::lock_guard lock(s.m);
+  if (!s.deferred || s.listed || s.dead) return {};
+  try {
+    s.setEntries(std::move(entries), std::move(mtimeMs));
+    s.listing = std::make_shared<const Impl::Listing>(Impl::Listing{s.entries, s.mtimes, s.ordinalOfEntry});
+    s.listed = true;
+  } catch (const PathTooLongError&) { s.manifestFailure = "clipboard_path_too_long"; }
+  catch (const std::exception& error) { s.manifestFailure = error.what(); if (s.manifestFailure.empty()) s.manifestFailure = "clipboard_transfer_failed"; }
+  SetEvent(s.manifestEvent.value);
+  return s.listed ? std::string() : s.manifestFailure;
+}
+void PullOffer::failManifest(const std::string& reason) {
+  auto& s = *impl_;
+  std::lock_guard lock(s.m);
+  if (!s.deferred || s.listed) return;
+  s.manifestFailure = reason.empty() ? std::string("clipboard_transfer_failed") : reason; SetEvent(s.manifestEvent.value);
+}
+void PullOffer::manifestProgress() { auto& s = *impl_; std::lock_guard lock(s.m); s.manifestHeard = std::chrono::steady_clock::now(); }
+bool PullOffer::deferredPending() const { std::lock_guard lock(impl_->m); return impl_->deferred && !impl_->listed; }
 std::shared_ptr<PullOffer> PullOffer::createContent(std::string offerId, const std::string& format, std::vector<Item> items, PullHooks hooks, PullTimeouts timeouts, PullRenderPolicy renderPolicy) {
   require(!renderPolicy.synchronous||bool(renderPolicy.allowed),"clipboard_transfer_failed");
   require(!offerId.empty() && !items.empty() && items.size() <= 3, "clipboard_entry_count_limit");
@@ -1147,6 +1348,7 @@ PullOffer::~PullOffer() {
 const std::string& PullOffer::format() const { return impl_->format; }
 void PullOffer::setCurrentCheck(std::function<bool()> current) { std::lock_guard lock(impl_->m); impl_->isCurrent = std::move(current); }
 void PullOffer::abortRenders(const std::string& reason, bool streams) { impl_->abortAll(reason.empty() ? std::string("clipboard_cancelled") : reason, streams); }
+void PullOffer::supersedeRenders(const std::string& reason) { impl_->abortAll(reason.empty() ? std::string("clipboard_offer_expired") : reason, false, true); }
 bool PullOffer::rendering() const { std::lock_guard lock(impl_->m); return !impl_->jobs.empty(); }const std::string& PullOffer::id() const { return impl_->id; }
 size_t PullOffer::fileCount() const { return impl_->fileEntry.size(); }
 uint64_t PullOffer::totalBytes() const { return impl_->total; }

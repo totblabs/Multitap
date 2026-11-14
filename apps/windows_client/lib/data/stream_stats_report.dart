@@ -1,4 +1,5 @@
 import 'audio_stats.dart';
+import 'gamepad.dart';
 import 'stream_telemetry.dart';
 import 'stream_observability.dart';
 
@@ -226,6 +227,9 @@ const streamStatsFields = <String>{
   // The frame rate the Host's capture loop paces at now (its encode-limit
   // controller may lower it below the requested rate before the picture size).
   'fpsTarget',
+  // gamepad-v1 (gamepad.dart GamepadTally): granted, pads held, states sent
+  // and refused, rumbles received. Brokers before these fields drop them.
+  ...gamepadStatsFields,
 };
 
 /// One reading of the values the 연결 통계 dialog shows, taken on the

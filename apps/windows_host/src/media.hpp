@@ -30,6 +30,7 @@ struct ID3D11Device;
 struct ID3D11Texture2D;
 
 namespace host {
+namespace cursor { class VideoCursor; }
 template<class T> using Com = Microsoft::WRL::ComPtr<T>;
 using Clock = std::chrono::steady_clock;
 void check(HRESULT result, const char* operation);
@@ -392,6 +393,12 @@ class Capture {
   int sourceLeft_ = 0, sourceTop_ = 0;
   bool frameUpdated_ = false, composedValid_ = false;
   bool composeCursor_ = true;
+  // The size, hotspot and picture of the cursor drawn into the video (cursor_channel.hpp VideoCursor): as Windows shows it.
+  std::unique_ptr<cursor::VideoCursor> videoCursor_;
+  struct VideoCursorDraw { HCURSOR shape = nullptr; int x = 0, y = 0, width = 0, height = 0; };
+  // The cursor showing at `position`, drawn into a picture of width x height made from the source rectangle: top-left and size in
+  // that picture, and the picture of the cursor to draw at that size.
+  VideoCursorDraw videoCursorDraw(HCURSOR handle, POINT position, const ICONINFO& icon, int width, int height);
   CursorSample cursorSample_;
   std::optional<capture::PixelRect> cursorBefore_, cursorAfter_;
   // Unscaled WGC path: convert readback directly and compose only the cursor.

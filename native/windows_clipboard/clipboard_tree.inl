@@ -24,11 +24,19 @@ constexpr DWORD transferableAttributes = FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUT
 std::wstring folded(std::wstring text) { if (!text.empty()) CharUpperBuffW(text.data(), DWORD(text.size())); return text; }
 
 struct TreeWalker {
-  const Bounds& bounds; TreeScan scan;
-  explicit TreeWalker(const Bounds& bounds) : bounds(bounds) {}
+  const Bounds& bounds; TreeScan scan; const TreeScanControl* control = nullptr; size_t reported = 0;
+  explicit TreeWalker(const Bounds& bounds, const TreeScanControl* control = nullptr) : bounds(bounds), control(control) {}
+  // The probe's stop (a copy that is not small) and the progress callback; `listed` counts a folder's children read so far.
+  void step(size_t listed = 0) {
+    if (!control) return;
+    if (control->stopAboveEntries && scan.entries.size() + listed > control->stopAboveEntries) throw TreeExceeds();
+    if (control->stopAboveBytes && scan.bytes > control->stopAboveBytes) throw TreeExceeds();
+    if (control->progress && scan.entries.size() >= reported + 256) { reported = scan.entries.size(); control->progress(reported); }
+  }
   void add(TreeEntry entry) {
     require(scan.entries.size() < bounds.entries, "clipboard_entry_count_limit");
     scan.entries.push_back(std::move(entry));
+    step();
   }
   void file(const std::filesystem::path& source, const std::wstring& relative, const WIN32_FIND_DATAW& data) {
     const uint64_t size = (uint64_t(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
@@ -55,7 +63,13 @@ struct TreeWalker {
       if (name == L"." || name == L"..") continue;
       require(children.size() < bounds.entries, "clipboard_entry_count_limit");
       children.push_back({name, data});
+      if ((children.size() & 255) == 0) {
+        step(children.size());
+        // A very large folder takes a while to list: the callback still runs (cancel, keep-alive) while it does.
+        if (control && control->progress && (children.size() & 4095) == 0) control->progress(scan.entries.size());
+      }
     } while (FindNextFileW(find, &data));
+    if (control && control->progress) control->progress(scan.entries.size());
     std::sort(children.begin(), children.end(), [](const Child& a, const Child& b) { return folded(a.name) < folded(b.name); });
     for (const auto& child : children) {
       // A link (symbolic link, junction, mount point) is neither followed nor sent.
@@ -72,9 +86,16 @@ struct TreeWalker {
 };
 }
 
-TreeScan scanTree(const std::vector<std::filesystem::path>& roots, const Bounds& bounds) {
+TreeScan scanTree(const std::vector<std::filesystem::path>& roots, const Bounds& bounds) { return scanTree(roots, bounds, TreeScanControl{}); }
+bool treeFitsWithin(const std::vector<std::filesystem::path>& roots, const Bounds& bounds, size_t entries, uint64_t bytes) {
+  TreeScanControl control; control.stopAboveEntries = entries; control.stopAboveBytes = bytes;
+  try { const auto scan = scanTree(roots, bounds, control); return scan.entries.size() <= entries && scan.bytes <= bytes; }
+  catch (const TreeExceeds&) { return false; }
+  catch (...) { return true; }
+}
+TreeScan scanTree(const std::vector<std::filesystem::path>& roots, const Bounds& bounds, const TreeScanControl& control) {
   require(!roots.empty(), "clipboard_empty");
-  TreeWalker walker(bounds); std::set<std::wstring> tops;
+  TreeWalker walker(bounds, &control); std::set<std::wstring> tops;
   for (const auto& root : roots) {
     WIN32_FILE_ATTRIBUTE_DATA data{};
     require(root.is_absolute() && GetFileAttributesExW(longPath(root).c_str(), GetFileExInfoStandard, &data), "clipboard_selected_file_unavailable");

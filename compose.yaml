@@ -9,7 +9,7 @@ services:
   broker:
     # MULTITAP_VERSION is the release to run; the admin console's server update
     # page shows the exact commands when a newer signed release exists.
-    image: ${MULTITAP_IMAGE:-ghcr.io/totblabs/multitap-broker}:${MULTITAP_VERSION:-1.1.5}
+    image: ${MULTITAP_IMAGE:-ghcr.io/totblabs/multitap-broker}:${MULTITAP_VERSION:-1.1.12}
     user: "1000:1000"
     init: true
     restart: unless-stopped

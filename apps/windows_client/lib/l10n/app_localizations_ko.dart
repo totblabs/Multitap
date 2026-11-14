@@ -5244,6 +5244,11 @@ class AppLocalizationsKo extends AppLocalizations {
   String get richText => '서식 있는 텍스트';
 
   @override
+  String listingItems(Object count) {
+    return '목록 확인 중 · $count개';
+  }
+
+  @override
   String ofLabel(Object fileCount, Object progress) {
     return '$fileCount개 중 $progress개';
   }
@@ -7279,7 +7284,46 @@ class AppLocalizationsKo extends AppLocalizations {
   String get desktop4 => '이 데스크톱';
 
   @override
-  String get readyStream => '스트리밍 가능';
+  String get readyStream => '스트리밍할 수 있어요';
+
+  @override
+  String get readyConnect2 => '연결할 수 있어요';
+
+  @override
+  String autoSign2(Object accountLabel) {
+    return '$accountLabel · 자동 로그인';
+  }
+
+  @override
+  String get signedWindows => 'Windows 로그인됨';
+
+  @override
+  String get noVirtualDisplayDriver => '가상 화면 드라이버 없음';
+
+  @override
+  String get virtualDisplayRecoveryNeeded => '가상 화면 복구 필요';
+
+  @override
+  String get windowsSignNeeded2 => 'Windows 로그인 필요';
+
+  @override
+  String get streamingScreenSwitchNeeded => '스트리밍 화면 전환 필요';
+
+  @override
+  String get preparingVirtualDisplay3 => '가상 화면 준비 중';
+
+  @override
+  String server3(Object serverDetail) {
+    return '서버$serverDetail';
+  }
+
+  @override
+  String client(Object clientDetail) {
+    return '클라이언트$clientDetail';
+  }
+
+  @override
+  String get client2 => '클라이언트';
 
   @override
   String get checkingStatus2 => '상태 확인 중';

@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- gamepad-v1: a game controller's own rumble motor, when the desktop's
+         game asks for it (AndroidGamepad.kt); never the phone's. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Network changes (Wi-Fi lost, mobile data available) for a quick
          reconnect of a remote session; no location or network names. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

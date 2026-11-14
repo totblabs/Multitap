@@ -77,7 +77,14 @@ function open(url, authorization) {
 const host = await open(`${base}/api/v1/hosts/channel`, `Host ${hostToken}`);
 host.send(JSON.stringify({ type: 'host.capabilities', capabilities: caps }));
 await host.take(value => value.type === 'host.capabilities.ack');
-const connection = relay.connect({ id: user }, tokenHash(clientToken), 'pve-810', 'stream', undefined, undefined, undefined, 'clipboard-sync-v1');
+// relay.connect's parameter list changed between releases: clipboardProtocol goes into the position its own signature names.
+const connectParameters = relay.connect.toString().slice(relay.connect.toString().indexOf('(') + 1, relay.connect.toString().indexOf(')')).split(',').map(part => part.split('=')[0].trim());
+const clipboardAt = connectParameters.indexOf('clipboardProtocol');
+if (clipboardAt < 4) throw new Error('relay.connect has no clipboardProtocol parameter');
+const connectArgs = [{ id: user }, tokenHash(clientToken), 'pve-810', 'stream'];
+while (connectArgs.length < clipboardAt) connectArgs.push(undefined);
+connectArgs.push('clipboard-sync-v1');
+const connection = relay.connect(...connectArgs);
 const media = await open(base + new URL(connection.webSocketUrl).pathname, `Bearer ${clientToken}`);
 const start = await host.take(value => value.type === 'session.start');
 void media;

@@ -245,6 +245,54 @@ void main() {
     );
   });
 
+  test('The route marks the place that is broken and nothing else', () {
+    List<HostRouteState> states(HostFacts f) {
+      final r = hostRoute(f);
+      return [r.desktop, r.toServer, r.server, r.toClient, r.client];
+    }
+
+    const ok = HostRouteState.ok,
+        warn = HostRouteState.warn,
+        idle = HostRouteState.idle;
+    // All fine: three green points, two green legs.
+    expect(states(facts()), [ok, ok, ok, ok, ok]);
+    // What does not stop a stream leaves the route whole.
+    for (final fault in [
+      facts(loginSetup: true),
+      facts(loginAttention: true),
+      facts(winfspMissing: true),
+      facts(devicesAttention: true),
+    ]) {
+      expect(states(fault), [ok, ok, ok, ok, ok]);
+    }
+    // Nothing read yet: nothing is claimed.
+    expect(states(const HostFacts()), [idle, idle, idle, idle, idle]);
+    expect(states(const HostFacts(readFailed: true)), [idle, idle, idle, idle, idle]);
+    // Windows signed out: the desktop is the broken place; the server is still fine.
+    expect(states(facts(interactive: false)), [warn, warn, ok, idle, idle]);
+    // The server side: not registered, waiting for approval, not connected.
+    for (final fault in [
+      facts(registered: false, brokerOnline: false),
+      facts(registered: false, awaitingApproval: true, brokerOnline: false),
+      facts(brokerOnline: false),
+    ]) {
+      expect(states(fault), [ok, warn, warn, idle, idle]);
+    }
+    // Both ends at once.
+    expect(states(facts(displayReady: false, brokerOnline: false)), [warn, warn, warn, idle, idle]);
+    // With the service off the Host cannot know the server: no claim.
+    expect(states(facts(serviceRunning: false, brokerOnline: false)), [warn, warn, idle, idle, idle]);
+    // The client end is never a problem of its own: the settings status says nothing about clients.
+    for (final fault in [
+      facts(interactive: false),
+      facts(brokerOnline: false),
+      facts(serviceRunning: false, brokerOnline: false),
+      facts(restartRequired: true, displayReady: false),
+    ]) {
+      expect(hostRoute(fault).client, isNot(warn));
+      expect(hostRoute(fault).toClient, isNot(warn));
+    }
+  });
   test('What does not stop a stream keeps the desktop streamable', () {
     for (final fault in [
       facts(loginSetup: true),

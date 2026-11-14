@@ -3828,6 +3828,12 @@
   "@image": {},
   "richText": "서식 있는 텍스트",
   "@richText": {},
+  "listingItems": "목록 확인 중 · {count}개",
+  "@listingItems": {
+    "placeholders": {
+      "count": {}
+    }
+  },
   "ofLabel": "{fileCount}개 중 {progress}개",
   "@ofLabel": {
     "placeholders": {
@@ -5269,8 +5275,42 @@
   "@notRegistered2": {},
   "desktop4": "이 데스크톱",
   "@desktop4": {},
-  "readyStream": "스트리밍 가능",
+  "readyStream": "스트리밍할 수 있어요",
   "@readyStream": {},
+  "readyConnect2": "연결할 수 있어요",
+  "@readyConnect2": {},
+  "autoSign2": "{accountLabel} · 자동 로그인",
+  "@autoSign2": {
+    "placeholders": {
+      "accountLabel": {}
+    }
+  },
+  "signedWindows": "Windows 로그인됨",
+  "@signedWindows": {},
+  "noVirtualDisplayDriver": "가상 화면 드라이버 없음",
+  "@noVirtualDisplayDriver": {},
+  "virtualDisplayRecoveryNeeded": "가상 화면 복구 필요",
+  "@virtualDisplayRecoveryNeeded": {},
+  "windowsSignNeeded2": "Windows 로그인 필요",
+  "@windowsSignNeeded2": {},
+  "streamingScreenSwitchNeeded": "스트리밍 화면 전환 필요",
+  "@streamingScreenSwitchNeeded": {},
+  "preparingVirtualDisplay3": "가상 화면 준비 중",
+  "@preparingVirtualDisplay3": {},
+  "server3": "서버{serverDetail}",
+  "@server3": {
+    "placeholders": {
+      "serverDetail": {}
+    }
+  },
+  "client": "클라이언트{clientDetail}",
+  "@client": {
+    "placeholders": {
+      "clientDetail": {}
+    }
+  },
+  "client2": "클라이언트",
+  "@client2": {},
   "checkingStatus2": "상태 확인 중",
   "@checkingStatus2": {},
   "checkingHostStatus2": "Host 상태를 확인하고 있어요",

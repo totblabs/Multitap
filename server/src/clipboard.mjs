@@ -47,6 +47,15 @@ export const clipboardIntentProtocol='text-image-pending-v1';
 // clipboard.ready carries clipboardPullQueue: clipboardPullQueueProtocol (the numbers above); every other pair keeps one pull at a time.
 export const clipboardPullQueueHeader='x-multitap-clipboard-pullqueue';
 export const clipboardPullQueueProtocol='pull-queue-4-v1';
+// Deferred manifest (like RDP: nothing heavy happens when something is copied). In an on-paste pair whose peers both sent
+// X-Multitap-Clipboard-Deferred: 1, a copy of files that is not small may be offered without its list:
+// clipboard.offer {requestId, format:'tree', deferred:true}. When something pastes it, the receiving peer asks for the list with
+// clipboard.manifest {requestId: pull id, offerId}; the offering peer walks the copy then (clipboard.manifest.progress {requestId, entries}
+// while it does) and answers clipboard.manifest.begin {requestId, offerId, entries, files, bytes, tops, skipped} with the usual
+// clipboard.entries pages (write times included), or clipboard.error. The request takes a pull slot and follows the pull rules (ids,
+// order, cancel, idle); once its last page has passed, the offer has its list and its files are pulled as usual.
+export const clipboardDeferredHeader='x-multitap-clipboard-deferred';
+export const clipboardDeferredProtocol='manifest-on-paste-v1';
 export const pullQueueDepth=4;
 const pullQueueWindowBytes=4*1024*1024,pullQueueWindowUnits=128;
 // Explorer cannot create a pasted item whose relative path has 260 or more characters (docs/remote-session-protocol.md, copy-source matrix).
@@ -259,9 +268,10 @@ export class ClipboardRelay{
     const settled=onPaste&&req.headers[clipboardSettledHeader]==='1';
     const intent=settled&&req.headers[clipboardIntentHeader]==='1';
     const pullQueue=onPaste&&req.headers[clipboardPullQueueHeader]==='1';
+    const deferred=onPaste&&req.headers[clipboardDeferredHeader]==='1';
     const observedPair=session.clipboardPair;
     const guard=()=>!socket.destroyed&&this.available(session)&&session.clipboardPair===observedPair&&!observedPair?.[role]&&!observedPair?.closed&&(observedPair||this.pairs.size<128);
-    const accept=()=>this.wss.handleUpgrade(req,socket,head,ws=>this.attach(ws,session,role,extended,formats,pull,scale,onPaste,settled,intent,pullQueue));
+    const accept=()=>this.wss.handleUpgrade(req,socket,head,ws=>this.attach(ws,session,role,extended,formats,pull,scale,onPaste,settled,intent,pullQueue,deferred));
     if(session.signinPolicy&&this.relay.admitSigninRedirect)void this.relay.admitSigninRedirect(session,guard,accept,()=>reject(401,'Unauthorized'));
     else if(!session.signinPolicy&&guard())accept();else reject(401,'Unauthorized');return true;
   }
@@ -269,14 +279,15 @@ export class ClipboardRelay{
   // announced it, the extended profile when both announced that, otherwise the
   // released numbers every peer checks exactly.
   pairLimits(pair){return pair.onPasteProfile?clipboardLimitsOnPaste:pair.scaleProfile?clipboardLimitsScale:pair.pullProfile?clipboardLimitsPull:pair.formats?clipboardLimitsFormats:pair.extended?clipboardLimitsV2:enforcedV1;}
-  attach(ws,session,role,extended=false,formats=false,pull=false,scale=false,onPaste=false,settled=false,intent=false,pullQueue=false){
+  attach(ws,session,role,extended=false,formats=false,pull=false,scale=false,onPaste=false,settled=false,intent=false,pullQueue=false,deferred=false){
     if(!this.available(session)){ws.close(1008,'redirect_unavailable');return;}
     let pair=session.clipboardPair;
-    if(!pair){pair={session,signinOwner:this.relay.signinRedirectOwner?.(session)??null,createdAt:Date.now(),ready:false,closed:false,seen:session.clipboardSync?null:new Set(),prefix:null,highWater:0n,terminal:new Map(),transfer:null,offers:[],pulls:[],pullHigh:{client:0,host:0},pullProfile:false,onPasteProfile:false,pullQueueProfile:false,watchEnabled:false,lastSequence:null,lastChangedAt:0,changedTimer:null,pendingChanged:null};session.clipboardPair=pair;this.pairs.add(pair);}
+    if(!pair){pair={session,signinOwner:this.relay.signinRedirectOwner?.(session)??null,createdAt:Date.now(),ready:false,closed:false,seen:session.clipboardSync?null:new Set(),prefix:null,highWater:0n,terminal:new Map(),transfer:null,offers:[],pulls:[],pullHigh:{client:0,host:0},pullProfile:false,onPasteProfile:false,pullQueueProfile:false,deferredProfile:false,watchEnabled:false,lastSequence:null,lastChangedAt:0,changedTimer:null,pendingChanged:null};session.clipboardPair=pair;this.pairs.add(pair);}
     pair[role]=ws;pair[role+'Alive']=true;pair[role+'Extended']=extended;pair[role+'Formats']=formats;pair[role+'Pull']=pull;pair[role+'Scale']=scale;pair[role+'OnPaste']=onPaste;
     pair[role+'Settled']=settled===true;
     pair[role+'Intent']=intent===true;
     pair[role+'PullQueue']=pullQueue===true;
+    pair[role+'Deferred']=deferred===true;
     const rate={at:Date.now(),messages:0,bytes:0};
     ws.on('pong',()=>{if(this.current(pair,role,ws))pair[role+'Alive']=true;});
     ws.on('error',()=>this.closePair(pair,'clipboard_transport_closed'));
@@ -324,9 +335,10 @@ export class ClipboardRelay{
       pair.settledProfile=pair.onPasteProfile&&session.clipboardProtocol==='clipboard-sync-v1'&&session.clipboardSync===true&&pair.clientSettled===true&&pair.hostSettled===true;
       pair.intentProfile=pair.settledProfile&&pair.clientIntent===true&&pair.hostIntent===true;
       pair.pullQueueProfile=pair.onPasteProfile&&pair.clientPullQueue===true&&pair.hostPullQueue===true;
+      pair.deferredProfile=pair.onPasteProfile&&pair.clientDeferred===true&&pair.hostDeferred===true;
       // A released peer is sent the exact released shape and numbers; an
       // extended peer is told the pair's effective limits.
-      const readyFor=role=>({type:'clipboard.ready',sessionId:session.id,protocol:'clipboard-v1',limits:pair[role+'Extended']?(pair.onPasteProfile?clipboardLimitsOnPaste:pair.scaleProfile?clipboardLimitsScale:pair.pullProfile?clipboardLimitsPull:pair.formats?clipboardLimitsFormats:pair.extended?clipboardLimitsV2:limitsV1Extended):clipboardLimits,...(pair.settledProfile?{clipboardSettled:clipboardSettledProtocol}:{}),...(pair.intentProfile?{clipboardIntent:clipboardIntentProtocol}:{}),...(pair.pullQueueProfile?{clipboardPullQueue:clipboardPullQueueProtocol}:{})});
+      const readyFor=role=>({type:'clipboard.ready',sessionId:session.id,protocol:'clipboard-v1',limits:pair[role+'Extended']?(pair.onPasteProfile?clipboardLimitsOnPaste:pair.scaleProfile?clipboardLimitsScale:pair.pullProfile?clipboardLimitsPull:pair.formats?clipboardLimitsFormats:pair.extended?clipboardLimitsV2:limitsV1Extended):clipboardLimits,...(pair.settledProfile?{clipboardSettled:clipboardSettledProtocol}:{}),...(pair.intentProfile?{clipboardIntent:clipboardIntentProtocol}:{}),...(pair.pullQueueProfile?{clipboardPullQueue:clipboardPullQueueProtocol}:{}),...(pair.deferredProfile?{clipboardDeferred:clipboardDeferredProtocol}:{})});
       this.send(pair,'client',session.clipboardProtocol==='clipboard-sync-v1'?{...readyFor('client'),clipboardPolicy:this.policy(session),clipboardSync:session.clipboardSync===true}:readyFor('client'));
       this.send(pair,'host',{...readyFor('host'),clipboardPolicy:this.policy(session),clipboardSync:session.clipboardSync===true});
     }
@@ -339,7 +351,8 @@ export class ClipboardRelay{
     if(pair.closed||pair.throttled)return;
     pair.throttled=true;
     for(const role of ['client','host'])pair[role]?.pause?.();
-    const timer=setTimeout(()=>{pair.throttled=false;if(pair.closed)return;for(const role of ['client','host'])pair[role+'Alive']=true;for(const role of ['client','host'])if(pair[role]?.readyState===WebSocket.OPEN)pair[role].resume();},Math.max(10,Math.min(1000,Math.ceil(ms))));
+    // A sender held for its receiver's backlog (holdSender) stays paused until that has drained.
+    const timer=setTimeout(()=>{pair.throttled=false;if(pair.closed)return;for(const role of ['client','host'])pair[role+'Alive']=true;for(const role of ['client','host'])if(pair[role]?.readyState===WebSocket.OPEN&&!pair.holding?.[role==='client'?'host':'client'])pair[role].resume();},Math.max(10,Math.min(1000,Math.ceil(ms))));
     timer.unref();
   }
   clearChanged(pair){if(pair.changedTimer)clearTimeout(pair.changedTimer);pair.changedTimer=null;pair.pendingChanged=null;}
@@ -396,8 +409,34 @@ export class ClipboardRelay{
     // A pull-queue pair's 4 MiB window is about 5.4 MiB of JSON: it may queue eight times as much.
     const ws=pair[role],size=Buffer.byteLength(encoded),queue=this.maxQueue*(pair.pullQueueProfile===true?8:pair.formats===true?4:1);
     // A window of 1 MiB raw data is about 1.4 MiB of JSON: a windowed pair may queue four times as much.
-    if(ws?.readyState!==WebSocket.OPEN||size>maxMessage||ws.bufferedAmount+size>queue){this.closePair(pair,'clipboard_backpressure');return false;}
-    ws.send(encoded,error=>{if(error)this.closePair(pair,'clipboard_transport_closed');});return true;
+    // A deferred-manifest pair also carries a list of up to 200,000 entries that has no window (tens of MB of pages): when the receiving
+    // socket is behind, the sending peer is no longer read until it has caught up (its TCP window then stops it), instead of the pair
+    // ending. The queue may grow to four times the bound meanwhile (messages already read keep arriving); beyond that the pair ends.
+    const soft=pair.deferredProfile===true;
+    if(ws?.readyState!==WebSocket.OPEN||size>maxMessage||ws.bufferedAmount+size>(soft?queue*4:queue)){this.closePair(pair,'clipboard_backpressure');return false;}
+    ws.send(encoded,error=>{if(error)this.closePair(pair,'clipboard_transport_closed');});
+    if(soft&&ws.bufferedAmount>queue)this.holdSender(pair,role,queue);
+    return true;
+  }
+  // Stops reading the peer that sends to `role` until `role`'s socket has drained below half the queue bound.
+  holdSender(pair,role,queue){
+    const sender=pair[role==='client'?'host':'client'];
+    if(pair.closed||pair.holding?.[role]||!sender)return;
+    pair.holding??={};pair.holding[role]=true;sender.pause?.();
+    let behind=pair[role]?.bufferedAmount??0;
+    const check=()=>{
+      if(pair.closed){pair.holding[role]=false;return;}
+      const ws=pair[role];
+      if(ws?.readyState===WebSocket.OPEN&&ws.bufferedAmount>queue/2){
+        // The receiver is taking the backlog (its TCP acknowledges it): that is its traffic for the heartbeat, and progress of the
+        // request being drained for the idle bound. A receiver that takes nothing still runs out of both.
+        if(ws.bufferedAmount<behind){behind=ws.bufferedAmount;pair[role+'Traffic']=true;if(pair.pulls[0])pair.pulls[0].at=Date.now();}
+        const timer=setTimeout(check,25);timer.unref?.();return;
+      }
+      pair.holding[role]=false;pair[(role==='client'?'host':'client')+'Alive']=true;
+      if(!pair.throttled&&sender.readyState===WebSocket.OPEN)sender.resume?.();
+    };
+    const timer=setTimeout(check,25);timer.unref?.();
   }
   reserve(pair,requestId,from,read=false){
     require(!pair.transfer,'clipboard_busy');
@@ -481,6 +520,16 @@ export class ClipboardRelay{
       // Text, rich text and images can be offered only in an on-paste pair (the offer replaces a push too big for it).
       require(pair.pullProfile===true&&(value.format==='tree'||(pair.onPasteProfile===true&&offerFormats.has(value.format))));
       require(clipboardTransferAllowed(policy,value.format,role),'clipboard_policy_denied');
+      // A deferred copy: no list yet (it is asked for when something pastes). Complete with this message.
+      if(Object.hasOwn(value,'deferred')){
+        require(pair.deferredProfile===true&&value.format==='tree'&&value.deferred===true&&exact(value,['type','requestId','format','deferred'])&&bytes<=maxManifest);
+        let transfer=pair.transfer;
+        if(role==='client')transfer=this.reserve(pair,value.requestId,'client');
+        else require(transfer?.stage==='begin'&&transfer.requestId===value.requestId&&transfer.from===role&&(transfer.requestedFormat===undefined||transfer.requestedFormat===clipboardFormatClass(value.format)));
+        Object.assign(transfer,{items:null,format:value.format,tree:null,stage:'offered',mode:'offer',deferred:true,hash:createHash('sha256'),at:Date.now()});
+        this.registerOffer(pair,transfer);
+        this.send(pair,transfer.to,value);return;
+      }
       const limits=this.pairLimits(pair),tree=value.format==='tree'?treeBegin(value,bytes,limits,true):null;
       const items=tree?[]:manifest(value,bytes,limits,true,true);let transfer=pair.transfer;
       if(role==='client')transfer=this.reserve(pair,value.requestId,'client');
@@ -596,7 +645,8 @@ export class ClipboardRelay{
   registerOffer(pair,transfer){
     const mine=pair.offers.filter(offer=>offer.from===transfer.from);
     while(mine.length>=clipboardLimitsPull.maxOffers)pair.offers.splice(pair.offers.indexOf(mine.shift()),1);
-    pair.offers.push({id:transfer.requestId,from:transfer.from,items:transfer.items,format:transfer.format});
+    // A deferred offer has no items until its list has passed (receivePull, clipboard.manifest).
+    pair.offers.push({id:transfer.requestId,from:transfer.from,items:transfer.deferred===true?null:transfer.items,format:transfer.format,deferred:transfer.deferred===true});
   }
   dropOffer(pair,id){const at=pair.offers.findIndex(offer=>offer.id===id);if(at>=0)pair.offers.splice(at,1);}
   // The offering peer's clipboard changed (or it no longer serves the offer): the offer is retired for both peers. A pull of it that
@@ -608,7 +658,7 @@ export class ClipboardRelay{
     if(at<0)return;
     pair.offers.splice(at,1);
     for(const pull of pair.pulls.filter(candidate=>candidate.offerId===value.requestId)){
-      this.remember(pair,pull.requestId,{status:'failed',to:pull.to});this.releasePull(pair,pull);
+      this.remember(pair,pull.requestId,{status:'failed',to:pull.to,manifest:pull.manifest===true});this.releasePull(pair,pull);
       this.send(pair,pull.to,{type:'clipboard.error',requestId:pull.requestId,reason:'clipboard_offer_expired'});
     }
     this.send(pair,role==='client'?'host':'client',value);
@@ -645,30 +695,54 @@ export class ClipboardRelay{
       if(!offer)return refuse('clipboard_offer_expired');
       require(offer.from!==role);
       require(clipboardTransferAllowed(policy,offer.format,offer.from),'clipboard_policy_denied');
-      require(value.index<offer.items.length&&value.offset<=offer.items[value.index].size);
+      // A deferred offer is pulled only once its list has passed.
+      require(Array.isArray(offer.items)&&value.index<offer.items.length&&value.offset<=offer.items[value.index].size);
       const queue=pair.pullQueueProfile===true;
       if(pair.pulls.length>=(queue?pullQueueDepth:1)||pair.pulls.some(pull=>pull.to!==role)||this.activeTransfers>=32)return refuse('clipboard_busy');
       const now=Date.now();this.activeTransfers++;
       pair.pulls.push({requestId:id,from:offer.from,to:role,offerId:offer.id,format:offer.format,items:offer.items,index:value.index,offset:value.offset,startedAt:now,at:now,units:[],inflight:0,windowUnits:queue?pullQueueWindowUnits:clipboardLimitsFormats.windowUnits,windowBytes:queue?pullQueueWindowBytes:clipboardLimitsFormats.windowBytes,hash:createHash('sha256')});
       this.send(pair,offer.from,value);return;
     }
+    // Deferred manifest: the receiving peer asks for the list of a deferred offer when something pastes it. The request takes a pull
+    // slot (and the pull id order); the offering peer answers with progress, then the counts and the entry pages, or an error.
+    if(value.type==='clipboard.manifest'){
+      require(pair.deferredProfile===true&&pullPattern.test(id)&&exact(value,['type','requestId','offerId'])&&typeof value.offerId==='string'&&requestPattern.test(value.offerId));
+      require(id[4]===(role==='client'?'c':'h'));
+      const n=Number(id.slice(6));require(n>pair.pullHigh[role]);pair.pullHigh[role]=n;
+      const refuse=reason=>{this.remember(pair,id,{status:'failed',to:role,manifest:true});this.send(pair,role,{type:'clipboard.error',requestId:id,reason});};
+      const offer=pair.offers.find(candidate=>candidate.id===value.offerId);
+      if(!offer)return refuse('clipboard_offer_expired');
+      // An offer whose list already crossed may be asked again (the receiving app cancelled while the last page crossed, or refused the
+      // list): the offering peer answers again and the newer list is the one later pulls are checked against.
+      require(offer.from!==role&&offer.deferred===true);
+      require(clipboardTransferAllowed(policy,offer.format,offer.from),'clipboard_policy_denied');
+      const queue=pair.pullQueueProfile===true;
+      if(pair.pulls.length>=(queue?pullQueueDepth:1)||pair.pulls.some(pull=>pull.to!==role||pull.offerId===offer.id)||this.activeTransfers>=32)return refuse('clipboard_busy');
+      const now=Date.now();this.activeTransfers++;
+      pair.pulls.push({requestId:id,manifest:true,from:offer.from,to:role,offerId:offer.id,format:offer.format,items:null,tree:null,startedAt:now,at:now,units:[],inflight:0});
+      this.send(pair,offer.from,value);return;
+    }
     const pull=pair.pulls.find(candidate=>candidate.requestId===id);
     if(!pull){
       // What the pull's two peers still had in flight when it ended (a cancel, an error, the last acks) is
-      // dropped, bounded, instead of being a protocol violation that would close the channel.
+      // dropped, bounded, instead of being a protocol violation that would close the channel. A list request's pages are not windowed:
+      // the offering peer stops at its next page, so its bound is larger.
       const terminal=pair.terminal.get(id);
-      require(terminal&&['clipboard.chunk','clipboard.item.end','clipboard.chunk.ack','clipboard.item.ack','clipboard.cancel','clipboard.error'].includes(value.type)&&++terminal.drops<=(pair.pullQueueProfile===true?pullQueueWindowUnits:clipboardLimitsFormats.windowUnits)*2);
+      const manifestKinds=['clipboard.manifest.progress','clipboard.manifest.begin','clipboard.entries','clipboard.cancel','clipboard.error'];
+      require(terminal&&(terminal.manifest===true?manifestKinds.includes(value.type)&&++terminal.drops<=4096:
+        ['clipboard.chunk','clipboard.item.end','clipboard.chunk.ack','clipboard.item.ack','clipboard.cancel','clipboard.error'].includes(value.type)&&++terminal.drops<=(pair.pullQueueProfile===true?pullQueueWindowUnits:clipboardLimitsFormats.windowUnits)*2));
       return;
     }
     pull.at=Date.now();
+    if(pull.manifest===true&&value.type!=='clipboard.cancel'&&value.type!=='clipboard.error'){this.receiveManifest(pair,role,pull,value,bytes);return;}
     if(value.type==='clipboard.cancel'){
       require(exact(value,['type','requestId']));
-      this.remember(pair,id,{status:'cancelled',to:pull.to});this.releasePull(pair,pull);this.send(pair,peer,value);return;
+      this.remember(pair,id,{status:'cancelled',to:pull.to,manifest:pull.manifest===true});this.releasePull(pair,pull);this.send(pair,peer,value);return;
     }
     if(value.type==='clipboard.error'){
       const reason=pullReasons.has(value.reason)?value.reason:this.peerReason(pair,value.reason);
       require(exact(value,['type','requestId','reason'])&&reason!==null);
-      this.remember(pair,id,{status:'failed',to:pull.to});this.releasePull(pair,pull);this.send(pair,peer,{...value,reason});return;
+      this.remember(pair,id,{status:'failed',to:pull.to,manifest:pull.manifest===true});this.releasePull(pair,pull);this.send(pair,peer,{...value,reason});return;
     }
     if(value.type==='clipboard.chunk.ack'){
       require(role===pull.to&&exact(value,['type','requestId','index','offset']));
@@ -702,6 +776,35 @@ export class ClipboardRelay{
     }
     throw new Error('clipboard_invalid_message');
   }
+  // The offering peer's answer to a list request: progress while it walks, the counts (checked as for an offer's tree), the entry pages
+  // (write times included). After the last page the offer has its list and the request is over; files are then pulled as usual.
+  receiveManifest(pair,role,pull,value,bytes){
+    require(role===pull.from&&pull===pair.pulls[0],'clipboard_out_of_order');
+    const limits=this.pairLimits(pair);
+    if(value.type==='clipboard.manifest.progress'){
+      require(!pull.tree&&exact(value,['type','requestId','entries'])&&Number.isSafeInteger(value.entries)&&value.entries>=0&&value.entries<=limits.maxEntries);
+      this.send(pair,pull.to,value);return;
+    }
+    if(value.type==='clipboard.manifest.begin'){
+      require(!pull.tree&&value.offerId===pull.offerId&&!Object.hasOwn(value,'format'));
+      const {offerId,...counts}=value;
+      pull.tree=treeBegin({...counts,format:'tree'},bytes,limits,true);
+      this.send(pair,pull.to,value);return;
+    }
+    if(value.type==='clipboard.entries'){
+      require(pull.tree);
+      const done=treeEntries(pull.tree,value,bytes,limits,true);
+      this.send(pair,pull.to,value);
+      if(done){
+        const offer=pair.offers.find(candidate=>candidate.id===pull.offerId);
+        // A pull already under way keeps the list it started with (it holds its own reference); no pull of this offer runs during a list request.
+        if(offer)offer.items=pull.tree.items;
+        this.remember(pair,pull.requestId,{status:'complete',to:pull.to,manifest:true});this.releasePull(pair,pull);
+      }
+      return;
+    }
+    throw new Error('clipboard_invalid_message');
+  }
   closePair(pair,reason){
     if(pair.closed)return;
     this.releasePulls(pair);
@@ -732,10 +835,11 @@ export class ClipboardRelay{
       }
       if(!pair.ready&&now-pair.createdAt>this.pairReadyMs){this.closePair(pair,'clipboard_pair_timeout');continue;}
       const pull=pair.pulls[0];
-      if(pull&&now-pull.at>this.pullIdleMs){
+      // A list request is answered by a walk that reports progress every second: silence for the transfer idle bound ends it.
+      if(pull&&now-pull.at>(pull.manifest===true?this.idleMs:this.pullIdleMs)){
         // A pull nobody continues (a paused Explorer dialog is allowed to wait far longer than a push) ends alone.
         const cancel={type:'clipboard.cancel',requestId:pull.requestId};
-        this.remember(pair,pull.requestId,{status:'cancelled',to:pull.to});this.releasePull(pair,pull);this.send(pair,'client',cancel);this.send(pair,'host',cancel);
+        this.remember(pair,pull.requestId,{status:'cancelled',to:pull.to,manifest:pull.manifest===true});this.releasePull(pair,pull);this.send(pair,'client',cancel);this.send(pair,'host',cancel);
       }
             // A transfer ends when it stops making progress (idle). A scale pair has no total duration: a 64 MiB text or a slow link is not an error
       // while bytes keep moving (every message refreshes transfer.at); older pairs keep their total.
@@ -756,7 +860,7 @@ export class ClipboardRelay{
     for(const pair of this.pairs)for(const role of ['client','host']){
       const ws=pair[role];if(ws?.readyState!==WebSocket.OPEN)continue;
       // A throttled pair is not read for up to a second: its silence (and an unread pong) is the relay's doing, not the peer's.
-      if(pair.throttled){pair[role+'Alive']=true;continue;}
+      if(pair.throttled||pair.holding?.[role==='client'?'host':'client']){pair[role+'Alive']=true;continue;}
       // A peer that sent anything since the last check is alive and is not
       // pinged: the Host's WinHTTP could write its pong inside a large chunk
       // frame it is sending (relay.mjs checkHeartbeat).

@@ -1429,6 +1429,7 @@ void FlutterWindow::OnDestroy() {
   // Before any nested teardown pump: never leave the shared cursor clipped.
   relative_mouse_.Release();
   game_mouse_usb_.reset();
+  gamepad_input_.reset();
   // The notification-area icon goes first, in every exit path (a normal exit,
   // the installer closing the app, logoff), so none stays behind.
   if (tray_channel_) tray_channel_->SetMethodCallHandler(nullptr);
@@ -1653,6 +1654,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
   if (relative_mouse_.HandleMessage(hwnd, message, wparam, lparam)) return 0;
   if (game_mouse_usb_ && game_mouse_usb_->HandleMessage(message)) return 0;
+  if (gamepad_input_ && gamepad_input_->HandleMessage(message)) return 0;
   if (message == multitap::kRelativeMouseToggleMessage) {
     // A queued chord belongs to the capture/arming epoch that posted it.
     // Never release or toggle a successor session after focus or ownership
@@ -2057,4 +2059,5 @@ void FlutterWindow::ConfigureRelativeMouse() {
     result->Success(V(path));
   });
   game_mouse_usb_ = std::make_unique<multitap::GameMouseUsbChannel>(flutter_controller_->engine()->messenger(), GetHandle());
+  gamepad_input_ = std::make_unique<multitap::GamepadInput>(flutter_controller_->engine()->messenger(), GetHandle());
 }

@@ -777,7 +777,7 @@ void main() {
           ..credentialsConfigured = true
           ..credentialUsername = 'tester'
           ..statusOverrides = {
-            'version': '1.0.55',
+            'version': '1.1.8',
             'desktopName': _w(lang, '디자인 1', 'Design 1'),
             'desktopId': 'pve-101',
             'serverOrigin': _origin.toString(),
@@ -830,7 +830,7 @@ void main() {
         // Before approval: the server page where the address is entered.
         final fresh = FakeHostSettings()
           ..displays = 1
-          ..statusOverrides = {'version': '1.0.55'};
+          ..statusOverrides = {'version': '1.1.8'};
         await t.pumpWidget(
           RepaintBoundary(
             key: boundary,

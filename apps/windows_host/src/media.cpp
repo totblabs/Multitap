@@ -13,6 +13,7 @@
 #include "capture_dirty.hpp"
 #include "capture_scale.hpp"
 #include "cursor_patch.hpp"
+#include "cursor_channel.hpp"
 #include "gpu_capture.hpp"
 #include "../../../native/windows_video/bgra_nv12_sse2.hpp"
 #include <wmcodecdsp.h>
@@ -974,9 +975,8 @@ bool Capture::gpuFrame(Clock::time_point began){
   if(capture::drawsCursor(composeCursor_,cursorKnown,cursor.flags)){
     ICONINFO icon{};
     if(GetIconInfo(cursor.hCursor,&icon)){
-      const int x=(cursor.ptScreenPos.x-sourceLeft_-int(icon.xHotspot))*width_/sourceWidth_,y=(cursor.ptScreenPos.y-sourceTop_-int(icon.yHotspot))*height_/sourceHeight_;
-      const int cursorWidth=std::max(1,GetSystemMetrics(SM_CXCURSOR)*width_/sourceWidth_),cursorHeight=std::max(1,GetSystemMetrics(SM_CYCURSOR)*height_/sourceHeight_);
-      draw=capture::CursorDraw{cursor.hCursor,x,y,cursorWidth,cursorHeight};
+      const auto shown=videoCursorDraw(cursor.hCursor,cursor.ptScreenPos,icon,width_,height_);
+      draw=capture::CursorDraw{shown.shape,shown.x,shown.y,shown.width,shown.height};
       if(icon.hbmMask)DeleteObject(icon.hbmMask);if(icon.hbmColor)DeleteObject(icon.hbmColor);
     }
   }
@@ -1024,9 +1024,8 @@ const std::vector<uint8_t>& Capture::frame() {
     std::optional<capture::CursorDraw> draw; ICONINFO icon{};
     if (drawCursor) {
       if (GetIconInfo(cursor.hCursor, &icon)) {
-        const int x = (cursor.ptScreenPos.x-sourceLeft_ - int(icon.xHotspot)) * width_ / sourceWidth_, y = (cursor.ptScreenPos.y-sourceTop_ - int(icon.yHotspot)) * height_ / sourceHeight_;
-        const int cursorWidth = std::max(1, GetSystemMetrics(SM_CXCURSOR) * width_ / sourceWidth_), cursorHeight = std::max(1, GetSystemMetrics(SM_CYCURSOR) * height_ / sourceHeight_);
-        draw = capture::CursorDraw{cursor.hCursor, x, y, cursorWidth, cursorHeight};
+        const auto shown = videoCursorDraw(cursor.hCursor, cursor.ptScreenPos, icon, width_, height_);
+        draw = capture::CursorDraw{shown.shape, shown.x, shown.y, shown.width, shown.height};
       } else cursorKnown = false;
     }
     const auto releaseIcon = [&] { if (icon.hbmMask) DeleteObject(icon.hbmMask); if (icon.hbmColor) DeleteObject(icon.hbmColor); icon.hbmMask = icon.hbmColor = nullptr; };
@@ -1044,14 +1043,18 @@ const std::vector<uint8_t>& Capture::frame() {
   const bool atSource = composedAtSource(); std::optional<capture::CursorDraw> sourceDraw;
   if (drawCursor) {
     ICONINFO icon{}; if (GetIconInfo(cursor.hCursor, &icon)) {
-      const int x = (cursor.ptScreenPos.x-sourceLeft_ - int(icon.xHotspot)) * width_ / sourceWidth_, y = (cursor.ptScreenPos.y-sourceTop_ - int(icon.yHotspot)) * height_ / sourceHeight_;
-      const int cursorWidth = std::max(1, GetSystemMetrics(SM_CXCURSOR) * width_ / sourceWidth_), cursorHeight = std::max(1, GetSystemMetrics(SM_CYCURSOR) * height_ / sourceHeight_);
+      const auto shown = videoCursorDraw(cursor.hCursor, cursor.ptScreenPos, icon, width_, height_);
+      const int x = shown.x, y = shown.y, cursorWidth = shown.width, cursorHeight = shown.height;
       if (int64_t(x) + cursorWidth > 0 && int64_t(y) + cursorHeight > 0 && x < width_ && y < height_)
-        cursorStamp = {uint64_t(reinterpret_cast<uintptr_t>(cursor.hCursor)), uint64_t(uint32_t(x)), uint64_t(uint32_t(y)), uint64_t(cursorWidth), uint64_t(cursorHeight), 1};
+        cursorStamp = {uint64_t(reinterpret_cast<uintptr_t>(shown.shape)), uint64_t(uint32_t(x)), uint64_t(uint32_t(y)), uint64_t(cursorWidth), uint64_t(cursorHeight), 1};
       // DrawIconEx writes only inside its destination rectangle.
-      if (atSource) { sourceDraw = capture::CursorDraw{cursor.hCursor, cursor.ptScreenPos.x - sourceLeft_ - int(icon.xHotspot), cursor.ptScreenPos.y - sourceTop_ - int(icon.yHotspot), GetSystemMetrics(SM_CXCURSOR), GetSystemMetrics(SM_CYCURSOR)}; saveScaledCursor(x, y, cursorWidth, cursorHeight); }
+      if (atSource) {
+        // The source-resolution picture (lossless tiles) gets the cursor at its shown size in source pixels.
+        const auto atSourceSize = videoCursorDraw(cursor.hCursor, cursor.ptScreenPos, icon, sourceWidth_, sourceHeight_);
+        sourceDraw = capture::CursorDraw{atSourceSize.shape, atSourceSize.x, atSourceSize.y, atSourceSize.width, atSourceSize.height}; saveScaledCursor(x, y, cursorWidth, cursorHeight);
+      }
       else cursorAfter_ = capture::evenCursorPatch(x, y, cursorWidth, cursorHeight, width_, height_);
-      if (!DrawIconEx(memory_, x, y, cursor.hCursor, cursorWidth, cursorHeight, 0, nullptr, DI_NORMAL)) cursorKnown = false;
+      if (!DrawIconEx(memory_, x, y, shown.shape, cursorWidth, cursorHeight, 0, nullptr, DI_NORMAL)) cursorKnown = false;
       if (icon.hbmMask) DeleteObject(icon.hbmMask); if (icon.hbmColor) DeleteObject(icon.hbmColor);
     } else cursorKnown = false;
   }
@@ -1070,6 +1073,17 @@ const std::vector<uint8_t>& Capture::frame() {
   return nv12_;
 }
 bool Capture::composedAtSource() const { return modern_ && !direct_ && (width_ != sourceWidth_ || height_ != sourceHeight_); }
+Capture::VideoCursorDraw Capture::videoCursorDraw(HCURSOR handle, POINT position, const ICONINFO& icon, int width, int height) {
+  if (!videoCursor_) videoCursor_ = std::make_unique<cursor::VideoCursor>();
+  const auto shown = videoCursor_->shown(handle, position, icon);
+  VideoCursorDraw draw;
+  draw.x = int((int64_t(position.x) - sourceLeft_ - shown.hotspotX) * width / sourceWidth_);
+  draw.y = int((int64_t(position.y) - sourceTop_ - shown.hotspotY) * height / sourceHeight_);
+  draw.width = std::max(1, int(int64_t(shown.width) * width / sourceWidth_));
+  draw.height = std::max(1, int(int64_t(shown.height) * height / sourceHeight_));
+  draw.shape = videoCursor_->shape(handle, icon, draw.width, draw.height);
+  return draw;
+}
 void Capture::saveScaledCursor(int x, int y, int width, int height) {
   scaledCursor_.reset();
   const int64_t left = std::max<int64_t>(0, x), top = std::max<int64_t>(0, y);

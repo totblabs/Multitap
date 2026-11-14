@@ -21,6 +21,8 @@ import 'stream_size.dart';
 import 'stream_capacity.dart';
 import 'input_latency.dart';
 import 'remote_cursor.dart';
+import 'background_video.dart';
+import 'gamepad.dart';
 import 'text_input.dart';
 import 'display_scale.dart';
 import 'touch_input.dart';
@@ -621,6 +623,8 @@ class BrokerDesktop {
     this.relativeMouse = false,
     this.cursorEcho = false,
     this.cursorCompose = false,
+    this.backgroundVideo = false,
+    this.gamepad = false,
     this.sessionResume = false,
     this.use = DesktopUse.idle,
     this.useAccount,
@@ -753,6 +757,15 @@ class BrokerDesktop {
   /// The host advertises cursor-compose-v1 (the VM's real cursor inside the
   /// video while 게임 마우스 holds the mouse) with cursor-v1; the same rule.
   final bool cursorCompose;
+
+  /// The host advertises background-video-v1 (one picture a second while the
+  /// remote view is hidden); a released broker strips it (and rejects the
+  /// field).
+  final bool backgroundVideo;
+
+  /// The host advertises gamepad-v1 (virtual Xbox 360 controllers for this
+  /// PC's or phone's gamepads); the same rule.
+  final bool gamepad;
 
   /// The broker shows session-resume-v1 where it can continue a stream whose
   /// socket was lost (session_resume.dart); a released broker never shows it.
@@ -981,6 +994,10 @@ class BrokerDesktop {
     cursorCompose: cursorComposeAdvertised(
       (data['host'] as Map?)?['capabilities'],
     ),
+    backgroundVideo: backgroundVideoAdvertised(
+      (data['host'] as Map?)?['capabilities'],
+    ),
+    gamepad: gamepadAdvertised((data['host'] as Map?)?['capabilities']),
     sessionResume: sessionResumeAdvertised(
       (data['host'] as Map?)?['capabilities'],
     ),
@@ -1098,6 +1115,8 @@ class BrokerConnection {
     this.relativeMouse = false,
     this.cursorEcho = false,
     this.cursorCompose = false,
+    this.backgroundVideo = false,
+    this.gamepad = false,
     this.sessionResume = false,
     this.resumeGraceMs = 15000,
   });
@@ -1131,6 +1150,8 @@ class BrokerConnection {
     bool requestedRelativeMouse = false,
     bool requestedCursorEcho = false,
     bool requestedCursorCompose = false,
+    bool requestedBackgroundVideo = false,
+    bool requestedGamepad = false,
     bool requestedSessionResume = false,
     Future<void> Function(String sessionId)? cancel,
   }) {
@@ -1280,6 +1301,18 @@ class BrokerConnection {
                 mode != 'stream' ||
                 (trackMedia &&
                     data['cursorTracksProtocol'] != cursorTracksProtocol))) ||
+        // background-video-v1: only on request, for an ordinary stream session.
+        (data['backgroundVideoProtocol'] != null &&
+            (data['backgroundVideoProtocol'] != backgroundVideoProtocol ||
+                !requestedBackgroundVideo ||
+                mode != 'stream' ||
+                trackMedia)) ||
+        // gamepad-v1: only on request, for an ordinary stream session.
+        (data['gamepadProtocol'] != null &&
+            (data['gamepadProtocol'] != gamepadProtocol ||
+                !requestedGamepad ||
+                mode != 'stream' ||
+                trackMedia)) ||
         // stream-size-v1: only on request, for a stream with an initial
         // viewport and separate-v1 encoder ceilings.
         (data['streamSizeProtocol'] != null &&
@@ -1521,6 +1554,9 @@ class BrokerConnection {
       relativeMouse: data['relativeMouseProtocol'] == relativeMouseProtocol,
       cursorEcho: data['cursorEchoProtocol'] == cursorEchoProtocol,
       cursorCompose: data['cursorComposeProtocol'] == cursorComposeProtocol,
+      backgroundVideo:
+          data['backgroundVideoProtocol'] == backgroundVideoProtocol,
+      gamepad: data['gamepadProtocol'] == gamepadProtocol,
       sessionResume: data['sessionResumeProtocol'] == sessionResumeProtocol,
       resumeGraceMs: validResumeGraceMs(data['resumeGraceMs']) ?? 15000,
       reservation:
@@ -1639,6 +1675,14 @@ class BrokerConnection {
   /// The broker granted cursor-compose-v1: "cursor.compose" may be sent, and
   /// while it is on the Host draws the cursor into the video.
   final bool cursorCompose;
+
+  /// The broker granted background-video-v1: "stream.background" may be
+  /// sent, and while it is on the Host sends one picture a second.
+  final bool backgroundVideo;
+
+  /// The broker granted gamepad-v1: "gamepad.state" and "gamepad.remove" may
+  /// be sent, and "gamepad.rumble" comes from the Host.
+  final bool gamepad;
 
   /// The broker granted session-resume-v1: a lost socket is replaced within
   /// [resumeGraceMs] and the stream continues (session_resume.dart).
@@ -1969,6 +2013,7 @@ class HttpBrokerApi
     this.requestTextInput = false,
     this.requestDisplayScaleControl = false,
     this.requestTouchInput = false,
+    this.requestGamepad = true,
     this.requestCaret = false,
     this.requestDrives = false,
     Future<DecoderLimits?> Function()? decoderLimits,
@@ -2095,6 +2140,10 @@ class HttpBrokerApi
   /// a touch screen that sends touch contacts, e.g. Android's direct touch).
   /// Mouse-only clients never ask.
   final bool requestTouchInput;
+
+  /// Ask for gamepad-v1 where the inventory advertises it (both apps read
+  /// the gamepads of their PC or phone).
+  final bool requestGamepad;
 
   /// Ask for caret-v1 where the inventory advertises it (a client with a soft
   /// keyboard that follows the text caret, e.g. Android).
@@ -2536,6 +2585,14 @@ class HttpBrokerApi
       _inventoryToken == token && _cursorEchoDesktops.contains(desktopId);
   // cursor-compose-v1: the same rule.
   Set<String> _cursorComposeDesktops = {};
+  // background-video-v1: the same rule.
+  Set<String> _backgroundVideoDesktops = {};
+  bool _backgroundVideoAdvertised(String token, String desktopId) =>
+      _inventoryToken == token && _backgroundVideoDesktops.contains(desktopId);
+  // gamepad-v1: the same rule.
+  Set<String> _gamepadDesktops = {};
+  bool _gamepadAdvertised(String token, String desktopId) =>
+      _inventoryToken == token && _gamepadDesktops.contains(desktopId);
   // desktop-preview-v1: desktops whose current list entry offers a picture.
   Set<String> _previewDesktops = {};
 
@@ -3784,6 +3841,14 @@ class HttpBrokerApi
         for (final desktop in desktops)
           if (desktop.cursorCompose) desktop.id,
       };
+      _backgroundVideoDesktops = {
+        for (final desktop in desktops)
+          if (desktop.backgroundVideo) desktop.id,
+      };
+      _gamepadDesktops = {
+        for (final desktop in desktops)
+          if (desktop.gamepad) desktop.id,
+      };
       // desktop-preview-v1: read from the raw entry (BrokerDesktop keeps no copy).
       _previewDesktops = {
         for (final value in inventory)
@@ -3841,6 +3906,8 @@ class HttpBrokerApi
       _relativeMouseDesktops = {};
       _cursorEchoDesktops = {};
       _cursorComposeDesktops = {};
+      _backgroundVideoDesktops = {};
+      _gamepadDesktops = {};
       _previewDesktops = {};
       _sessionResumeDesktops = {};
       _hostReadyDesktops = {};
@@ -3994,6 +4061,14 @@ class HttpBrokerApi
     // cursor-compose-v1 likewise (preferred over the echo where granted).
     var cursorCompose =
         cursor && relativeMouse && _cursorComposeAdvertised(token, desktopId);
+    // background-video-v1 likewise (one picture a second while hidden).
+    var background =
+        mode == 'stream' && _backgroundVideoAdvertised(token, desktopId);
+    // gamepad-v1 likewise, only for a client that reads gamepads.
+    var gamepad =
+        mode == 'stream' &&
+        requestGamepad &&
+        _gamepadAdvertised(token, desktopId);
     // session-resume-v1 likewise, only for a client that resumes its socket.
     var resume =
         mode == 'stream' && _sessionResumeRequested(token, desktopId);
@@ -4020,6 +4095,8 @@ class HttpBrokerApi
       if (relativeMouse) 'relativeMouseProtocol': relativeMouseProtocol,
       if (cursorEcho) 'cursorEchoProtocol': cursorEchoProtocol,
       if (cursorCompose) 'cursorComposeProtocol': cursorComposeProtocol,
+      if (background) 'backgroundVideoProtocol': backgroundVideoProtocol,
+      if (gamepad) 'gamepadProtocol': gamepadProtocol,
       if (resume) 'sessionResumeProtocol': sessionResumeProtocol,
       if (initialViewport != null) ...{
         'initialViewportProtocol': initialViewportProtocol,
@@ -4067,6 +4144,8 @@ class HttpBrokerApi
           requestedRelativeMouse: relativeMouse,
           requestedCursorEcho: cursorEcho,
           requestedCursorCompose: cursorCompose,
+          requestedBackgroundVideo: background,
+          requestedGamepad: gamepad,
           requestedSessionResume: resume,
         );
     Map<String, dynamic> data;
@@ -4115,6 +4194,8 @@ class HttpBrokerApi
           requestedRelativeMouse: relativeMouse,
           requestedCursorEcho: cursorEcho,
           requestedCursorCompose: cursorCompose,
+          requestedBackgroundVideo: background,
+          requestedGamepad: gamepad,
           requestedSessionResume: resume,
         );
       }
@@ -4153,6 +4234,10 @@ class HttpBrokerApi
       input.remove('relativeMouseProtocol');
       input.remove('cursorEchoProtocol');
       input.remove('cursorComposeProtocol');
+      input.remove('backgroundVideoProtocol');
+      background = false;
+      input.remove('gamepadProtocol');
+      gamepad = false;
       input.remove('sessionResumeProtocol');
       resume = false;
       input.remove('audioCodecProtocol');
@@ -4305,6 +4390,8 @@ class HttpBrokerApi
     _relativeMouseDesktops = {};
     _cursorEchoDesktops = {};
     _cursorComposeDesktops = {};
+    _backgroundVideoDesktops = {};
+    _gamepadDesktops = {};
     _previewDesktops = {};
     _sessionResumeDesktops = {};
     _hostReadyDesktops = {};

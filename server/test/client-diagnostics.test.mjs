@@ -384,3 +384,15 @@ test('Android decoder low-latency configuration fields are kept',()=>{
   assert.equal(values.decoderLowLatency,31);assert.equal(values.decoderVendorKeys,5);
   assert.equal(values.decoderLowLatencyName,undefined);assert.equal(values.decodeFps10,598,'the rest of the row survives');
 });
+
+test('gamepad-v1 counts are kept on streamStats (pads within four, the grant a boolean); nothing about a pad itself',()=>{
+  // Without these a pad that "does not work" cannot be told apart: not granted, no pad read on the device, or sent and not answered.
+  const sent=statsReport(1);Object.assign(sent.events[0].values,{gamepad:true,gamepadPads:2,gamepadStates:418,gamepadRefused:1,gamepadRumbles:12,gamepadName:'8BitDo'});
+  const values=safeClientDiagnosticReport(sent).events[0].values;
+  assert.equal(values.gamepad,true);assert.equal(values.gamepadPads,2);assert.equal(values.gamepadStates,418);
+  assert.equal(values.gamepadRefused,1);assert.equal(values.gamepadRumbles,12);assert.equal(values.gamepadName,undefined);
+  const bad=statsReport(2);Object.assign(bad.events[0].values,{gamepad:1,gamepadPads:5,gamepadStates:-1});
+  const dropped=safeClientDiagnosticReport(bad).events[0].values;
+  for(const key of ['gamepad','gamepadPads','gamepadStates'])assert.equal(dropped[key],undefined,key);
+  assert.equal(dropped.decodeFps10,598,'the rest of the row survives');
+});

@@ -72,6 +72,8 @@ void handle(const JV& command) {
         else if (name == "setFiles") { std::vector<std::filesystem::path> files; if (const auto* list = command.find("paths")) if (const auto* a = std::get_if<e2e::JArray>(&list->v)) for (const auto& item : *a) files.emplace_back(e2e::wide(std::get<std::string>(item.v))); board.userFiles(files); respond(id, true); }
       else if (name == "setVirtual") { const auto* list = command.find("entries"); board.userVirtual(list ? e2e::virtualItems(*list) : std::vector<vsrc::Item>{}); respond(id, true); }
       else if (name == "clear") { board.userClear(); respond(id, true); }
+      else if (name == "renumber") { board.renumber(); respond(id, true); }
+      else if (name == "makeEmptyFiles") { e2e::makeEmptyFiles(std::filesystem::path(e2e::wide(command.str("root"))), size_t(command.num("total")), size_t(command.num("perFolder"))); respond(id, true); }
       else if (name == "get") respond(id, board.describe());
         else if (name == "describePaths") { std::vector<std::filesystem::path> tops; if (const auto* list = command.find("paths")) if (const auto* a = std::get_if<e2e::JArray>(&list->v)) for (const auto& item : *a) tops.emplace_back(e2e::wide(std::get<std::string>(item.v))); respond(id, e2e::Board::describePaths(tops)); }
       else if (name == "paste") {
