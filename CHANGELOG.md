@@ -2,7 +2,28 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13; the server is unchanged and the apps stay at 1.1.13. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.15](https://github.com/totblabs/Multitap/releases/tag/v1.1.15)
+
+### Gamepads (Host)
+
+- **Fixed: a button or trigger held when the connection dropped for a moment could stay held on the desktop.** While the connection is away the Host releases its virtual pads, and it sends the rumble again when the connection is back.
+- A pad input that arrives just after a session ended no longer plugs a pad in again, and plugging and unplugging a pad fast no longer piles up work. A rare memory error is fixed.
+
+### USB sharing (Host)
+
+- A real wired Xbox 360 controller shared over USB is no longer taken for a virtual pad when its start is checked.
+- Removing a device no longer unplugs a port the virtual mouse or a pad uses.
+
+### Host settings
+
+- **Fixed: after connecting to a server, the window stayed on "connecting" until it was refreshed.** It reads the status while it is visible, not only while it is in front, and every second while the connection changes. While the server changes it says "connecting" instead of a failure, and an expired or rejected request shows at once.
+- The Korean input fix of the Windows app 1.1.13 applies to the Host settings' password fields too.
+
+### Server
+
+- No change; the number follows the Host.
 
 ## [1.1.14](https://github.com/totblabs/Multitap/releases/tag/v1.1.14)
 
