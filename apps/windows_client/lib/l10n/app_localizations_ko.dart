@@ -4288,6 +4288,19 @@ class AppLocalizationsKo extends AppLocalizations {
       'USB 드라이버를 찾지 못했어요. PC를 다시 시작해도 같으면 클라이언트를 다시 설치해 주세요.';
 
   @override
+  String get usbDriverInstallerMissing =>
+      'USB 드라이버 설치 파일이 없어 USB 장치를 연결할 수 없어요. 클라이언트를 다시 설치해 주세요.';
+
+  @override
+  String get usbDriverNotRunning => 'USB 드라이버가 설치됐지만 동작하지 않아요. PC를 다시 시작해 주세요.';
+
+  @override
+  String get usbDriverUnverified => 'USB 드라이버를 확인하지 못해 쓸 수 없어요.';
+
+  @override
+  String get usbDriverStillStopped => 'PC를 다시 시작한 뒤에도 USB 드라이버가 동작하지 않아요.';
+
+  @override
   String get couldntVerifyInstallersSignatureSo =>
       '설치 파일의 서명을 확인하지 못해 설치하지 않았어요.';
 

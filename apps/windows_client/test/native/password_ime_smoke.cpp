@@ -40,10 +40,19 @@ int main() {
     HIMC active = ImmGetContext(window);
     ok = ok && active == nullptr;
     if (active) ImmReleaseContext(window, active);
+    // Contract only (it held before the Dart focus fix too): once Dart releases
+    // password mode while in the background, coming back does not disable again.
+    scope.Set(window, true);
+    scope.Activate(window, false);
+    scope.Set(window, false);
+    scope.Activate(window, true);
+    HIMC released = ImmGetContext(window);
+    ok = ok && released == context;
+    if (released) ImmReleaseContext(window, released);
   }
   ImmAssociateContext(window, original);
   ImmDestroyContext(context);
   DestroyWindow(window);
-  std::cout << (ok ? "Native IMM scope: disabled during password focus; restored on blur/background.\n" : "Native IMM scope failed.\n");
+  std::cout << (ok ? "Native IMM scope: disabled during password focus; restored on blur/background and after release.\n" : "Native IMM scope failed.\n");
   return ok ? 0 : 3;
 }

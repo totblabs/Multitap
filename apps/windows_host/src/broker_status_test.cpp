@@ -78,9 +78,13 @@ void acknowledgementEvidence() {
   status.acknowledged(generation, false, 1200, 1700000000000);
   auto json = JsonParser::parse(brokerStatusJson(status.evidence(), 1300));
   require(json.get("online").boolean() && json.get("lastHeartbeatAt").string().empty() && std::holds_alternative<std::nullptr_t>(json.get("lastHeartbeatAt").value), "Capabilities acknowledgement invented a heartbeat timestamp");
+  // The capabilities ACK is this connection's newest acknowledgement: its own
+  // age, while no heartbeat age is invented for it.
+  require(json.get("ackAgeSeconds").number(-1) == 0 && std::holds_alternative<std::nullptr_t>(json.get("heartbeatAgeSeconds").value), "Capabilities acknowledgement lost its age or invented a heartbeat age");
   status.acknowledged(generation, true, 11200, 1700000010000);
   json = JsonParser::parse(brokerStatusJson(status.evidence(), 13200));
   require(json.get("online").boolean() && json.get("heartbeatAgeSeconds").number() == 2 && json.get("lastReadyAt").number() == 1700000000000.0, "Actual heartbeat observation lost its separate timestamps");
+  require(json.get("ackAgeSeconds").number(-1) == 2, "A heartbeat ACK did not renew the acknowledgement age");
 }
 void staleAndClock() {
   BrokerConnectionStatus status; const auto generation = status.begin(1000); status.upgraded(generation, 1100);
@@ -92,6 +96,14 @@ void staleAndClock() {
   require(!json.get("online").boolean() && json.get("failureReason").string() == "clock_changed", "Monotonic clock rollback remained online");
   status.acknowledged(generation, true, 2100, 1600000000000);
   require(JsonParser::parse(brokerStatusJson(status.evidence(), 2200)).get("online").boolean(), "Wall-clock adjustment broke fresh monotonic network evidence");
+  // A connection prepared or dialled for over a minute (one dial ends within
+  // about 40 s) is stale, never "connecting" for good.
+  BrokerConnectionStatus dialing; dialing.begin(5000);
+  require(JsonParser::parse(brokerStatusJson(dialing.evidence(), 65000)).get("state").string() == "connecting", "A dial within its bounds became stale");
+  json = JsonParser::parse(brokerStatusJson(dialing.evidence(), 65001));
+  require(json.get("state").string() == "stale" && !json.get("online").boolean() && json.get("failureReason").string() == "heartbeat_timeout", "A connection that never dialled stayed connecting");
+  dialing.preparing(70000);
+  require(JsonParser::parse(brokerStatusJson(dialing.evidence(), 130001)).get("state").string() == "stale", "A reload that never dialled stayed connecting");
 }
 void generationsAndFailures() {
   BrokerConnectionStatus status; const auto first = status.begin(1000); status.upgraded(first, 1100); status.acknowledged(first, true, 1200, 1700000000000);
@@ -107,6 +119,22 @@ void generationsAndFailures() {
   const auto third = status.begin(2000); status.disconnected(third, "PRIVATE_TOKEN=https://private.invalid/password");
   const auto safe = brokerStatusJson(status.evidence(), 2100); require(safe.find("PRIVATE_TOKEN") == std::string::npos && safe.find("private.invalid") == std::string::npos, "Arbitrary failure text escaped the fixed allowlist");
 }
+// The service connects again with a usable registration (a reload, or its
+// start): a stop or a missing registration becomes the connection being
+// prepared, and the old connection's late events cannot change that.
+void preparingConnection() {
+  BrokerConnectionStatus status; const auto old = status.begin(1000); status.upgraded(old, 1100); status.acknowledged(old, true, 1200, 1700000000000);
+  status.stop(); status.preparing(1300);
+  auto value = status.evidence(); require(value.phase == BrokerPhase::Connecting && value.reason.empty() && !value.verifiedTick && value.attemptTick == 1300, "A reload reported a stop instead of the connection being prepared");
+  status.upgraded(old, 1400); status.acknowledged(old, true, 1400, 1700000001000); status.disconnected(old, "transport_closed");
+  value = status.evidence(); require(value.phase == BrokerPhase::Connecting && value.reason.empty() && !value.verifiedTick, "A late event of the old connection changed the prepared one");
+  const auto json = JsonParser::parse(brokerStatusJson(value, 1500));
+  require(json.get("state").string() == "connecting" && !json.get("online").boolean() && json.get("failureReason").string().empty() && std::holds_alternative<std::nullptr_t>(json.get("ackAgeSeconds").value), "A prepared connection claimed an acknowledgement or a failure");
+  status.waiting(); status.preparing(1600); value = status.evidence();
+  require(value.phase == BrokerPhase::Connecting && value.reason.empty(), "A new registration still reported waiting_registration");
+  const auto next = status.begin(1700); status.upgraded(next, 1800); status.acknowledged(next, false, 1900, 1700000002000);
+  require(status.evidence().phase == BrokerPhase::Online && JsonParser::parse(brokerStatusJson(status.evidence(), 2000)).get("ackAgeSeconds").number(-1) == 0, "The connection after preparing could not come online");
+}
 void wireValidation() {
   BrokerConnectionStatus status; const auto generation = status.begin(1000); status.upgraded(generation, 1100); status.acknowledged(generation, true, 1200, 1700000000000);
   const auto good = brokerWire(status.evidence(), 1300); require(parseBrokerWire(good, 1400).phase == BrokerPhase::Online, "Valid broker status wire failed");
@@ -115,7 +143,9 @@ void wireValidation() {
     auto invalid = good; const auto at = invalid.find(pair.first); require(at != std::string::npos, "QA invalid wire replacement missing"); invalid.replace(at, std::strlen(pair.first), pair.second); rejected([&] { parseBrokerWire(invalid, 1400); });
   }
   const auto publicJson = JsonParser::parse(brokerStatusJson(status.evidence(), 1400));
-  const auto* object = std::get_if<Json::Object>(&publicJson.value); require(object && object->size() == 6, "Public status leaked internal PID/clock/proof fields");
+  const auto* object = std::get_if<Json::Object>(&publicJson.value); require(object && object->size() == 7, "Public status leaked internal PID/clock/proof fields");
+  // The acknowledgement is an age in seconds, never the raw monotonic tick.
+  require(publicJson.get("ackAgeSeconds").number(-1) == 0 && JsonParser::parse(brokerStatusJson(status.evidence(), 4200)).get("ackAgeSeconds").number(-1) == 3, "The acknowledgement age exposed a tick instead of seconds");
 }
 void concurrentEvidence() {
   BrokerConnectionStatus status; std::atomic<bool> done{false}; std::atomic<bool> valid{true};
@@ -152,7 +182,7 @@ int wmain(int argc, wchar_t** argv) {
   try {
     if (argc == 3 && std::wstring(argv[1]) == L"--observe-installed") return observeInstalled(argv[2]);
     if (argc == 4 && std::wstring(argv[1]) == L"--serve") return child(argv[2], argv[3]);
-    require(argc == 1, "Unknown QA arguments"); serviceIdentityPolicy();acknowledgementEvidence(); staleAndClock(); generationsAndFailures(); wireValidation(); concurrentEvidence();const auto measured=ownedProcesses();
-    std::cout << "{\"kind\":\"host-broker-live-status-qa\",\"groups\":7,\"serviceIdentityCases\":16,\"actualOwnedChildProcesses\":2,\"repeatedProtectedPipeReads\":true,\"pipeBenchmarkReads\":8,\"pipeMedianUs\":"<<measured.medianUs<<",\"pipeMaxUs\":"<<measured.maxUs<<",\"blockedReaderShutdownUs\":"<<measured.blockedReaderShutdownUs<<",\"peerPidAndCreationChecked\":true,\"systemPeerRequirementRefusesOrdinaryQaProcess\":true,\"processExitAndReplacementInvalidateOldStatus\":true,\"ackGenerationAndMonotonicFreshness\":true,\"ackEventsAreFixtures\":true,\"actualBrokerWssTested\":false,\"actualSystemServicePipeTested\":false,\"installedHostChanged\":false,\"serviceChanges\":0,\"driverChanges\":0,\"runtimeFilesWritten\":false}\n"; return 0;
+    require(argc == 1, "Unknown QA arguments"); serviceIdentityPolicy();acknowledgementEvidence(); staleAndClock(); generationsAndFailures(); preparingConnection(); wireValidation(); concurrentEvidence();const auto measured=ownedProcesses();
+    std::cout << "{\"kind\":\"host-broker-live-status-qa\",\"groups\":8,\"serviceIdentityCases\":16,\"actualOwnedChildProcesses\":2,\"repeatedProtectedPipeReads\":true,\"pipeBenchmarkReads\":8,\"pipeMedianUs\":"<<measured.medianUs<<",\"pipeMaxUs\":"<<measured.maxUs<<",\"blockedReaderShutdownUs\":"<<measured.blockedReaderShutdownUs<<",\"peerPidAndCreationChecked\":true,\"systemPeerRequirementRefusesOrdinaryQaProcess\":true,\"processExitAndReplacementInvalidateOldStatus\":true,\"ackGenerationAndMonotonicFreshness\":true,\"ackEventsAreFixtures\":true,\"actualBrokerWssTested\":false,\"actualSystemServicePipeTested\":false,\"installedHostChanged\":false,\"serviceChanges\":0,\"driverChanges\":0,\"runtimeFilesWritten\":false}\n"; return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

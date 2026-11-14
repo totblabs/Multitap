@@ -149,7 +149,6 @@ class FlutterWindow : public Win32Window, private multitap::tray::Delegate {
       credential_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> input_channel_;
   multitap::PasswordIme password_ime_;
-  int64_t password_scope_ = 0;
   std::unique_ptr<flutter::PluginRegistrarWindows> remote_registrar_;
   // Whether this view's Flutter renderer is a hardware GPU (stream statistics).
   multitap::RenderEnvironment render_environment_;

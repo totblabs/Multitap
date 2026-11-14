@@ -239,6 +239,9 @@ export function configuration(env = process.env, { readAccessFile = readProtecte
     allowedOrigins: accessConfig ? allowedServerOrigins(accessConfig) : [],
     bootstrapOnly, bootstrapHost: '0.0.0.0', bootstrapPort: transport.port,
     setupOrigin: dockerSetupOrigin(env, deploymentKind),
+    // The address a Docker install recorded for this server (dockerSetupOrigin checked it): PC wake asks whether
+    // the broker owns it, that is, whether it runs on the host's network (pc-power.mjs dockerWakeBlock).
+    serverAddress: deploymentKind === 'docker' ? (env.MULTITAP_SERVER_ADDRESS || null) : null,
     legacyProxyTrustNeedsConfiguration: !saved && !bootstrapOnly && accessConfig.https.enabled && accessConfig.https.mode === 'proxy' && !env.MULTITAP_TRUSTED_PROXIES,
     dataDir,
     deploymentKind,

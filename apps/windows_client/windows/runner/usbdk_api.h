@@ -68,6 +68,43 @@ inline bool SignedByRedHat(const std::wstring& path) {
   data.dwStateAction = WTD_STATEACTION_CLOSE; WinVerifyTrust(nullptr, &action, &data);
   return ok;
 }
+
+// The newest creation time of [paths] (FILETIME units, 100 ns since 1601); 0
+// when one of them cannot be read.
+inline ULONGLONG NewestCreation(std::initializer_list<std::wstring> paths) {
+  ULONGLONG newest = 0;
+  for (const auto& path : paths) {
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (path.empty() || !GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return 0;
+    newest = (std::max)(newest, (ULONGLONG(data.ftCreationTime.dwHighDateTime) << 32) | data.ftCreationTime.dwLowDateTime);
+  }
+  return newest;
+}
+
+// When UsbDk was put on this PC: its runtime folder and its helper, which its
+// installer creates (the newer of the two; 0 when unknown).
+inline ULONGLONG InstalledAt() { return NewestCreation({RuntimeDirectory(), HelperPath()}); }
+
+// Did Windows start more than a minute after [installed]? [now] is the system
+// time (FILETIME units like [installed]) and [uptimeMs] the time since Windows
+// started (GetTickCount64, which runs on through sleep and fast startup, so
+// neither counts as a start). The minute keeps a small clock correction since
+// the installation from reading as a restart; an unknown time ([installed] 0)
+// is not one either.
+inline bool StartedAfter(ULONGLONG installed, ULONGLONG now, ULONGLONG uptimeMs) {
+  constexpr ULONGLONG minute = 60ULL * 1000 * 10000;
+  if (installed == 0 || uptimeMs > now / 10000) return false;
+  const ULONGLONG started = now - uptimeMs * 10000;
+  return installed < started && started - installed > minute;
+}
+
+// UsbDk was in place before Windows last started: the restart its
+// installation may need has happened.
+inline bool InstalledBeforeStart() {
+  FILETIME now{};
+  GetSystemTimeAsFileTime(&now);
+  return StartedAfter(InstalledAt(), (ULONGLONG(now.dwHighDateTime) << 32) | now.dwLowDateTime, GetTickCount64());
+}
 }  // namespace usbdk
 
 // UsbDk frees its opaque redirector object on StopRedirect and can reuse that
@@ -128,15 +165,22 @@ class UsbPendingIo {
 
 class UsbDkApi final : public Api {
  public:
-  // nullptr when UsbDk is not installed or the helper's signature is not Red Hat's.
-  static std::unique_ptr<UsbDkApi> Load() {
+  // Why Load gave no helper: UsbDk is not installed, the helper's signature is
+  // not Red Hat's, or it would not load or lacks a function used here.
+  enum class Failure { none, missing, signature, load };
+  // nullptr when UsbDk is not installed or the helper cannot be used ([why] says which).
+  static std::unique_ptr<UsbDkApi> Load(Failure* why = nullptr) {
+    const auto fail = [why](Failure failure) { if (why) *why = failure; return std::unique_ptr<UsbDkApi>(); };
     const auto path = usbdk::HelperPath();
-    if (path.empty() || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES || !usbdk::SignedByRedHat(path)) return nullptr;
+    if (path.empty() || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return fail(Failure::missing);
+    if (!usbdk::SignedByRedHat(path)) return fail(Failure::signature);
     // The helper loads its own driver files from its directory; nothing is searched on the path.
     HMODULE module = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (!module) return nullptr;
+    if (!module) return fail(Failure::load);
     std::unique_ptr<UsbDkApi> api(new UsbDkApi(module));
-    return api->complete() ? std::move(api) : nullptr;
+    if (!api->complete()) return fail(Failure::load);
+    if (why) *why = Failure::none;
+    return api;
   }
   ~UsbDkApi() override { if (module_) FreeLibrary(module_); }
 

@@ -179,6 +179,14 @@ class Captures {
   void SetControlTimeout(unsigned milliseconds) { controlTimeoutMs_ = milliseconds; }
   void SetReleaseWait(unsigned milliseconds) { releaseWaitMs_ = milliseconds; }
 
+  // Does UsbDk answer: its device list call succeeds? Its helper can load while
+  // the driver does not run (until Windows restarts after its installation, or
+  // when Windows keeps it from starting); List() then has nothing to report.
+  bool Answers() {
+    std::vector<DeviceInfo> found;
+    return api_->Devices(found);
+  }
+
   // This PC's USB devices with every descriptor, id = "deviceId|instanceId".
   // UsbDk is asked without any lock held. A device this client has captured is
   // not asked again (it is busy with the VM's traffic): its descriptors are the

@@ -28,8 +28,9 @@ export async function loadAdmin(t, suffix, user, inventory, { origin = 'https://
   const dialog = document.querySelector('#modal');
   dialog.showModal = () => { dialog.open = true; }; dialog.close = () => { dialog.open = false; };
   // linkedom has no focus model: record the element the console focuses last.
-  let focused = null; const focusProto = window.HTMLElement.prototype, ownFocus = Object.getOwnPropertyDescriptor(focusProto, 'focus');
-  focusProto.focus = function () { focused = this; };
+  // The options of that call too: a focus given back after a redraw must not scroll (preventScroll).
+  let focused = null, focusOptions = null; const focusProto = window.HTMLElement.prototype, ownFocus = Object.getOwnPropertyDescriptor(focusProto, 'focus');
+  focusProto.focus = function (options) { focused = this; focusOptions = options ?? null; };
   t.after(() => { if (ownFocus) Object.defineProperty(focusProto, 'focus', ownFocus); else delete focusProto.focus; });
   const writes = [], requests = [];
   const ok = (value, status = 200) => ({ ok: status < 400, status, json: async () => value });
@@ -122,7 +123,7 @@ export async function loadAdmin(t, suffix, user, inventory, { origin = 'https://
   const crumb = () => document.querySelector('#breadcrumb').textContent;
   await settle();
   const emitWindow = name => { const event = new window.Event(name, { cancelable: true }); for (const listener of windowListeners.get(name) ?? []) listener(event); return event; };
-  return { window, writes, requests, dialog, content, click, follow, find, navigate, pickVm, settle, change, crumb, monitor, emitWindow, focused: () => focused };
+  return { window, writes, requests, dialog, content, click, follow, find, navigate, pickVm, settle, change, crumb, monitor, emitWindow, focused: () => focused, focusOptions: () => focusOptions };
 }
 export const iso = offset => new Date(Date.now() + offset).toISOString();
 export const workspaceFixture = () => {

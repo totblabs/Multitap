@@ -14,7 +14,9 @@ import 'usb_redirection.dart';
 /// verifies the installer's signature before it runs.
 ///
 /// Channel `multitap/usb`:
-///   environment            -> {driver: ready|missing|unsupported}
+///   environment            -> {driver: ready|missing|stopped|unsupported, installer: ready|missing,
+///                              reason?: signature|load|no_answer|still_stopped (why an installed UsbDk is
+///                              stopped; no_answer: installed after Windows last started, still_stopped: before)}
 ///   list                   -> [{id, name, subtitle, vidPid, kind, neededByPc, chips, arrivalMs, memoryKey,
 ///                               busyElsewhere, descriptors, speed, busy, otherWindow?}]
 ///   prepare {id, generation} -> {ready, checked, blocker} (storage check, no explicit dismount)
@@ -28,8 +30,8 @@ import 'usb_redirection.dart';
 ///   release {handle}      -> {urbs, kib, stalls, failed, timeouts, slow, firstClass, firstStatus, slowClass, firstUsbd}
 ///   returned {id, storage} -> {state, why}: after a release, did Windows start the device again (0 unknown, 1 yes, 2 no);
 ///                             why: for 2, what was missing (1 no node, 2 not started, 3 no disk, 100 + problem code)
-///   install                -> null (PlatformException: usbdk_signature_invalid, usbdk_install_failed, usbdk_elevation_cancelled,
-///                              usbdk_restart_required, usbdk_missing)
+///   install                -> null (PlatformException: usbdk_installer_missing, usbdk_signature_invalid, usbdk_install_failed,
+///                              usbdk_elevation_cancelled, usbdk_restart_required, usbdk_not_running)
 ///   holder {id}            -> {held}: does another remote window of this client hold it
 ///   handOver {id, window}  -> {asked}: asks that window to give it back
 /// and from the runner: gone {handle} when a captured device left the bus,
@@ -161,11 +163,27 @@ class NativeUsbBackend extends UsbBackend {
     final value = await _channel.invokeMapMethod<String, Object?>(
       'environment',
     );
-    return UsbEnvironment(switch (value?['driver']) {
+    final driver = switch (value?['driver']) {
       'ready' => UsbDriverState.ready,
+      'stopped' => UsbDriverState.stopped,
       'unsupported' => UsbDriverState.unsupported,
       _ => UsbDriverState.missing,
-    });
+    };
+    return UsbEnvironment(
+      driver,
+      // Only the runner's explicit answer hides the installation; otherwise
+      // the installation itself says what happened.
+      installerMissing: value?['installer'] == 'missing',
+      problem: driver == UsbDriverState.stopped
+          ? switch (value?['reason']) {
+              'signature' => UsbDriverProblem.signature,
+              'load' => UsbDriverProblem.load,
+              'no_answer' => UsbDriverProblem.noAnswer,
+              'still_stopped' => UsbDriverProblem.stillStopped,
+              _ => null,
+            }
+          : null,
+    );
   }
 
   @override

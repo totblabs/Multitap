@@ -274,10 +274,23 @@ Code: `lib/data/usb_redirection.dart`, `lib/data/usb_picker.dart`,
   설치…** and confirms. It verifies the bundled installer (size, SHA-256, Red
   Hat, Inc. Authenticode signature, held without write sharing) and starts
   `msiexec /i /qn /norestart` with one Windows approval prompt; a declined
-  prompt is `usbdk_elevation_cancelled`. It never restarts Windows. The MSI
-  ships beside the client (`usbdk/`) when the client is built after
-  `tools/fetch-usb-drivers.ps1 -UsbDk`. `UsbDkHelper.dll` is loaded only after
-  its signature verifies.
+  prompt is `usbdk_elevation_cancelled`. It never restarts Windows. Every
+  client carries the MSI beside it (`usbdk/`). It is fetched once per build PC
+  with `tools/fetch-usb-drivers.ps1 -UsbDk`; a Release build stops without it,
+  and the installer build and the publisher refuse a client without it. If it
+  is gone from a PC, the panel says so (`usbdk_installer_missing`) and offers no
+  installation. `UsbDkHelper.dll` is loaded only after its signature verifies.
+  The panel calls UsbDk ready only when it answers (its device list). Installed
+  but not answering is `usbdk_not_running`. When UsbDk was installed after
+  Windows last started (the creation time of its runtime folder and helper
+  against the time since that start), the panel offers the restart, also after
+  a refresh or a reconnect. When it was in place more than a minute before that
+  start, the restart did not start it: the panel says so in red, without a
+  restart offer. A helper whose signature does not verify or that does not load
+  is said in red, without a restart offer. The installation and the restart are
+  offered only under the line about the driver, never under one about the
+  desktop. While UsbDk is being installed nothing read of it counts: the
+  installation reads it once it is over.
 - **Transfers.** `usb_capture_core.h` runs each request with UsbDk's overlapped
   read/write, translates `SET_INTERFACE`, `SET_CONFIGURATION` and
   `CLEAR_FEATURE(ENDPOINT_HALT)` into UsbDk calls and maps Windows/USBD errors to
@@ -308,7 +321,7 @@ Code: `lib/data/usb_redirection.dart`, `lib/data/usb_picker.dart`,
 | Detach | `usb_user_stopped`, `usb_device_removed`, `usb_vm_detached`, `usb_policy_changed`, `usb_device_error`, `usb_session_closed` |
 | Host status | `usb_driver_missing`, `usb_driver_install_failed`, `usb_vhci_unprotected`, `usb_vhci_unavailable`, `usb_setup_failed`, `usb_restart_required` |
 | Channel | `usb_invalid_message`, `usb_out_of_order`, `usb_limits_exceeded`, `usb_rate_limit`, `usb_backpressure`, `usb_pair_timeout`, `usb_transport_closed`, `usb_unavailable`, `usb_policy_changed` |
-| Client (local) | `usbdk_missing`, `usbdk_install_failed`, `usbdk_signature_invalid`, `usbdk_elevation_cancelled`, `usbdk_restart_required`, `usb_device_busy`, `usb_capture_failed`, `usb_limit_session`, `usb_capture_timeout`, `usb_request_stuck`, `usb_device_not_returned`, `usb_prepare_timeout`, `usb_return_unknown`, `usb_pc_in_use`, `usb_busy_elsewhere`, `usb_device_redirected`, `usb_move_timeout` |
+| Client (local) | `usbdk_installer_missing`, `usbdk_not_running`, `usbdk_install_failed`, `usbdk_signature_invalid`, `usbdk_elevation_cancelled`, `usbdk_restart_required`, `usb_device_busy`, `usb_capture_failed`, `usb_limit_session`, `usb_capture_timeout`, `usb_request_stuck`, `usb_device_not_returned`, `usb_prepare_timeout`, `usb_return_unknown`, `usb_pc_in_use`, `usb_busy_elsewhere`, `usb_device_redirected`, `usb_move_timeout` |
 
 The client-local codes are diagnostics and panel messages, not relay detach
 reasons.

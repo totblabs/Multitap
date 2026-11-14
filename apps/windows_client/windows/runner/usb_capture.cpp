@@ -48,13 +48,28 @@ std::string FileSha256(HANDLE file) {
   BCryptCloseAlgorithmProvider(algorithm, 0);
   return out;
 }
+
+// Whether the installer that the install button runs is in place: a regular file
+// (not a folder or a link) of the pinned size beside the executable. Its SHA-256
+// and signature are checked when it runs (InstallUsbDk).
+bool InstallerPresent(const std::wstring& directory) {
+  if (directory.empty()) return false;
+  const std::wstring path = directory + L"\\usbdk\\" + UsbDkInstaller::file;
+  HANDLE raw = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (raw == INVALID_HANDLE_VALUE) return false;
+  BY_HANDLE_FILE_INFORMATION info{};
+  const bool regular = GetFileInformationByHandle(raw, &info) && !(info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) &&
+      info.nFileSizeHigh == 0 && info.nFileSizeLow == UsbDkInstaller::size;
+  CloseHandle(raw);
+  return regular;
+}
 }  // namespace
 
 std::string InstallUsbDk(const std::wstring& directory) {
   const std::wstring path = directory + L"\\usbdk\\" + UsbDkInstaller::file;
   // Held without write sharing from the check to the end of the installation.
   HANDLE raw = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-  if (raw == INVALID_HANDLE_VALUE) return "usbdk_missing";
+  if (raw == INVALID_HANDLE_VALUE) return "usbdk_installer_missing";
   struct Close { HANDLE value; ~Close() { CloseHandle(value); } } close{raw};
   BY_HANDLE_FILE_INFORMATION info{};
   if (!GetFileInformationByHandle(raw, &info) || (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) ||
@@ -137,11 +152,12 @@ struct UsbCaptureChannel::State : std::enable_shared_from_this<UsbCaptureChannel
     { std::lock_guard lock(mutex); done.push_back({std::move(result), V(), std::move(code), nativeError}); }
     Post();
   }
-  // The capture engine, available once UsbDk is installed and verified.
-  usb::Captures* Engine() {
+  // The capture engine, available once UsbDk is installed and verified; [why]
+  // says why not.
+  usb::Captures* Engine(usb::UsbDkApi::Failure* why = nullptr) {
     std::lock_guard engineGuard(engineMutex);   // both lanes may ask at once
     if (auto* existing = Current()) return existing;
-    auto api = usb::UsbDkApi::Load();
+    auto api = usb::UsbDkApi::Load(why);
     if (!api) return nullptr;
     auto made = std::make_unique<usb::Captures>(std::move(api), [weak = weak_from_this()](int64_t handle) {
       if (auto state = weak.lock()) {
@@ -152,6 +168,24 @@ struct UsbCaptureChannel::State : std::enable_shared_from_this<UsbCaptureChannel
     std::lock_guard lock(mutex);   // Enqueue reads the pointer under the same lock
     captures = std::move(made);
     return captures.get();
+  }
+  // The driver as the environment reply names it: "ready" only when UsbDk
+  // answers (its device list), "missing" without its helper, and "stopped" with
+  // [reason] when the helper is there but its signature does not verify
+  // ("signature"), it does not load ("load") or the driver does not answer:
+  // "no_answer" when UsbDk was installed after Windows last started (the
+  // restart starts it), "still_stopped" when it was in place before that start
+  // (the restart did not start it; another would not help). x64 builds only.
+  std::string Driver(std::string& reason) {
+    auto why = usb::UsbDkApi::Failure::none;
+    auto* engine = Engine(&why);
+    if (!engine) {
+      if (why == usb::UsbDkApi::Failure::missing) return "missing";
+      reason = why == usb::UsbDkApi::Failure::signature ? "signature" : "load";
+      return "stopped";
+    }
+    if (!engine->Answers()) { reason = usb::usbdk::InstalledBeforeStart() ? "still_stopped" : "no_answer"; return "stopped"; }
+    return "ready";
   }
   static const V* Find(const M& arguments, const char* key) { const auto found = arguments.find(V(key)); return found == arguments.end() ? nullptr : &found->second; }
   static std::optional<int64_t> Integer(const M& arguments, const char* key) {
@@ -169,8 +203,14 @@ struct UsbCaptureChannel::State : std::enable_shared_from_this<UsbCaptureChannel
   void Run(Job& job) {
     const auto& method = job.method;
     if (method == "environment") {
+      // installer: whether the pinned UsbDk installer the install button runs
+      // is beside the executable; the panel offers no installation without it.
       const bool x64 = sizeof(void*) == 8;
-      Finish(std::move(job.result), V(M{{V("driver"), V(std::string(!x64 ? "unsupported" : Engine() ? "ready" : "missing"))}}));
+      std::string reason;
+      M reply{{V("driver"), V(x64 ? Driver(reason) : std::string("unsupported"))},
+          {V("installer"), V(std::string(InstallerPresent(ExecutableDirectory()) ? "ready" : "missing"))}};
+      if (!reason.empty()) reply[V("reason")] = V(reason);
+      Finish(std::move(job.result), V(std::move(reply)));
     } else if (method == "list") {
       auto* engine = Engine();
       L items;
@@ -249,8 +289,11 @@ struct UsbCaptureChannel::State : std::enable_shared_from_this<UsbCaptureChannel
       const int state = text && engine ? engine->WaitReturned(*text, wantChild && *wantChild, 10000, &why) : 0;
       Finish(std::move(job.result), V(M{{V("state"), V(int32_t(state))}, {V("why"), V(int64_t(why))}}));
     } else if (method == "install") {
+      // msiexec succeeded: UsbDk must also answer, else it is installed but not
+      // running (until Windows restarts, or Windows keeps it from starting).
       const auto code = InstallUsbDk(ExecutableDirectory());
-      if (code.empty() && !Engine()) Fail(std::move(job.result), "usbdk_missing");
+      std::string reason;
+      if (code.empty() && Driver(reason) != "ready") Fail(std::move(job.result), "usbdk_not_running");
       else if (code.empty()) Finish(std::move(job.result), V());
       else Fail(std::move(job.result), code);
     } else {

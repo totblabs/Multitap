@@ -2,7 +2,46 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.14](https://github.com/totblabs/Multitap/releases/tag/v1.1.14)
+
+### Starting a PC (server)
+
+- **Fixed: on a server installed with Docker, starting a local PC was recorded as sent and failed four minutes later.** Docker's network does not pass the wake signal on to the PCs' network, so the server now says at once that it cannot send it. Proxmox VMs start as before.
+
+### Host log (server)
+
+- A Host that was deleted and added again starts its log in the admin console fresh: events of its earlier registration no longer come back. Sign-in and connection records are kept as before.
+
+### Admin console (server)
+
+- **Fixed: scrolling down a page jumped back up a few seconds later.** The page's automatic refresh gave the focus back to the page title and the browser scrolled to it; it now keeps the page where it is.
+
+### Copy and paste permission (Windows app, Android app)
+
+- **Fixed: copy and paste permissions an administrator widened during a connection (files allowed, say) applied only after connecting again.** Now only the copy and paste channel opens again with the new permission; the screen stays connected, and a copy under way finishes first.
+- It needs the server at 1.1.13 or later and the app at 1.1.13 or later. A connection that started with copy and paste all off gets it from the next connection.
+
+### Gamepads (Windows app, Android app)
+
+- **Fixed: right after connecting, the virtual pad was plugged in only on the first press, so a short first press was lost.** It is plugged in when the first picture comes.
+- **Fixed: a pad kept vibrating when the game stopped the rumble while the connection was frozen for a moment.** The motors stop while it is frozen, and every pad's state and the latest rumble come again when it is back.
+- **Fixed (Windows app): 30 minutes of play with only a gamepad signed you out for inactivity.** With a Multitap window in front, buttons, triggers and stick movement count as input; a resting stick's small drift does not.
+- Only the window in front drives the rumble: a game in a window behind no longer shakes the pad in your hands, and a window that ends no longer stops the rumble of the game you are playing.
+- Android: a TV remote or a keyboard is not taken for a gamepad (only a controller with sticks or the A button is); PlayStation-style triggers send how far they are pulled; nothing held stays held after you leave the app and come back; rumble no longer stops after 60 seconds.
+
+### Less video while the picture is hidden (Windows app, Android app)
+
+- **Fixed: a hidden-picture notice lost while the connection was frozen, or just before it opened, could leave a visible picture at one frame a second.** It is sent again when the connection is back and when the first picture comes.
+
+### Korean input (Windows app)
+
+- **Fixed: Korean could not be typed in the sign-in ID field until the app was quit.** When a focused password field went away (signed out with the two-step verification window open, for example), Korean input stayed off for the whole window.
+
+### USB devices on your PC (Windows app)
+
+- **Fixed: "Install USB driver" always failed.** The app did not include the driver's installer. It does now, and a driver that is installed but not running yet (a restart is needed, for example) is shown as such instead of "no devices".
 
 ## [1.1.13](https://github.com/totblabs/Multitap/releases/tag/v1.1.13)
 

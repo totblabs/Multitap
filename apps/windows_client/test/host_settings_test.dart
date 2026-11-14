@@ -322,13 +322,16 @@ class FakeHostSettings implements HostSettingsApi {
         'registered': registered,
         'desktopId': registered ? 'pve-totbvm-149' : '',
         'serverOrigin': registered ? 'https://cloud.example.com' : '',
-        'connectionRequest': {
-          ...connectionRequest,
-          if (connectionRequest.isNotEmpty)
-            'cancelProtocol': 'cancel-request-v1',
-          if (connectionRequest.isNotEmpty)
-            'cancelRevision': connectionRequest['cancelRevision'] ?? 'a' * 64,
-        },
+        // No request is {"status":"none"}, as the helper says it
+        // (pending_connection.hpp publicConnectionRequest).
+        'connectionRequest': connectionRequest.isEmpty
+            ? {'status': 'none'}
+            : {
+                ...connectionRequest,
+                'cancelProtocol': 'cancel-request-v1',
+                'cancelRevision':
+                    connectionRequest['cancelRevision'] ?? 'a' * 64,
+              },
         'service': {
           'installed': true,
           'running': running,
@@ -867,12 +870,550 @@ void main() {
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await approvalTick(t);
+    // Shown again: one read at once (not one more for the focus), then the
+    // usual three seconds.
+    await t.pump();
     expect(api.requests.where((r) => r['action'] == 'status'), hasLength(2));
+    await approvalTick(t);
+    expect(api.requests.where((r) => r['action'] == 'status'), hasLength(3));
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 20));
-    expect(api.requests.where((r) => r['action'] == 'status'), hasLength(2));
+    expect(api.requests.where((r) => r['action'] == 'status'), hasLength(3));
   });
+
+  // On Windows a window that is seen but has lost the keyboard focus (a
+  // browser in front, a click elsewhere) is "inactive": it still reads.
+  int statusReads(FakeHostSettings api) =>
+      api.requests.where((r) => r['action'] == 'status').length;
+  Map<String, dynamic> acknowledged() => {
+    ...brokerEvidence(age: null),
+    'lastHeartbeatAt': null,
+    'ackAgeSeconds': 0,
+  };
+  // A row of 진단 > 자세히: the value beside its label.
+  String detailRow(WidgetTester t, String label) => t
+      .widget<SelectableText>(
+        find.descendant(
+          of: find
+              .ancestor(of: find.text(label), matching: find.byType(Row))
+              .first,
+          matching: find.byType(SelectableText),
+        ),
+      )
+      .data!;
+  // A time as 진단 writes it (this PC's time zone, to the second).
+  String shownTime(int utc) {
+    final time = DateTime.fromMillisecondsSinceEpoch(utc).toLocal();
+    String pad(int n) => n.toString().padLeft(2, '0');
+    return '${time.year}-${pad(time.month)}-${pad(time.day)} '
+        '${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}';
+  }
+
+  testWidgets(
+    'A window seen without the focus keeps reading and shows the connection come up without a tap',
+    (t) async {
+      final api = FakeHostSettings(registered: true)
+        ..statusOverrides = {
+          'broker': brokerEvidence(
+            state: 'connecting',
+            online: false,
+            age: null,
+          ),
+        };
+      await open(t, api);
+      expect(serverLine(t), '서버 연결 중');
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      final before = statusReads(api);
+      api.statusOverrides = {'broker': acknowledged()};
+      await t.pump(const Duration(milliseconds: 1010));
+      await pumpWork(t);
+      expect(statusReads(api), greaterThan(before));
+      expect(serverLine(t), confirmed);
+      expect(find.byKey(const Key('host-feedback')), findsNothing);
+      expect(find.byKey(const Key('host-result-dialog')), findsNothing);
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'An approval made while the window is behind another one shows the registration, then the connection, without a tap',
+    (t) async {
+      final api = FakeHostSettings()..connectionRequest = approvalRequest();
+      await open(t, api);
+      await nav(t, 1);
+      expect(find.text('관리자 승인 대기'), findsOneWidget);
+      // The browser to approve in comes to the front.
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await t.pump();
+      expect(find.byKey(const Key('host-approval-waiting')), findsOneWidget);
+      api
+        ..registered = true
+        ..connectionRequest = {...api.connectionRequest, 'status': 'approved'}
+        ..statusOverrides = {
+          'broker': brokerEvidence(
+            state: 'connecting',
+            online: false,
+            age: null,
+          ),
+        };
+      await approvalTick(t);
+      expect(find.textContaining('관리자 승인으로 서버 등록이 완료됐어요.'), findsOneWidget);
+      expect(serverLine(t), '서버 연결 중');
+      // The service connects with the new registration: read every second.
+      api.statusOverrides = {'broker': acknowledged()};
+      await t.pump(const Duration(milliseconds: 1010));
+      await pumpWork(t);
+      expect(serverLine(t), confirmed);
+      expect(find.text('서버 응답 확인 필요'), findsNothing);
+      expect(find.byKey(const Key('host-result-dialog')), findsNothing);
+      expect(api.requests.every(isReadOnlyHostRequest), isTrue);
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Back in front reads at once; losing the focus neither reads nor drops a read on its way',
+    (t) async {
+      final api = FakeHostSettings(registered: true)
+        ..statusOverrides = {'broker': brokerEvidence()};
+      await open(t, api);
+      final first = statusReads(api);
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await t.pump();
+      expect(statusReads(api), first);
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await t.pump();
+      expect(statusReads(api), first + 1);
+      // The next read is on its way when another window takes the focus.
+      final held = Completer<Map<String, dynamic>>();
+      api.nextStatus = held;
+      await t.pump(const Duration(milliseconds: 3010));
+      expect(statusReads(api), first + 2);
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      api.statusOverrides = {
+        'broker': brokerEvidence(
+          state: 'reconnecting',
+          online: false,
+          reason: 'network_unavailable',
+        ),
+      };
+      held.complete(await api.request('status'));
+      await pumpWork(t);
+      expect(serverLine(t), '서버 다시 연결 중');
+      expect(find.byKey(const Key('host-approval-status-error')), findsNothing);
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'The capabilities acknowledgement alone confirms the connection before the first heartbeat',
+    (t) async {
+      final api = FakeHostSettings(registered: true)
+        ..statusOverrides = {'broker': acknowledged()};
+      await open(t, api);
+      expect(serverLine(t), confirmed);
+      expect(find.text('서버 응답 확인 필요'), findsNothing);
+      expect(find.textContaining('최근 서버 응답을 확인하지 못했어요'), findsNothing);
+      await nav(t, 4);
+      await tap(t, 'host-diagnostics-details');
+      // 서버 응답 경과 and 마지막 응답 시각 name the same response: that
+      // acknowledgement (lastReadyAt), as no heartbeat came yet.
+      expect(detailRow(t, '서버 응답 경과'), '0초 전');
+      expect(detailRow(t, '마지막 응답 시각'), shownTime(1792700400000));
+      expect(detailRow(t, '마지막 연결 시각'), shownTime(1792700400000));
+      expect(find.text('확인된 응답 없음'), findsNothing);
+      // The same after a reconnection, with the old connection's heartbeat
+      // still known: the new acknowledgement, not that heartbeat's time.
+      api.statusOverrides = {
+        'broker': {
+          ...acknowledged(),
+          'lastReadyAt': 1792700460000,
+          'lastHeartbeatAt': 1792700400000,
+          'heartbeatAgeSeconds': 70,
+        },
+      };
+      await approvalTick(t);
+      expect(detailRow(t, '서버 응답 경과'), '0초 전');
+      expect(detailRow(t, '마지막 응답 시각'), shownTime(1792700460000));
+      // A heartbeat after it: both rows are that heartbeat.
+      api.statusOverrides = {
+        'broker': {
+          ...acknowledged(),
+          'lastReadyAt': 1792700460000,
+          'lastHeartbeatAt': 1792700470000,
+          'heartbeatAgeSeconds': 2,
+          'ackAgeSeconds': 2,
+        },
+      };
+      await approvalTick(t);
+      expect(detailRow(t, '서버 응답 경과'), '2초 전');
+      expect(detailRow(t, '마지막 응답 시각'), shownTime(1792700470000));
+      expect(detailRow(t, '마지막 연결 시각'), shownTime(1792700460000));
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Connecting again, 진단 names the last heartbeat in both rows and in the copied report',
+    (t) async {
+      final copied = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+      // This connection has no acknowledgement (ackAgeSeconds null); the
+      // last one's heartbeat was 45 seconds ago.
+      final api = FakeHostSettings(registered: true)
+        ..statusOverrides = {
+          'broker': {
+            ...brokerEvidence(
+              state: 'reconnecting',
+              online: false,
+              age: 45,
+              reason: 'network_unavailable',
+            ),
+            'lastHeartbeatAt': 1792700460000,
+            'ackAgeSeconds': null,
+          },
+        };
+      await open(t, api);
+      // 연결 진단 opens 자세히 at once.
+      await tap(t, 'host-broker-diagnostics');
+      expect(detailRow(t, '서버 응답 경과'), '45초 전');
+      expect(detailRow(t, '마지막 응답 시각'), shownTime(1792700460000));
+      expect(detailRow(t, '마지막 연결 시각'), shownTime(1792700400000));
+      expect(find.text('확인된 응답 없음'), findsNothing);
+      await tap(t, 'host-copy-diagnostics');
+      expect(copied, hasLength(1));
+      expect(copied.single, contains('서버 연결: 확인 필요'));
+      expect(copied.single, matches(RegExp(r'마지막 서버 응답 경과: 45\.[0-9]초')));
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A Host with no registration and no request keeps reading its status',
+    (t) async {
+      // The helper says {"status":"none"} (FakeHostSettings does the same).
+      final api = FakeHostSettings();
+      await open(t, api);
+      final first = statusReads(api);
+      await approvalTick(t);
+      expect(statusReads(api), first + 1);
+      // A service that stops is seen without a tap.
+      api.running = false;
+      await approvalTick(t);
+      expect(statusReads(api), first + 2);
+      await nav(t, 4);
+      expect(find.text('서비스 중지'), findsWidgets);
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A connection that keeps failing is read every second for one minute only, one read at a time',
+    (t) async {
+      Map<String, dynamic> dialling(int round) => brokerEvidence(
+        state: round.isOdd ? 'reconnecting' : 'connecting',
+        online: false,
+        age: null,
+        reason: round.isOdd ? 'network_unavailable' : '',
+      );
+      final api = FakeHostSettings(registered: true)
+        ..statusOverrides = {'broker': dialling(0)};
+      await open(t, api);
+      final start = statusReads(api);
+      // The phase flips at every read; the minute counts from the first.
+      for (var round = 1; round <= 40; round++) {
+        api.statusOverrides = {'broker': dialling(round)};
+        await t.pump(const Duration(seconds: 1));
+      }
+      expect(statusReads(api) - start, inInclusiveRange(39, 41));
+      await t.pump(const Duration(seconds: 30));
+      // Past the minute: every three seconds.
+      final slow = statusReads(api);
+      await t.pump(const Duration(seconds: 30));
+      expect(statusReads(api) - slow, inInclusiveRange(9, 11));
+      // A slow helper read is never joined by a second one.
+      final held = Completer<Map<String, dynamic>>();
+      api.nextStatus = held;
+      await t.pump(const Duration(seconds: 3));
+      final holding = statusReads(api);
+      await t.pump(const Duration(seconds: 15));
+      expect(statusReads(api), holding);
+      // Settled, then failing again: a new minute of reads every second.
+      api.statusOverrides = {'broker': brokerEvidence()};
+      held.complete(await api.request('status'));
+      await approvalTick(t);
+      expect(serverLine(t), confirmed);
+      api.statusOverrides = {'broker': dialling(1)};
+      await approvalTick(t);
+      final again = statusReads(api);
+      await t.pump(const Duration(seconds: 10));
+      expect(statusReads(api) - again, inInclusiveRange(9, 11));
+      await t.pumpWidget(const SizedBox());
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets('A settled window behind another one reads every ten seconds', (
+    t,
+  ) async {
+    final api = FakeHostSettings(registered: true)
+      ..statusOverrides = {'broker': brokerEvidence()};
+    await open(t, api);
+    t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    // The read already planned (three seconds) runs first.
+    await t.pump(const Duration(seconds: 3));
+    final from = statusReads(api);
+    await t.pump(const Duration(seconds: 35));
+    expect(statusReads(api) - from, 3);
+    expect(serverLine(t), confirmed);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets(
+    'An expired request says so without a refresh tap, on a new and on a registered Host',
+    (t) async {
+      for (final registered in [false, true]) {
+        // Past its deadline: still read, as the Host records the end itself.
+        final api = FakeHostSettings(registered: registered)
+          ..connectionRequest = approvalRequest(
+            origin: 'https://new.example.com',
+            validity: const Duration(seconds: -5),
+          );
+        await open(t, api);
+        expect(pill(t), '관리자 승인 필요');
+        api.connectionRequest = {...api.connectionRequest, 'status': 'expired'};
+        await approvalTick(t);
+        expect(
+          find.text('연결 요청이 만료됐어요. 서버를 확인한 뒤 다시 요청하세요.'),
+          findsOneWidget,
+          reason: registered ? 'registered' : 'new',
+        );
+        expect(find.textContaining('요청 유효 시간이 지났어요'), findsNothing);
+        if (registered) {
+          // The server page offers the change again with the same reason.
+          await nav(t, 1);
+          await tap(t, 'host-change-server');
+          expect(
+            t.widget<Text>(find.byKey(const Key('host-request-result'))).data,
+            startsWith('연결 요청이 만료됐어요.'),
+          );
+        }
+        await t.pumpWidget(const SizedBox());
+        await pumpWork(t);
+      }
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A registered Host whose change of server is refused or cancelled elsewhere says so and keeps its server',
+    (t) async {
+      IconData feedbackIcon() => t
+          .widget<Icon>(
+            find.descendant(
+              of: find
+                  .ancestor(
+                    of: find.byKey(const Key('host-feedback')),
+                    matching: find.byType(Row),
+                  )
+                  .first,
+              matching: find.byType(Icon),
+            ),
+          )
+          .icon!;
+      for (final (end, message, icon) in [
+        (
+          {'status': 'rejected'},
+          '관리자가 요청을 거절했어요. 서버 주소를 확인한 뒤 다시 요청하세요.',
+          Icons.error_outline_rounded,
+        ),
+        // Cancelled from another settings window, and acknowledged.
+        (
+          {'status': 'cancelled', 'cancelAcknowledged': true, 'error': ''},
+          '연결 요청을 취소했어요.',
+          Icons.check_circle_outline_rounded,
+        ),
+      ]) {
+        final api = FakeHostSettings(registered: true)
+          ..connectionRequest = approvalRequest(
+            origin: 'https://new.example.com',
+          );
+        await open(t, api);
+        expect(pill(t), '관리자 승인 필요');
+        api.connectionRequest = {...api.connectionRequest, ...end};
+        await approvalTick(t);
+        final reason = '${end['status']}';
+        expect(
+          t.widget<Text>(find.byKey(const Key('host-feedback'))).data,
+          message,
+          reason: reason,
+        );
+        expect(feedbackIcon(), icon, reason: reason);
+        expect(
+          t.widget<Text>(find.byKey(const Key('host-connection-heading'))).data,
+          'pve-totbvm-149',
+        );
+        // The server page offers the change again with the same reason.
+        await nav(t, 1);
+        await tap(t, 'host-change-server');
+        expect(
+          t.widget<Text>(find.byKey(const Key('host-request-result'))).data,
+          message,
+          reason: reason,
+        );
+        expect(api.requests.every(isReadOnlyHostRequest), isTrue);
+        await t.pumpWidget(const SizedBox());
+        await pumpWork(t);
+      }
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A service starting or stopping, or a registered Host connecting again after a stop, is read every second',
+    (t) async {
+      Map<String, dynamic> service(String state) => {
+        'installed': true,
+        'running': false,
+        'state': state,
+        'restartProtocol': 'service-restart-v1',
+      };
+      for (final override in <Map<String, dynamic>>[
+        {'service': service('starting')},
+        {'service': service('stopping')},
+        // The service reloading its registration, as a Host from before
+        // the "connection being prepared" status reports it.
+        {
+          'broker': brokerEvidence(
+            state: 'waiting_registration',
+            online: false,
+            age: null,
+            reason: 'unregistered',
+          ),
+        },
+        {
+          'broker': brokerEvidence(
+            state: 'stopped',
+            online: false,
+            age: null,
+            reason: 'service_stopped',
+          ),
+        },
+      ]) {
+        final api = FakeHostSettings(registered: true)
+          ..statusOverrides = override;
+        await open(t, api);
+        final from = statusReads(api);
+        for (var second = 0; second < 5; second++) {
+          await t.pump(const Duration(seconds: 1));
+        }
+        expect(
+          statusReads(api) - from,
+          inInclusiveRange(4, 6),
+          reason: '$override',
+        );
+        await t.pumpWidget(const SizedBox());
+        await pumpWork(t);
+      }
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A change made here starts another minute of reads every second; a server test or the administrator window does not',
+    (t) async {
+      Future<int> readsOver(FakeHostSettings api, int seconds) async {
+        final from = statusReads(api);
+        for (var second = 0; second < seconds; second++) {
+          await t.pump(const Duration(seconds: 1));
+        }
+        return statusReads(api) - from;
+      }
+
+      // The service keeps dialling a server it cannot reach.
+      final dialling = {
+        'broker': brokerEvidence(state: 'connecting', online: false, age: null),
+      };
+      final api = FakeHostSettings(registered: true)
+        ..statusOverrides = dialling;
+      await open(t, api);
+      // Its minute of reads every second is over: every three seconds.
+      await t.pump(const Duration(seconds: 61));
+      expect(await readsOver(api, 9), inInclusiveRange(2, 4));
+      // Testing a server changes nothing on this Host.
+      await nav(t, 1);
+      await tap(t, 'host-change-server');
+      await tap(t, 'host-test-server');
+      expect(
+        api.requests.where((r) => r['action'] == 'testBroker'),
+        hasLength(1),
+      );
+      expect(await readsOver(api, 9), inInclusiveRange(2, 4));
+      // Restarting the service does.
+      await nav(t, 4);
+      await tap(t, 'host-service');
+      await tap(t, 'host-confirm');
+      expect(
+        api.requests.where((r) => r['action'] == 'restartServiceV1'),
+        hasLength(1),
+      );
+      await tap(t, 'host-result-close');
+      expect(await readsOver(api, 10), inInclusiveRange(9, 11));
+      await t.pumpWidget(const SizedBox());
+      await pumpWork(t);
+
+      // Opening the administrator window changes nothing either.
+      final user = FakeHostSettings(registered: true, administrator: false)
+        ..statusOverrides = dialling;
+      await open(t, user);
+      await t.pump(const Duration(seconds: 61));
+      await nav(t, 1);
+      await tap(t, 'host-elevate');
+      await tap(t, 'host-confirm');
+      expect(
+        user.requests.where((r) => r['action'] == 'elevate'),
+        hasLength(1),
+      );
+      await tap(t, 'host-result-close');
+      expect(await readsOver(user, 9), inInclusiveRange(2, 4));
+      await t.pumpWidget(const SizedBox());
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'An action that ends while the window is behind another one applies its follow-up read',
+    (t) async {
+      final api = FakeHostSettings(registered: true)
+        ..running = false
+        ..pending = Completer<void>();
+      await open(t, api);
+      await nav(t, 4);
+      await tap(t, 'host-service');
+      await t.tap(find.byKey(const Key('host-confirm')));
+      await t.pump();
+      expect(api.requests.where((r) => r['action'] == 'service'), hasLength(1));
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      api.pending!.complete();
+      await pumpWork(t);
+      expect(find.textContaining('작업 응답은 받았지만'), findsNothing);
+      expect(find.text('작업 완료'), findsOneWidget);
+      await tap(t, 'host-result-close');
+      expect(find.text('서비스 실행 중'), findsWidgets);
+      expect(api.requests.where((r) => r['action'] == 'service'), hasLength(1));
+      expect(t.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'First connection request needs no registration code and survives closing settings',
@@ -1084,9 +1625,12 @@ void main() {
       await tap(t, 'host-result-close');
       expect(find.byKey(const Key('host-approval-heading')), findsNothing);
       expect(find.text('연결 요청을 취소했어요.'), findsOneWidget);
+      // The form is back; the Host's status is still read, nothing else.
       final count = api.requests.length;
       await t.pump(const Duration(seconds: 12));
-      expect(api.requests.length, count);
+      expect(api.requests.length, greaterThan(count));
+      expect(api.requests.skip(count).every(isReadOnlyHostRequest), isTrue);
+      expect(find.text('연결 요청을 취소했어요.'), findsOneWidget);
       expect(t.takeException(), isNull);
     },
   );
@@ -1212,8 +1756,9 @@ void main() {
       await t.pump();
       await t.pump(const Duration(seconds: 10));
       expect(api.requests.length, count);
+      // Shown again: the approval is read at once.
       resume();
-      await approvalTick(t);
+      await t.pump();
       expect(api.requests.length, count + 1);
       await t.pumpWidget(const SizedBox());
       expect(t.takeException(), isNull);
@@ -1255,11 +1800,14 @@ void main() {
   });
 
   testWidgets(
-    'Approval expiry stops automatic queries and terminal rejection exposes no raw error',
+    'A request still pending half a minute past its deadline stops automatic queries and terminal rejection exposes no raw error',
     (t) async {
+      // The deadline passed 29 seconds ago. The Host's own pass records the
+      // end within a second or two; one that still says pending 30 seconds
+      // after it (its service stopped) is not read on.
       final api = FakeHostSettings()
         ..connectionRequest = approvalRequest(
-          validity: const Duration(seconds: 1),
+          validity: const Duration(seconds: -29),
         );
       await open(t, api);
       await nav(t, 1);
@@ -1291,9 +1839,14 @@ void main() {
         find.textContaining('secret-arbitrary-native-error'),
         findsNothing,
       );
+      // The request has ended: the Host's status is read on as usual.
       final afterRefresh = api.requests.length;
       await t.pump(const Duration(seconds: 10));
-      expect(api.requests.length, afterRefresh);
+      expect(api.requests.length, greaterThan(afterRefresh));
+      expect(
+        api.requests.skip(afterRefresh).every(isReadOnlyHostRequest),
+        isTrue,
+      );
       expect(t.takeException(), isNull);
     },
   );

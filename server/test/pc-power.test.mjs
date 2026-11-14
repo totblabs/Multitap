@@ -17,7 +17,7 @@ const pcId = 'pc-' + pcUuid;
 const mac = 'D8:BB:C1:12:34:56';
 const caps = { service: true, interactiveSession: true, streaming: true, virtualDisplayReady: true, monitors: [{ id: '0', width: 1920, height: 1080, primary: true }] };
 
-async function fixture(t, { wakeMs = 240000, replyMs = 15000, sendWake } = {}) {
+async function fixture(t, { wakeMs = 240000, replyMs = 15000, sendWake, wakeBlocked } = {}) {
   const store = new Store(':memory:'), vault = new Vault(randomBytes(32));
   const tokens = {};
   for (const [name, role] of [['alice', 'user'], ['bob', 'user'], ['carol', 'user']]) {
@@ -34,7 +34,7 @@ async function fixture(t, { wakeMs = 240000, replyMs = 15000, sendWake } = {}) {
   store.replaceVmAssignments('alice', [pcId], 'fixture'); store.replaceVmAssignments('bob', [pcId], 'fixture');
   const woken = [];
   const server = await buildServer({ store, vault, publicOrigin: origin, proxmox: { inventory: async () => [{ vmid: 149, node: 'fixture', name: 'VM', status: 'running' }] },
-    relayOptions: { authorizationMs: 20, heartbeatMs: 1000 }, pcPowerOptions: { tickMs: 10, wakeMs, replyMs, sendWake: sendWake ?? (async macs => { woken.push(macs); return macs.length; }) }, logger: { error: value => assert.fail(value) } });
+    relayOptions: { authorizationMs: 20, heartbeatMs: 1000 }, pcPowerOptions: { tickMs: 10, wakeMs, replyMs, sendWake: sendWake ?? (async macs => { woken.push(macs); return macs.length; }), ...(wakeBlocked ? { wakeBlocked } : {}) }, logger: { error: value => assert.fail(value) } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -164,6 +164,18 @@ test('켜기 that could not send a packet ends as wake_send_failed and records w
   const rows = f.store.auditLog().map(row => [row.event, row.subject]);
   assert.ok(rows.some(([event, subject]) => event === 'pc_wake_failed' && subject === `${pcId}:EPERM`), JSON.stringify(rows));
   assert.ok(!rows.some(([event]) => event === 'power_failed' || event === 'pc_wake_sent'));
+});
+
+test('켜기 on a broker that cannot reach the PC network (a Docker bridge) ends at once as NO_LAN_SENDER and sends nothing', async t => {
+  const f = await fixture(t, { wakeBlocked: () => 'NO_LAN_SENDER' });
+  await f.close(await f.host());
+  const started = await f.client('alice', 'POST', `/desktops/${pcId}/power`, { action: 'start' });
+  assert.equal(started.body.powerTask.status, 'stopped');
+  assert.equal(started.body.powerTask.exitStatus, 'wake_send_failed');
+  assert.equal(f.woken.length, 0, 'no packet was handed to the bridge');
+  const rows = f.store.auditLog().map(row => [row.event, row.subject]);
+  assert.ok(rows.some(([event, subject]) => event === 'pc_wake_failed' && subject === `${pcId}:NO_LAN_SENDER`), JSON.stringify(rows));
+  assert.ok(!rows.some(([event]) => event === 'pc_wake_sent' || event === 'power_failed'));
 });
 
 test('A Host that could not read its adapters keeps the last wake report', async t => {

@@ -107,10 +107,19 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   int _operationGeneration = 0;
   int _clearAccountConsentGeneration = 0;
   bool _statusReloadNeeded = false;
+  // _visible: the window can be seen (resumed, or shown without the keyboard
+  // focus), and the status is read while it is. _focused: it has the focus.
   bool _approvalPolling = false,
       _approvalReadError = false,
       _approvalDeadlineReached = false,
-      _foreground = true;
+      _visible = true,
+      _focused = true;
+  // The read that saw the administrator's approval committed: the service
+  // connects with the new registration right after.
+  bool _justApproved = false;
+  // One minute from the start of a change under way (the first unsettled
+  // read, an action or an approval): reads come every second while it runs.
+  Timer? _transitionBudget;
   String? _approvalIdentity;
   DateTime? _approvalDeadline;
   String _operation = l10n.checkingHostStatus, _phase = l10n.waitingWindowsRespond;
@@ -182,16 +191,43 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   }
 
   bool get _connectionWorkflow => _awaitingApproval || _cancellingConnection;
+  // Registered or not, the status is read again while the window is seen.
+  // Only a request still waiting well past its deadline stops it (then the
+  // screen asks for 새로고침).
   bool get _needsStatusPoll =>
       _statusReloadNeeded ||
       _state.isEmpty ||
-      (_connectionWorkflow
-          ? !_approvalDeadlineReached
-          : _registered ||
-                (_requestStatus.isEmpty && _state['version'] is String));
+      !_connectionWorkflow ||
+      !_approvalDeadlineReached;
+  // A change the next seconds settle: the service starting or stopping, or a
+  // registered Host's connection to the server being made, or not yet
+  // acknowledged, or the approval just committed.
+  bool get _transitionPending {
+    if (_justApproved) return true;
+    final service = _section('service');
+    if (const {
+      'starting',
+      'stopping',
+      'pausing',
+      'continuing',
+    }.contains(service['state'])) {
+      return true;
+    }
+    if (!_registered || service['running'] != true) return false;
+    final broker = _section('broker');
+    return const {
+          'connecting',
+          'awaiting_ack',
+          'reconnecting',
+          'waiting_registration',
+          'stopped',
+        }.contains(broker['state']) ||
+        (broker['state'] == 'online' && hostBrokerAckAge(broker) is! num);
+  }
+
   bool get _brokerOnline {
     final broker = _section('broker');
-    final age = broker['heartbeatAgeSeconds'];
+    final age = hostBrokerAckAge(broker);
     return _registered &&
         _section('service')['running'] == true &&
         !_approvalReadError &&
@@ -339,9 +375,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _foreground =
-        WidgetsBinding.instance.lifecycleState == null ||
-        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _visible = _shown(lifecycle);
+    _focused = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     _closeGuard.attach(_requestClose);
     _origin.addListener(_draftsChanged);
     _accountUsername.addListener(_draftsChanged);
@@ -378,11 +414,28 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     _ => null,
   };
 
+  /// Resumed or merely unfocused: the window can still be seen (on Windows a
+  /// window behind another one, or one whose focus went elsewhere, is
+  /// inactive). Unknown before the first report counts as seen.
+  static bool _shown(AppLifecycleState? state) =>
+      state == null ||
+      state == AppLifecycleState.resumed ||
+      state == AppLifecycleState.inactive;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _foreground = state == AppLifecycleState.resumed;
-    if (!_foreground) _statusGeneration++;
-    _scheduleApprovalPoll();
+    final wasVisible = _visible, wasFocused = _focused;
+    _visible = _shown(state);
+    _focused = state == AppLifecycleState.resumed;
+    if (!_visible) {
+      // Minimized or gone: nothing is read, and a read on its way is not
+      // applied.
+      if (wasVisible) _statusGeneration++;
+      _scheduleApprovalPoll();
+    } else if (!wasVisible || (_focused && !wasFocused)) {
+      // Seen again, or back in front: what it shows is read at once.
+      unawaited(_pollApproval());
+    }
   }
 
   Future<Map<String, dynamic>> _readStatus(int generation) async {
@@ -473,6 +526,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
             DateTime.tryParse('${request['expiresAt'] ?? ''}') ??
             DateTime.now().add(const Duration(minutes: 15));
       }
+      var approved = false;
       if (wasAwaiting &&
           !_awaitingApproval &&
           _registered &&
@@ -485,6 +539,25 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         if (_page == 1) _page = 0;
         _notice = l10n.administratorApprovedServerRegistrationComplete;
         _error = false;
+        approved = true;
+      } else if (wasAwaiting &&
+          !_connectionWorkflow &&
+          _registered &&
+          const {'rejected', 'expired', 'cancelled'}.contains(_requestStatus)) {
+        // A registered Host's change of server ended without a new
+        // registration: why, here (a new Host's overview says it itself).
+        _notice = _terminalRequestMessage;
+        _error = _requestStatus != 'cancelled';
+      }
+      // A change under way is read every second for one minute from its
+      // start: the first unsettled read, or the approval. A phase that flips
+      // does not start it again; a settled read ends it.
+      _justApproved = approved;
+      if (!_transitionPending) {
+        _transitionBudget?.cancel();
+        _transitionBudget = null;
+      } else if (approved || _transitionBudget == null) {
+        _startTransition();
       }
       if (initial || !_editAccount) {
         _accountUsername.text =
@@ -507,21 +580,42 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     _checkForUpdate();
   }
 
+  // The request's end is read for half a minute past its deadline: the Host's
+  // own pass records "expired" itself, within a second or two.
+  static const _approvalGrace = Duration(seconds: 30);
+
+  void _startTransition() {
+    _transitionBudget?.cancel();
+    _transitionBudget = Timer(const Duration(seconds: 60), () {});
+  }
+
+  // Every second while a change is under way (for one minute from its
+  // start), else every 3 seconds, or every 10 while the window is seen
+  // without the focus: a 10 s old ACK read 10 s ago is still under the 30 s
+  // of _brokerOnline.
+  Duration get _statusInterval =>
+      _transitionPending && (_transitionBudget?.isActive ?? false)
+      ? const Duration(seconds: 1)
+      : Duration(seconds: _focused ? 3 : 10);
+
   void _scheduleApprovalPoll() {
     _approvalTimer?.cancel();
     _approvalTimer = null;
-    if (!mounted || !_foreground || !_needsStatusPoll || _busy) {
+    if (!mounted || !_visible || !_needsStatusPoll || _busy) {
       return;
     }
     if (!_connectionWorkflow) {
-      _approvalTimer = Timer(const Duration(seconds: 3), () {
+      _approvalTimer = Timer(_statusInterval, () {
         if (mounted) unawaited(_pollApproval());
       });
       return;
     }
+    // While the administrator is asked: every three seconds, focused or not
+    // (the Host asks the server as often, pending_connection.hpp).
     final remaining =
-        _approvalDeadline?.difference(DateTime.now()) ??
-        const Duration(minutes: 15);
+        (_approvalDeadline?.difference(DateTime.now()) ??
+            const Duration(minutes: 15)) +
+        _approvalGrace;
     if (remaining <= Duration.zero) {
       setState(() => _approvalDeadlineReached = true);
       return;
@@ -542,12 +636,12 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
 
   Future<void> _pollApproval() async {
     if (!mounted ||
-        !_foreground ||
+        !_visible ||
         !_needsStatusPoll ||
         _busy ||
         _approvalPolling ||
         _statusRequest != null) {
-      if (mounted && _foreground && !_busy && _registered) {
+      if (mounted && _visible && !_busy && _registered) {
         setState(
           () {},
         ); // Age the last ACK even while a helper read is delayed.
@@ -560,11 +654,11 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     final generation = _statusGeneration;
     try {
       final response = await _readStatus(generation);
-      if (mounted && _foreground && generation == _statusGeneration && !_busy) {
+      if (mounted && _visible && generation == _statusGeneration && !_busy) {
         _applyStatus(response, initial: _state.isEmpty);
       }
     } catch (_) {
-      if (mounted && _foreground && generation == _statusGeneration && !_busy) {
+      if (mounted && _visible && generation == _statusGeneration && !_busy) {
         setState(() => _approvalReadError = true);
       }
     } finally {
@@ -576,7 +670,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   Future<bool> _load({bool initial = false}) async {
     final generation = _statusGeneration;
     final response = await _readStatus(generation);
-    if (!mounted || !_foreground || generation != _statusGeneration) {
+    if (!mounted || !_visible || generation != _statusGeneration) {
       if (mounted) _statusReloadNeeded = true;
       return false;
     }
@@ -661,7 +755,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       }
     } catch (error) {
       if (mounted &&
-          _foreground &&
+          _visible &&
           owner == _operationGeneration &&
           generation == _statusGeneration) {
         setState(() {
@@ -825,7 +919,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       _notice = summary.message;
       _error = !summary.ok;
     });
-    if (!_foreground) return;
+    if (!_visible) return;
     await showAppNotice(
       context,
       icon: summary.ok ? Icons.check_rounded : Icons.warning_amber_rounded,
@@ -971,6 +1065,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       accepted = true;
       final reported = outcome?.call(response);
       if (action != 'testBroker' && action != 'elevate') {
+        // What it changed may still be settling (a service starting, the
+        // server connected again): read closely for a while.
+        _startTransition();
         if (mounted) {
           setState(() {
             _phase = l10n.checkingChangedStatus;
@@ -1025,7 +1122,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     }
     if (!mounted || !owns()) return false;
     final ok = accepted && !_error;
-    if (_foreground && action != 'testBroker' && !quiet && (notify || !ok)) {
+    if (_visible && action != 'testBroker' && !quiet && (notify || !ok)) {
       await showAppNotice(
         context,
         icon: _error ? Icons.warning_amber_rounded : Icons.check_rounded,
@@ -2197,6 +2294,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     WidgetsBinding.instance.removeObserver(this);
     _statusGeneration++;
     _approvalTimer?.cancel();
+    _transitionBudget?.cancel();
     unawaited(_progressSubscription?.cancel());
     _statusAge.stop();
     _closeGuard.dispose();
@@ -2732,7 +2830,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
 
   /// "방금 확인" / "12초 전 확인" while the acknowledgement is fresh.
   String get _ackWords {
-    final age = _section('broker')['heartbeatAgeSeconds'];
+    final age = hostBrokerAckAge(_section('broker'));
     return hostAckWords(
       age is num && age.isFinite && age >= 0
           ? age + _statusAge.elapsedMilliseconds / 1000
@@ -3397,7 +3495,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
             !_approvalDeadlineReached &&
             _requestStatus == 'pending' &&
             !_approvalReadError &&
-            _foreground) ...[
+            _visible) ...[
           const SizedBox(height: 10),
           AppBusyLine(
             l10n.hostApprovalWaitingLine,
@@ -3517,8 +3615,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
               ),
             ] else ...[
               // Why the form is back after a request ended without a
-              // registration (the overview says the same).
-              if (!_registered && _terminalRequestMessage != null) ...[
+              // registration (the overview says the same), also when a
+              // registered Host asks for another server again.
+              if (_terminalRequestMessage != null) ...[
                 KeepAllText(
                   _terminalRequestMessage!,
                   key: const Key('host-request-result'),
@@ -4712,8 +4811,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         '${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}';
   }
 
-  String get _brokerAckAge {
-    final age = _section('broker')['heartbeatAgeSeconds'];
+  // 서버 응답 경과: the age of the response 마지막 응답 시각 shows
+  // (hostBrokerLastResponse).
+  String _brokerResponseAge(Object? age) {
     if (age is! num || !age.isFinite || age < 0 || age > 86400 * 365) {
       return l10n.noConfirmedResponse;
     }
@@ -4723,7 +4823,10 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   Future<void> _copyDiagnostics() async {
     try {
       final broker = _section('broker');
-      final age = broker['heartbeatAgeSeconds'];
+      // As of now: the status was read _statusAge ago.
+      num? aged(Object? age) => age is num && age.isFinite && age >= 0
+          ? age + _statusAge.elapsedMilliseconds / 1000
+          : null;
       await Clipboard.setData(
         ClipboardData(
           text: hostDiagnosticsText({
@@ -4740,9 +4843,10 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
                   : !_brokerOnline && broker['state'] == 'online'
                   ? 'stale'
                   : broker['state'],
-              'heartbeatAgeSeconds': age is num && age.isFinite && age >= 0
-                  ? age + _statusAge.elapsedMilliseconds / 1000
-                  : null,
+              'ackAgeSeconds': aged(hostBrokerAckAge(broker)),
+              // The last response's age while this connection has no
+              // acknowledgement (hostBrokerLastResponse).
+              'heartbeatAgeSeconds': aged(broker['heartbeatAgeSeconds']),
               if (_approvalReadError) 'failureReason': 'status_unavailable',
             },
           }),
@@ -4845,6 +4949,8 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     int outputs,
     String Function(dynamic v, String yes, String no) label,
   ) {
+    // 서버 응답 경과 and 마지막 응답 시각 name one response.
+    final response = hostBrokerLastResponse(broker);
     return _panel(
       title: l10n.summary,
       subtitle: l10n.diagnosticsSentServerAutomaticallyPasswords,
@@ -4907,9 +5013,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
           children: _rows([
             _info(l10n.serviceInstall2, label(s['installed'], l10n.installed, l10n.notInstalled)),
             if (_registered) ...[
-              _info(l10n.sinceServerResponse, _brokerAckAge),
+              _info(l10n.sinceServerResponse, _brokerResponseAge(response.age)),
               _info(l10n.lastConnected, _brokerAckTime(broker['lastReadyAt'])),
-              _info(l10n.lastResponse, _brokerAckTime(broker['lastHeartbeatAt'])),
+              _info(l10n.lastResponse, _brokerAckTime(response.at)),
               _info(l10n.connectionGuidance, _brokerGuidance),
             ],
             _info(l10n.virtualDisplayDriver2, label(d['installed'], l10n.installed, l10n.notInstalled)),

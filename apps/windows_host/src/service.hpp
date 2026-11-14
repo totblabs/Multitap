@@ -3373,13 +3373,15 @@ inline void WINAPI serviceMain(DWORD, LPWSTR*) {
           if(privateDiagnostics)privateDiagnostics->coordinator().cancelForward();
 #endif
           loaded=false;struct Release{const decltype(releaseConnection)& release;~Release(){release();}}release{releaseConnection};
-          if(catalogMaintenance)catalogMaintenance->cancel();std::lock_guard lifetime(bridgeLifetime);if(agent)agent->stop();});},
+          if(catalogMaintenance)catalogMaintenance->cancel();std::lock_guard lifetime(bridgeLifetime);if(agent)agent->stop(true);});},
           [&]{loopGuard.run(ServiceLoopStep::sessionChange,[&]{if(catalogMaintenance)catalogMaintenance->cancel();if(bridge)bridge->sessionChanged(changes);});});}
       // A failed start must not leave an agent bound to a bridge that the next
       // attempt replaces (the old agent's teardown would reach a freed bridge).
       // host-machine-v1 (credential_binding.hpp): a registration copied from another
       // machine is kept aside and not used; the service then waits like an unregistered Host.
-      if (!loaded) { try { Credentials credentials; if (loadCredentials(credentials) && bindCredentialMachine(credentials, nativeCredentialMachineAccess()) != CredentialMachine::copied) { {std::lock_guard lifetime(bridgeLifetime);bridge = std::make_unique<ServiceBridge>(credentials,catalogMaintenance.get(),&nativeDisplay,signinRuntime);bridge->readinessWake(serviceChangeEvent);
+      // A registration this Windows can use: the status is the connection being
+      // prepared until the new agent dials (missing, unreadable or copied ones wait).
+      if (!loaded) { try { Credentials credentials; if (loadCredentials(credentials) && bindCredentialMachine(credentials, nativeCredentialMachineAccess()) != CredentialMachine::copied) { brokerStatus.preparing(); {std::lock_guard lifetime(bridgeLifetime);bridge = std::make_unique<ServiceBridge>(credentials,catalogMaintenance.get(),&nativeDisplay,signinRuntime);bridge->readinessWake(serviceChangeEvent);
 #ifdef MULTITAP_NATIVE_DISPLAY
           if(privateDiagnostics)bridge->diagnosticActivity(privateDiagnostics->busyFlag());
 #endif

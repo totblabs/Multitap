@@ -13,15 +13,18 @@
 #include <string>
 
 namespace multitap {
-// The UsbDk installer that ships with this client (usbdk\UsbDk_1.0.22_x64.msi
-// beside the executable), pinned: Red Hat, Inc., Apache-2.0.
+// The UsbDk installer that ships with every client (usbdk\UsbDk_1.0.22_x64.msi
+// beside the executable), pinned: Red Hat, Inc., Apache-2.0. The same pin as
+// third_party/usbdk/upstream.json, which the build reads
+// (test/usbdk_installer_pin_test.dart).
 struct UsbDkInstaller {
   static constexpr const char* sha256 = "91f6f695e1e13c656024e6d3b55620bf08d8835ef05ee0496935ba6bb62466a5";
   static constexpr unsigned long long size = 6348800;
   static constexpr const wchar_t* file = L"UsbDk_1.0.22_x64.msi";
 };
 // Verifies the pinned installer (size, SHA-256, Red Hat, Inc. signature) and
-// runs it silently through msiexec; a fixed code on failure, "" on success.
+// runs it silently through msiexec; a fixed code on failure
+// (usbdk_installer_missing when it is not there), "" on success.
 // [directory] is where `usbdk\UsbDk_1.0.22_x64.msi` lives.
 std::string InstallUsbDk(const std::wstring& directory);
 

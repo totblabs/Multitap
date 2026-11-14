@@ -48,7 +48,7 @@ export function auditEntry(e, usersById, desktopsById) {
   // record has no subject, its event is its reason.
   else if (e.event === 'backup_reauthentication_failed') { entry.code = 'current_password_incorrect'; entry.codeLabel = t('timeline.backupPasswordWrong'); }
   // desktopId:code (server/src/pc-power.mjs): why no wake packet left, the system's error code (EPERM...) or unknown.
-  else if (e.event === 'pc_wake_failed' && /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(rest[0] ?? '')) { entry.code = rest[0]; entry.codeLabel = rest[0] === 'unknown' ? t('timeline.wakeFailedUnknown') : t('timeline.wakeFailedCode', { code: rest[0] }); }
+  else if (e.event === 'pc_wake_failed' && /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(rest[0] ?? '')) { entry.code = rest[0]; entry.codeLabel = rest[0] === 'unknown' ? t('timeline.wakeFailedUnknown') : rest[0] === 'NO_LAN_SENDER' ? t('timeline.wakeFailedNoLan') : t('timeline.wakeFailedCode', { code: rest[0] }); }
   else if (e.event === 'integration_updated') entry.detail.push(own(settingNames, e.subject) ?? e.subject);
   else if (e.event === 'proxmox_synchronized') entry.detail.push(t('timeline.16', { subject: e.subject }));
   // threshold:expiry date:fingerprint prefix (certificate-expiry.mjs).

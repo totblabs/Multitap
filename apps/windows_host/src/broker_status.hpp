@@ -38,6 +38,10 @@ inline BrokerEvidence freshBrokerEvidence(BrokerEvidence value, uint64_t now) {
     else if (now - value.verifiedTick > 30000) { value.phase = BrokerPhase::Stale; value.reason = "heartbeat_timeout"; }
   } else if (value.phase == BrokerPhase::AwaitingAck && (now < value.attemptTick || now - value.attemptTick > 30000)) {
     value.phase = BrokerPhase::Stale; value.reason = now < value.attemptTick ? "clock_changed" : "heartbeat_timeout";
+  } else if (value.phase == BrokerPhase::Connecting && (now < value.attemptTick || now - value.attemptTick > 60000)) {
+    // One dial ends within about 40 s (support.hpp httpSession timeouts): a
+    // connection prepared or dialled for over a minute is not "connecting".
+    value.phase = BrokerPhase::Stale; value.reason = now < value.attemptTick ? "clock_changed" : "heartbeat_timeout";
   }
   return value;
 }
@@ -45,7 +49,10 @@ inline std::string brokerStatusJson(BrokerEvidence value, uint64_t now = GetTick
   value = freshBrokerEvidence(std::move(value), now);
   const auto stamp = [](uint64_t n) { return n ? std::to_string(n) : std::string("null"); };
   const auto age = value.heartbeatTick && now >= value.heartbeatTick ? std::to_string((now - value.heartbeatTick) / 1000) : std::string("null");
-  return "{\"state\":" + jsonQuote(brokerPhaseName(value.phase)) + ",\"online\":" + (value.phase == BrokerPhase::Online ? "true" : "false") + ",\"lastReadyAt\":" + stamp(value.readyUtc) + ",\"lastHeartbeatAt\":" + stamp(value.heartbeatUtc) + ",\"heartbeatAgeSeconds\":" + age + ",\"failureReason\":" + jsonQuote(brokerSafeReason(value.reason) ? value.reason : "status_unavailable") + '}';
+  // The newest acknowledgement of this connection, its capabilities or a
+  // heartbeat (verifiedTick): the age the window shows as "방금 확인".
+  const auto ackAge = value.verifiedTick && now >= value.verifiedTick ? std::to_string((now - value.verifiedTick) / 1000) : std::string("null");
+  return "{\"state\":" + jsonQuote(brokerPhaseName(value.phase)) + ",\"online\":" + (value.phase == BrokerPhase::Online ? "true" : "false") + ",\"lastReadyAt\":" + stamp(value.readyUtc) + ",\"lastHeartbeatAt\":" + stamp(value.heartbeatUtc) + ",\"heartbeatAgeSeconds\":" + age + ",\"ackAgeSeconds\":" + ackAge + ",\"failureReason\":" + jsonQuote(brokerSafeReason(value.reason) ? value.reason : "status_unavailable") + '}';
 }
 class BrokerConnectionStatus {
  public:
@@ -72,6 +79,13 @@ class BrokerConnectionStatus {
   }
   void waiting(const std::string& reason = "unregistered") {
     std::lock_guard lock(mutex_); ++generation_; upgraded_ = false; value_ = {}; value_.reason = brokerSafeReason(reason) ? reason : "credentials_unavailable";
+  }
+  // The service connects again with the registration it holds (a reload, or
+  // its start): from the old agent's stop until the new one dials, the status
+  // is the connection being prepared, never a stop or a missing registration.
+  // Late events of the old connection belong to an older generation.
+  void preparing(uint64_t tick = GetTickCount64()) {
+    std::lock_guard lock(mutex_); ++generation_; upgraded_ = false; readyForGeneration_ = false; value_.phase = BrokerPhase::Connecting; value_.reason.clear(); value_.attemptTick = tick; value_.verifiedTick = 0;
   }
   void stop() {
     std::lock_guard lock(mutex_); ++generation_; upgraded_ = false; value_.phase = BrokerPhase::Stopped; value_.verifiedTick = 0; value_.reason = "service_stopped";

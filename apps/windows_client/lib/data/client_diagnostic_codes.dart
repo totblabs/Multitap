@@ -62,6 +62,9 @@ const diagnosticCodes = {
   'usbdk_install_failed',
   'usbdk_signature_invalid',
   'usbdk_restart_required',
+  // No UsbDk installer beside the client; UsbDk installed but not answering.
+  'usbdk_installer_missing',
+  'usbdk_not_running',
   'usb_capture_failed',
   'usb_transfer_failed',
   'usb_device_busy',

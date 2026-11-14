@@ -170,8 +170,23 @@ class FakeBackend extends UsbBackend {
     return returnHandler == null ? returnedState : await returnHandler!(device);
   }
 
+  bool installerMissing = false;
+  UsbDriverProblem? problem;
+
+  /// Holds environment() back while set; it then reads the PC as it is (a
+  /// reading that waits on the runner, which may run during an installation).
+  Completer<void>? environmentGate;
   @override
-  Future<UsbEnvironment> environment() async => UsbEnvironment(driver);
+  Future<UsbEnvironment> environment() async {
+    final gate = environmentGate;
+    if (gate != null) await gate.future;
+    return UsbEnvironment(
+      driver,
+      installerMissing: installerMissing,
+      problem: problem,
+    );
+  }
+
   /// Holds the device list back while set (a listing that takes a while).
   Completer<void>? listGate;
   @override
@@ -189,11 +204,18 @@ class FakeBackend extends UsbBackend {
     return capture;
   }
 
+  /// What UsbDk is once its installation succeeded.
+  UsbDriverState driverAfterInstall = UsbDriverState.ready;
+
+  /// Holds the installation (msiexec) back while set.
+  Completer<void>? installGate;
   @override
   Future<void> installDriver() async {
+    final gate = installGate;
+    if (gate != null) await gate.future;
     if (installFailure != null) throw installFailure!;
     installed = true;
-    driver = UsbDriverState.ready;
+    driver = driverAfterInstall;
   }
 
   // Another remote window of this client (이 창으로 옮기기).
@@ -1548,6 +1570,232 @@ void main() {
     await session.close();
   });
 
+  test('Without the UsbDk installer beside the client no installation is offered, and that is recorded once per session', () async {
+    final (session, _, backend) = await started();
+    final recorded = <ProductLogEntry>[];
+    final subscription = ProductLog.instance.localRecords.listen(recorded.add);
+    backend.driver = UsbDriverState.missing;
+    backend.installerMissing = true;
+    await session.refresh();
+    await session.refresh();
+    expect(session.driver, UsbDriverState.missing);
+    expect(session.installerMissing, isTrue);
+    expect(session.installOffered, isFalse, reason: 'it could only fail');
+    expect(session.restartNeeded, isFalse);
+    final missing = recorded.where((e) => e.code == 'usbdk_installer_missing');
+    expect(missing, hasLength(1));
+    expect(missing.single.event, LogEvent.usb);
+    expect(missing.single.values, {'stage': 6, 'ok': false});
+    expect(usbMessage('usbdk_installer_missing'), contains('클라이언트를 다시 설치'));
+    // Reinstalled: the installer is there and the installation is offered.
+    backend.installerMissing = false;
+    await session.refresh();
+    expect(session.installOffered, isTrue);
+    // The file went away after the listing: the installation says so (its
+    // outcome is recorded), the reading after it finds it gone too, and the
+    // session stops offering it.
+    backend.installFailure = const UsbBackendException(
+      'usbdk_installer_missing',
+    );
+    backend.installerMissing = true;
+    expect(await session.installDriver(), 'usbdk_installer_missing');
+    expect(session.installerMissing, isTrue);
+    expect(session.installOffered, isFalse);
+    // A driver that is already there needs no installer: nothing is said.
+    backend.driver = UsbDriverState.ready;
+    backend.installerMissing = true;
+    await session.refresh();
+    expect(session.entries, isNotEmpty);
+    await subscription.cancel();
+    expect(
+      recorded.where((e) => e.code == 'usbdk_installer_missing'),
+      hasLength(2),
+      reason: 'one listing and one installation, each said once',
+    );
+    await session.close();
+  });
+
+  test('UsbDk installed but not answering is usbdk_not_running with a restart offer; an unverified helper is not offered one', () async {
+    final (session, _, backend) = await started();
+    final recorded = <ProductLogEntry>[];
+    final subscription = ProductLog.instance.localRecords.listen(recorded.add);
+    backend.driver = UsbDriverState.missing;
+    await session.refresh();
+    // The runner's own answer after msiexec: installed, not answering.
+    backend.installFailure = const UsbBackendException('usbdk_not_running');
+    backend.driver = UsbDriverState.stopped;
+    backend.problem = UsbDriverProblem.noAnswer;
+    expect(await session.installDriver(), 'usbdk_not_running');
+    expect(
+      session.driver,
+      UsbDriverState.stopped,
+      reason: 'read again at once',
+    );
+    expect(session.driverProblem, UsbDriverProblem.noAnswer);
+    expect(session.restartNeeded, isTrue);
+    expect(session.installOffered, isFalse);
+    expect(
+      session.entries,
+      isEmpty,
+      reason: 'nothing is listed while UsbDk does not answer',
+    );
+    await session.refresh();
+    expect(session.restartNeeded, isTrue, reason: 'a refresh keeps it');
+    expect(recorded.where((e) => e.code == 'usbdk_not_running'), hasLength(1));
+    // A successful installation is the runner's word that UsbDk answered:
+    // no failure. What the reading after it finds is the driver's state.
+    backend.installFailure = null;
+    backend.driver = UsbDriverState.missing;
+    backend.problem = null;
+    await session.refresh();
+    backend.driverAfterInstall = UsbDriverState.stopped;
+    backend.problem = UsbDriverProblem.noAnswer;
+    expect(await session.installDriver(), isNull);
+    expect(session.restartNeeded, isTrue);
+    // A helper whose signature does not verify: said, recorded once, and
+    // a restart is not offered.
+    backend.problem = UsbDriverProblem.signature;
+    await session.refresh();
+    await session.refresh();
+    expect(session.restartNeeded, isFalse);
+    expect(session.installOffered, isFalse);
+    await subscription.cancel();
+    final notRunning = recorded.where((e) => e.code == 'usbdk_not_running');
+    expect(notRunning, hasLength(1), reason: 'once per session');
+    expect(notRunning.single.values, {'stage': 6, 'ok': false});
+    expect(
+      recorded.where((e) => e.code == 'usbdk_signature_invalid'),
+      hasLength(1),
+    );
+    expect(usbMessage('usbdk_not_running'), contains('PC를 다시 시작'));
+    await session.close();
+  });
+
+  /// Stage 6 records of successful installations.
+  Iterable<ProductLogEntry> installedOk(List<ProductLogEntry> recorded) =>
+      recorded.where(
+        (e) =>
+            e.event == LogEvent.usb &&
+            e.values['stage'] == 6 &&
+            e.values['ok'] == true,
+      );
+
+  test('An installation that succeeds while a listing waits on the runner returns no failure: it reads UsbDk once that listing is over', () async {
+    final (session, _, backend) = await started();
+    final recorded = <ProductLogEntry>[];
+    final subscription = ProductLog.instance.localRecords.listen(recorded.add);
+    backend.driver = UsbDriverState.missing;
+    await session.refresh();
+    // A listing under way (a device was plugged in), its reading held on the
+    // runner.
+    final held = Completer<void>();
+    backend.environmentGate = held;
+    final listing = session.refresh();
+    await settle();
+    expect(session.listing, isTrue);
+    final install = session.installDriver();
+    await settle();
+    expect(session.installing, isTrue, reason: 'it waits for that listing');
+    backend.environmentGate = null;
+    held.complete();
+    await listing;
+    expect(await install, isNull);
+    expect(session.installing, isFalse);
+    expect(session.driver, UsbDriverState.ready);
+    expect(session.installOffered, isFalse);
+    expect(session.restartNeeded, isFalse);
+    expect(session.entries, isNotEmpty);
+    await subscription.cancel();
+    expect(recorded.where((e) => e.code == 'usbdk_not_running'), isEmpty);
+    expect(installedOk(recorded), hasLength(1));
+    await session.close();
+  });
+
+  test('While UsbDk is being installed nothing read of it counts: no restart offer, the progress stays, nothing is recorded', () async {
+    final (session, _, backend) = await started();
+    final recorded = <ProductLogEntry>[];
+    final subscription = ProductLog.instance.localRecords.listen(recorded.add);
+    backend.driver = UsbDriverState.missing;
+    await session.refresh();
+    final held = Completer<void>();
+    backend.environmentGate = held;
+    final listing = session.refresh();
+    await settle();
+    final msiexec = Completer<void>();
+    backend.installGate = msiexec;
+    final install = session.installDriver();
+    await settle();
+    // msiexec has copied UsbDk's helper and its driver does not answer yet:
+    // the listing that was waiting reads exactly that.
+    backend.driver = UsbDriverState.stopped;
+    backend.problem = UsbDriverProblem.noAnswer;
+    backend.environmentGate = null;
+    held.complete();
+    await listing;
+    expect(session.driver, UsbDriverState.missing, reason: 'not believed');
+    expect(session.restartNeeded, isFalse);
+    expect(session.installOffered, isTrue, reason: '설치하는 중… stays');
+    // A listing asked for now (the device watcher, a reopened panel) waits
+    // for the installation.
+    await session.refresh();
+    expect(session.listing, isFalse);
+    expect(session.driver, UsbDriverState.missing);
+    expect(session.restartNeeded, isFalse);
+    // A helper half copied reads as unverified: not believed either.
+    backend.problem = UsbDriverProblem.signature;
+    await session.refresh();
+    expect(session.driverProblem, isNull);
+    expect(recorded.where((e) => e.code != null), isEmpty);
+    // The installation ends and the runner found UsbDk answering.
+    backend.problem = null;
+    msiexec.complete();
+    expect(await install, isNull);
+    expect(session.driver, UsbDriverState.ready);
+    expect(session.restartNeeded, isFalse);
+    expect(session.entries, isNotEmpty);
+    await subscription.cancel();
+    expect(recorded.where((e) => e.code != null), isEmpty);
+    expect(installedOk(recorded), hasLength(1));
+    await session.close();
+  });
+
+  test('UsbDk not answering right after msiexec, and answering by the reading after it, is no failure', () async {
+    final (session, _, backend) = await started();
+    final recorded = <ProductLogEntry>[];
+    final subscription = ProductLog.instance.localRecords.listen(recorded.add);
+    backend.driver = UsbDriverState.missing;
+    await session.refresh();
+    backend.installFailure = const UsbBackendException('usbdk_not_running');
+    backend.driver = UsbDriverState.ready;
+    expect(await session.installDriver(), isNull);
+    expect(session.driver, UsbDriverState.ready);
+    expect(session.restartNeeded, isFalse);
+    expect(session.entries, isNotEmpty);
+    await subscription.cancel();
+    expect(recorded.where((e) => e.code == 'usbdk_not_running'), isEmpty);
+    expect(installedOk(recorded), hasLength(1));
+    await session.close();
+  });
+
+  test('UsbDk still not answering after Windows started again offers no restart and is recorded as usbdk_not_running', () async {
+    final (session, _, backend) = await started();
+    final recorded = <ProductLogEntry>[];
+    final subscription = ProductLog.instance.localRecords.listen(recorded.add);
+    backend.driver = UsbDriverState.stopped;
+    backend.problem = UsbDriverProblem.stillStopped;
+    await session.refresh();
+    await session.refresh();
+    expect(session.driverProblem, UsbDriverProblem.stillStopped);
+    expect(session.restartNeeded, isFalse, reason: 'it would not help');
+    expect(session.installOffered, isFalse);
+    expect(session.entries, isEmpty);
+    await subscription.cancel();
+    final notRunning = recorded.where((e) => e.code == 'usbdk_not_running');
+    expect(notRunning, hasLength(1));
+    expect(notRunning.single.values, {'stage': 6, 'ok': false});
+    await session.close();
+  });
+
   // A stick shared in one window must not fail in another window with
   // "내 PC에서 장치를 가져오지 못했어요".
   test('A device another window holds is not offered; it moves here only after that window let it go and Windows took it back', () async {
@@ -1689,8 +1937,11 @@ void main() {
       'usbdk_missing',
       'usbdk_install_failed',
       'usbdk_signature_invalid',
+      'usbdk_installer_missing',
+      'usbdk_not_running',
     ]) {
       expect(usbMessage(code), isNotEmpty);
+      expect(usbMessage(code), isNot(usbMessage('unknown')), reason: code);
     }
   });
 }

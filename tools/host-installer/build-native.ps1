@@ -64,7 +64,9 @@ if (-not $SkipTests) {
     # Korean and English: every text of the installers, tray and service in both languages (docs/i18n.md).
     'MultitapHostUiTextTest',
     # A registration copied with the disk (full clone) is not used on another machine (host-machine-v1).
-    'MultitapHostCredentialBindingTest','MultitapHostPendingConnectionTest')
+    'MultitapHostCredentialBindingTest','MultitapHostPendingConnectionTest',
+    # The server connection Host settings shows: acknowledgement age, a reload that says connecting, a dial that turns stale.
+    'MultitapHostBrokerStatusTest','MultitapHostAgentPublicationTest')
   & $cmake --build $tree --config Release --parallel $Parallel --target @tests; if ($LASTEXITCODE) { throw 'test build failed' }
   foreach ($t in $tests) { & (Join-Path $tree "$t.exe") | Out-Null; if ($LASTEXITCODE) { throw "test failed: $t" }; "ok $t" }
 }

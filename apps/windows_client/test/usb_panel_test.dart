@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/data/usb_redirection.dart';
+import 'package:multitap_client/ui/app_dialog.dart' show AppStatusLine, AppTone;
 import 'package:multitap_client/ui/app_progress.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/usb_panel.dart';
@@ -39,6 +40,16 @@ Widget host(
     ),
   ),
 );
+
+/// The tone of the panel's status line.
+AppTone statusTone(WidgetTester tester) => tester
+    .widget<AppStatusLine>(
+      find.ancestor(
+        of: find.byKey(const Key('usb-status')),
+        matching: find.byType(AppStatusLine),
+      ),
+    )
+    .tone;
 
 void main() {
   for (final brightness in Brightness.values) {
@@ -408,6 +419,392 @@ void main() {
         tester.widget<Text>(find.byKey(const Key('usb-status'))).data,
         'PC를 다시 시작하면 USB 장치를 쓸 수 있어요.',
       );
+      await tester.runAsync(usb.close);
+    },
+  );
+
+  testWidgets(
+    'Each UsbDk state has its own status line and only the action that can help',
+    (tester) async {
+      Future<void> check(
+        UsbDriverState driver,
+        UsbDriverProblem? problem,
+        String text,
+        AppTone tone, {
+        bool installerMissing = false,
+        bool install = false,
+        bool restart = false,
+      }) async {
+        late UsbSession usb;
+        await tester.runAsync(() async {
+          final result = await started();
+          usb = result.$1;
+          result.$3
+            ..driver = driver
+            ..problem = problem
+            ..installerMissing = installerMissing;
+          await usb.refresh();
+        });
+        await tester.pumpWidget(host(usb));
+        await tester.pump();
+        expect(
+          tester.widget<Text>(find.byKey(const Key('usb-status'))).data,
+          text,
+        );
+        expect(statusTone(tester), tone, reason: text);
+        expect(
+          find.byKey(const Key('usb-install')),
+          install ? findsOneWidget : findsNothing,
+          reason: text,
+        );
+        expect(
+          find.byKey(const Key('usb-restart-now')),
+          restart ? findsOneWidget : findsNothing,
+          reason: text,
+        );
+        // Never "no devices" while UsbDk cannot list them.
+        expect(find.text('연결할 USB 장치가 없어요.'), findsNothing, reason: text);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(usb.close);
+      }
+
+      await check(
+        UsbDriverState.missing,
+        null,
+        'USB 드라이버 설치가 필요해요.',
+        AppTone.warn,
+        install: true,
+      );
+      await check(
+        UsbDriverState.missing,
+        null,
+        'USB 드라이버 설치 파일이 없어 USB 장치를 연결할 수 없어요. 클라이언트를 다시 설치해 주세요.',
+        AppTone.danger,
+        installerMissing: true,
+      );
+      await check(
+        UsbDriverState.stopped,
+        UsbDriverProblem.noAnswer,
+        'USB 드라이버가 설치됐지만 동작하지 않아요. PC를 다시 시작해 주세요.',
+        AppTone.warn,
+        restart: true,
+      );
+      // In place before Windows last started and still not answering: another
+      // restart would not help, so none is offered.
+      await check(
+        UsbDriverState.stopped,
+        UsbDriverProblem.stillStopped,
+        'PC를 다시 시작한 뒤에도 USB 드라이버가 동작하지 않아요.',
+        AppTone.danger,
+      );
+      for (final problem in [
+        UsbDriverProblem.signature,
+        UsbDriverProblem.load,
+      ]) {
+        await check(
+          UsbDriverState.stopped,
+          problem,
+          'USB 드라이버를 확인하지 못해 쓸 수 없어요.',
+          AppTone.danger,
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    'An installation that finds no installer, or leaves UsbDk not answering, ends in that state line, not a failure line',
+    (tester) async {
+      Future<void> install(
+        String failure,
+        String text, {
+        bool installerGone = false,
+        bool notAnswering = false,
+      }) async {
+        late UsbSession usb;
+        late FakeBackend backend;
+        await tester.runAsync(() async {
+          final result = await started();
+          usb = result.$1;
+          backend = result.$3;
+          backend.driver = UsbDriverState.missing;
+          await usb.refresh();
+        });
+        await tester.pumpWidget(host(usb));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('usb-install')));
+        await tester.pumpAndSettle();
+        backend.installFailure = UsbBackendException(failure);
+        // What the PC has when the installation answers.
+        backend.installerMissing = installerGone;
+        if (notAnswering) {
+          backend
+            ..driver = UsbDriverState.stopped
+            ..problem = UsbDriverProblem.noAnswer;
+        }
+        await tester.runAsync(() async {
+          await tester.tap(find.byKey(const Key('usb-install-confirm')));
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        });
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<Text>(find.byKey(const Key('usb-status'))).data,
+          text,
+        );
+        expect(find.byKey(const Key('usb-notice')), findsNothing);
+        expect(find.byKey(const Key('usb-install')), findsNothing);
+        expect(
+          find.byKey(const Key('usb-restart-now')),
+          notAnswering ? findsOneWidget : findsNothing,
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(usb.close);
+      }
+
+      await install(
+        'usbdk_installer_missing',
+        'USB 드라이버 설치 파일이 없어 USB 장치를 연결할 수 없어요. 클라이언트를 다시 설치해 주세요.',
+        installerGone: true,
+      );
+      await install(
+        'usbdk_not_running',
+        'USB 드라이버가 설치됐지만 동작하지 않아요. PC를 다시 시작해 주세요.',
+        notAnswering: true,
+      );
+    },
+  );
+
+  testWidgets(
+    'After the installation asked for a restart, a refresh, a reopened panel and a reconnect keep the restart offer until UsbDk answers',
+    (tester) async {
+      String? status() =>
+          tester.widget<Text>(find.byKey(const Key('usb-status'))).data;
+      late UsbSession usb;
+      late FakeBackend backend;
+      await tester.runAsync(() async {
+        final result = await started();
+        usb = result.$1;
+        backend = result.$3;
+        backend.driver = UsbDriverState.missing;
+        await usb.refresh();
+        backend.installFailure = const UsbBackendException(
+          'usbdk_restart_required',
+        );
+        expect(await usb.installDriver(), 'usbdk_restart_required');
+        // Until Windows restarts: UsbDk's helper is there, its driver does
+        // not answer.
+        backend.driver = UsbDriverState.stopped;
+        backend.problem = UsbDriverProblem.noAnswer;
+      });
+      await tester.pumpWidget(host(usb));
+      await tester.pump();
+      expect(usb.driver, UsbDriverState.stopped, reason: 'read when it opened');
+      expect(status(), 'PC를 다시 시작하면 USB 장치를 쓸 수 있어요.');
+      expect(find.byKey(const Key('usb-restart-now')), findsOneWidget);
+      expect(find.byKey(const Key('usb-install')), findsNothing);
+      expect(find.text('연결할 USB 장치가 없어요.'), findsNothing);
+      await tester.tap(find.byKey(const Key('usb-refresh')));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+      expect(status(), 'PC를 다시 시작하면 USB 장치를 쓸 수 있어요.');
+      expect(find.byKey(const Key('usb-restart-now')), findsOneWidget);
+      // The panel opened again.
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(host(usb));
+      await tester.pump();
+      expect(status(), 'PC를 다시 시작하면 USB 장치를 쓸 수 있어요.');
+      expect(find.byKey(const Key('usb-restart-now')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(usb.close);
+
+      // A reconnect: the new session knows nothing of the installation, and
+      // UsbDk's own state still asks for the restart.
+      late UsbSession again;
+      late FakeBackend againBackend;
+      await tester.runAsync(() async {
+        final result = await started(devices: []);
+        again = result.$1;
+        againBackend = result.$3
+          ..driver = UsbDriverState.stopped
+          ..problem = UsbDriverProblem.noAnswer;
+        await again.refresh();
+      });
+      await tester.pumpWidget(host(again));
+      await tester.pump();
+      expect(again.restartRequired, isFalse);
+      expect(status(), 'USB 드라이버가 설치됐지만 동작하지 않아요. PC를 다시 시작해 주세요.');
+      expect(find.byKey(const Key('usb-restart-now')), findsOneWidget);
+      // Restarted: UsbDk answers, and an empty list says so.
+      await tester.runAsync(() async {
+        againBackend
+          ..driver = UsbDriverState.ready
+          ..problem = null;
+        await again.refresh();
+      });
+      await tester.pump();
+      expect(find.byKey(const Key('usb-status')), findsNothing);
+      expect(find.byKey(const Key('usb-restart-now')), findsNothing);
+      expect(find.text('연결할 USB 장치가 없어요.'), findsOneWidget);
+      await tester.runAsync(again.close);
+    },
+  );
+
+  testWidgets(
+    'While UsbDk is being installed the panel keeps 설치하는 중…: no refresh, and nothing read of a half-installed driver shows',
+    (tester) async {
+      String? status() =>
+          tester.widget<Text>(find.byKey(const Key('usb-status'))).data;
+      late UsbSession usb;
+      late FakeBackend backend;
+      await tester.runAsync(() async {
+        final result = await started();
+        usb = result.$1;
+        backend = result.$3..driver = UsbDriverState.missing;
+        await usb.refresh();
+      });
+      await tester.pumpWidget(host(usb));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('usb-install')));
+      await tester.pumpAndSettle();
+      final msiexec = Completer<void>();
+      backend.installGate = msiexec;
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('usb-install-confirm')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await pumpWork(tester);
+      expect(usb.installing, isTrue);
+      expect(find.text('설치하는 중…'), findsOneWidget);
+      expect(
+        tester
+            .widget<IconButton>(find.byKey(const Key('usb-refresh')))
+            .onPressed,
+        isNull,
+        reason: 'the installation reads the list itself once it is over',
+      );
+      // msiexec has copied UsbDk's helper and its driver does not answer yet;
+      // a device plugged in meanwhile asks for a listing.
+      await tester.runAsync(() async {
+        backend
+          ..driver = UsbDriverState.stopped
+          ..problem = UsbDriverProblem.noAnswer;
+        await usb.refresh();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await pumpWork(tester);
+      expect(status(), 'USB 드라이버 설치가 필요해요.');
+      expect(find.text('설치하는 중…'), findsOneWidget);
+      expect(find.byKey(const Key('usb-restart-now')), findsNothing);
+      // The installation ends and UsbDk answers.
+      await tester.runAsync(() async {
+        backend.problem = null;
+        msiexec.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(usb.installing, isFalse);
+      expect(find.byKey(const Key('usb-status')), findsNothing);
+      expect(find.byKey(const Key('usb-notice')), findsNothing);
+      expect(find.byKey(const Key('usb-restart-now')), findsNothing);
+      expect(find.byKey(const ValueKey('usb-name-stick')), findsOneWidget);
+      await tester.runAsync(usb.close);
+    },
+  );
+
+  testWidgets(
+    'UsbDk not answering right after msiexec but answering by the reading after it: no notice, the devices',
+    (tester) async {
+      late UsbSession usb;
+      late FakeBackend backend;
+      await tester.runAsync(() async {
+        final result = await started();
+        usb = result.$1;
+        backend = result.$3..driver = UsbDriverState.missing;
+        await usb.refresh();
+      });
+      await tester.pumpWidget(host(usb));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('usb-install')));
+      await tester.pumpAndSettle();
+      backend
+        ..installFailure = const UsbBackendException('usbdk_not_running')
+        ..driver = UsbDriverState.ready;
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('usb-install-confirm')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('usb-notice')), findsNothing);
+      expect(find.byKey(const Key('usb-status')), findsNothing);
+      expect(find.byKey(const Key('usb-restart-now')), findsNothing);
+      expect(find.byKey(const ValueKey('usb-name-stick')), findsOneWidget);
+      await tester.runAsync(usb.close);
+    },
+  );
+
+  testWidgets(
+    'The PC restart and the driver installation are offered only under the line about the driver, never under the desktop’s',
+    (tester) async {
+      String? status() =>
+          tester.widget<Text>(find.byKey(const Key('usb-status'))).data;
+      late UsbSession usb;
+      late FakeSocket socket;
+      late FakeBackend backend;
+      await tester.runAsync(() async {
+        final result = await started(devices: [], hostReady: false);
+        usb = result.$1;
+        socket = result.$2;
+        backend = result.$3
+          ..driver = UsbDriverState.stopped
+          ..problem = UsbDriverProblem.noAnswer;
+        await usb.refresh();
+      });
+      await tester.pumpWidget(host(usb));
+      await pumpWork(tester);
+      expect(usb.restartNeeded, isTrue);
+      expect(status(), '데스크톱이 USB 장치를 받을 준비를 하고 있어요…');
+      expect(find.byKey(const Key('usb-restart-now')), findsNothing);
+      // The desktop has to restart: its line, and no PC restart under it.
+      await tester.runAsync(() async {
+        socket.emit({
+          'type': 'usb.status',
+          'state': 'unavailable',
+          'reason': 'usb_restart_required',
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await tester.pump();
+      expect(status(), '데스크톱을 다시 시작해야 USB 장치를 쓸 수 있어요.');
+      expect(find.byKey(const Key('usb-restart-now')), findsNothing);
+      // No installation under the desktop's line either.
+      await tester.runAsync(() async {
+        backend
+          ..driver = UsbDriverState.missing
+          ..problem = null;
+        await usb.refresh();
+      });
+      await tester.pump();
+      expect(usb.installOffered, isTrue);
+      expect(find.byKey(const Key('usb-install')), findsNothing);
+      // The desktop takes devices: the line is the driver's, with its action.
+      await tester.runAsync(() async {
+        socket.emit({'type': 'usb.status', 'state': 'ready'});
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await tester.pump();
+      expect(status(), 'USB 드라이버 설치가 필요해요.');
+      expect(find.byKey(const Key('usb-install')), findsOneWidget);
+      await tester.runAsync(() async {
+        backend
+          ..driver = UsbDriverState.stopped
+          ..problem = UsbDriverProblem.noAnswer;
+        await usb.refresh();
+      });
+      await tester.pump();
+      expect(status(), 'USB 드라이버가 설치됐지만 동작하지 않아요. PC를 다시 시작해 주세요.');
+      expect(find.byKey(const Key('usb-restart-now')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(usb.close);
     },
   );

@@ -411,11 +411,31 @@ enum UsbKind {
   }
 }
 
-enum UsbDriverState { ready, missing, unsupported }
+/// UsbDk on this PC: [ready] only when it answers; [stopped] when it is
+/// installed but cannot be used ([UsbDriverProblem] says why).
+enum UsbDriverState { ready, missing, stopped, unsupported }
+
+/// Why an installed UsbDk cannot be used: its helper's Red Hat signature did
+/// not verify, the helper would not load, the driver does not answer since it
+/// was installed after Windows last started (a restart starts it), or it was
+/// in place before that start and still does not answer (the restart did not
+/// start it: another would not help).
+enum UsbDriverProblem { signature, load, noAnswer, stillStopped }
 
 class UsbEnvironment {
-  const UsbEnvironment(this.driver);
+  const UsbEnvironment(
+    this.driver, {
+    this.installerMissing = false,
+    this.problem,
+  });
   final UsbDriverState driver;
+
+  /// The UsbDk installer that ships with the client is not beside it
+  /// (deleted, quarantined, or a build without it): installing cannot work.
+  final bool installerMissing;
+
+  /// Why the driver is [UsbDriverState.stopped] (null when not said).
+  final UsbDriverProblem? problem;
 }
 
 class UsbBackendException implements Exception {
@@ -562,8 +582,8 @@ abstract class UsbBackend {
   int returnDetail(UsbLocalDevice device) => 0;
 
   /// Installs the capture driver; only ever after the user chose to
-  /// (`usbdk_signature_invalid`, `usbdk_install_failed`, `usbdk_elevation_cancelled`, `usbdk_restart_required`,
-  /// `usbdk_missing`).
+  /// (`usbdk_installer_missing`, `usbdk_signature_invalid`, `usbdk_install_failed`, `usbdk_elevation_cancelled`,
+  /// `usbdk_restart_required`, `usbdk_not_running`).
   Future<void> installDriver();
 }
 
@@ -690,6 +710,8 @@ String usbMessage(String? code) => switch (code) {
   // One name for UsbDk on screen: "USB 드라이버" (the install dialog names it).
   'usbdk_missing' =>
     l10n.couldntFindUsbDriverIf,
+  'usbdk_installer_missing' => l10n.usbDriverInstallerMissing,
+  'usbdk_not_running' => l10n.usbDriverNotRunning,
   'usbdk_signature_invalid' => l10n.couldntVerifyInstallersSignatureSo,
   'usbdk_install_failed' => l10n.couldntInstallUsbDriverTry,
   usbdkElevationCancelled =>
@@ -841,11 +863,44 @@ class UsbSession extends ChangeNotifier {
   Future<void> get settled => _ending ?? Future<void>.value();
   Future<void>? _ending;
   UsbDriverState driver = UsbDriverState.missing;
+
+  /// The runner found no UsbDk installer beside the client: the panel says
+  /// so instead of offering the installation.
+  bool installerMissing = false;
+
+  /// Why the driver is [UsbDriverState.stopped].
+  UsbDriverProblem? driverProblem;
   bool listing = false, installing = false;
+
+  /// Completes when the listing under way ends.
+  Future<void>? _listed;
+
+  /// Counts installations: a listing that read UsbDk while one ran saw it
+  /// half installed and is not believed.
+  int _installs = 0;
 
   /// The driver was installed in this session and Windows must restart
   /// before it works: another install would not help.
   bool restartRequired = false;
+
+  /// USB 드라이버 설치… is offered only while UsbDk is missing, its installer
+  /// is beside the client and no restart is pending.
+  bool get installOffered =>
+      driver == UsbDriverState.missing &&
+      !installerMissing &&
+      !restartRequired &&
+      !_closed;
+
+  /// Windows must restart before UsbDk works: this session's installation
+  /// said so, or UsbDk was installed after Windows last started and does not
+  /// answer. The second is read at every refresh, so the restart stays offered
+  /// after a refresh, a reopened panel or a reconnect until the driver answers
+  /// or Windows has started again.
+  bool get restartNeeded =>
+      !_closed &&
+      (restartRequired ||
+          driver == UsbDriverState.stopped &&
+              driverProblem == UsbDriverProblem.noAnswer);
   List<UsbEntry> entries = const [];
   int _nextId = 1, _attaches = 0, _urbs = 0, _bytes = 0;
   final _shared = <int, _Shared>{};
@@ -885,15 +940,30 @@ class UsbSession extends ChangeNotifier {
 
   Future<void> refresh() async {
     if (_closed) return;
-    if (listing) {
-      _refreshAgain = true; // something changed while listing: list once more
+    // While UsbDk is being installed it is half there: installDriver reads it
+    // once the installation is over.
+    if (listing || installing) {
+      _refreshAgain = true; // something changed meanwhile: list once more
       return;
     }
+    await _list();
+  }
+
+  Future<void> _list() async {
     listing = true;
+    final done = Completer<void>();
+    _listed = done.future;
+    final installs = _installs;
     notifyListeners();
     try {
       final environment = await backend.environment();
+      // Read while UsbDk was being installed: not its state. installDriver
+      // reads it again once the installation is over.
+      if (installs != _installs) return;
       driver = environment.driver;
+      installerMissing = environment.installerMissing;
+      driverProblem = environment.problem;
+      _noteDriver();
       final found = environment.driver == UsbDriverState.ready
           ? await backend.list()
           : const <UsbLocalDevice>[];
@@ -978,9 +1048,10 @@ class UsbSession extends ChangeNotifier {
         });
       }
     } catch (_) {
-      driver = UsbDriverState.unsupported;
+      if (installs == _installs) driver = UsbDriverState.unsupported;
     } finally {
       listing = false;
+      done.complete();
       if (!_closed) notifyListeners();
     }
     if (!_refreshAgain) _tryResume();
@@ -1022,32 +1093,91 @@ class UsbSession extends ChangeNotifier {
     hiddenNeeded: hiddenNeeded,
   );
 
+  /// The driver states the panel names as a problem, recorded once per
+  /// session (stage 6): no installer beside the client, or UsbDk installed
+  /// but not usable. A restart this session's installation asked for is
+  /// already recorded as usbdk_restart_required.
+  final _driverRecorded = <String>{};
+  void _noteDriver() {
+    final code = switch (driver) {
+      UsbDriverState.missing when installerMissing => 'usbdk_installer_missing',
+      UsbDriverState.stopped when restartRequired => null,
+      UsbDriverState.stopped =>
+        driverProblem == UsbDriverProblem.signature
+            ? 'usbdk_signature_invalid'
+            : 'usbdk_not_running',
+      _ => null,
+    };
+    if (code != null) _recordDriver(code);
+  }
+
+  void _recordDriver(String code) {
+    if (!_driverRecorded.add(code)) return;
+    ProductLog.instance.recordFailure(LogEvent.usb, code, {
+      'stage': 6,
+      'ok': false,
+    });
+  }
+
   /// Installs the capture driver (only ever from the user's explicit action).
-  /// Returns a fixed code on failure.
+  /// Returns a fixed code on failure. The runner calls an installation done
+  /// only once UsbDk answers; what it left is read once it is over.
   Future<String?> installDriver() async {
     if (installing || _closed) return 'usb_busy';
     installing = true;
+    _installs++;
     notifyListeners();
+    String? failure;
     try {
       await backend.installDriver();
-      await refresh();
-      return driver == UsbDriverState.ready ? null : 'usbdk_missing';
-    } on UsbBackendException catch (failure) {
-      ProductLog.instance.recordFailure(
-        LogEvent.usb,
-        failure.code == usbdkElevationCancelled
-            ? 'usbdk_install_failed'
-            : failure.code,
-        {'stage': 6, 'ok': false},
-      );
-      if (failure.code == 'usbdk_restart_required') restartRequired = true;
-      return failure.code;
+    } on UsbBackendException catch (error) {
+      failure = error.code;
+      // Installed but not answering is said by the reading below, which may
+      // find UsbDk answering by now.
+      if (failure != 'usbdk_not_running') {
+        ProductLog.instance.recordFailure(
+          LogEvent.usb,
+          failure == usbdkElevationCancelled ? 'usbdk_install_failed' : failure,
+          {'stage': 6, 'ok': false},
+        );
+        // Recorded: a listing that finds the same state does not record it
+        // again.
+        _driverRecorded.add(failure);
+      }
+      if (failure == 'usbdk_restart_required') restartRequired = true;
+      if (failure == 'usbdk_installer_missing') installerMissing = true;
     } catch (_) {
-      return 'usbdk_install_failed';
+      failure = 'usbdk_install_failed';
+    }
+    try {
+      // A listing that read UsbDk meanwhile saw it half installed and is not
+      // believed: read it now that the installation is over.
+      while (listing) {
+        await _listed;
+      }
+      _refreshAgain = false;
+      if (!_closed) await _list();
     } finally {
       installing = false;
       if (!_closed) notifyListeners();
     }
+    // Asked for while that reading ran.
+    if (_refreshAgain && !_closed) {
+      _refreshAgain = false;
+      unawaited(refresh());
+    }
+    if (failure == 'usbdk_not_running') {
+      if (driver == UsbDriverState.ready) {
+        failure = null; // it answers by now
+      } else if (driver != UsbDriverState.stopped) {
+        // Stopped: the reading recorded how.
+        _recordDriver('usbdk_not_running');
+      }
+    }
+    if (failure == null) {
+      ProductLog.instance.record(LogEvent.usb, {'stage': 6, 'ok': true});
+    }
+    return failure;
   }
 
   /// Offers [entry] to the VM. It stays on this PC until the VM has taken it.

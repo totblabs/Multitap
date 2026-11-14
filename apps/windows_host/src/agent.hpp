@@ -342,8 +342,12 @@ class Agent {
   ~Agent() { stop(); }
   // Set before starting this agent; called only on a failed capture path.
   void captureDiagnostic(std::function<void(uint32_t,uint32_t)> sink){captureDiagnostic_=std::move(sink);}
-  void start(Credentials credentials) { stop(); credentials_ = std::move(credentials); updater_.reset(); if (hostUpdateEnvironment_) updater_ = std::make_unique<HostUpdater>(hostUpdateEnvironment_(credentials_.origin), [this](const std::string& message) { text(message); }); power_.reset(); if (hostPowerEnvironment_) power_ = std::make_unique<HostPower>(hostPowerEnvironment_(), [this](const std::string& message) { text(message); }); stopped_ = false; worker_ = std::thread([this] { run(); }); }
-  void stop() { closingNotice("service_stopping");if(bridge_)bridge_->stopMainAdapters(); caretEnd(); cursorEchoEnd(); stopped_ = true; if(brokerStatus_)brokerStatus_->stop();streamStop_ = true; input_.reset(); closeTransport(); if (worker_.joinable()) worker_.join(); joinDiagnostics(); stopStream(); if (updater_) updater_->stop(); for (int i = 0; i < 10 && input_.pending(); i++) { input_.retry(); std::this_thread::sleep_for(std::chrono::milliseconds(10)); } }
+  void start(Credentials credentials) { stop(true); credentials_ = std::move(credentials); updater_.reset(); if (hostUpdateEnvironment_) updater_ = std::make_unique<HostUpdater>(hostUpdateEnvironment_(credentials_.origin), [this](const std::string& message) { text(message); }); power_.reset(); if (hostPowerEnvironment_) power_ = std::make_unique<HostPower>(hostPowerEnvironment_(), [this](const std::string& message) { text(message); }); stopped_ = false; worker_ = std::thread([this] { run(); }); }
+  // reload: the service connects again right after (a new registration or
+  // server), so the status says the connection is being prepared, not
+  // stopped. Only the call that stops a running agent changes the status:
+  // the destructor after a reload stop leaves the next connection's alone.
+  void stop(bool reload = false) { closingNotice("service_stopping");if(bridge_)bridge_->stopMainAdapters(); caretEnd(); cursorEchoEnd(); const bool running = !stopped_.exchange(true); if(brokerStatus_&&running){if(reload)brokerStatus_->preparing();else brokerStatus_->stop();}streamStop_ = true; input_.reset(); closeTransport(); if (worker_.joinable()) worker_.join(); joinDiagnostics(); stopStream(); if (updater_) updater_->stop(); for (int i = 0; i < 10 && input_.pending(); i++) { input_.retry(); std::this_thread::sleep_for(std::chrono::milliseconds(10)); } }
   // Service mode only (set before start): remote Host program update over
   // this authenticated channel, downloading from the configured origin.
   void enableHostUpdate(std::function<HostUpdateEnvironment(const std::wstring& origin)> environment) { hostUpdateEnvironment_ = std::move(environment); }

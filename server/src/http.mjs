@@ -22,7 +22,7 @@ import { createReadStream } from 'node:fs';
 import { activitySnapshot, localActivityRequest, localDesktopActivityTarget, desktopActivitySnapshot, connectionCounts, endConnections } from './activity.mjs';
 import { PowerControl } from './power.mjs';
 import { VmRelocation } from './vm-relocate.mjs';
-import { PcPower } from './pc-power.mjs';
+import { PcPower, dockerWakeBlock } from './pc-power.mjs';
 import { VmAudioControl, vmAudioProtocol } from './vm-audio.mjs';
 import { VmStates } from './vm-state.mjs';
 import { DesktopEvents } from './desktop-events.mjs';
@@ -126,7 +126,7 @@ function accessFailure(error) {
   return new HttpError(503, 'session_access_unavailable');
 }
 
-export async function buildServer({ store, vault, proxmox = new Proxmox(), publicOrigin, allowInsecureHttp = false, tls = null, accessConfig = undefined, accessRevision = null, accessInstallationId = null, accessIdentityFile = null, accessIdentityRead = null, accessOperationId = null, legacyAdminOrigin = null, bootstrap = false, setupOrigin = null, accessClient = null, restoreClient = null, backupDir = null, backupOptions = {}, deploymentKind = 'unknown', dataDir = null, downloadDir, serverUpdate = null, restartServer = null, sessionTtlMs = 8 * 60 * 60 * 1000, sessionMaxLifetimeMs = 7 * 24 * 60 * 60 * 1000, loginLimit = 8, addressLimit = 60, trustedProxies: proxies, initialSetupOptions = {}, relayOptions = {}, browserConsoleOptions = {}, powerOptions = {}, relocationOptions = {}, resourceOptions = {}, pcPowerOptions = {}, desktopEventOptions = {}, vmStateOptions = {}, catalogWatchOptions = {}, hostRequestOptions = {}, hostUpdateOptions = {}, sessionAccessOptions = {}, mfaOptions = {}, certificateMonitor = null, logger = console }) {
+export async function buildServer({ store, vault, proxmox = new Proxmox(), publicOrigin, allowInsecureHttp = false, tls = null, accessConfig = undefined, accessRevision = null, accessInstallationId = null, accessIdentityFile = null, accessIdentityRead = null, accessOperationId = null, legacyAdminOrigin = null, bootstrap = false, setupOrigin = null, accessClient = null, restoreClient = null, backupDir = null, backupOptions = {}, deploymentKind = 'unknown', serverAddress = null, dataDir = null, downloadDir, serverUpdate = null, restartServer = null, sessionTtlMs = 8 * 60 * 60 * 1000, sessionMaxLifetimeMs = 7 * 24 * 60 * 60 * 1000, loginLimit = 8, addressLimit = 60, trustedProxies: proxies, initialSetupOptions = {}, relayOptions = {}, browserConsoleOptions = {}, powerOptions = {}, relocationOptions = {}, resourceOptions = {}, pcPowerOptions = {}, desktopEventOptions = {}, vmStateOptions = {}, catalogWatchOptions = {}, hostRequestOptions = {}, hostUpdateOptions = {}, sessionAccessOptions = {}, mfaOptions = {}, certificateMonitor = null, logger = console }) {
   const strictAccess = accessConfig !== undefined || bootstrap;
   // A fresh installation has only its management listener, not a fabricated
   // public domain. Legacy direct API callers retain their negotiated profile.
@@ -204,7 +204,7 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
     } catch { /* Authentication remains guarded if the observer is unavailable. */ }
   }, 1000); idleSweep.unref();
   // Approved physical PCs: 종료/다시 시작 through their Host, 켜기 by Wake-on-LAN.
-  const pcPower = new PcPower(relay, { onChange: () => desktopEvents?.notify(), ...pcPowerOptions });
+  const pcPower = new PcPower(relay, { onChange: () => desktopEvents?.notify(), wakeBlocked: () => dockerWakeBlock(deploymentKind, serverAddress), ...pcPowerOptions });
   relay.pcPower = pcPower; power.pc = pcPower;
   relay.powerBusy = id => !!power.active(id) || pcPower.busy(id);
   // A sound-card state change reaches clients as an ordinary list change.

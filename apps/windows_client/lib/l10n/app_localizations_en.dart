@@ -4584,6 +4584,22 @@ class AppLocalizationsEn extends AppLocalizations {
       'Couldn\'t find the USB driver. If restarting your PC doesn\'t help, reinstall the client.';
 
   @override
+  String get usbDriverInstallerMissing =>
+      'The USB driver installer is missing, so USB devices can\'t be connected. Reinstall the client.';
+
+  @override
+  String get usbDriverNotRunning =>
+      'The USB driver is installed but not running. Restart your PC.';
+
+  @override
+  String get usbDriverUnverified =>
+      'Couldn\'t verify the USB driver, so it can\'t be used.';
+
+  @override
+  String get usbDriverStillStopped =>
+      'The USB driver still isn\'t running after your PC restarted.';
+
+  @override
   String get couldntVerifyInstallersSignatureSo =>
       'Couldn\'t verify the installer\'s signature, so it wasn\'t installed.';
 

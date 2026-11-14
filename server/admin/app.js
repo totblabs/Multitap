@@ -813,7 +813,9 @@ function render({ focus = false, refocus = null } = {}) {
   const active = document.activeElement, activeKey = active?.getAttribute?.('data-focus') ?? null;
   // A control without a key of its own is found again by where it stands (focusMark).
   const activeMark = activeKey ? null : focusMark(active, content);
-  if (active?.tagName === 'H1' && content.contains?.(active)) focus = true;
+  // The page title kept the focus since the page opened: a redraw gives it back without scrolling.
+  const titleHeld = active?.tagName === 'H1' && content.contains?.(active) === true;
+  if (titleHeld) focus = true;
   const wasOpen = detailOpen(), inDetail = wasOpen && detail.contains?.(active) === true, onTitle = inDetail && active?.id === 'detail-title';
   const selection = activeKey && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
   const scroll = new Map([...content.querySelectorAll('[data-scroll-key]')].map(node => [node.dataset.scrollKey, [node.scrollLeft, node.scrollTop]]));
@@ -858,12 +860,17 @@ function render({ focus = false, refocus = null } = {}) {
   const target = opened ? null : refocus ?? (activeKey ? { key: activeKey, range: selection } : null);
   const node = target ? [...content.querySelectorAll('[data-focus]')].find(candidate => candidate.getAttribute('data-focus') === target.key)
     : opened || focus ? null : findMark(activeMark, content);
+  // Focus given back to the control (or title) that had it before this redraw never moves the page: the reader
+  // may have scrolled away from it with the wheel, which leaves the focus where it was, and a refresh that put it
+  // back with an ordinary focus() scrolled the page up to it. Only a focus the code asks for (refocus, a page or
+  // window that just opened) may bring its target into view.
+  const quiet = { preventScroll: true };
   if (node) {
-    if (document.activeElement !== node) node.focus?.();
+    if (document.activeElement !== node) node.focus?.(refocus ? undefined : quiet);
     if (target?.range && ['search', 'text', 'url', 'textarea'].includes(node.type)) node.setSelectionRange?.(target.range[0], target.range[1], target.range[2] || 'none');
-  } else if (opened || onTitle || (focus && detailOpen())) detail.querySelector('#detail-title')?.focus?.();
-  else if (inDetail && detailOpen()) detail.querySelector('.win-body')?.focus?.();
-  else if (focus) content.querySelector('h1')?.focus?.();
+  } else if (opened || onTitle || (focus && detailOpen())) detail.querySelector('#detail-title')?.focus?.(opened ? undefined : quiet);
+  else if (inDetail && detailOpen()) detail.querySelector('.win-body')?.focus?.(quiet);
+  else if (focus) content.querySelector('h1')?.focus?.(titleHeld ? quiet : undefined);
 }
 // Puts `fresh` in `parent` in that order without taking out the nodes of `keep` that are already there.
 function place(parent, fresh, keep) {

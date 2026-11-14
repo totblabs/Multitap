@@ -120,6 +120,13 @@ try {
     $expectedOriginal = if ($Variant -eq 'Client') { 'Multitap.exe' } else { 'MultitapHostSettings.exe' }
     if ($info.ProductVersion -cne $versionLabel -or $info.ProductName -cne $expectedProduct -or $info.OriginalFilename -cne $expectedOriginal) { throw 'Compiled PE version or product identity mismatch.' }
     foreach ($requiredBundleFile in @('flutter_windows.dll','data/app.so','data/icudtl.dat','data/flutter_assets/AssetManifest.bin','data/licenses/libopus-COPYING.txt','data/licenses/WebView2-LICENSE.txt')) { if (-not [IO.File]::Exists((Join-Path $bundle $requiredBundleFile))) { throw "Bundle input is missing: $requiredBundleFile" } }
+    # usb-v1: the client carries exactly the pinned UsbDk installer in usbdk\ (windows/CMakeLists.txt); Host settings never do.
+    $usbDkPin = (Get-Content -LiteralPath (Join-Path $app 'third_party/usbdk/upstream.json') -Raw -Encoding UTF8 | ConvertFrom-Json).file
+    $usbDkFolder = Join-Path $bundle 'usbdk'
+    if ($Variant -eq 'Client') {
+        $usbDkMsi = Join-Path $usbDkFolder $usbDkPin.name
+        if (@(Get-ChildItem -LiteralPath $usbDkFolder -Force -ErrorAction SilentlyContinue).Count -ne 1 -or -not [IO.File]::Exists($usbDkMsi) -or (Get-Item -LiteralPath $usbDkMsi).Length -ne $usbDkPin.size -or (Get-FileHash -LiteralPath $usbDkMsi -Algorithm SHA256).Hash.ToLowerInvariant() -cne $usbDkPin.sha256) { throw "usbdk_installer_missing: the bundle needs exactly usbdk\$($usbDkPin.name) as pinned; run tools/fetch-usb-drivers.ps1 -UsbDk" }
+    } elseif (Test-Path -LiteralPath $usbDkFolder) { throw 'Host settings must not carry the UsbDk installer (usbdk\).' }
     $runtimeArguments = @{ Bundle = $bundle }
     if ($RuntimeDirectory) { $runtimeArguments.RuntimeDirectory = $RuntimeDirectory }
     & (Join-Path $PSScriptRoot 'copy-vc-runtime.ps1') @runtimeArguments | Out-Null

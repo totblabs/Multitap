@@ -1378,15 +1378,9 @@ bool FlutterWindow::OnCreate() {
     auto value = args->find(flutter::EncodableValue("enabled"));
     const bool* enabled = value == args->end() ? nullptr : std::get_if<bool>(&value->second);
     if (!enabled) { result->Error("invalid_arguments", "Expected password focus state."); return; }
-    auto scope_it = args->find(flutter::EncodableValue("scope"));
-    int64_t scope = 0;
-    if (scope_it != args->end()) {
-      if (auto* number = std::get_if<int32_t>(&scope_it->second)) scope = *number;
-      else if (auto* number64 = std::get_if<int64_t>(&scope_it->second)) scope = *number64;
-    }
-    if (*enabled) password_scope_ = scope;
-    if (*enabled || scope == password_scope_)
-      password_ime_.Set(flutter_controller_->view()->GetNativeWindow(), *enabled);
+    // One sender per engine (PasswordInputScope's focus tracker) reports the
+    // real focus, so each value applies as is.
+    password_ime_.Set(flutter_controller_->view()->GetNativeWindow(), *enabled);
     result->Success();
   });
   ConfigureRelativeMouse();

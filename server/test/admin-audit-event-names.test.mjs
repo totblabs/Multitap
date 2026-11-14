@@ -50,4 +50,7 @@ test('a PC wake that sent nothing says why in 기록, not "원인 미확인"', a
   assert.equal(causeCell(entry), '켜기 신호를 보내지 못함 (시스템 오류 EPERM)'); assert.notEqual(causeCell(entry), ko['labels.108']);
   const unknown = auditEntry({ id: 9, created_at: Date.now(), event: 'pc_wake_failed', actor: 'u1', subject: 'pc-fixture:unknown' }, new Map(), desktops);
   assert.equal(causeCell(unknown), '켜기 신호를 보내지 못함 (이유 모름)');
+  // A Docker broker on a bridge network refuses before sending (pc-power.mjs dockerWakeBlock).
+  const docker = auditEntry({ id: 10, created_at: Date.now(), event: 'pc_wake_failed', actor: 'u1', subject: 'pc-fixture:NO_LAN_SENDER' }, new Map(), desktops);
+  assert.equal(causeCell(docker), '켜기 신호를 보내지 못함 (Docker 서버는 PC 네트워크로 보낼 수 없음)');
 });

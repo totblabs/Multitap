@@ -115,21 +115,39 @@ export function safeHostEvent(row) {
 // so each accepted report's events are merged per Host, once each (same time,
 // event and values), newest 500 for 7 days. Administrator evidence only.
 export const hostEventHistoryLimit = 500, hostEventHistoryMs = 7 * 86400000;
+// A Host's history on this broker starts with the registration it came from.
+// The Host keeps its own log on the PC and each report carries its newest
+// few events, so a machine whose Host was deleted and added again would
+// otherwise bring events of its earlier registration into the new one. The
+// start is the connection request this registration was approved from; for a
+// registration without one (an enrollment code) the registration time less
+// the 10 minutes a request may wait. A minute more allows for a Host clock a
+// little behind this server's.
+export const hostHistoryRequestWindowMs = 600000, hostHistoryClockToleranceMs = 60000;
+export function hostHistorySince(store, hostId) {
+  const request = store.db.prepare("SELECT MIN(created_at) AS at FROM host_requests WHERE host_id=? AND status='approved'").get(hostId)?.at;
+  const registered = store.db.prepare('SELECT created_at AS at FROM hosts WHERE id=?').get(hostId)?.at;
+  const start = Number.isSafeInteger(request) ? request : Number.isSafeInteger(registered) ? registered - hostHistoryRequestWindowMs : null;
+  return start === null ? null : start - hostHistoryClockToleranceMs;
+}
+const before = (event, since) => since !== null && !(Date.parse(event.time) >= since);
 const canonicalEvent = event => JSON.stringify({ time: event.time, event: event.event, values: Object.fromEntries(Object.entries(event.values).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) });
 export function recordHostEventHistory(store, hostId, report, now = Date.now()) {
   store.transaction(() => {
     const insert = store.db.prepare('INSERT INTO host_diagnostic_events(host_id,received_at,version,row) VALUES(?,?,?,?) ON CONFLICT(host_id,row) DO NOTHING');
-    for (const event of report.events) insert.run(hostId, now, report.version, canonicalEvent(event));
+    const since = hostHistorySince(store, hostId);
+    for (const event of report.events) if (!before(event, since)) insert.run(hostId, now, report.version, canonicalEvent(event));
     store.db.prepare('DELETE FROM host_diagnostic_events WHERE received_at<?').run(now - hostEventHistoryMs);
     store.db.prepare(`DELETE FROM host_diagnostic_events WHERE host_id=? AND id NOT IN (SELECT id FROM host_diagnostic_events WHERE host_id=? ORDER BY id DESC LIMIT ${hostEventHistoryLimit})`).run(hostId, hostId);
   });
 }
-// Newest first, each re-projected like a report's events.
+// Newest first, each re-projected like a report's events. Rows stored before
+// the start above was kept (a broker up to 1.1.13) are not shown either.
 export function hostEventHistory(store, hostId, now = Date.now()) {
-  const events = [];
+  const events = [], since = hostHistorySince(store, hostId);
   for (const row of store.db.prepare(`SELECT received_at,version,row FROM host_diagnostic_events WHERE host_id=? AND received_at>=? ORDER BY id DESC LIMIT ${hostEventHistoryLimit}`).all(hostId, now - hostEventHistoryMs)) {
     let event = null; try { event = safeHostEvent(JSON.parse(row.row)); } catch { /* A damaged row is skipped. */ }
-    if (event && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(row.version)) events.push({ ...event, version: row.version, receivedAt: new Date(row.received_at).toISOString() });
+    if (event && !before(event, since) && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(row.version)) events.push({ ...event, version: row.version, receivedAt: new Date(row.received_at).toISOString() });
   }
   return events;
 }

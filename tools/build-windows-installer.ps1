@@ -2,6 +2,7 @@ param([Parameter(Mandatory=$true)][ValidateSet('client')][string]$Product,[Param
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'windows-executable-policy.ps1')
 . (Join-Path $PSScriptRoot 'windows-payload-path-policy.ps1')
+. (Join-Path $PSScriptRoot 'windows-bundled-installer-policy.ps1')
 if($Version -notmatch '^\d+\.\d+\.\d+$'){throw 'Invalid version.'}
 $root=Split-Path -Parent $PSScriptRoot
 $source=(Resolve-Path -LiteralPath $Payload).Path
@@ -77,6 +78,13 @@ $files=@(Get-ChildItem -LiteralPath $stagePayload -Recurse -File|ForEach-Object{
   if(-not (Test-MultitapWindowsPayloadPath $relative)){throw 'Private or non-product file in installer.'}
   @{path=$relative;size=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
 })
+# The same admission as the publisher: the client carries exactly the pinned
+# UsbDk installer (bin/usbdk) and its licence. A bundle built without
+# tools/fetch-usb-drivers.ps1 -UsbDk stops here.
+$usbDkPin=Get-Content -LiteralPath (Join-Path $root 'apps/windows_client/third_party/usbdk/upstream.json') -Raw -Encoding UTF8|ConvertFrom-Json
+Assert-BundledWindowsMsiManifest $Product $files $null $usbDkPin
+$usbDkSignature=Get-AuthenticodeSignature -LiteralPath (Join-Path $bin ('usbdk/'+$usbDkPin.file.name))
+if($usbDkSignature.Status -ne 'Valid' -or -not $usbDkSignature.SignerCertificate -or $usbDkSignature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) -cne $usbDkPin.signature.signer){throw "usbdk_installer_missing: the bundled UsbDk installer is not validly signed by $($usbDkPin.signature.signer)."}
 $output=Join-Path $root ".artifacts/releases/$prefix-$Version-windows-x64.exe"
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
 if(Test-Path -LiteralPath $output){throw 'Installer version already exists; use a new version.'}

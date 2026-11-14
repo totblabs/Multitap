@@ -7371,6 +7371,30 @@ abstract class AppLocalizations {
   /// **'USB 드라이버를 찾지 못했어요. PC를 다시 시작해도 같으면 클라이언트를 다시 설치해 주세요.'**
   String get couldntFindUsbDriverIf;
 
+  /// No description provided for @usbDriverInstallerMissing.
+  ///
+  /// In ko, this message translates to:
+  /// **'USB 드라이버 설치 파일이 없어 USB 장치를 연결할 수 없어요. 클라이언트를 다시 설치해 주세요.'**
+  String get usbDriverInstallerMissing;
+
+  /// No description provided for @usbDriverNotRunning.
+  ///
+  /// In ko, this message translates to:
+  /// **'USB 드라이버가 설치됐지만 동작하지 않아요. PC를 다시 시작해 주세요.'**
+  String get usbDriverNotRunning;
+
+  /// No description provided for @usbDriverUnverified.
+  ///
+  /// In ko, this message translates to:
+  /// **'USB 드라이버를 확인하지 못해 쓸 수 없어요.'**
+  String get usbDriverUnverified;
+
+  /// No description provided for @usbDriverStillStopped.
+  ///
+  /// In ko, this message translates to:
+  /// **'PC를 다시 시작한 뒤에도 USB 드라이버가 동작하지 않아요.'**
+  String get usbDriverStillStopped;
+
   /// No description provided for @couldntVerifyInstallersSignatureSo.
   ///
   /// In ko, this message translates to:

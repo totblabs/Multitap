@@ -27,9 +27,12 @@ The published image carries the Windows client and Host installers and the Andro
 ## Windows client
 
 ```powershell
+powershell -File tools\fetch-usb-drivers.ps1 -UsbDk
 Build-Client.cmd
 powershell -File tools\build-windows-installer.ps1 -Product client -Version <x.y.z> -Payload apps\windows_client\build\windows\x64\runner\Release
 ```
+
+The first line fetches the pinned UsbDk installer (Red Hat's signed MSI, checked by SHA-256) that every client carries for its USB driver installation. Once per build PC is enough; the build stops without it.
 
 ## Android client
 
@@ -85,9 +88,12 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 ### Windows 클라이언트
 
 ```powershell
+powershell -File tools\fetch-usb-drivers.ps1 -UsbDk
 Build-Client.cmd
 powershell -File tools\build-windows-installer.ps1 -Product client -Version <x.y.z> -Payload apps\windows_client\build\windows\x64\runner\Release
 ```
+
+첫 줄은 모든 클라이언트가 USB 드라이버 설치에 쓰는 고정된 UsbDk 설치 파일(Red Hat 서명 MSI, SHA-256 확인)을 받습니다. 빌드 PC마다 한 번이면 되고, 이 파일이 없으면 빌드가 멈춥니다.
 
 ### Android 클라이언트
 

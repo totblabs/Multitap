@@ -1,12 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/data/mfa_account.dart';
 import 'package:multitap_client/data/mfa_account_controller.dart';
+import 'package:multitap_client/data/session_activity.dart';
 import 'package:multitap_client/ui/app_dialog.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/mfa_account_dialog.dart';
+import 'package:multitap_client/ui/password_input_scope.dart';
+import 'package:multitap_client/ui/session_access_boundary.dart';
 
 import 'helpers/mfa_account_fake.dart';
 
@@ -14,6 +18,18 @@ Future<void> _mount(WidgetTester tester, Widget child, {double scale = 1}) => te
   theme: buildAppTheme(), home: MediaQuery(data: MediaQueryData(size: const Size(800, 600), textScaler: TextScaler.linear(scale)),
     child: Scaffold(body: child))));
 Future<void> _remove(WidgetTester tester) async { await tester.pumpWidget(const SizedBox.shrink()); await tester.pump(); }
+/// Each passwordMode the Windows runner would receive, in order. No expect()
+/// in the handler: inside a guarded tester call it fails as a guarded function
+/// conflict, which the scope sees as a PlatformException.
+List<bool> _passwordModes() {
+  const channel = MethodChannel('multitap/input'); final modes = <bool>[], methods = <String>[];
+  final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(channel, (call) async {
+    methods.add(call.method); modes.add((call.arguments as Map)['enabled'] as bool); return null;
+  });
+  addTearDown(() { messenger.setMockMethodCallHandler(channel, null); expect(methods, everyElement('passwordMode')); });
+  PasswordInputScope.debugReset(); return modes;
+}
 
 void main() {
   testWidgets('B setup hides local key until explicit reveal and clears submitted password', (tester) async {
@@ -118,6 +134,38 @@ void main() {
     expect(find.byKey(const Key('mfa-completed-done')).hitTestable(), findsOneWidget);
     expect(tester.getSize(find.byKey(const Key('mfa-completed-done'))).height, greaterThanOrEqualTo(48));
     expect(find.byType(SingleChildScrollView), findsWidgets); expect(tester.takeException(), isNull);
+    await _remove(tester);
+  });
+  testWidgets('retiring the sign-in while the proof password is focused turns native password mode off', (tester) async {
+    final modes = _passwordModes(); final f = MfaTestOwner(); addTearDown(f.dispose);
+    await _mount(tester, MfaAccountDialog(controller: f.controller, onClose: () {})); await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mfa-account-enable'))); await tester.pump();
+    await tester.tap(find.byKey(const Key('mfa-account-password'))); await tester.pump();
+    expect(modes.last, isTrue);
+    // Straight to closed, without busy: the focused field goes in one frame.
+    f.authenticated = false; f.controller.authenticationRetired(); await tester.pump();
+    expect(f.controller.phase, MfaAccountPhase.closed);
+    expect(find.byKey(const Key('mfa-account-password')), findsNothing);
+    expect(modes.last, isFalse);
+    await _remove(tester);
+  });
+  testWidgets('a sign-out that closes the proof step in the same frame turns native password mode off', (tester) async {
+    final modes = _passwordModes(); final f = MfaTestOwner(); addTearDown(f.dispose);
+    final access = SessionActivity(); addTearDown(access.dispose);
+    // As in ThemedApp: the boundary covers the Navigator that holds the dialog.
+    await tester.pumpWidget(MaterialApp(theme: buildAppTheme(),
+      builder: (context, child) => SessionAccessBoundary(controller: access, child: child!),
+      home: Scaffold(body: MfaAccountDialog(controller: f.controller, onClose: () {}))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mfa-account-enable'))); await tester.pump();
+    await tester.tap(find.byKey(const Key('mfa-account-password'))); await tester.pump();
+    expect(modes.last, isTrue);
+    // As _retireAuthentication does: the dialog closes, then the boundary retires, before one frame.
+    f.authenticated = false; f.controller.authenticationRetired(); access.retire('session_idle_timeout');
+    await tester.pump();
+    expect(find.byKey(const ValueKey('session-end-ack')), findsOneWidget);
+    expect(find.byKey(const Key('mfa-account-password'), skipOffstage: false), findsNothing);
+    expect(modes.last, isFalse);
     await _remove(tester);
   });
 }

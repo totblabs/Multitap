@@ -17,7 +17,7 @@
     "status": "Valid (the certificate expired 2022-01-26; the Symantec timestamp keeps the signature valid)"
   },
   "notes": [
-    "The MSI is not stored in this repository. tools/fetch-usb-drivers.ps1 -UsbDk downloads it into .tools/usb-drivers/usbdk-1.0.22 and checks the SHA-256; the client build (windows/CMakeLists.txt) copies it to usbdk/ beside the client when present.",
+    "The MSI is not stored in this repository. tools/fetch-usb-drivers.ps1 -UsbDk downloads it into .tools/usb-drivers/usbdk-1.0.22 and checks the SHA-256. Every client build (windows/CMakeLists.txt, which reads name, size and SHA-256 from this file) copies it to usbdk/ beside the client, and a Release build stops without it; the installer build and the publisher refuse a client without it (tools/windows-bundled-installer-policy.ps1).",
     "The client never runs it on its own: the USB panel asks, then verifies size, SHA-256 and the Red Hat, Inc. signature and runs msiexec /i /qn /norestart (usb_capture.cpp InstallUsbDk).",
     "UsbDk 1.0.22 is the last release (2020). Memory Integrity (HVCI) compatibility was not verified; it is a filter driver on every USB hub of the PC while installed."
   ]

@@ -814,3 +814,20 @@ test('another administrator sees the primary administrator\'s password reset tur
   navigate('users'); follow(content, 'deputy'); await settle();
   assert.equal([...content.querySelectorAll('.user-detail .win-actions button')].find(node => node.textContent === '비밀번호 재설정').disabled, false);
 });
+
+// A refresh redraws the page every few seconds. The page title keeps the focus since the page opened, and
+// wheel scrolling leaves it there: giving it back with an ordinary focus() scrolled the page up to the title.
+test('a refresh gives the focus back without scrolling the page; a page that just opened brings its title into view', async t => {
+  const { user, inventory } = workspaceFixture();
+  const f = await loadAdmin(t, 'refresh-keeps-scroll', user, inventory, { hash: '#/desktops' });
+  f.navigate('users'); await f.settle();
+  assert.equal(f.focused() === f.content.querySelector('h1'), true);
+  assert.equal(f.focusOptions(), null, 'a page that just opened may scroll to its title');
+  // linkedom has no focus model: the document answers with the element the console focused last.
+  const doc = document, own = Object.getOwnPropertyDescriptor(doc, 'activeElement');
+  Object.defineProperty(doc, 'activeElement', { configurable: true, get: () => f.focused() });
+  t.after(() => { if (own) Object.defineProperty(doc, 'activeElement', own); else delete doc.activeElement; });
+  await recheck(f);
+  assert.equal(f.focused() === f.content.querySelector('h1'), true, 'the redrawn title has the focus again');
+  assert.deepEqual(f.focusOptions(), { preventScroll: true }, 'without moving the page');
+});

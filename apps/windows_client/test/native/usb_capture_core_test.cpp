@@ -3,7 +3,7 @@
 // CLEAR_FEATURE as UsbDk calls), status mapping, cancellation, release and
 // unplugging, over a substituted UsbDk. No driver, device or installation.
 // usbdk_api.h is compiled too, so its data layout checks run; the real library
-// is not loaded.
+// is not loaded. Its creation-time read runs on temporary files.
 #include "usb_capture_core.h"
 #include "usbdk_api.h"
 #include <usb.h>
@@ -129,6 +129,63 @@ void listing() {
   require(!rig.captures->List()[0].busy && rig.shared->stops == 1 && rig.captures->Count() == 0, "Release did not give the device back");
   rig.captures->Release(handle);
   require(rig.shared->stops == 1, "A second release stopped the capture again");
+}
+
+// UsbDk answers when its device list call succeeds, also with nothing plugged
+// in; a failing call is a driver that does not run (the panel's "stopped").
+void answering() {
+  Rig rig;
+  require(rig.captures->Answers(), "A driver that lists devices does not answer");
+  rig.shared->devices.clear();
+  require(rig.captures->Answers(), "A driver with nothing plugged in does not answer");
+  rig.shared->refuseDevices = true;
+  require(!rig.captures->Answers(), "A driver whose device list fails answers");
+  rig.shared->refuseDevices = false;
+  require(rig.captures->Answers(), "A driver that answers again does not answer");
+}
+
+// Not answering: before the restart its installation needs ("no_answer"), or
+// still after Windows started again ("still_stopped").
+void startedAfterInstallation() {
+  using usbdk::StartedAfter;
+  constexpr ULONGLONG second = 10000000ULL, minute = 60 * second, hour = 60 * minute;
+  constexpr ULONGLONG now = 134080000000000000ULL;   // November 2025
+  constexpr ULONGLONG upHour = 3600ULL * 1000;       // Windows started an hour ago
+  require(StartedAfter(now - 2 * hour, now, upHour), "An installation before the start was not seen as restarted");
+  require(!StartedAfter(now - 10 * minute, now, upHour), "An installation after the start was seen as restarted");
+  require(!StartedAfter(now - hour - 30 * second, now, upHour), "A start within a minute of the installation counted (a clock correction)");
+  require(StartedAfter(now - hour - 61 * second, now, upHour), "A start more than a minute after the installation did not count");
+  require(!StartedAfter(0, now, upHour), "An unknown installation time counted as restarted");
+  require(!StartedAfter(now + hour, now, upHour), "An installation in the future counted as restarted");
+  require(!StartedAfter(now - 2 * hour, now, now / 10000 + 1), "An uptime longer than the clock counted as restarted");
+  require(!StartedAfter(now - 2 * hour, now, now / 10000), "A start at the epoch counted as restarted");
+}
+
+// The creation times the decision reads, on real files: the newest of them,
+// and 0 when one cannot be read.
+void creationTimes() {
+  wchar_t temp[MAX_PATH + 1]{};
+  require(GetTempPathW(MAX_PATH, temp) > 0, "No temporary folder");
+  FILETIME before{}; GetSystemTimeAsFileTime(&before);
+  const std::wstring folder = std::wstring(temp) + L"multitap-usbdk-created-" + std::to_wstring(GetCurrentProcessId());
+  const std::wstring file = folder + L"\\UsbDkHelper.dll";
+  require(CreateDirectoryW(folder.c_str(), nullptr) != FALSE, "The test folder could not be made");
+  const HANDLE handle = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+  require(handle != INVALID_HANDLE_VALUE, "The test file could not be made");
+  CloseHandle(handle);
+  FILETIME after{}; GetSystemTimeAsFileTime(&after);
+  const auto value = [](const FILETIME& time) { return (ULONGLONG(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
+  const ULONGLONG created = usbdk::NewestCreation({folder, file});
+  // A second either way: the file system may stamp a finer clock than this one.
+  constexpr ULONGLONG second = 10000000ULL;
+  const bool inWindow = created + second >= value(before) && created <= value(after) + second;
+  require(usbdk::NewestCreation({folder, folder + L"\\missing.dll"}) == 0, "A missing file gave a creation time");
+  require(usbdk::NewestCreation({L""}) == 0, "An empty path gave a creation time");
+  DeleteFileW(file.c_str()); RemoveDirectoryW(folder.c_str());
+  require(inWindow, "The creation time is not the time the files were made");
+  // This PC: UsbDk's folder and helper are read where the runner reads them.
+  const bool installed = GetFileAttributesW(usbdk::RuntimeDirectory().c_str()) != INVALID_FILE_ATTRIBUTES && GetFileAttributesW(usbdk::HelperPath().c_str()) != INVALID_FILE_ATTRIBUTES;
+  require((usbdk::InstalledAt() != 0) == installed, "UsbDk's installation time does not match its files on this PC");
 }
 
 void capturing() {
@@ -559,7 +616,7 @@ void completionCanDestroyItsEngine() {
 
 int main() {
   try {
-    listing(); capturing(); heldUntilUsbDkLetsGo(); requests(); translated(); statuses(); cancelling(); unplugging(); everythingGivenBack(); controlCancelAndTimeout(); listingNeverBlocksTheVm(); countersAndReturn(); fieldStallAndRawStatus(); pendingRequestsBelongToTheirCapture(); lateCompletionDoesNotUseTheDestroyedEngine(); restartedRedirectorRejectsOldIdentity(); independentApiNamespacesKeepLateCleanupLocal(); lateReleasedCaptureCannotStopItsReplacement(); completionCanDestroyItsEngine();
+    listing(); answering(); startedAfterInstallation(); creationTimes(); capturing(); heldUntilUsbDkLetsGo(); requests(); translated(); statuses(); cancelling(); unplugging(); everythingGivenBack(); controlCancelAndTimeout(); listingNeverBlocksTheVm(); countersAndReturn(); fieldStallAndRawStatus(); pendingRequestsBelongToTheirCapture(); lateCompletionDoesNotUseTheDestroyedEngine(); restartedRedirectorRejectsOldIdentity(); independentApiNamespacesKeepLateCleanupLocal(); lateReleasedCaptureCannotStopItsReplacement(); completionCanDestroyItsEngine();
     std::cout << "Multitap client USB capture regression passed (" << checks << " checks)\n";
     return 0;
   } catch (const std::exception& error) {

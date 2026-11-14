@@ -56,6 +56,56 @@ void main() {
     await backend.dispose();
   });
 
+  test('the environment names the installer and why an installed UsbDk cannot be used', () async {
+    final backend = NativeUsbBackend(channel);
+    script = (call) => {'driver': 'missing', 'installer': 'missing'};
+    var environment = await backend.environment();
+    expect(environment.driver, UsbDriverState.missing);
+    expect(environment.installerMissing, isTrue);
+    expect(environment.problem, isNull);
+    script = (call) => {'driver': 'missing', 'installer': 'ready'};
+    expect((await backend.environment()).installerMissing, isFalse);
+    // Only the runner's explicit answer hides the installation.
+    for (final installer in [null, 'gone', 0]) {
+      script = (call) => {'driver': 'missing', 'installer': ?installer};
+      expect((await backend.environment()).installerMissing, isFalse);
+    }
+    for (final (reason, problem) in [
+      ('signature', UsbDriverProblem.signature),
+      ('load', UsbDriverProblem.load),
+      ('no_answer', UsbDriverProblem.noAnswer),
+      ('still_stopped', UsbDriverProblem.stillStopped),
+      ('something else', null),
+      (null, null),
+    ]) {
+      script = (call) => {
+        'driver': 'stopped',
+        'installer': 'ready',
+        'reason': ?reason,
+      };
+      environment = await backend.environment();
+      expect(environment.driver, UsbDriverState.stopped);
+      expect(environment.problem, problem, reason: '$reason');
+    }
+    script = (call) => {'driver': 'ready', 'reason': 'no_answer'};
+    environment = await backend.environment();
+    expect(environment.driver, UsbDriverState.ready);
+    expect(
+      environment.problem,
+      isNull,
+      reason: 'a reason only goes with stopped',
+    );
+    // The installation's own outcomes cross as they are.
+    for (final code in ['usbdk_installer_missing', 'usbdk_not_running']) {
+      script = (call) => PlatformException(code: code);
+      await expectLater(
+        backend.installDriver(),
+        throwsA(isA<UsbBackendException>().having((e) => e.code, 'code', code)),
+      );
+    }
+    await backend.dispose();
+  });
+
   test(
     'a capture runs transfers, forwards cancellation and gives the device back',
     () async {

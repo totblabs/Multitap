@@ -119,7 +119,16 @@ Future<void> clickOwned(
   }
 }
 
+// Minimized and back, the way Windows reports it (through inactive).
+void hideOwned(WidgetTester t) {
+  t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+  t.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+}
+
 void resumeOwned(WidgetTester t) {
+  if (t.binding.lifecycleState == AppLifecycleState.hidden) {
+    t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+  }
   if (t.binding.lifecycleState != AppLifecycleState.resumed) {
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   }
@@ -158,12 +167,14 @@ void main() {
       api.nextStatus = old;
       addTearDown(() => resumeOwned(t));
       await openOwned(t, api, settle: false);
-      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      // Minimized (a window merely behind another one keeps reading).
+      hideOwned(t);
       old.complete(response);
       await t.pump();
       await t.pump(const Duration(milliseconds: 400));
       final fresh = Completer<Map<String, dynamic>>();
       api.nextStatus = fresh;
+      // Shown again: the fresh read starts at once and is held.
       resumeOwned(t);
       await t.pump(const Duration(milliseconds: 3100));
       await t.pump();
@@ -257,12 +268,14 @@ void main() {
       api.restarting!.complete();
       await t.pump();
       await t.pump();
-      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      hideOwned(t);
       held.complete(response);
       await t.pump();
       await t.pump(const Duration(milliseconds: 400));
-      expect(find.textContaining('작업 응답은 받았지만'), findsOneWidget);
+      // A minimized window draws nothing: the notice shows once it is back.
       resumeOwned(t);
+      await t.pump();
+      expect(find.textContaining('작업 응답은 받았지만'), findsOneWidget);
       await t.pump(const Duration(milliseconds: 3100));
       await pumpWork(t);
       expect(
@@ -282,12 +295,13 @@ void main() {
       api.nextStatus = held;
       addTearDown(() => resumeOwned(t));
       await openOwned(t, api, settle: false);
-      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      hideOwned(t);
       held.complete(initial);
       await t.pump();
       await t.pump(const Duration(milliseconds: 400));
+      // Shown again: the discarded status is read again at once.
       resumeOwned(t);
-      await t.pump(const Duration(milliseconds: 3100));
+      await t.pump();
       await pumpWork(t);
       expect(api.requests.where((r) => r['action'] == 'status'), hasLength(2));
       expect(find.byKey(const Key('host-refresh')), findsOneWidget);
@@ -307,7 +321,7 @@ void main() {
       final held = Completer<Map<String, dynamic>>();
       api.nextStatus = held;
       await clickOwned(t, 'host-refresh', settle: false);
-      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      hideOwned(t);
       held.complete(response);
       await t.pump();
       await t.pump(const Duration(milliseconds: 400));

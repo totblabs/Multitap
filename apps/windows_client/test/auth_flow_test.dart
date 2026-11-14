@@ -7,6 +7,7 @@ import 'package:multitap_client/app.dart';
 import 'package:multitap_client/data/broker_api.dart';
 import 'package:multitap_client/data/login_memory.dart';
 import 'package:multitap_client/ui/app_progress.dart';
+import 'package:multitap_client/ui/password_input_scope.dart';
 import 'package:multitap_client/ui/sign_in_screen.dart';
 import 'package:multitap_client/ui/remote_view.dart';
 import 'package:multitap_client/ui/session_preview.dart';
@@ -307,6 +308,125 @@ void main() {
       await tester.tap(find.byKey(const Key('login-submit')));
       await tester.pumpAndSettle();
       expect(api.lastPassword, pasted);
+    },
+  );
+
+  List<bool> recordPasswordModes() {
+    const channel = MethodChannel('multitap/input');
+    final modes = <bool>[], methods = <String>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    // No expect() in the handler: called from inside a guarded tester call
+    // such as enterText it fails as a guarded function conflict, and the
+    // scope sees a PlatformException instead of the message.
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      methods.add(call.method);
+      modes.add((call.arguments as Map)['enabled'] as bool);
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(channel, null);
+      expect(methods, everyElement('passwordMode'));
+    });
+    PasswordInputScope.debugReset();
+    return modes;
+  }
+
+  Widget passwordFields({required bool secret}) => MaterialApp(
+    home: Scaffold(
+      body: Column(
+        children: [
+          const TextField(key: Key('plain-field')),
+          if (secret)
+            PasswordInputScope(
+              builder: (focus) => TextField(
+                key: const Key('secret-field'),
+                focusNode: focus,
+                obscureText: true,
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+
+  testWidgets(
+    'A focused password field removed in one frame turns native password mode off',
+    (tester) async {
+      final modes = recordPasswordModes();
+      await tester.pumpWidget(passwordFields(secret: true));
+      await tester.tap(find.byKey(const Key('secret-field')));
+      await tester.pump();
+      expect(modes.last, isTrue);
+      // Removed while focused, as when a sign-out closes 2단계 인증: the
+      // field's node detaches without a focus notification of its own.
+      await tester.pumpWidget(passwordFields(secret: false));
+      expect(find.byKey(const Key('secret-field')), findsNothing);
+      expect(modes.last, isFalse);
+      await tester.pump();
+      expect(modes.last, isFalse);
+      await tester.tap(find.byKey(const Key('plain-field')));
+      await tester.pump();
+      expect(modes.last, isFalse);
+    },
+  );
+
+  testWidgets(
+    'Password mode is off while the window is inactive and on again when it returns',
+    (tester) async {
+      final modes = recordPasswordModes();
+      await tester.pumpWidget(passwordFields(secret: true));
+      await tester.tap(find.byKey(const Key('secret-field')));
+      await tester.pump();
+      expect(modes.last, isTrue);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      expect(modes.last, isFalse);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(modes.last, isTrue);
+    },
+    // Flutter parks the focus of an inactive app only on desktop, and
+    // flutter test reports android unless a variant says otherwise.
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  testWidgets(
+    'Moving between the change-password fields keeps password mode on; closing it and the ID field turn it off',
+    (tester) async {
+      final modes = recordPasswordModes();
+      final api = TestBroker();
+      await start(tester, api);
+      await login(tester);
+      await tester.tap(find.byKey(const Key('open-app-settings')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('account-change-password')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('current-password')));
+      await tester.pump();
+      expect(modes.last, isTrue);
+      final sent = modes.length;
+      for (final key in [
+        'new-password',
+        'confirm-new-password',
+        'current-password',
+      ]) {
+        await tester.tap(find.byKey(Key(key)));
+        await tester.pump();
+        // One mode for the whole dialog: never off and on again in between.
+        expect(modes.length, sent);
+      }
+      await tester.tap(find.widgetWithText(TextButton, '취소'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('current-password')), findsNothing);
+      expect(modes.last, isFalse);
+      await confirmWorkspaceSignOut(tester);
+      await tester.tap(find.byKey(const Key('sign-in-password')));
+      await tester.pump();
+      expect(modes.last, isTrue);
+      await tester.tap(find.byKey(const Key('sign-in-id')));
+      await tester.pump();
+      expect(modes.last, isFalse);
     },
   );
 

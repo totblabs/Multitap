@@ -8,10 +8,11 @@ import { Store } from '../src/store.mjs';
 import { Vault } from '../src/vault.mjs';
 import { buildServer } from '../src/http.mjs';
 import { newToken, tokenHash } from '../src/security.mjs';
-import { safeDiagnosticReport, recordHostEventHistory, hostEventHistory, hostEventHistoryLimit, hostEventHistoryMs } from '../src/host-diagnostics.mjs';
+import { safeDiagnosticReport, recordHostEventHistory, hostEventHistory, hostEventHistoryLimit, hostEventHistoryMs, hostHistorySince, hostHistoryRequestWindowMs, hostHistoryClockToleranceMs } from '../src/host-diagnostics.mjs';
 import { clientEntry, desktopHostList, hostEntries } from '../admin/js/timeline.js';
 
-const at = ms => new Date(Date.UTC(2026, 10, 2) + ms).toISOString();
+// Event times just before the fixtures register: a Host's history starts with its registration (hostHistorySince).
+const started = Date.now(), at = ms => new Date(started + ms).toISOString();
 const event = (ms, values = { action: 250, stage: 31, ok: true, items: ms }) => ({ time: at(ms), event: 'hostAction', values });
 const report = (events, version = '0.2.146') => safeDiagnosticReport({ protocol: 'host-diagnostics-v1', source: 'host-service', version, collectedAt: at(0), interactiveSession: true, consoleSession: true, captureAvailable: true,
   display: { observed: true, observationAgeMs: 0, installed: true, deviceReady: true, owned: true, activeDisplay: true, configurationPending: false, recoveryRequired: false, rebootRequired: false, remoteSession: false, monitorCount: 0, width: 0, height: 0, reason: '' },
@@ -130,4 +131,36 @@ test('A client record is a failure by its ok; a code beside ok:true is informati
   assert.equal(entry({ stage: 3, ok: false }).failure, true);
   assert.equal(entry({ stage: 1 }, 'unknown_failure').failure, true, 'a code without ok stays a failure (older clients)');
   assert.equal(entry({ stage: 1 }).failure, false);
+});
+
+// A Host deleted and added again: the Host keeps its own log on the PC and
+// sends its newest events with every report, so without a start its earlier
+// registration's events would come back into the new one.
+test('A Host added again starts its history with the request it was approved from', () => {
+  const store = new Store(':memory:');
+  try {
+    const [host] = enrolled(store, [149]), now = Date.now(), requested = now - 120000;
+    store.db.prepare('INSERT INTO host_requests(id,key_hash,hostname,machine_uuid,version,status,created_at,expires_at,decided_at,desktop_id,host_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+      .run('request-1', 'key-1', 'fixture', '00000000-1234-1234-1234-000000000000', '0.2.146', 'approved', requested, requested + 600000, requested + 1000, 'pve-149', host);
+    assert.equal(hostHistorySince(store, host), requested - hostHistoryClockToleranceMs);
+    const old = ms => ({ time: new Date(requested - hostHistoryClockToleranceMs - ms).toISOString(), event: 'hostAction', values: { action: 250, stage: 31, ok: true, items: ms } });
+    const fresh = ms => ({ time: new Date(requested + ms).toISOString(), event: 'hostAction', values: { action: 250, stage: 31, ok: true, items: 1000 + ms } });
+    recordHostEventHistory(store, host, report([old(1000), old(1), fresh(0), fresh(5)]), now);
+    assert.deepEqual(hostEventHistory(store, host, now).map(row => row.values.items), [1005, 1000], 'only events since the request');
+    // A row an older broker stored from the earlier registration is not shown either.
+    store.db.prepare('INSERT INTO host_diagnostic_events(host_id,received_at,version,row) VALUES(?,?,?,?)').run(host, now, '0.2.146', JSON.stringify(old(7)));
+    assert.deepEqual(hostEventHistory(store, host, now).map(row => row.values.items), [1005, 1000]);
+  } finally { store.close(); }
+});
+
+test('A Host registered with an enrollment code starts its history 10 minutes before its registration', () => {
+  const store = new Store(':memory:');
+  try {
+    const [host] = enrolled(store, [149]), now = Date.now();
+    const registered = store.db.prepare('SELECT created_at FROM hosts WHERE id=?').get(host).created_at;
+    assert.equal(hostHistorySince(store, host), registered - hostHistoryRequestWindowMs - hostHistoryClockToleranceMs);
+    const around = ms => ({ time: new Date(registered + ms).toISOString(), event: 'hostAction', values: { action: 250, stage: 31, ok: true, items: Math.abs(ms) } });
+    recordHostEventHistory(store, host, report([around(-(hostHistoryRequestWindowMs + hostHistoryClockToleranceMs + 1000)), around(-60000), around(0)]), now);
+    assert.deepEqual(hostEventHistory(store, host, now).map(row => row.values.items), [0, 60000]);
+  } finally { store.close(); }
 });

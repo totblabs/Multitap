@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
-import { magicPacket, broadcastTargets, routeBroadcasts, sendWakePackets, wakeAdapters, wakeFailureReason } from '../src/pc-power.mjs';
+import { magicPacket, broadcastTargets, routeBroadcasts, sendWakePackets, wakeAdapters, wakeFailureReason, dockerWakeBlock } from '../src/pc-power.mjs';
 import { localAddresses } from '../update/server-access-deployment.mjs';
 
 test('The magic packet is six 0xFF bytes and the MAC sixteen times', () => {
@@ -91,4 +91,18 @@ test('The real sender puts magic packets on the wire (loopback listener)', async
   for (let i = 0; i < 100 && received.length < 2; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(received.length, 2);
   assert.deepEqual(received[0], magicPacket('D8:BB:C1:12:34:56'));
+});
+
+// A Docker broker on a bridge network hands broadcasts to the kernel without an error and they never reach the
+// LAN: it sends only when it owns the server address the install recorded (host networking).
+test('dockerWakeBlock: only a Docker broker that does not own the recorded server address is refused', () => {
+  const bridge = () => ({ lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true }], eth0: [{ address: '172.18.0.2', family: 'IPv4', internal: false }] });
+  const host = () => ({ lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true }], ens18: [{ address: '10.0.0.5', family: 'IPv4', internal: false }] });
+  assert.equal(dockerWakeBlock('systemd', null, bridge), null, 'a broker installed as a Linux service sends');
+  assert.equal(dockerWakeBlock('unknown', null, bridge), null);
+  assert.equal(dockerWakeBlock('docker', '10.0.0.5', bridge), 'NO_LAN_SENDER', 'a bridge network: the address is the host’s, not the container’s');
+  assert.equal(dockerWakeBlock('docker', '10.0.0.5', host), null, 'host networking owns the address');
+  assert.equal(dockerWakeBlock('docker', null, host), 'NO_LAN_SENDER', 'no recorded address: nothing tells the LAN is reachable');
+  assert.equal(dockerWakeBlock('docker', '127.0.0.1', bridge), 'NO_LAN_SENDER', 'a loopback address does not count');
+  assert.equal(dockerWakeBlock('docker', '10.0.0.5', () => { throw Object.assign(new Error('netlink'), { code: 'EAFNOSUPPORT' }); }), 'NO_LAN_SENDER');
 });

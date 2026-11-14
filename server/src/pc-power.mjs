@@ -79,6 +79,25 @@ export function broadcastTargets(interfaces, read = networkInterfaces, routes = 
   return [...targets];
 }
 
+// Whether this broker can reach a local PC's network at all, before anything
+// is sent. A Docker install runs the broker on a bridge network: its
+// broadcasts stay on that bridge, are handed to the kernel without an error
+// and never reach the LAN. So a Docker broker sends only when the server
+// address the install recorded (MULTITAP_SERVER_ADDRESS) is one of its own
+// addresses, which means it runs on the host's network. Otherwise the wake
+// ends at once as NO_LAN_SENDER instead of reporting packets as sent.
+// Returns null when sending may go ahead.
+export function dockerWakeBlock(deploymentKind, serverAddress, read = networkInterfaces) {
+  if (deploymentKind !== 'docker') return null;
+  if (typeof serverAddress !== 'string' || !serverAddress) return 'NO_LAN_SENDER';
+  let interfaces;
+  try { interfaces = read(); } catch { return 'NO_LAN_SENDER'; }
+  for (const list of Object.values(interfaces ?? {})) for (const entry of list ?? []) {
+    if (!entry.internal && typeof entry.address === 'string' && entry.address.toLowerCase() === serverAddress.toLowerCase()) return null;
+  }
+  return 'NO_LAN_SENDER';
+}
+
 // Why no wake packet left: the system's error code (EPERM, ENETUNREACH...),
 // a fixed token only, never a message or an address.
 export function wakeFailureReason(error) {
@@ -114,8 +133,8 @@ export async function sendWakePackets(macs, { targets = broadcastTargets(), port
 const active = operation => !!operation && ['submitted', 'running'].includes(operation.status);
 
 export class PcPower {
-  constructor(relay, { now = Date.now, tickMs = 1000, replyMs = 15000, wakeMs = 240000, rebootMs = 300000, sendWake = sendWakePackets, onChange = () => {} } = {}) {
-    Object.assign(this, { relay, now, replyMs, wakeMs, rebootMs, sendWake, onChange });
+  constructor(relay, { now = Date.now, tickMs = 1000, replyMs = 15000, wakeMs = 240000, rebootMs = 300000, sendWake = sendWakePackets, wakeBlocked = () => null, onChange = () => {} } = {}) {
+    Object.assign(this, { relay, now, replyMs, wakeMs, rebootMs, sendWake, wakeBlocked, onChange });
     this.operations = new Map();
     this.timer = setInterval(() => this.tick(), tickMs); this.timer.unref();
   }
@@ -241,6 +260,14 @@ export class PcPower {
     this.operations.set(id, operation);
     this.audit('power_submitted', actor, `${id}:${action}`);
     if (action === 'start') {
+      // A broker that cannot reach the PC's network says so now (dockerWakeBlock).
+      let blocked = null;
+      try { blocked = this.wakeBlocked(); } catch { blocked = 'unknown'; }
+      if (blocked) {
+        this.finish(operation, 'stopped', 'wake_send_failed');
+        this.audit('pc_wake_failed', actor, `${id}:${wakeFailureReason({ reason: blocked })}`);
+        return this.view(id, actor, operation);
+      }
       try { await this.sendWake(adapters.map(adapter => adapter.mac)); }
       catch (error) {
         this.finish(operation, 'stopped', 'wake_send_failed');

@@ -8,7 +8,7 @@ import 'package:multitap_client/ui/app_menu.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/usb_panel.dart';
 
-import 'usb_redirection_test.dart' show FakeBackend;
+import 'usb_redirection_test.dart' show FakeBackend, FakeSocket, ready;
 import 'helpers/pump_work.dart';
 
 class _SetupBackend extends FakeBackend {
@@ -21,7 +21,8 @@ class _SetupBackend extends FakeBackend {
 }
 
 // Actual product panel/route/observer; only local driver and restart callbacks
-// are synthetic. No native driver, Windows restart, socket or user data.
+// and an in-memory relay socket are synthetic. No native driver, Windows
+// restart, network or user data.
 void main() {
   for (final action in ['install', 'restart']) {
     for (final boundary in [
@@ -38,15 +39,24 @@ void main() {
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
         final backend = _SetupBackend()..driver = UsbDriverState.missing;
+        final socket = FakeSocket();
         final usb = UsbSession(
           url: Uri.parse('wss://synthetic.example/usb'),
           token: 'synthetic-token',
           sessionId: 'synthetic-session',
           backend: backend,
-          dialer: (_, _) async =>
-              throw StateError('No network in setup fixture'),
+          dialer: (_, _) async => socket,
         );
         await tester.runAsync(() async {
+          // The desktop takes devices, so the panel's line is the driver's
+          // and its actions are offered.
+          await usb.start();
+          socket.emit({...ready, 'sessionId': 'synthetic-session'});
+          socket.emit({'type': 'usb.status', 'state': 'ready'});
+          for (var i = 0; i < 200 && !usb.ready; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 1));
+          }
+          expect(usb.ready, isTrue);
           await usb.refresh();
           if (action == 'restart') {
             backend.installFailure = const UsbBackendException(

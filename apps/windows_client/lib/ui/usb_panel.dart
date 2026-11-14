@@ -104,6 +104,8 @@ class _UsbPanelState extends State<UsbPanel> {
     usb.closed,
     usb.ready,
     usb.driver.index,
+    usb.installerMissing,
+    usb.driverProblem?.index,
     usb.restartRequired,
     for (final entry in usb.entries)
       '${entry.device.id}:${entry.state.index}:${entry.moving}:'
@@ -220,10 +222,15 @@ class _UsbPanelState extends State<UsbPanel> {
     setState(() => _say(null));
     final failure = await widget.usb.installDriver();
     if (!mounted) return;
-    // A needed restart is a state (the status line), not a failure.
+    // A needed restart, a driver that does not run and a missing installer
+    // are states (the status line), not a failure.
+    final usb = widget.usb;
     setState(
       () => _say(
-        failure == null || widget.usb.restartRequired
+        failure == null ||
+                usb.restartNeeded ||
+                usb.driver == UsbDriverState.stopped ||
+                usb.driver == UsbDriverState.missing && usb.installerMissing
             ? null
             : usbMessage(failure),
       ),
@@ -335,7 +342,8 @@ class _UsbPanelState extends State<UsbPanel> {
                   IconButton(
                     key: const Key('usb-refresh'),
                     tooltip: l10n.refreshList,
-                    onPressed: usb.listing || usb.closed
+                    // The installation reads the list itself once it is over.
+                    onPressed: usb.listing || usb.installing || usb.closed
                         ? null
                         : () => unawaited(usb.refresh()),
                     icon: Icon(Icons.refresh_rounded, size: 18, color: p.muted),
@@ -379,11 +387,14 @@ class _UsbPanelState extends State<UsbPanel> {
               ),
             // The installed driver needs this PC restarted: offer it now or
             // later; nothing restarts without the save-your-work question.
-            if (usb.driver == UsbDriverState.missing &&
-                usb.restartRequired &&
+            // Read from the driver's state, so a refresh, a reopened panel or
+            // a reconnect keeps the offer until UsbDk answers. Only under the
+            // line that says so: under the desktop's line it would read as
+            // restarting the desktop.
+            if (_driverLine(usb) &&
+                usb.restartNeeded &&
                 !_restartLater &&
-                !_restartAsked &&
-                !usb.closed)
+                !_restartAsked)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: Wrap(
@@ -406,9 +417,9 @@ class _UsbPanelState extends State<UsbPanel> {
                   ],
                 ),
               ),
-            if (usb.driver == UsbDriverState.missing &&
-                !usb.restartRequired &&
-                !usb.closed)
+            // Never without the installer beside the client: it could only
+            // fail. Only under the line that asks for it, like the restart.
+            if (_driverLine(usb) && usb.installOffered)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: Tooltip(
@@ -546,6 +557,12 @@ class _UsbPanelState extends State<UsbPanel> {
       ? usb.error != 'usb_policy_changed' && usb.recovering
       : usb.unavailableReason == null && !usb.ready;
 
+  /// The state line speaks of UsbDk on this PC, not of the channel or the
+  /// desktop (ready: the channel is up and the desktop takes devices): only
+  /// then are the installation and the restart offered under it.
+  bool _driverLine(UsbSession usb) =>
+      usb.ready && usb.driver != UsbDriverState.unsupported;
+
   (String, AppTone)? _status(UsbSession usb) {
     if (usb.closed) {
       return (
@@ -564,11 +581,24 @@ class _UsbPanelState extends State<UsbPanel> {
     if (usb.driver == UsbDriverState.unsupported) {
       return (l10n.pcCantConnectUsbDevices, AppTone.warn);
     }
-    if (usb.driver == UsbDriverState.missing) {
+    if (usb.restartNeeded) {
       return _restartAsked
           ? (l10n.restartRequestedWindowsAsksIf, AppTone.info)
           : usb.restartRequired
           ? (usbMessage('usbdk_restart_required'), AppTone.warn)
+          : (usbMessage('usbdk_not_running'), AppTone.warn);
+    }
+    // Installed, but still not answering after Windows started again, or its
+    // helper's signature did not verify or it would not load: a restart would
+    // not help.
+    if (usb.driver == UsbDriverState.stopped) {
+      return usb.driverProblem == UsbDriverProblem.stillStopped
+          ? (l10n.usbDriverStillStopped, AppTone.danger)
+          : (l10n.usbDriverUnverified, AppTone.danger);
+    }
+    if (usb.driver == UsbDriverState.missing) {
+      return usb.installerMissing
+          ? (usbMessage('usbdk_installer_missing'), AppTone.danger)
           : (l10n.usbDriverNeedsInstalled, AppTone.warn);
     }
     return null;

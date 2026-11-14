@@ -302,5 +302,17 @@ int main(){try{
     require(!host::JsonParser::parse(f.agent.publicationTestHeartbeatCapabilities()).get("streaming").boolean()&&f.bridge.reads==before+2,"A heartbeat repeated a report older than the announcement");++checks;
     f.bridge.ready=true;f.bridge.text(R"({"type":"host.display.result","operationId":"00000000-0000-0000-0000-000000000003","ok":true,"count":1,"capabilities":{"service":true,"streaming":true}})");require(f.drain(),"Display result fixture failed");
     require(host::JsonParser::parse(f.agent.publicationTestHeartbeatCapabilities()).get("streaming").boolean()&&f.bridge.reads==before+3,"A heartbeat after a result with its own report repeated an older one");++checks;}
+  // The service's reload stops the running agent and connects again: the
+  // status says the next connection is being prepared, and neither that stop
+  // nor the destructor afterwards says "stopped". A shutdown stop still does.
+  for(const bool reload:{true,false}){
+    host::BrokerConnectionStatus status;Bridge bridge;const auto expected=reload?host::BrokerPhase::Connecting:host::BrokerPhase::Stopped;
+    {host::Agent agent([](const std::wstring&){},&bridge,{},&status);agent.publicationTestOpen();agent.stop(reload);
+      require(status.evidence().phase==expected,reload?"A reload stop reported a stopped service":"A shutdown stop did not report a stopped service");}
+    require(status.evidence().phase==expected&&(!reload||status.evidence().reason.empty()),"The destructor after a stop changed what the stop reported");++checks;
+  }
+  // An agent that never ran (a new one before its start) leaves the prepared status alone.
+  {host::BrokerConnectionStatus status;status.preparing();Bridge bridge;{host::Agent agent([](const std::wstring&){},&bridge,{},&status);agent.stop();}
+    require(status.evidence().phase==host::BrokerPhase::Connecting,"An agent that never ran reported a stop over the prepared connection");++checks;}
   std::cout<<"{\"actualAgentQueuePublicationCases\":"<<checks<<",\"transport\":\"recorded sink\",\"capabilities\":\"injected bridge\",\"perVideoFrameCapabilityReads\":0,\"windowsDisplayChanges\":0,\"actualNetwork\":false}\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

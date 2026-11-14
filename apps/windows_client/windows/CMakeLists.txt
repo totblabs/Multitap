@@ -113,12 +113,38 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
-# usb-v1: the pinned UsbDk installer (Red Hat, Apache-2.0) ships with the client
-# when tools/fetch-usb-drivers.ps1 -UsbDk fetched it; the client verifies its
-# size, SHA-256 and signature and installs it only from the user's explicit
-# action (usb_capture.cpp). Without it the USB panel says the component is missing.
-set(MULTITAP_USBDK_MSI "${CMAKE_CURRENT_SOURCE_DIR}/../../../.tools/usb-drivers/usbdk-1.0.22/UsbDk_1.0.22_x64.msi")
-if(EXISTS "${MULTITAP_USBDK_MSI}")
+# usb-v1: every client carries the pinned UsbDk installer (Red Hat, Apache-2.0)
+# in usbdk/. The client verifies its size, SHA-256 and signature and installs it
+# only from the user's explicit action (usb_capture.cpp); without it the USB
+# panel can only say the installer is missing. The MSI is not in the repository:
+# tools/fetch-usb-drivers.ps1 -UsbDk puts it in .tools. Its name, size and
+# SHA-256 come from the pin (third_party/usbdk/upstream.json). Checked when the
+# bundle is installed, so the smoke and QA targets still configure without it:
+# a Release or Profile build stops without that exact file, a Debug build only
+# warns. Host settings (resource build 20000 or more) never carry it.
+if(FLUTTER_VERSION_BUILD LESS 20000)
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/usbdk/upstream.json" MULTITAP_USBDK_PIN)
+  string(JSON MULTITAP_USBDK_RELEASE GET "${MULTITAP_USBDK_PIN}" release)
+  string(JSON MULTITAP_USBDK_NAME GET "${MULTITAP_USBDK_PIN}" file name)
+  string(JSON MULTITAP_USBDK_SIZE GET "${MULTITAP_USBDK_PIN}" file size)
+  string(JSON MULTITAP_USBDK_SHA256 GET "${MULTITAP_USBDK_PIN}" file sha256)
+  set(MULTITAP_USBDK_MSI "${CMAKE_CURRENT_SOURCE_DIR}/../../../.tools/usb-drivers/usbdk-${MULTITAP_USBDK_RELEASE}/${MULTITAP_USBDK_NAME}")
+  install(CODE "
+    if(\"\${CMAKE_INSTALL_CONFIG_NAME}\" MATCHES \"^([Rr][Ee][Ll][Ee][Aa][Ss][Ee]|[Pp][Rr][Oo][Ff][Ii][Ll][Ee])\$\")
+      set(MULTITAP_USBDK_LEVEL FATAL_ERROR)
+    else()
+      set(MULTITAP_USBDK_LEVEL WARNING)
+    endif()
+    if(NOT EXISTS \"${MULTITAP_USBDK_MSI}\")
+      message(\${MULTITAP_USBDK_LEVEL} \"usbdk_installer_missing: run tools/fetch-usb-drivers.ps1 -UsbDk\")
+    else()
+      file(SIZE \"${MULTITAP_USBDK_MSI}\" MULTITAP_USBDK_BYTES)
+      file(SHA256 \"${MULTITAP_USBDK_MSI}\" MULTITAP_USBDK_HASH)
+      if(NOT MULTITAP_USBDK_BYTES EQUAL ${MULTITAP_USBDK_SIZE} OR NOT MULTITAP_USBDK_HASH STREQUAL \"${MULTITAP_USBDK_SHA256}\")
+        message(\${MULTITAP_USBDK_LEVEL} \"usbdk_installer_changed: ${MULTITAP_USBDK_MSI} is not the pinned installer; run tools/fetch-usb-drivers.ps1 -UsbDk\")
+      endif()
+    endif()
+    " COMPONENT Runtime)
   install(FILES "${MULTITAP_USBDK_MSI}" DESTINATION "${CMAKE_INSTALL_PREFIX}/usbdk"
-    COMPONENT Runtime)
+    OPTIONAL COMPONENT Runtime)
 endif()

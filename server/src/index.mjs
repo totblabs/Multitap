@@ -68,7 +68,7 @@ try {
           restartServer: selfAccess ? () => shutdown(selfAccessRestartCode) : null,
           // 백업·복원: its working directory, and the updater that applies a restore.
           backupDir: join(config.dataDir, 'backup-work'), restoreClient: config.updateSocket ? new ServerRestoreClient(config.updateSocket) : null,
-          deploymentKind: config.deploymentKind, trustedProxies: config.trustedProxies, dataDir: config.dataDir, downloadDir: join(config.dataDir, 'downloads'), serverUpdate, relayOptions: { udp: config.udp, hostRoute: config.hostRoute, signinOptions: { enabled: false, qualifiedService: true } /* signed out -> Console, no in-stream sign-in */ } });
+          deploymentKind: config.deploymentKind, serverAddress: config.serverAddress, trustedProxies: config.trustedProxies, dataDir: config.dataDir, downloadDir: join(config.dataDir, 'downloads'), serverUpdate, relayOptions: { udp: config.udp, hostRoute: config.hostRoute, signinOptions: { enabled: false, qualifiedService: true } /* signed out -> Console, no in-stream sign-in */ } });
         current = server;
       } else current = server.createAdditionalListener(tls);
     } finally { tls?.key.fill(0); }
