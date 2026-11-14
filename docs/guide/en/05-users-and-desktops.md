@@ -145,8 +145,7 @@ The **Devices** screen in Host shows the ready state; it does not allow sharing 
 
 | Change | How it applies |
 | --- | --- |
-| Turning on copy and paste | With apps 1.1.13 and later, applies at once, also to an ongoing connection. An older app, or a connection that started with copy and paste all off, gets it from the next connection. |
-| Turning on shared folder, printer or USB | Applies from the next connection. |
+| Turning on | Applies from the next connection. |
 | Turning off copy and paste | The ongoing connection and transfers on that desktop end. |
 | Turning off shared folder, printer or USB | The screen stays; only that sharing is removed. |
 

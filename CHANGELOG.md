@@ -2,42 +2,7 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 and 1.1.13 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
-
-## [1.1.13](https://github.com/totblabs/Multitap/releases/tag/v1.1.13)
-
-### Starting a PC (server)
-
-- **Fixed: on a server installed as a Linux service, starting a local PC never worked.** The server service's security settings kept it from reading its network list, so it sent no Wake-on-LAN signal at all and failed at once. It sends the signal now; updating the server to 1.1.13 applies it.
-- A signal that cannot be sent is recorded in the admin console's log as "PC wake signal not sent", with the reason. Until now it read "VM power request failed".
-
-### Copy and paste permission (server)
-
-- **Fixed: copy and paste permissions an administrator widened during a connection (files allowed, say) applied only after connecting again.** The 1.1.8 fix had no effect: the server never passed a wider permission to a running connection. Now only the copy and paste channel opens again with the new permission; the screen stays connected, and a copy under way finishes first.
-- It needs the Windows or Android app at 1.1.13 or later. An older app, or a connection that started with copy and paste all off, gets it from the next connection. The admin console's hint says so.
-
-### Gamepads (server, Windows app, Android app, Host)
-
-- **Fixed: right after connecting, the virtual pad was plugged in only on the first press, so a short first press was lost.** It is plugged in when the first picture comes.
-- **Fixed: a button or trigger held when the connection dropped for a moment stayed held on the desktop.** While the connection is away the virtual pads are released, and their states are sent again when it is back.
-- **Fixed: a pad kept vibrating when the game stopped the rumble during such a drop.** The latest rumble is sent again when the connection is back, and the motors stop while it is frozen.
-- **Fixed (Windows app): 30 minutes of play with only a gamepad signed you out for inactivity.** With a Multitap window in front, buttons, triggers and stick movement count as input; a resting stick's small drift does not.
-- Only the window in front drives the rumble: a game in a window behind no longer shakes the pad in your hands, and a window that ends no longer stops the rumble of the game you are playing.
-- Android: a TV remote or a keyboard is not taken for a gamepad (only a controller with sticks or the A button is); PlayStation-style triggers send how far they are pulled; nothing held stays held after you leave the app and come back; rumble no longer stops after 60 seconds.
-- Host: a pad input that arrives just after a session ended no longer plugs a pad in again, and plugging and unplugging a pad fast no longer piles up work. A rare memory error is fixed.
-
-### Less video while the picture is hidden (Windows app, Android app)
-
-- **Fixed: a hidden-picture notice lost while the connection was frozen, or just before it opened, could leave a visible picture at one frame a second.** It is sent again when the connection is back and when the first picture comes.
-
-### USB sharing (Host)
-
-- A real wired Xbox 360 controller shared over USB is no longer taken for a virtual pad when its start is checked.
-- Removing a device no longer unplugs a port the virtual mouse or a pad uses.
-
-### Admin console (server)
-
-- The Host's log shows the virtual mouse and gamepad stages with their port, pad number and failure reason; until now they read as unrelated USB sharing reasons.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
 
 ## [1.1.12](https://github.com/totblabs/Multitap/releases/tag/v1.1.12)
 

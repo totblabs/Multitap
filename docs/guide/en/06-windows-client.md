@@ -328,7 +328,7 @@ Change the app settings with **⚙** (Settings) at the top of the desktop list.
 
 ### Auto sign-out
 
-With no keyboard, mouse or gamepad input for 30 minutes, you are signed out automatically and the connection is closed.
+With no keyboard or mouse input for 30 minutes, you are signed out automatically and the connection is closed.
 A warning appears 1 minute before; click **Keep using** to stay.
 You can turn this off for the current sign-in only with the **Auto sign-out** switch in **⚙** Settings.
 
