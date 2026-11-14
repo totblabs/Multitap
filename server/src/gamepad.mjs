@@ -38,6 +38,21 @@ export function validGamepadRemove(value) {
   return exact(value, ['type', 'pad']) && value.type === 'gamepad.remove' && int(value.pad, 0, maxPads - 1);
 }
 
+// What the relay keeps per session (relay.mjs, session-resume.mjs): the pads the client gave the Host a state for
+// (set neutral when the client goes away: the Host's virtual pads are its own devices, which input.reset does not
+// reach) and each pad's latest rumble (sent again to a client that resumes: a change made while it was away was
+// never delivered).
+export function trackGamepadMessage(session, value) {
+  const pads = session.gamepadPads ??= new Set();
+  if (value.type === 'gamepad.state') { pads.add(value.pad); return; }
+  pads.delete(value.pad);
+  session.gamepadRumble?.delete(value.pad);
+}
+export function trackGamepadRumble(session, rumble) {
+  (session.gamepadRumble ??= new Map()).set(rumble.pad, { low: rumble.low, high: rumble.high });
+}
+export const neutralGamepadState = (sessionId, pad) => ({ type: 'gamepad.state', pad, buttons: 0, lt: 0, rt: 0, lx: 0, ly: 0, rx: 0, ry: 0, sessionId });
+
 // The Host's rumble report for the client: exact fields; the client gets it without the sessionId.
 export function gamepadRumble(value) {
   if (!exact(value, ['type', 'sessionId', 'pad', 'low', 'high']) || value.type !== 'gamepad.rumble' || typeof value.sessionId !== 'string' || !int(value.pad, 0, maxPads - 1) || !int(value.low, 0, 255) || !int(value.high, 0, 255)) return null;

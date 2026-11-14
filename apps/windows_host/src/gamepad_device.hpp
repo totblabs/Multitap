@@ -201,9 +201,12 @@ class GamepadDeviceCore {
     }
     return !send || send(reply);
   }
+  // On the kernel connection's own thread, after its last request: no other thread is inside a send or a close of
+  // that connection when this returns (kernel_), so the server may free it.
   void kernelClosed(uint8_t id) {
     std::function<void(int)> gone;
     {
+      std::lock_guard kernel(kernel_);
       std::lock_guard lock(mutex_);
       if (id < 1 || id > xpad::maxPads || !pads_[id - 1].imported) return;
       Pad& p = pads_[id - 1];
@@ -213,8 +216,10 @@ class GamepadDeviceCore {
     if (gone) gone(id - 1);
   }
   // The newest state of [pad]: answers a waiting read, or the next one. Kept while the pad is not imported yet.
+  // From the service's threads: the reply goes out under kernel_, so the connection cannot be freed meanwhile.
   void state(int pad, const xpad::State& s) {
     if (pad < 0 || pad >= xpad::maxPads) return;
+    std::lock_guard kernel(kernel_);
     std::function<bool(const Bytes&)> send; Bytes reply;
     {
       std::lock_guard lock(mutex_);
@@ -227,8 +232,9 @@ class GamepadDeviceCore {
     }
     if (send) send(reply);
   }
-  // Ends [pad]'s kernel connection (its port could not be unplugged).
+  // Ends [pad]'s kernel connection (its port could not be unplugged). Under kernel_ for the same reason as state().
   void close(int pad) {
+    std::lock_guard kernel(kernel_);
     std::function<void()> close;
     { std::lock_guard lock(mutex_); if (pad >= 0 && pad < xpad::maxPads) close = pads_[pad].closeKernel; }
     if (close) close();
@@ -249,6 +255,9 @@ class GamepadDeviceCore {
     uint32_t controls = 0, stalled = 0, lastStalled = 0, readsSeen = 0;
   };
   mutable std::mutex mutex_;
+  // Held by another thread's send to (or close of) a kernel connection, and by that connection's end (kernelClosed):
+  // the server frees a connection only after its end, so it never frees one in use. Taken before mutex_.
+  std::mutex kernel_;
   std::array<Pad, xpad::maxPads> pads_;
   std::function<void(int, uint8_t, uint8_t)> rumble_;
   std::function<void(int)> gone_;
@@ -286,24 +295,28 @@ class GamepadDevices {
     if (pad < 0 || pad >= xpad::maxPads) return;
     core_.state(pad, s);
     std::lock_guard lock(mutex_);
-    if (stopped_ || ports_[pad] > 0 || wanted_[pad] || failed_[pad]) return;
-    wanted_[pad] = true; jobs_.push_back({pad, true}); wake_.notify_one();
+    // The wish is recorded also for a pad still plugged in: a removal waiting for the worker is overtaken.
+    if (stopped_ || wanted_[pad] || failed_[pad]) return;
+    wanted_[pad] = true; queue(pad);
   }
-  // The client's pad went away: unplugged.
-  void remove(int pad) {
-    if (pad < 0 || pad >= xpad::maxPads) return;
-    core_.state(pad, {});
-    std::lock_guard lock(mutex_);
-    if (stopped_) return;
-    wanted_[pad] = false; failed_[pad] = false; jobs_.push_back({pad, false}); wake_.notify_one();
-  }
+  // The client's pad went away: unplugged. A pad that could not be plugged in stays so for the session.
+  void remove(int pad) { remove(pad, false); }
   // The session ended: every pad goes, and a pad that could not be plugged in may be tried again next time.
-  void removeAll() { for (int pad = 0; pad < xpad::maxPads; ++pad) remove(pad); }
+  void removeAll() { for (int pad = 0; pad < xpad::maxPads; ++pad) remove(pad, true); }
+  // Nobody is there to hold the pads (the client or the Host's channel is away): each pad plugged in, or being
+  // plugged in, reads neutral; none is plugged in or out.
+  void neutralAll() {
+    for (int pad = 0; pad < xpad::maxPads; ++pad) {
+      bool held = false;
+      { std::lock_guard lock(mutex_); held = !stopped_ && (ports_[pad] > 0 || wanted_[pad]); }
+      if (held) core_.state(pad, {});
+    }
+  }
   void stop() {
     {
       std::lock_guard lock(mutex_);
       if (stopped_) return;
-      stopped_ = true; stopping_ = true; jobs_.clear();
+      stopped_ = true; stopping_ = true; jobs_.clear(); queued_.fill(false);
     }
     wake_.notify_all();
     if (options_.cancelAttach) try { options_.cancelAttach(); } catch (...) { }
@@ -319,27 +332,40 @@ class GamepadDevices {
   const GamepadDeviceCore& core() const { return core_; }
 
  private:
-  struct Job { int pad = 0; bool plug = false; };
   Options options_;
   GamepadDeviceCore core_;
   BasicUsbIpServer<GamepadDeviceCore> server_;
   uint16_t serverPort_ = 0;                                              // worker thread only
-  mutable std::mutex mutex_; std::condition_variable wake_; std::deque<Job> jobs_; std::thread worker_;
-  std::array<int, xpad::maxPads> ports_{}; std::array<bool, xpad::maxPads> wanted_{}, failed_{};
+  // The pads whose wish (wanted_) changed, each at most once: a client that plugs and unplugs a pad without end
+  // queues no more than four jobs, and the worker does only what the latest wish needs.
+  mutable std::mutex mutex_; std::condition_variable wake_; std::deque<int> jobs_; std::thread worker_;
+  std::array<int, xpad::maxPads> ports_{}; std::array<bool, xpad::maxPads> wanted_{}, failed_{}, queued_{};
   bool stopped_ = false, busy_ = false; std::atomic<bool> stopping_{false};
 
+  void remove(int pad, bool forgetFailure) {
+    if (pad < 0 || pad >= xpad::maxPads) return;
+    core_.state(pad, {});
+    std::lock_guard lock(mutex_);
+    if (stopped_) return;
+    wanted_[pad] = false; if (forgetFailure) failed_[pad] = false; queue(pad);
+  }
+  void queue(int pad) {                                                  // under mutex_
+    if (queued_[pad]) return;
+    queued_[pad] = true; jobs_.push_back(pad); wake_.notify_one();
+  }
   void run() {
     for (;;) {
-      Job job;
+      int pad = 0; bool plugIn = false, unplugOut = false;
       {
         std::unique_lock lock(mutex_);
         busy_ = false;
         wake_.wait(lock, [this] { return stopped_ || !jobs_.empty(); });
         if (stopped_) return;
-        job = jobs_.front(); jobs_.pop_front(); busy_ = true;
-        if (job.plug && (!wanted_[job.pad] || ports_[job.pad] > 0)) continue;   // removed meanwhile, or already in
+        pad = jobs_.front(); jobs_.pop_front(); queued_[pad] = false; busy_ = true;
+        plugIn = wanted_[pad] && ports_[pad] == 0 && !failed_[pad];
+        unplugOut = !wanted_[pad] && ports_[pad] > 0;
       }
-      if (job.plug) plug(job.pad); else unplug(job.pad);
+      if (plugIn) plug(pad); else if (unplugOut) unplug(pad);
     }
   }
   void unplug(int pad) {

@@ -49,8 +49,10 @@ class GamepadInput {
     Stop();
     if (module_) FreeLibrary(module_);
   }
-  // On the window's thread: the changes the poller posted. True when the message was this one.
-  bool HandleMessage(UINT message) {
+  // On the window's thread: the changes the poller posted. True when the message was this one. [human]: a button,
+  // a trigger past XInput's threshold or a stick outside its dead zone moved (the idle sign-out counts it as input,
+  // as a key or the mouse; a stick that drifts inside its dead zone does not).
+  bool HandleMessage(UINT message, bool* human = nullptr) {
     if (message != kGamepadMessage) return false;
     std::array<Slot, XUSER_MAX_COUNT> changed{};
     {
@@ -60,9 +62,15 @@ class GamepadInput {
     }
     if (!channel_ || !running_) return true;
     for (size_t i = 0; i < changed.size(); ++i) {
-      if (changed[i].removed) channel_->InvokeMethod("removed", std::make_unique<V>(int32_t(i)));
+      if (changed[i].removed) {
+        // The slot's pad is gone, and with it what this window set on its motors; another pad may take the slot.
+        channel_->InvokeMethod("removed", std::make_unique<V>(int32_t(i)));
+        delivered_[i] = XINPUT_GAMEPAD{}; vibrating_[i] = false;
+      }
       else if (changed[i].dirty) {
         const auto& pad = changed[i].pad;
+        if (human && Moved(delivered_[i], pad)) *human = true;
+        delivered_[i] = pad;
         flutter::EncodableMap state{{V("slot"), V(int32_t(i))}, {V("buttons"), V(int32_t(pad.wButtons))}, {V("lt"), V(int32_t(pad.bLeftTrigger))}, {V("rt"), V(int32_t(pad.bRightTrigger))},
                                     {V("lx"), V(int32_t(pad.sThumbLX))}, {V("ly"), V(int32_t(pad.sThumbLY))}, {V("rx"), V(int32_t(pad.sThumbRX))}, {V("ry"), V(int32_t(pad.sThumbRY))}};
         channel_->InvokeMethod("state", std::make_unique<V>(std::move(state)));
@@ -76,6 +84,19 @@ class GamepadInput {
   using SetState = DWORD(WINAPI*)(DWORD, XINPUT_VIBRATION*);
   struct Slot { bool connected = false, dirty = false, removed = false; DWORD packet = 0; XINPUT_GAMEPAD pad{}; };
 
+  static bool Moved(const XINPUT_GAMEPAD& before, const XINPUT_GAMEPAD& after) {
+    if (before.wButtons != after.wButtons) return true;
+    const auto trigger = [](BYTE was, BYTE now) {
+      return now > XINPUT_GAMEPAD_TRIGGER_THRESHOLD ? now != was : was > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
+    };
+    const auto stick = [](SHORT wasX, SHORT wasY, SHORT x, SHORT y, long long zone) {
+      return (wasX != x || wasY != y) && (long long)x * x + (long long)y * y > zone * zone;
+    };
+    return trigger(before.bLeftTrigger, after.bLeftTrigger) || trigger(before.bRightTrigger, after.bRightTrigger) ||
+           stick(before.sThumbLX, before.sThumbLY, after.sThumbLX, after.sThumbLY, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE) ||
+           stick(before.sThumbRX, before.sThumbRY, after.sThumbRX, after.sThumbRY, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE);
+  }
+
   void Handle(const flutter::MethodCall<V>& call, std::unique_ptr<flutter::MethodResult<V>> result) {
     const auto& method = call.method_name();
     if (method == "start") { Start(); result->Success(V(get_ != nullptr)); return; }
@@ -86,6 +107,7 @@ class GamepadInput {
       const int slot = number("slot"), low = number("low"), high = number("high");
       if (slot < 0 || slot >= int(XUSER_MAX_COUNT) || low < 0 || low > 255 || high < 0 || high > 255) { result->Error("invalid_arguments", "Expected slot, low, high."); return; }
       if (set_) { XINPUT_VIBRATION vibration{WORD(low * 257), WORD(high * 257)}; set_(DWORD(slot), &vibration); }
+      vibrating_[size_t(slot)] = low != 0 || high != 0;
       result->Success();
       return;
     }
@@ -112,7 +134,10 @@ class GamepadInput {
     running_ = false;
     if (stop_) SetEvent(stop_);
     if (thread_.joinable()) thread_.join();
-    if (set_) for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i) if (slots_[i].connected) { XINPUT_VIBRATION off{}; set_(i, &off); }
+    // Only the motors this window set: the pads are shared by every window of the PC, and another may be driving them.
+    if (set_) for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i) if (vibrating_[i]) { XINPUT_VIBRATION off{}; set_(i, &off); }
+    vibrating_.fill(false);
+    delivered_.fill(XINPUT_GAMEPAD{});
     Close();
   }
   void Close() {
@@ -154,6 +179,9 @@ class GamepadInput {
   std::unique_ptr<flutter::MethodChannel<V>> channel_;
   std::mutex mutex_;
   std::array<Slot, XUSER_MAX_COUNT> slots_{};
+  // The window's thread only: each slot's last state given to Dart, and the slots whose motors this window set.
+  std::array<XINPUT_GAMEPAD, XUSER_MAX_COUNT> delivered_{};
+  std::array<bool, XUSER_MAX_COUNT> vibrating_{};
   bool posted_ = false;
   std::atomic<bool> running_{false};
   HANDLE timer_ = nullptr, stop_ = nullptr;

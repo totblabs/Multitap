@@ -11,7 +11,7 @@
 using namespace host;
 namespace {
 unsigned checks = 0;
-void require(bool condition, const char* reason) { ++checks; if (!condition) throw std::runtime_error(reason); }
+void require(bool condition, const std::string& reason) { ++checks; if (!condition) throw std::runtime_error(reason); }
 bool waitFor(const std::function<bool()>& condition, int milliseconds = 3000) {
   for (int waited = 0; waited < milliseconds; waited += 5) { if (condition()) return true; Sleep(5); }
   return condition();
@@ -171,9 +171,36 @@ void failures() {
   require(waitFor([&] { return fake.prepares == 1 && pads.idle(); }), "The preparation did not run");
   for (int i = 0; i < 10; ++i) pads.state(0, a);
   Sleep(50); require(fake.prepares == 1 && !pads.plugged(0), "A failed pad was tried again in the same session");
+  // A client that removes and adds the pad again does not make it try again either (only the session's end does).
+  for (int i = 0; i < 10; ++i) { pads.remove(0); pads.state(0, a); }
+  Sleep(50); require(waitFor([&] { return pads.idle(); }) && fake.prepares == 1, "A removal made a failed pad try again");
   pads.removeAll();
   pads.state(0, a);
   require(waitFor([&] { return fake.prepares == 2; }), "The next session did not try again");
+}
+
+// A client that plugs and unplugs a pad without end: the jobs are coalesced per pad, and the pad ends as the last
+// message said. Being away sets the pads neutral without unplugging them.
+void churnAndNeutral() {
+  usb::keptPorts().clearForTesting();
+  FakeController fake; usb::GamepadDevices pads(fake.options());
+  usb::xpad::State a; a.buttons = 0x1000; a.rt = 255;
+  for (int i = 0; i < 2000; ++i) { pads.state(1, a); pads.remove(1); }
+  pads.state(1, a);
+  require(waitFor([&] { return pads.plugged(1) && pads.idle(); }), "The pad did not end plugged in, as the last message said");
+  require(fake.attaches < 50, "Every message became a plug-in (" + std::to_string(fake.attaches.load()) + ")");
+  const int port = pads.port(1); const int attaches = fake.attaches;
+  pads.neutralAll();
+  Sleep(50);
+  require(pads.plugged(1) && pads.port(1) == port && fake.attaches == attaches, "Setting the pads neutral plugged or unplugged one");
+  pads.neutralAll();   // no pad 0, 2 or 3: none is plugged in by it
+  Sleep(50);
+  require(!pads.plugged(0) && !pads.plugged(2) && fake.attaches == attaches, "A neutral state plugged in a pad nobody used");
+  // A state right after a removal of a plugged pad (before the worker unplugged it) is the last word: plugged.
+  pads.remove(1); pads.state(1, a);
+  require(waitFor([&] { return pads.plugged(1) && pads.idle(); }), "A state after a removal left the pad unplugged");
+  pads.removeAll();
+  require(waitFor([&] { return !pads.plugged(1) && pads.idle(); }), "The session's end left the pad");
 }
 
 void messages() {
@@ -195,7 +222,7 @@ void messages() {
 int main() {
   try {
     WSADATA wsa{}; if (WSAStartup(MAKEWORD(2, 2), &wsa)) throw std::runtime_error("Winsock");
-    const std::pair<const char*, void (*)()> steps[] = {{"descriptors", descriptors}, {"core", core}, {"owner", owner}, {"failures", failures}, {"messages", messages}};
+    const std::pair<const char*, void (*)()> steps[] = {{"descriptors", descriptors}, {"core", core}, {"owner", owner}, {"failures", failures}, {"churn and neutral", churnAndNeutral}, {"messages", messages}};
     for (const auto& [name, step] : steps) { std::cout << name << std::endl; step(); }
     WSACleanup();
     std::cout << "Multitap Host gamepad regression passed (" << checks << " checks)\n";

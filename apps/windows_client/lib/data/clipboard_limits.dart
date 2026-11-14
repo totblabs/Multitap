@@ -52,6 +52,12 @@ const clipboardPullQueueDepth = 4;
 /// which is walked when the peer pastes (clipboard.manifest). docs/remote-session-protocol.md, "Deferred manifest".
 const clipboardDeferredHeader = 'X-Multitap-Clipboard-Deferred';
 const clipboardDeferredHeaderValue = '1';
+
+/// This client takes a pair's clipboard.ready policy as its own (so a grant the administrator widens during the
+/// stream applies when the relay replaces the pair). A client without it intersected the ready with the stream's
+/// start and would refuse what the Host is then allowed to offer, so the relay widens only where it is sent.
+const clipboardLivePolicyHeader = 'X-Multitap-Clipboard-Policy';
+const clipboardLivePolicyHeaderValue = '1';
 const clipboardDeferredProtocol = 'manifest-on-paste-v1';
 const clipboardPullQueueWindowBytes = 4 * 1024 * 1024;
 const clipboardPullQueueWindowUnits = 128;

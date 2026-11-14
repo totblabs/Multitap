@@ -742,13 +742,22 @@ export function render(ctx) {
   // The saved settings no longer list the address this page was opened on: where to open the console next.
   const here = snapshot.managementOrigin, moved = typeof here === 'string' && !!here && Array.isArray(model.operation?.origins) && model.operation.origins.length > 0 && !model.operation.origins.includes(here) &&
     !['failed', 'failed_rolled_back'].includes(model.operation.state) && !!(origin(model.operation.primaryOrigin, 'https') ?? origin(model.operation.primaryOrigin, 'http'));
+  // A proxy the server does not trust yet is the one the test's own request came through: one click lists it and
+  // tests again. Only that address, and only when it is pressed.
+  const listedProxies = () => model.draft.trustedProxies.split(/\r?\n/).map(ip => ip.trim()).filter(Boolean);
+  const trustPeer = check => check.code === 'server_access_address_proxy_untrusted' && check.peer && !listedProxies().includes(check.peer)
+    ? disable(button(t('server-access.addressProxyTrust', { peer: check.peer }), () => {
+      if (disabled || stale || model.testing || model.conflict || !current(ctx, model) || listedProxies().includes(check.peer)) return;
+      model.draft.trustedProxies = [...listedProxies(), check.peer].join('\n'); invalidate(model);
+      void testDraft(ctx, model, snapshot);
+    }, 'secondary', 'plus', { 'data-access-proxy-trust': check.peer }), disabled || stale || model.testing || model.conflict ? t('server-access.96') : null) : null;
   const testPanel = panel({ title: t('server-access.174'), className: 'server-access-results' },
     el('p', { role: 'status', 'data-access-test-status': '', hidden: !testStatus }, model.testing ? el('span', { class: 'loading-dot is-inline', 'aria-hidden': 'true' }) : null, testStatus),
     model.lastTest ? el('ul', { class: 'server-access-checks' }, model.lastTest.checks.map(check => el('li', check.status === 'unreached' ? { 'data-unreached': '' } : {},
       icon(check.status === 'pending' ? 'clock' : check.ok ? 'check' : 'alert'),
       // An address the server tried is named, with what it found there; an extra one it did not reach, with what to do.
       check.id === 'address' && check.origin ? el('span', { 'data-access-address-check': check.status }, check.origin,
-        check.status === 'unreached' ? el('small', { 'data-access-extra-unreached': '' }, t('server-access.addressExtraUnreached')) : null, el('small', {}, addressReason(check)))
+        check.status === 'unreached' ? el('small', { 'data-access-extra-unreached': '' }, t('server-access.addressExtraUnreached')) : null, el('small', {}, addressReason(check)), trustPeer(check))
         : el('span', {}, (checkNames[check.id] ?? t('server-access.175')) + (check.status === 'pending' ? t('server-access.176') : ''),
           bounded(check.message, 400) && check.message ? el('small', {}, check.message) : check.code && check.status !== 'pending' ? el('small', {}, check.code) : null)))) : null,
     unreached.some(check => check.origin?.startsWith('https://')) ? el('p', { class: 'field-hint', 'data-access-https-needs': '' }, t('server-access.httpsNeeds')) : null,

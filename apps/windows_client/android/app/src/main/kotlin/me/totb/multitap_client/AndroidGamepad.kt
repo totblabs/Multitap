@@ -18,14 +18,17 @@ import kotlin.math.roundToInt
 // gamepad-v1 (docs/remote-session-protocol.md "Gamepads"): this phone's game controllers for the session's Host.
 // The channel "multitap/android/gamepad": Dart sends "start" and "stop" and "rumble" {slot, low, high}; this side
 // sends "state" {slot, buttons, lt, rt, lx, ly, rx, ry} (XInput's ranges and button bits) on every change and
-// "removed" slot. A slot is the InputDevice id. While started, the keys and motion of a gamepad or joystick are
-// taken here (B is no Back, the D-pad moves nothing in the app); other devices are untouched.
+// "removed" slot. A slot is the InputDevice id. While started, the keys and motion of a game controller are taken
+// here (B is no Back, the D-pad moves nothing in the app); other devices are untouched. A game controller has
+// sticks (a joystick source) or the gamepad buttons; a TV remote or a keyboard that Android also lists as a gamepad
+// but has neither keeps steering the app. A controller already connected when a session starts, or connected
+// during it, gets its neutral state at once, so the desktop has its virtual controller before the first press.
 class AndroidGamepad(activity: Activity, engine: FlutterEngine) {
     private val channel = MethodChannel(engine.dartExecutor.binaryMessenger, "multitap/android/gamepad")
     private val inputManager = activity.getSystemService(Context.INPUT_SERVICE) as InputManager
     private var running = false
 
-    private class Pad {
+    private class Pad(val analogLt: Boolean, val analogRt: Boolean) {
         var buttons = 0          // from keys
         var hat = 0              // D-pad bits from AXIS_HAT_X/Y
         var keyLt = false; var keyRt = false
@@ -35,7 +38,7 @@ class AndroidGamepad(activity: Activity, engine: FlutterEngine) {
     private val pads = HashMap<Int, Pad>()
 
     private val listener = object : InputManager.InputDeviceListener {
-        override fun onInputDeviceAdded(deviceId: Int) {}
+        override fun onInputDeviceAdded(deviceId: Int) { if (running) plugIn(InputDevice.getDevice(deviceId)) }
         override fun onInputDeviceChanged(deviceId: Int) {}
         override fun onInputDeviceRemoved(deviceId: Int) {
             if (pads.remove(deviceId) != null && running) channel.invokeMethod("removed", deviceId)
@@ -46,7 +49,10 @@ class AndroidGamepad(activity: Activity, engine: FlutterEngine) {
         inputManager.registerInputDeviceListener(listener, Handler(activity.mainLooper))
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
-                "start" -> { running = true; pads.clear(); result.success(true) }
+                "start" -> {
+                    running = true; pads.clear(); result.success(true)
+                    for (id in inputManager.inputDeviceIds) plugIn(InputDevice.getDevice(id))
+                }
                 "stop" -> { stopRumble(); running = false; pads.clear(); result.success(null) }
                 "rumble" -> {
                     val slot = call.argument<Int>("slot"); val low = call.argument<Int>("low"); val high = call.argument<Int>("high")
@@ -65,21 +71,47 @@ class AndroidGamepad(activity: Activity, engine: FlutterEngine) {
         running = false
     }
 
-    private fun gamepad(device: InputDevice?): Boolean {
+    // A game controller: sticks (a joystick source), or the gamepad buttons (A). Android also lists some TV remotes
+    // and keyboards as gamepads; with neither, their arrows and Back stay with the app.
+    private fun controller(device: InputDevice?): Boolean {
         val sources = device?.sources ?: return false
-        return sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD || sources and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
+        if (sources and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK) return true
+        return sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD &&
+            device.hasKeys(KeyEvent.KEYCODE_BUTTON_A).firstOrNull() == true
+    }
+    private fun pad(device: InputDevice, id: Int): Pad = pads.getOrPut(id) {
+        // An analog trigger is the trigger's value; L2/R2 keys then only say it passed a threshold.
+        fun has(axis: Int) = device.getMotionRange(axis, InputDevice.SOURCE_JOYSTICK) != null
+        Pad(has(MotionEvent.AXIS_LTRIGGER) || has(MotionEvent.AXIS_BRAKE), has(MotionEvent.AXIS_RTRIGGER) || has(MotionEvent.AXIS_GAS))
+    }
+    // Its neutral state now: the desktop plugs the virtual controller in before the first press.
+    private fun plugIn(device: InputDevice?) {
+        if (device == null || !controller(device) || pads.containsKey(device.id)) return
+        emit(device.id, pad(device, device.id))
+    }
+
+    // The app's window lost focus: Android sends a controller's later moves elsewhere, so what is held now would
+    // come back as held. Every pad is released; the next event says where it really is.
+    fun released() {
+        if (!running) return
+        for ((id, pad) in pads) {
+            pad.buttons = 0; pad.hat = 0; pad.keyLt = false; pad.keyRt = false
+            pad.lt = 0; pad.rt = 0; pad.lx = 0; pad.ly = 0; pad.rx = 0; pad.ry = 0
+            emit(id, pad)
+        }
     }
 
     // A key of a game controller: true when taken.
     fun key(event: KeyEvent): Boolean {
-        if (!running || !gamepad(event.device)) return false
+        val device = event.device
+        if (!running || !controller(device)) return false
         val code = event.keyCode
         val trigger = code == KeyEvent.KEYCODE_BUTTON_L2 || code == KeyEvent.KEYCODE_BUTTON_R2
         val bit = buttonBit(code)
         if (bit == 0 && !trigger) return false       // volume, power and the like stay with Android
         if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return true
         val down = event.action == KeyEvent.ACTION_DOWN
-        val pad = pads.getOrPut(event.deviceId) { Pad() }
+        val pad = pad(device, event.deviceId)
         when (code) {
             KeyEvent.KEYCODE_BUTTON_L2 -> pad.keyLt = down
             KeyEvent.KEYCODE_BUTTON_R2 -> pad.keyRt = down
@@ -91,10 +123,10 @@ class AndroidGamepad(activity: Activity, engine: FlutterEngine) {
 
     // The sticks, triggers and hat of a game controller: true when taken.
     fun motion(event: MotionEvent): Boolean {
-        if (!running || !gamepad(event.device)) return false
-        if (event.source and InputDevice.SOURCE_JOYSTICK != InputDevice.SOURCE_JOYSTICK || event.actionMasked != MotionEvent.ACTION_MOVE) return false
         val device = event.device
-        val pad = pads.getOrPut(event.deviceId) { Pad() }
+        if (!running || !controller(device)) return false
+        if (event.source and InputDevice.SOURCE_JOYSTICK != InputDevice.SOURCE_JOYSTICK || event.actionMasked != MotionEvent.ACTION_MOVE) return false
+        val pad = pad(device, event.deviceId)
         fun axis(id: Int): Float = if (device.getMotionRange(id, event.source) != null) event.getAxisValue(id) else 0f
         fun has(id: Int): Boolean = device.getMotionRange(id, event.source) != null
         fun stick(value: Float): Int = (value.coerceIn(-1f, 1f) * 32767f).roundToInt().coerceIn(-32768, 32767)
@@ -112,9 +144,10 @@ class AndroidGamepad(activity: Activity, engine: FlutterEngine) {
     }
 
     private fun emit(id: Int, pad: Pad) {
+        // A digital L2/R2 counts only on a controller without the analog trigger (a pull past its threshold is not 255).
         val state = intArrayOf(
             (pad.buttons or pad.hat) and 0xF7FF,
-            if (pad.keyLt) 255 else pad.lt, if (pad.keyRt) 255 else pad.rt,
+            if (pad.keyLt && !pad.analogLt) 255 else pad.lt, if (pad.keyRt && !pad.analogRt) 255 else pad.rt,
             pad.lx, pad.ly, pad.rx, pad.ry)
         if (pad.sent?.contentEquals(state) == true) return
         pad.sent = state
@@ -122,7 +155,9 @@ class AndroidGamepad(activity: Activity, engine: FlutterEngine) {
             "lx" to state[3], "ly" to state[4], "rx" to state[5], "ry" to state[6]))
     }
 
-    // One motor's worth: Android's controller vibrators have one strength; the stronger of the two motors.
+    // One motor's worth: Android's controller vibrators have one strength; the stronger of the two motors. It goes on
+    // (a repeating second) until the Host's next level, as the game's rumble does. The pattern starts with an empty
+    // segment: before Android 12 a controller's vibrator reads a waveform's timings as off/on pairs from "off".
     @Suppress("DEPRECATION")
     private fun rumble(id: Int, low: Int, high: Int) {
         val device = InputDevice.getDevice(id) ?: return
@@ -131,8 +166,9 @@ class AndroidGamepad(activity: Activity, engine: FlutterEngine) {
         val strength = max(low, high)
         try {
             if (strength == 0) vibrator.cancel()
-            else if (Build.VERSION.SDK_INT >= 26) vibrator.vibrate(VibrationEffect.createOneShot(60_000L, if (vibrator.hasAmplitudeControl()) strength.coerceIn(1, 255) else VibrationEffect.DEFAULT_AMPLITUDE))
-            else vibrator.vibrate(60_000L)
+            else if (Build.VERSION.SDK_INT >= 26) vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0L, 1000L),
+                intArrayOf(0, if (vibrator.hasAmplitudeControl()) strength.coerceIn(1, 255) else VibrationEffect.DEFAULT_AMPLITUDE), 1))
+            else vibrator.vibrate(longArrayOf(0L, 1000L), 1)
         } catch (_: Exception) { }
     }
     private fun stopRumble() { for (id in pads.keys.toList()) rumble(id, 0, 0) }

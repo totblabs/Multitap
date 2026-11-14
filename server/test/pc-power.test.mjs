@@ -155,6 +155,17 @@ test('A PC that does not come back ends as wake_timeout; a PC without a wired ad
   assert.equal(f.woken.length, 1);
 });
 
+test('켜기 that could not send a packet ends as wake_send_failed and records why (a PC wake failure, not a VM power failure)', async t => {
+  const f = await fixture(t, { sendWake: async () => { throw Object.assign(new Error('wake_send_failed'), { reason: 'EPERM' }); } });
+  await f.close(await f.host());
+  const started = await f.client('alice', 'POST', `/desktops/${pcId}/power`, { action: 'start' });
+  assert.equal(started.body.powerTask.status, 'stopped');
+  assert.equal(started.body.powerTask.exitStatus, 'wake_send_failed');
+  const rows = f.store.auditLog().map(row => [row.event, row.subject]);
+  assert.ok(rows.some(([event, subject]) => event === 'pc_wake_failed' && subject === `${pcId}:EPERM`), JSON.stringify(rows));
+  assert.ok(!rows.some(([event]) => event === 'power_failed' || event === 'pc_wake_sent'));
+});
+
 test('A Host that could not read its adapters keeps the last wake report', async t => {
   const f = await fixture(t);
   await f.close(await f.host());

@@ -174,7 +174,9 @@ for (const change of ['node', 'vmid', 'existing-host', 'lost', 'now-known']) tes
   if (change === 'now-known') f.request.candidates = [candidate];
   await assert.rejects(form.action(ticked()), /Proxmox에서 찾은 VM이 바뀌었어요/); assert.deepEqual(f.writes, []);
 });
-for (const [vmLookup, reason] of [[{ state: 'not_found' }, 'Proxmox에서 맞는 VM을 찾지 못했어요.'], [{ state: 'unavailable', errorCode: 'proxmox_unreachable' }, 'Proxmox에 연결하지 못했어요.'],
+for (const [vmLookup, reason] of [[{ state: 'not_found' }, 'Proxmox에서 맞는 VM을 찾지 못했어요.'], [{ state: 'unavailable', errorCode: 'proxmox_unreachable' }, '서버에서 Proxmox에 연결하지 못했어요. 주소와 방화벽을 확인하세요.'],
+  [{ state: 'unavailable', errorCode: 'proxmox_permission_denied' }, 'Proxmox 토큰 또는 접근 권한을 확인하세요.'], [{ state: 'unavailable', errorCode: 'proxmox_certificate_error' }, '서버 인증서를 검증하지 못했어요. 호스트 이름과 Proxmox CA 인증서를 확인하세요.'],
+  [{ state: 'unavailable', errorCode: 'proxmox_timeout' }, 'Proxmox에 연결하지 못했어요.'],
   [{ state: 'unavailable', errorCode: 'proxmox_lookup_incomplete' }, 'Proxmox에서 맞는 VM을 찾지 못했어요.'], [{ state: 'ambiguous', count: 2 }, '식별 정보가 같은 VM이 여러 대예요.'], [undefined, 'Proxmox에서 맞는 VM을 찾지 못했어요.']]) test('an unplaced request shows one reason line and the manual link: ' + (vmLookup?.errorCode ?? vmLookup?.state ?? 'no lookup field'), t => {
   const f = fixture(t, { vmLookup }), root = f.render(), line = root.querySelector('.request-match');
   assert.equal(line.querySelector('span').textContent, reason);
@@ -184,6 +186,14 @@ for (const [vmLookup, reason] of [[{ state: 'not_found' }, 'Proxmox에서 맞는
   assert.deepEqual([...root.querySelectorAll('article.request-card .actions button')].map(n => n.textContent), ['로컬 PC로 등록', '거절']);
   assert.equal(root.querySelector('.request-pc-hint').textContent, 'Proxmox 밖의 PC라면 로컬 PC로 등록하세요.');
   const form = f.openManual(); assert.equal(form.fields.find(x => x.name === 'node').value, '');
+});
+test('a server with no Proxmox connection says so, offers no manual VM entry, and still offers a local PC', t => {
+  const f = fixture(t, { vmLookup: { state: 'unavailable', errorCode: 'proxmox_setup_required' } }), root = f.render(), line = root.querySelector('.request-match');
+  assert.equal(line.querySelector('span').textContent, '이 서버는 아직 Proxmox에 연결하지 않았어요. VM이면 Proxmox부터 연결하세요.');
+  assert.equal(line.querySelector('button'), null);
+  assert.equal(!!f.button(root, '확인하고 승인'), false);
+  assert.deepEqual([...root.querySelectorAll('article.request-card .actions button')].map(n => n.textContent), ['로컬 PC로 등록', '거절']);
+  assert.equal(root.querySelector('.request-pc-hint').textContent, 'Proxmox 밖의 PC라면 로컬 PC로 등록하세요.');
 });
 test('while the server is still looking no VM approval or manual entry is offered yet', t => {
   const f = fixture(t, { vmLookup: { state: 'searching' } }), root = f.render();

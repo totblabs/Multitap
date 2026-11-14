@@ -189,6 +189,20 @@ function renewProxmox(ctx) {
     }
   }, { save: t('system.83'), description: t('system.84') });
 }
+// 다시 연결: a new integration account and token made in the Proxmox Shell and
+// pasted under ‘연결 설정 변경’, which this opens and brings into view. 토큰
+// 갱신 only moves the expiry of the token the server holds; a token Proxmox
+// refuses (removed or remade there, or brought by a backup from another
+// server) is fixed only by connecting again.
+function openReconnect(ctx) {
+  ctx.state.expanded?.set?.('pve-change', true);
+  ctx.render();
+  const node = globalThis.document.querySelector('details.pve-change');
+  if (!node) return;
+  node.setAttribute('open', '');
+  node.scrollIntoView?.({ block: 'start' });
+  node.querySelector('summary')?.focus?.();
+}
 // The integration account lacks VM.Console (an installation connected before
 // the setup script granted it, or an account made by hand): the page says so
 // where the account is shown, with the one command that adds it, and this
@@ -212,11 +226,12 @@ export function proxmox(ctx) {
   const state = ctx.state, config = state.data.proxmox, setup = ctx.setupRequired();
   const sync = disable(button(state.pveBusy ? t('common.86') : t('common.42'), ctx.syncProxmox, 'secondary', 'refresh'), state.pveBusy ? t('common.149') : !config.configured ? t('system.87') : null);
   const renew = disable(button(t('system.75'), () => renewProxmox(ctx), 'primary', 'key'), state.pveBusy ? t('system.88') : null);
+  const reconnect = () => disable(button(t('system.reconnect'), () => openReconnect(ctx), 'secondary', 'link'), state.pveBusy ? t('common.149') : null);
   // `working`: a saved connection that has been checked at least once (the first setup ends with that check). Settings
   // saved during the first setup that never connected are still the first connection: the two steps stay open,
   // pasting again replaces them without the "바꾸기" confirmation, and there is no token to renew yet.
   const working = config.configured && !setup;
-  const result = [ctx.pageHeader({ title: t('common.10'), description: setup ? t('system.89') : null, actions: working ? [sync, renew] : config.configured ? [sync] : [] })];
+  const result = [ctx.pageHeader({ title: t('common.10'), description: setup ? t('system.89') : null, actions: working ? [sync, renew, reconnect()] : config.configured ? [sync] : [] })];
   // The first setup in the order of its bar and of 홈 시작하기: the account, the server's address, Proxmox (this page).
   // The address step is ticked once the server has one (a Docker install made by the install command starts with it).
   if (setup) {
@@ -239,6 +254,7 @@ export function proxmox(ctx) {
     // certificate) fails on the certificate once Proxmox replaces it: say that,
     // and give the one command that makes a new connection setting.
     const failureCode = state.pveError ? state.pveErrorCode : config.state === 'error' ? config.errorCode : refused ? 'proxmox_certificate_error' : null;
+    const tokenRefused = working && failureCode === 'proxmox_permission_denied';
     let pinCommand = null;
     if (config.fingerprint && failureCode === 'proxmox_certificate_error') try { pinCommand = enrollmentCommand(globalThis.location.origin, { allowInsecureHttp: globalThis.location.protocol === 'http:', sha256: config.setupScriptSha256 }); } catch { /* the plain line below */ }
     // Past its date: renew it in Proxmox first, then the same command.
@@ -247,7 +263,10 @@ export function proxmox(ctx) {
       ? el('div', { class: 'inline-alert is-error pin-changed-alert', role: 'alert' }, icon('alert'), el('div', {}, el('strong', {}, pinExpired ? t('pveHealth.expired') : t('system.97')),
           el('span', {}, pinExpired ? t('pveHealth.expiredPinned') : t('system.98')),
           pinCommand ? commandBox(el, button, pinCommand) : null), button(t('common.32'), ctx.syncProxmox, 'quiet', 'refresh'))
-      : el('div', { class: 'inline-alert is-error', role: 'alert' }, icon('alert'), el('div', {}, el('strong', {}, refused && failureCode === 'proxmox_certificate_error' && !state.pveError && config.state !== 'error' ? t('pveHealth.' + refused) : t('system.99')), el('span', {}, failure)), button(t('common.32'), ctx.syncProxmox, 'quiet', 'refresh'));
+      : el('div', { class: 'inline-alert is-error', role: 'alert' }, icon('alert'), el('div', {}, el('strong', {}, refused && failureCode === 'proxmox_certificate_error' && !state.pveError && config.state !== 'error' ? t('pveHealth.' + refused) : t('system.99')), el('span', {}, failure),
+          // A refused token: renewing keeps the token Proxmox refuses, connecting again replaces it.
+          tokenRefused ? el('small', { class: 'pve-reconnect-hint' }, t('system.reconnectHint')) : null),
+        button(t('common.32'), ctx.syncProxmox, 'quiet', 'refresh'), tokenRefused ? reconnect() : null);
     // The pinned certificate's own expiry (pve-health-v1), next to the token's.
     const pinExpiry = config.pinnedCertificate?.expiresAt && Number.isFinite(Date.parse(config.pinnedCertificate.expiresAt)) ? new Date(config.pinnedCertificate.expiresAt) : null;
     const pinDays = pinExpiry ? Math.ceil((pinExpiry.getTime() - Date.now()) / 86400000) : null;
@@ -282,7 +301,7 @@ export function proxmox(ctx) {
   } }, el('div', { class: 'form-grid' }, field(t('system.124'), 'endpoint', config.endpoint, 'https://pve.example.com:8006'), field(t('system.125'), 'tokenId', config.tokenId, 'multitap@pve!broker')), field(t('system.126'), 'secret', '', config.configured ? t('system.127') : t('system.128'), 'password'), el('label', {}, t('system.129'), el('textarea', { name: 'ca', placeholder: '-----BEGIN CERTIFICATE-----', maxlength: 16000 }, config.ca || '')), el('label', {}, t('system.130'), el('input', { name: 'fingerprint', type: 'text', value: config.fingerprint || '', placeholder: t('system.131'), autocomplete: 'off', spellcheck: 'false', maxlength: 95 }), el('small', {}, t('system.132'))), el('button', { type: 'submit', class: 'primary' }, t('system.133')));
   const shell = createShellSetup(el, button, input => working ? confirmOverwrite(ctx, () => saveProxmox(ctx, input)) : saveProxmox(ctx, input), { sha256: config.setupScriptSha256 });
   const raw = el('details', { class: 'pve-disclosure' }, el('summary', {}, t('system.134')), form);
-  if (working) result.push(el('details', { class: 'pve-disclosure pve-change', inert: state.pveBusy }, el('summary', {}, t('system.135')), shell, raw));
+  if (working) result.push(el('details', { class: 'pve-disclosure pve-change', 'data-keep-open': 'pve-change', inert: state.pveBusy }, el('summary', {}, t('system.135')), shell, raw));
   else result.push(shell, raw);
   return result;
 }

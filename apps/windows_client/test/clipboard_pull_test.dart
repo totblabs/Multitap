@@ -202,13 +202,14 @@ void main() {
         clipboardLimitsHeader: clipboardLimitsHeaderValue,
         clipboardFormatsHeader: clipboardFormatsHeaderValue,
         clipboardPullHeader: clipboardPullHeaderValue,
+        clipboardLivePolicyHeader: clipboardLivePolicyHeaderValue,
       });
       final plain = make(with_: fmt.FormatsClipboard());
       expect(plain.dialHeaders.containsKey(clipboardPullHeader), isFalse);
       expect(plain.dialHeaders.containsKey(clipboardFormatsHeader), isTrue);
       addTearDown(plain.close);
       final released = make(with_: base.MemoryClipboard());
-      expect(released.dialHeaders.length, 1);
+      expect(released.dialHeaders.length, 2, reason: 'the limits and the live policy');
       addTearDown(released.close);
     });
 

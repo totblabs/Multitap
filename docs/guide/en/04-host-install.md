@@ -110,6 +110,7 @@ Requests waiting for approval appear in **To do now** on **Home**, and in **Wait
 
 The request shows the VM the server found in Proxmox, so you do not enter a node or VM ID.
 If it says the VM was not found, press **Enter manually**, enter the Proxmox node and VM ID, and select **Check the code on the Host screen**.
+If it says the server is not connected to Proxmox yet, approve a VM after [connecting Proxmox](03-connect-proxmox.md). Do not register it as a local PC.
 
 Select **Replace existing Host** only when you are replacing an existing Host.
 Replacing disconnects the existing Host.
@@ -130,6 +131,7 @@ Replacing disconnects the existing Host.
 
 Local PCs have no Console.
 To start a local PC, the PC needs Wake-on-LAN set up and the server needs access to its LAN.
+A server installed with Docker cannot start a local PC yet: Docker's network does not pass the signal on to the PC's network.
 
 **Check:** What you approved shows as **Available** in the **Desktops** list, and Host shows the approval too.
 Check again that you registered the right VM or PC.

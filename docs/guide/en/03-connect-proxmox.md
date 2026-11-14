@@ -110,6 +110,7 @@ When the Proxmox connection has a problem or an expiry is near, a warning appear
 | **Couldn't verify the Proxmox certificate** | Check the address and certificate with the [If it does not connect](#if-it-does-not-connect) table above. |
 | **Proxmox certificate expires in N days** | The node certificate pinned in the connection settings expires soon. Renewing it in Proxmox stops the connection, so paste the connection settings again after renewing. |
 | **Proxmox token expires in N days** | Extend it with **Renew token** below. |
+| **Check the Proxmox token or access permissions** | Proxmox refuses the saved token (removed in Proxmox, or a backup restored from another server, for example). **Renew token** only extends its expiry, so press **Reconnect**, make a new integration account with the command shown, and paste the connection settings. |
 
 Expiry warnings start 30 days before and turn red 7 days before.
 The pinned certificate's expiry date is in the **Proxmox certificate** row on the **Proxmox connection** page.

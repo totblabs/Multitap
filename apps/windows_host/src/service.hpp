@@ -1497,10 +1497,11 @@ class ServiceBridge final : public AgentBridge {
   // host-resume-v1: the clipboard channel waits out the hold and starts again.
   // channel-resume-v1: the same for the client's absence (session.channels), and for all four channels. They
   // wait while either side is away and start again when both are there (ChannelPresence).
-  void clipboardAway() override { if(presence_.host(true))channelsAway(); }
-  void clipboardResumed() override { if(presence_.host(false))channelsBack(); }
-  void peerAway() override { if(presence_.peer(true))channelsAway(); }
-  void peerBack() override { if(presence_.peer(false))channelsBack(); }
+  // gamepad-v1: while either side is away nothing holds the pads (neutral), and once back each pad's rumble goes again.
+  void clipboardAway() override { if(presence_.host(true))channelsAway(); gamepadsNeutral(); }
+  void clipboardResumed() override { if(presence_.host(false))channelsBack(); gamepadRumbleAgain(); }
+  void peerAway() override { if(presence_.peer(true))channelsAway(); gamepadsNeutral(); }
+  void peerBack() override { if(presence_.peer(false))channelsBack(); gamepadRumbleAgain(); }
   void channelsAway(){clipboard_.away();printRedial_.away();driveRedial_.away();usbRedial_.away();}
   void channelsBack(){clipboard_.resumed();printRedial_.resumed();driveRedial_.resumed();usbRedial_.resumed();}
   // A new session: nobody is away, and its print, drive and USB channels are dialled again after a transient
@@ -1541,7 +1542,7 @@ class ServiceBridge final : public AgentBridge {
     // background-video-v1: likewise only the latest request.
     if(type=="stream.background"){if(const auto on=backgroundRequest(value);on&&streaming_&&value.get("sessionId").string()==id_){pendingBackground_.store(*on?1:2);SetEvent(relayWake_.value);}return;}
     // gamepad-v1: the pads are this service's own devices; nothing reaches the worker.
-    if(type=="gamepad.state"||type=="gamepad.remove"){if(gamepadsGranted_&&streaming_&&value.get("sessionId").string()==id_)gamepadMessage(value);return;}
+    if(type=="gamepad.state"||type=="gamepad.remove"){gamepadControl(value);return;}
     // stream.lossless: the client's tiles-v1 opt-in (see Agent ping), for the worker.
     if(type!="stream.resize"&&type!="input"&&type!="input.reset"&&type!="stream.lossless")return;
     if(type=="stream.resize") {
@@ -1838,25 +1839,52 @@ class ServiceBridge final : public AgentBridge {
   std::atomic<int> pendingCursorCompose_{0};  // cursor-compose-v1 request for the worker (1 on, 2 off, 0 none)
   std::atomic<int> pendingBackground_{0};     // background-video-v1 request for the worker (1 hidden, 2 shown, 0 none)
   // gamepad-v1 (gamepad_device.hpp): granted for the running session; the last rumble sent per pad (only a change
-  // is sent: a game may set the same rumble every frame).
-  std::atomic<bool> gamepadsGranted_{false}; std::mutex rumbleMutex_; std::array<int, usb::xpad::maxPads> rumbleSent_{};
+  // is sent: a game may set the same rumble every frame). gamepadMutex_ orders a pad message against the session's
+  // start and end, so a state that races the end never plugs a pad in again after it.
+  std::atomic<bool> gamepadsGranted_{false}; std::mutex gamepadMutex_; std::mutex rumbleMutex_; std::array<int, usb::xpad::maxPads> rumbleSent_{};
+  std::string gamepadSession_; Send gamepadSend_;   // under gamepadMutex_
   void gamepadsStart(bool granted){
-    gamepadsGranted_=granted;{std::lock_guard lock(rumbleMutex_);rumbleSent_.fill(-1);}
+    std::lock_guard serial(gamepadMutex_);
+    gamepadsGranted_=false;{std::lock_guard lock(rumbleMutex_);rumbleSent_.fill(-1);}
     auto* pads=usb::serviceGamepads().load();if(!pads||!granted)return;
     pads->removeAll();  // nothing of an earlier session stays
+    gamepadSession_=id_;gamepadSend_=send_;
+    // Sent under rumbleMutex_, as gamepadRumbleAgain sends: an older level never goes out after a newer one.
     pads->onRumble([this,session=id_,send=send_](int pad,uint8_t low,uint8_t high){
       const int packed=int(low)<<8|high;
-      {std::lock_guard lock(rumbleMutex_);if(pad<0||pad>=usb::xpad::maxPads||rumbleSent_[pad]==packed)return;rumbleSent_[pad]=packed;}
+      std::lock_guard lock(rumbleMutex_);if(pad<0||pad>=usb::xpad::maxPads||rumbleSent_[pad]==packed)return;rumbleSent_[pad]=packed;
       if(!send)return;const auto message=gamepadRumbleMessage(session,pad,low,high);send(true,{message.begin(),message.end()});});
+    gamepadsGranted_=true;  // only now: nothing of an earlier session, and the rumble goes to this one
   }
   void gamepadsEnd(){
+    std::lock_guard serial(gamepadMutex_);
     const bool had=gamepadsGranted_.exchange(false);auto* pads=usb::serviceGamepads().load();if(!pads||!had)return;
-    pads->onRumble({});pads->removeAll();
+    pads->onRumble({});pads->removeAll();gamepadSession_.clear();gamepadSend_={};
   }
-  void gamepadMessage(const Json& value){
+  // A pad message of this session (control()): checked and applied under gamepadMutex_.
+  void gamepadControl(const Json& value){
+    std::lock_guard serial(gamepadMutex_);
+    if(!gamepadsGranted_||!streaming_||value.get("sessionId").string()!=id_)return;
     auto* pads=usb::serviceGamepads().load();if(!pads)return;
     if(const auto state=gamepadStateMessage(value))pads->state(state->first,state->second);
-    else if(const auto pad=gamepadRemoveMessage(value))pads->remove(*pad);
+    else if(const auto pad=gamepadRemoveMessage(value)){pads->remove(*pad);std::lock_guard lock(rumbleMutex_);rumbleSent_[size_t(*pad)]=-1;}
+  }
+  // The client or the Host's own channel is away: nobody holds the pads, so none stays pressed in the VM (a held
+  // trigger went on driving the game). The client sends its pads again once the stream takes them.
+  void gamepadsNeutral(){
+    std::lock_guard serial(gamepadMutex_);
+    if(!gamepadsGranted_)return;auto* pads=usb::serviceGamepads().load();if(pads)pads->neutralAll();
+  }
+  // Back after an absence: a rumble changed meanwhile may not have reached the client (the broker drops it then),
+  // and the game sends no change after it. Each pad's latest level goes again.
+  void gamepadRumbleAgain(){
+    std::lock_guard serial(gamepadMutex_);
+    if(!gamepadsGranted_||!gamepadSend_)return;
+    std::lock_guard lock(rumbleMutex_);   // the hook's sends wait: no newer level is overtaken by an older one
+    for(int pad=0;pad<usb::xpad::maxPads;++pad)if(const int level=rumbleSent_[size_t(pad)];level>=0){
+      const auto message=gamepadRumbleMessage(gamepadSession_,pad,uint8_t(level>>8),uint8_t(level&0xff));
+      gamepadSend_(true,{message.begin(),message.end()});
+    }
   }
   std::atomic<int> pendingScale_{0};  // display-scale-v1 request for the worker (0 = none)
   std::atomic<bool> pendingKeyFrame_{false};  // an IDR for the worker (dropped video)

@@ -997,6 +997,12 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
       // The grant decides: without display-scale-v1 the output becomes an
       // exact pixel fraction of this screen (one resize after the start).
       _replan();
+      // Away while connecting: the session says so from its first picture.
+      final lifecycle = WidgetsBinding.instance.lifecycleState;
+      if (lifecycle == AppLifecycleState.hidden ||
+          lifecycle == AppLifecycleState.paused) {
+        session.setBackground(true);
+      }
       unawaited(session.start());
       // gamepad-v1: this phone's game controllers for a granted session.
       final gamepads = _gamepads = SessionGamepads(

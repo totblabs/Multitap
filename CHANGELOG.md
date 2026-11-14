@@ -2,7 +2,30 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.13](https://github.com/totblabs/Multitap/releases/tag/v1.1.13)
+
+### Starting a PC (server)
+
+- **Fixed: on a server installed as a Linux service, starting a local PC never worked.** The server service's security settings kept it from reading its network list, so it sent no Wake-on-LAN signal at all and failed at once. It sends the signal now; updating the server to 1.1.13 applies it.
+- A signal that cannot be sent is recorded in the admin console's log as "PC wake signal not sent", with the reason. Until now it read "VM power request failed".
+- A server installed with Docker cannot start a local PC yet: Docker's network does not pass the signal on to the PCs' network. Proxmox VMs start as before.
+
+### Gamepads (server)
+
+- **Fixed: a button or trigger held when an app's connection dropped for a moment could stay held on the desktop.** The server now releases the virtual pads while the app is away.
+- When the app is back, the server sends it the game's latest rumble again.
+
+### Copy and paste
+
+- Correction: the 1.1.8 entry below says that a copy and paste permission an administrator widens during a connection applies at once. It does not; it applies from the next connection.
+
+### Admin console (server)
+
+- The Host's log shows the virtual mouse and gamepad stages with their port, pad number and failure reason; until now they read as unrelated USB sharing reasons.
+- **Fixed: on a server with no Proxmox connection yet, a Host request read "Couldn't connect to Proxmox".** It now says the server is not connected to Proxmox yet and offers no manual VM entry, which cannot work then. A failed connection says what to check: the address and firewall, the token or the certificate.
+- **The Proxmox connection page has "Reconnect".** Until now the way to make a new integration account was only inside the folded "Change connection settings" at the bottom. When Proxmox refuses the token (removed in Proxmox, or a backup restored from another server, for example), the page says that renewing will not fix it and offers "Reconnect" right there.
 
 ## [1.1.12](https://github.com/totblabs/Multitap/releases/tag/v1.1.12)
 

@@ -306,6 +306,7 @@ void main() {
       clipboardScaleHeader: clipboardScaleHeaderValue,
       clipboardOnPasteHeader: clipboardOnPasteHeaderValue,
       clipboardSettledHeader: clipboardSettledHeaderValue,
+      clipboardLivePolicyHeader: clipboardLivePolicyHeaderValue,
     });
   });
 

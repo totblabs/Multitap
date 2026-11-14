@@ -207,6 +207,7 @@ void main() {
         clipboardPullHeader: clipboardPullHeaderValue,
         clipboardScaleHeader: clipboardScaleHeaderValue,
         clipboardOnPasteHeader: clipboardOnPasteHeaderValue,
+        clipboardLivePolicyHeader: clipboardLivePolicyHeaderValue,
       });
       final scaleOnly = make(with_: scale.ScaleClipboard());
       expect(

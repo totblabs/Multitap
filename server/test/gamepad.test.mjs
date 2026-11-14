@@ -63,11 +63,11 @@ async function fixture(t) {
     hostSocket.json(streamInfo); await controller.take(value => value.type === 'stream.info');
     return { response, controller, start, sessionId: response.body.sessionId };
   }
-  return { call, alice, host, connect, stream };
+  return { call, alice, host, connect, stream, wsUrl };
 }
-async function socket(url, authorization) {
+async function socket(url, authorization, headers = {}) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url, { headers: { Authorization: authorization }, perMessageDeflate: false });
+    const ws = new WebSocket(url, { headers: { Authorization: authorization, ...headers }, perMessageDeflate: false });
     ws.once('error', reject);
     ws.once('open', () => {
       const queue = [], waiters = [];
@@ -165,4 +165,29 @@ test('A malformed connect field is refused before any session', async t => {
   }
   const plain = await f.connect({});
   assert.equal(plain.status, 200, 'a released client request is unchanged'); assert.equal(plain.body.gamepadProtocol, undefined);
+});
+test('A client that goes away leaves no pad pressed; once back it gets each pad\'s latest rumble', async t => {
+  // A held trigger kept driving the VM through a client's Wi-Fi drop (input.reset does not reach the Host's own
+  // virtual pads), and a rumble stop sent while the client was away never reached it.
+  const f = await fixture(t); const host = await f.host({ ...padHost, keyFrameProtocol: 'keyframe-v1', hostResumeProtocol: 'host-resume-v1' });
+  const { controller, sessionId } = await f.stream(host, { ...asked, sessionResumeProtocol: 'session-resume-v1' });
+  // The first picture: a resumable stream.
+  const key = Buffer.alloc(64); key[0] = 1; key[1] = 1; key[12] = 1; host.send(key);
+  const token = (await controller.take(value => value.type === 'session.resume.token')).token;
+  controller.json(pressed); controller.json({ ...pressed, pad: 2, buttons: 0, rt: 255 });
+  await host.take(value => value.type === 'gamepad.state' && value.pad === 0); await host.take(value => value.type === 'gamepad.state' && value.pad === 2);
+  controller.json({ type: 'gamepad.remove', pad: 2 }); await host.take(value => value.type === 'gamepad.remove');
+  host.json({ type: 'gamepad.rumble', sessionId, pad: 0, low: 255, high: 255 });
+  assert.equal((await controller.take(value => value.type === 'gamepad.rumble')).low, 255);
+  controller.terminate();
+  assert.deepEqual(await host.take(value => value.type === 'input.reset'), { type: 'input.reset', sessionId });
+  assert.deepEqual(await host.take(value => value.type === 'gamepad.state'), { type: 'gamepad.state', pad: 0, buttons: 0, lt: 0, rt: 0, lx: 0, ly: 0, rx: 0, ry: 0, sessionId },
+    'the pad in use is set neutral; a removed pad is not plugged in again');
+  host.json({ type: 'gamepad.rumble', sessionId, pad: 0, low: 0, high: 0 });   // the game stops while nobody is there
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const back = await socket(f.wsUrl('/api/v1/sessions/' + sessionId), 'Bearer ' + f.alice, { 'X-Multitap-Resume': token });
+  t.after(() => back.terminate());
+  await back.take(value => value.type === 'session.resumed');
+  assert.deepEqual(await back.take(value => value.type === 'gamepad.rumble'), { type: 'gamepad.rumble', pad: 0, low: 0, high: 0 });
+  await assert.rejects(host.take(value => value.type === 'gamepad.state' && value.pad === 2), /message_timeout/, 'the removed pad is never set again');
 });

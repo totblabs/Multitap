@@ -225,11 +225,18 @@ export function requestVm(request) {
   return candidates.length === 1 ? candidates[0] : candidates.length ? null : foundVm(request);
 }
 // Why node and VM ID have to be typed, in one line; null while the server is still looking.
+// A failed Proxmox read names its cause as the console does elsewhere (address and firewall,
+// token, certificate). A server with no Proxmox connection says so: until one exists, no VM
+// can be found or typed (noProxmox), and a VM's Host is not a local PC.
+const lookupFailures = ['proxmox_unreachable', 'proxmox_certificate_error', 'proxmox_permission_denied', 'proxmox_request_failed'];
+const noProxmox = request => request?.vmLookup?.state === 'unavailable' && request.vmLookup.errorCode === 'proxmox_setup_required';
 function manualReason(request, candidates) {
   const lookup = request.vmLookup;
   if (candidates.length > 1 || lookup?.state === 'ambiguous') return t('hosts.56');
   if (lookup?.state === 'searching') return null;
-  return lookup?.state === 'unavailable' && lookup.errorCode !== 'proxmox_lookup_incomplete' ? t('hosts.57') : t('hosts.58');
+  if (lookup?.state !== 'unavailable' || lookup.errorCode === 'proxmox_lookup_incomplete') return t('hosts.58');
+  if (noProxmox(request)) return t('hosts.278');
+  return lookupFailures.includes(lookup.errorCode) ? messages[lookup.errorCode] : t('hosts.57');
 }
 function approvalOwner(ctx, request) {
   const bound = requestBinding(request), signature = JSON.stringify(bound), actor = ctx.state.user, csrf = ctx.state.csrf;
@@ -407,7 +414,7 @@ export function requestCards(ctx, { desktop = null, kind = null } = {}) {
       code, el('details', { class: 'request-more', 'data-keep-open': 'request-id:' + request.requestId }, el('summary', {}, t('hosts.118')), el('p', {}, 'SMBIOS UUID ', el('code', { class: 'request-identity', title: 'SMBIOS UUID' }, request.machineUuid))), duplicate,
       el('p', { class: 'request-match' + (matching.length === 1 || found ? '' : ' no-match') }, matching.length === 1 ? [icon('check'), el('span', {}, t('hosts.119'), matching.map(item => `VM ${item.vmid} · ${item.name}${item.hasExistingHost ? t('hosts.120') : ''}`).join(' / '))]
         : found ? [icon('check'), el('span', {}, t('hosts.121'), foundVmLabel(found) + (found.hasExistingHost ? t('hosts.120') : ''))]
-        : typed ? [icon('alert'), el('span', {}, reason ?? t('hosts.122')), reason ? requestApproveButton(ctx, request, { manual: true }) : null]
+        : typed ? [icon('alert'), el('span', {}, reason ?? t('hosts.122')), reason && !noProxmox(request) ? requestApproveButton(ctx, request, { manual: true }) : null]
         : [icon('alert'), el('span', {}, kind === 'pc' ? (pcRequestBlocked(ctx, request) ?? t('hosts.123')) : t('hosts.124'))]),
       asPc ? el('p', { class: 'field-hint request-pc-hint' }, t('hosts.125')) : null,
       el('div', { class: 'actions' }, approve, asPc, button(t('common.114'), () => rejectRequest(ctx, request), 'danger')));

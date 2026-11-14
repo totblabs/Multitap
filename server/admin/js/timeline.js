@@ -47,6 +47,8 @@ export function auditEntry(e, usersById, desktopsById) {
   // The backup dialog asked for the administrator's password again and it was wrong (server/src/admin-http.mjs): the
   // record has no subject, its event is its reason.
   else if (e.event === 'backup_reauthentication_failed') { entry.code = 'current_password_incorrect'; entry.codeLabel = t('timeline.backupPasswordWrong'); }
+  // desktopId:code (server/src/pc-power.mjs): why no wake packet left, the system's error code (EPERM...) or unknown.
+  else if (e.event === 'pc_wake_failed' && /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(rest[0] ?? '')) { entry.code = rest[0]; entry.codeLabel = rest[0] === 'unknown' ? t('timeline.wakeFailedUnknown') : t('timeline.wakeFailedCode', { code: rest[0] }); }
   else if (e.event === 'integration_updated') entry.detail.push(own(settingNames, e.subject) ?? e.subject);
   else if (e.event === 'proxmox_synchronized') entry.detail.push(t('timeline.16', { subject: e.subject }));
   // threshold:expiry date:fingerprint prefix (certificate-expiry.mjs).
@@ -89,6 +91,13 @@ export function usbHostDetail(v) {
     case 27: return [stage, t('timeline.44', { value: v.items ?? 0 }), t('timeline.45', { value: v.kib ?? 0 }), t('timeline.29', { value: v.cause ?? 0 }), t('timeline.46', { value: v.expected ?? 0 })];
     case 28: return [stage, v.error ? t('timeline.47', { error: v.error }) : t('timeline.48'), t('timeline.49', { expected: v.expected })];
     case 17: return [stage, valueText('error', v.error), request];
+    // The Host's own devices (pointer_device.hpp, gamepad_device.hpp): the controller port, the pad number, and
+    // why one could not be plugged in (usb_driver.hpp Prepare 1..7, 20 its loopback server with the Windows
+    // socket error in `expected`, 21 the plug-in). Never the session reason table or "to restore".
+    case 33: return [stage, v.expected > 0 ? t('timeline.ownPort', { port: v.expected }) : null];
+    case 35: return [stage];
+    case 36: case 38: return [stage, v.expected > 0 ? t('timeline.ownPad', { pad: v.expected }) : null];
+    case 34: case 37: return [stage, v.error >= 1 && v.error <= 7 ? t('timeline.ownPrepare' + v.error) : v.error === 20 ? t('timeline.ownServerFailed', { code: v.expected ?? 0 }) : v.error === 21 ? t('timeline.ownAttachFailed') : valueText('error', v.error)];
     default: return [stage, v.error ? (own(clientCodes, reason) ?? reason ?? valueText('error', v.error)) : null, v.expected && ![17, 24, 25, 26, 28].includes(v.stage) ? valueText('expected', v.expected) : null];
   }
 }

@@ -22,7 +22,8 @@ class SessionGamepads {
   final MethodChannel channel;
   GamepadForwarder? _forwarder;
   StreamSubscription<GamepadRumble>? _rumble;
-  bool _active = true;
+  StreamSubscription<void>? _resync;
+  bool _active = true, _resuming = false;
 
   /// Whether the platform reads pads for this session now.
   bool get running => _forwarder != null;
@@ -44,8 +45,11 @@ class SessionGamepads {
     _forwarder = forwarder;
     channel.setMethodCallHandler(_handle);
     _rumble = session.gamepadRumble.listen(forwarder.hostRumble);
+    // The stream takes pads again (first picture, resume): all sent again.
+    _resync = session.gamepadResync.listen((_) => forwarder.resync());
+    _resuming = session.resuming;
     // A session that ended lets the pads go at once (on Android the
-    // controller's B is Back again).
+    // controller's B is Back again); a frozen one stops the motors.
     session.addListener(_sessionChanged);
     try {
       await channel.invokeMethod<Object?>('start');
@@ -69,6 +73,8 @@ class SessionGamepads {
     channel.setMethodCallHandler(null);
     await _rumble?.cancel();
     _rumble = null;
+    await _resync?.cancel();
+    _resync = null;
     forwarder.close();
     try {
       await channel.invokeMethod<void>('stop');
@@ -76,7 +82,15 @@ class SessionGamepads {
   }
 
   void _sessionChanged() {
-    if (session.closed) unawaited(stop());
+    if (session.closed) {
+      unawaited(stop());
+      return;
+    }
+    // A resume began: nothing keeps vibrating while the stream is frozen; the
+    // broker or the Host sends the level again once it is back.
+    final resuming = session.resuming;
+    if (resuming && !_resuming) _forwarder?.holdRumble();
+    _resuming = resuming;
   }
 
   Future<Object?> _handle(MethodCall call) async {

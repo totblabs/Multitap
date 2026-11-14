@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { newToken, tokenHash } from './security.mjs';
 import { channelResumeProtocol } from './channel-resume.mjs';
+import { neutralGamepadState } from './gamepad.mjs';
 
 // Transparent resume (tuning backlog #32). A short loss of the client's or the
 // Host's transport no longer ends a stream: the broker keeps the session (its
@@ -118,7 +119,12 @@ export class SessionResume {
     // outputs take input on their track tunnel).
     const reset = { type: 'input.reset', sessionId: session.id };
     if (session.trackState) { if (session.trackTunnel) r.send(session.trackTunnel, reset); }
-    else if (!session.hostHeld && !r.send(session.host.ws, reset)) r.dropHost(session.host, 'host_backpressure');
+    else if (!session.hostHeld) {
+      if (!r.send(session.host.ws, reset)) return r.dropHost(session.host, 'host_backpressure');
+      // gamepad-v1: input.reset does not reach the Host's virtual pads (its own devices, not the worker's input):
+      // each pad the client used is set neutral. The client sends its pads' states again once it is back.
+      for (const pad of session.gamepad ? session.gamepadPads ?? [] : []) if (!r.send(session.host.ws, neutralGamepadState(session.id, pad))) return r.dropHost(session.host, 'host_backpressure');
+    }
   }
   clientClosed(session, ws, code) { return session.ws === ws && code === 1006 && this.detachClient(session, 'client_disconnected'); }
   // ws names protocol violations WS_ERR_*; those end the session as before.
@@ -159,6 +165,8 @@ export class SessionResume {
     for (const shape of detached?.shapes ?? []) r.send(session.ws, shape, true);
     if (detached?.state) r.send(session.ws, detached.state, true);
     if (session.hostHeld || session.trackHeld) { r.send(session.ws, { type: 'session.resuming', sessionId: session.id }); return; }
+    // gamepad-v1: each pad's latest rumble (one changed while the client was away never reached it).
+    for (const [pad, level] of session.gamepad ? session.gamepadRumble ?? [] : []) r.send(session.ws, { type: 'gamepad.rumble', pad, low: level.low, high: level.high });
     this.restartVideo(session);
     this.record('session_resumed', session, 'client', detached);
   }
@@ -204,6 +212,9 @@ export class SessionResume {
     if (!transport || !resumable(session) || !hostResumeCapability(session.host.capabilities) || (session.trackState && !trackResumeCapability(session.host.capabilities)) || r.powerBusy(session.desktopId)) return false;
     const now = Date.now();
     session.hostHeld = { reason, detail, at: now, until: now + this.hostGraceMs };
+    // gamepad-v1: a rumble the game changes while the Host is away never reaches the broker, so the levels kept
+    // are no longer known to be current (the Host sends its own again once back; the client stops its motors).
+    session.gamepadRumble?.clear();
     if (session.ws) r.send(session.ws, { type: 'session.resuming', sessionId: session.id });
     // channel-resume-v1: the side channels end with the Host's channel and wait for it.
     r.channels?.closePairs(session);
@@ -227,6 +238,9 @@ export class SessionResume {
       // channel-resume-v1: first whether the client is there, so the Host's side channels wait or dial.
       r.channels?.tell(session, host);
       r.send(host.ws, { type: 'host.session.resumed', sessionId: session.id });
+      // The client went away while the Host was away too: its input.reset (and the pads' neutral states) could not
+      // be sent then, so they go now.
+      if (!session.ws && session.detached) { this.resetInput(session); if (r.sessions.get(session.id) !== session) continue; }
       // A track tunnel still away restarts the picture when it is back.
       if (session.ws && !session.trackHeld) { r.send(session.ws, { type: 'session.resumed', sessionId: session.id }); this.restartVideo(session); }
       this.record('session_resumed', session, 'host', held);

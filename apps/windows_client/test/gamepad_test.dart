@@ -21,7 +21,7 @@ import 'audio_stats_test.dart' show AudioMedia;
 import 'power_api_test.dart' show ApiClient;
 import 'remote_session_test.dart'
     show SessionMedia, SessionSocket, flush, info, packet;
-import 'session_recovery_test.dart' show ManualClock;
+import 'session_recovery_test.dart' show ManualClock, RecoveryMedia;
 
 const _origin = 'https://fixture.invalid';
 
@@ -162,7 +162,79 @@ void main() {
     }
     expect(forwarder.pads.length, gamepadMaxPads, reason: 'at most four');
     forwarder.close();
-    expect(rumbled.where((r) => r.$2 == 0 && r.$3 == 0).length, 4, reason: 'every local pad stops');
+    expect(rumbled.last, (9, 0, 0), reason: 'the motor this view set stops');
+    expect(rumbled.where((r) => r.$2 == 0 && r.$3 == 0).length, 1, reason: 'no other pad is touched');
+  });
+
+  test('Resync sends every pad again and the removals the session could not take; a new pad overtakes a pending removal', () {
+    var accept = true;
+    final sent = <Map<String, Object?>>[];
+    final forwarder = GamepadForwarder(
+      send: (message) {
+        if (accept) sent.add(message);
+        return accept;
+      },
+      rumble: (_, _, _) {},
+    );
+    forwarder.state(1, a);
+    forwarder.state(2, GamepadState.neutral);
+    forwarder.state(3, a);
+    accept = false;                       // the socket is being replaced
+    forwarder.state(1, const GamepadState(buttons: GamepadButtons.x));
+    forwarder.removed(2);
+    forwarder.removed(3);
+    accept = true;
+    sent.clear();
+    forwarder.state(4, const GamepadState(buttons: GamepadButtons.y));   // takes pad 1, freed by local 2
+    forwarder.resync();
+    expect(sent, [
+      const GamepadState(buttons: GamepadButtons.y).message(1),
+      gamepadRemoveMessage(2),
+      const GamepadState(buttons: GamepadButtons.x).message(0),
+      const GamepadState(buttons: GamepadButtons.y).message(1),
+    ], reason: 'pad 1 needs no removal (its new state replaces it); pad 2 is removed; every state again');
+    sent.clear();
+    forwarder.resync();
+    expect(sent, [const GamepadState(buttons: GamepadButtons.x).message(0), const GamepadState(buttons: GamepadButtons.y).message(1)],
+        reason: 'a removal is sent once');
+    forwarder.setActive(false);
+    sent.clear();
+    forwarder.resync();
+    expect(sent, [GamepadState.neutral.message(0), GamepadState.neutral.message(1)], reason: 'inactive: neutral');
+    // A removal the session took may have gone into a socket that was already dead: sent once more at the next resync.
+    final again = <Map<String, Object?>>[];
+    final other = GamepadForwarder(send: (message) { again.add(message); return true; }, rumble: (_, _, _) {});
+    other.state(1, a);
+    other.removed(1);
+    again.clear();
+    other.resync();
+    expect(again, [gamepadRemoveMessage(0)]);
+    again.clear();
+    other.resync();
+    expect(again, isEmpty, reason: 'once');
+  });
+
+  test('Only the view in front drives the motors, and it stops only what it set', () {
+    final rumbled = <(Object, int, int)>[];
+    final forwarder = GamepadForwarder(send: (_) => true, rumble: (local, low, high) => rumbled.add((local, low, high)));
+    forwarder.state(7, a);
+    forwarder.hostRumble(const GamepadRumble(0, 0, 0));
+    expect(rumbled, isEmpty, reason: 'a stop this view never started leaves another window\'s motors alone');
+    forwarder.hostRumble(const GamepadRumble(0, 120, 120));
+    expect(rumbled, [(7, 120, 120)]);
+    forwarder.setActive(false);
+    expect(rumbled.last, (7, 0, 0), reason: 'leaving stops it');
+    forwarder.hostRumble(const GamepadRumble(0, 200, 10));
+    expect(rumbled.length, 2, reason: 'inactive: nothing is driven');
+    forwarder.setActive(true);
+    expect(rumbled.last, (7, 200, 10), reason: 'back: the Host\'s latest');
+    forwarder.holdRumble();
+    expect(rumbled.last, (7, 0, 0), reason: 'a frozen stream stops it');
+    forwarder.setActive(false);
+    forwarder.setActive(true);
+    expect(rumbled.length, 4, reason: 'the level is unknown until the Host sends it again');
+    forwarder.close();
+    expect(rumbled.length, 4, reason: 'nothing to stop');
   });
 
   test('A state the session could not take is sent again with the next change', () {
@@ -217,36 +289,58 @@ void main() {
     );
   });
 
-  test('The session sends only with the grant and passes the Host\'s rumble on', () async {
-    for (final granted in [true, false]) {
-      final socket = SessionSocket(), media = SessionMedia();
+  // Real time (the statistics poll that marks the first picture runs every second).
+  for (final granted in [true, false]) {
+    test('The session sends only with the grant and from its first picture, passes the Host\'s rumble on, '
+        'and asks for every pad again at the first picture and after the Host is back (granted: $granted)', () async {
+      final socket = SessionSocket(), media = RecoveryMedia();
       final session = RemoteSession(
         connection: BrokerConnection(
           sessionId: 'pad-session',
           webSocketUrl: Uri.parse('wss://fixture.invalid/api/v1/sessions/pad-session'),
           gamepad: granted,
+          sessionResume: true,
         ),
         token: 'fixture',
         media: media,
         dialer: (_, _) async => socket,
       );
-      unawaited(session.start());
-      await flush();
       final rumbles = <GamepadRumble>[];
       final listening = session.gamepadRumble.listen(rumbles.add);
+      var resyncs = 0;
+      final resyncing = session.gamepadResync.listen((_) => resyncs++);
+      expect(session.sendGamepad(a.message(0)), isFalse, reason: 'not connected yet');
+      unawaited(session.start());
+      await flush();
+      socket.incoming.add(jsonEncode(info));
+      await flush();
+      expect(session.frameReady, isFalse);
+      expect(session.sendGamepad(a.message(0)), isFalse, reason: 'connected, no picture yet: the Host may not take pads');
+      expect(resyncs, 0);
+      socket.incoming.add(packet());
+      await _until(() => session.frameReady);
+      expect(session.frameReady, isTrue);
+      expect(resyncs, granted ? 1 : 0, reason: 'the first picture');
       expect(session.sendGamepad(a.message(0)), granted);
-      socket.incoming
-        ..add(jsonEncode(info))
-        ..add(jsonEncode({'type': 'gamepad.rumble', 'pad': 0, 'low': 9, 'high': 8}));
+      socket.incoming.add(jsonEncode({'type': 'gamepad.rumble', 'pad': 0, 'low': 9, 'high': 8}));
       await flush();
       expect([for (final e in socket.sent) if (e['type'] == 'gamepad.state') e], granted ? [a.message(0)] : isEmpty);
       expect(rumbles, granted ? [const GamepadRumble(0, 9, 8)] : isEmpty);
+      // The Host's channel is held: the broker drops what is sent then.
+      socket.incoming.add(jsonEncode({'type': 'session.resuming', 'sessionId': 'pad-session'}));
+      await flush();
+      expect(session.sendGamepad(a.message(1)), isFalse);
+      socket.incoming.add(jsonEncode({'type': 'session.resumed', 'sessionId': 'pad-session', 'token': 'B' * 43, 'graceMs': 15000}));
+      await flush();
+      expect(resyncs, granted ? 2 : 0, reason: 'the Host is back');
+      expect(session.sendGamepad(a.message(1)), granted);
       await listening.cancel();
+      await resyncing.cancel();
       await session.close();
       expect(session.sendGamepad(a.message(0)), isFalse, reason: 'closed');
       await media.events.close();
-    }
-  });
+    });
+  }
 
   test('The tally counts states sent and refused, pads held and rumbles; a window starts again from zero', () {
     final tally = GamepadTally();
@@ -302,9 +396,8 @@ void main() {
       await t.pump();
       socket.incoming.add(jsonEncode(info));
       await t.pump();
-      expect(session.sendGamepad(a.message(0)), granted);
-      socket.incoming.add(jsonEncode({'type': 'gamepad.rumble', 'pad': 0, 'low': 9, 'high': 8}));
-      var answered = 0;
+      expect(session.sendGamepad(a.message(1)), isFalse, reason: 'before the first picture: refused');
+      var answered = 0, sentPad = false;
       for (var second = 1; second <= 12; second++) {
         clock.now = second * 1000000;
         for (; answered < socket.sent.length; answered++) {
@@ -315,24 +408,32 @@ void main() {
         }
         socket.incoming.add(packet());
         await t.pump(const Duration(seconds: 1));
+        if (!sentPad && session.frameReady) {
+          sentPad = true;
+          expect(session.sendGamepad(a.message(0)), granted);
+          socket.incoming.add(jsonEncode({'type': 'gamepad.rumble', 'pad': 0, 'low': 9, 'high': 8}));
+        }
       }
+      expect(sentPad, isTrue);
       expect(reports, isNotEmpty);
-      expect(reports.first['gamepad'], granted);
+      expect(reports.every((report) => report['gamepad'] == granted), isTrue);
+      int total(String key) => reports.fold(0, (sum, report) => sum + ((report[key] as int?) ?? 0));
       if (granted) {
-        expect(reports.first['gamepadPads'], 1);
-        expect(reports.first['gamepadStates'], 1);
-        expect(reports.first['gamepadRefused'], 0);
-        expect(reports.first['gamepadRumbles'], 1);
+        expect(reports.last['gamepadPads'], 1);
+        expect(total('gamepadStates'), 1);
+        expect(total('gamepadRefused'), 1);
+        expect(total('gamepadRumbles'), 1);
       } else {
         expect(reports.first.keys.where((key) => key.startsWith('gamepad')), ['gamepad']);
       }
-      expect(reports.first.keys.every(streamStatsFields.contains), isTrue);
+      expect(reports.every((report) => report.keys.every(streamStatsFields.contains)), isTrue);
       await session.close();
       await media.events.close();
     }
   });
 
-  test('The platform reads pads only for a granted session; states reach it, rumble goes back, the end stops it', () async {
+  test('The platform reads pads only for a granted session; a pad read before the first picture is plugged in with it, '
+      'rumble goes back and stops while the stream resumes, the end stops it', () async {
     const channel = MethodChannel('multitap/test-gamepad');
     final calls = <MethodCall>[];
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -346,35 +447,49 @@ void main() {
       const StandardMethodCodec().encodeMethodCall(MethodCall(method, args)),
       (_) {},
     );
+    List<Object?> padsSent(SessionSocket socket) => [for (final e in socket.sent) if (e['type'] == 'gamepad.state') e['pad']];
     for (final granted in [false, true]) {
       calls.clear();
-      final socket = SessionSocket(), media = SessionMedia();
+      final socket = SessionSocket(), media = RecoveryMedia();
       final session = RemoteSession(
         connection: BrokerConnection(
           sessionId: 'pad-session',
           webSocketUrl: Uri.parse('wss://fixture.invalid/api/v1/sessions/pad-session'),
           gamepad: granted,
+          sessionResume: true,
         ),
         token: 'fixture',
         media: media,
         dialer: (_, _) async => socket,
       );
-      unawaited(session.start());
-      await flush();
+      // As remote_view.dart: the pads start with the session, before its socket is dialled.
       final pads = SessionGamepads(session, channel: channel);
       await pads.start();
       expect(pads.running, granted);
       expect(calls.map((c) => c.method), granted ? ['start'] : isEmpty);
       if (granted) {
-        await platform('state', {'slot': 2, 'buttons': 0x1000, 'lt': 0, 'rt': 0, 'lx': 0, 'ly': 0, 'rx': 0, 'ry': 0});
+        // An idle pad reports its state once, as the Windows runner does at 'start'.
+        await platform('state', {'slot': 2, 'buttons': 0, 'lt': 0, 'rt': 0, 'lx': 0, 'ly': 0, 'rx': 0, 'ry': 0});
         await flush();
-        expect([for (final e in socket.sent) if (e['type'] == 'gamepad.state') e['pad']], [0]);
-        socket.incoming
-          ..add(jsonEncode(info))
-          ..add(jsonEncode({'type': 'gamepad.rumble', 'pad': 0, 'low': 50, 'high': 60}));
+        expect(padsSent(socket), isEmpty, reason: 'not connected yet');
+        unawaited(session.start());
+        await flush();
+        socket.incoming.add(jsonEncode(info));
+        await flush();
+        socket.incoming.add(packet());
+        await _until(() => session.frameReady);
+        await flush();
+        expect(padsSent(socket), [0], reason: 'plugged in at the first picture without a touch');
+        socket.incoming.add(jsonEncode({'type': 'gamepad.rumble', 'pad': 0, 'low': 50, 'high': 60}));
         await flush();
         expect(calls.last.method, 'rumble');
         expect(calls.last.arguments, {'slot': 2, 'low': 50, 'high': 60});
+        socket.incoming.add(jsonEncode({'type': 'session.resuming', 'sessionId': 'pad-session'}));
+        await flush();
+        expect(calls.last.arguments, {'slot': 2, 'low': 0, 'high': 0}, reason: 'nothing vibrates while the stream is frozen');
+        socket.incoming.add(jsonEncode({'type': 'session.resumed', 'sessionId': 'pad-session', 'token': 'C' * 43, 'graceMs': 15000}));
+        await flush();
+        expect(padsSent(socket), [0, 0], reason: 'sent again once the Host is back');
         await platform('removed', 2);
         await flush();
         expect(socket.sent.last, gamepadRemoveMessage(0));
@@ -389,4 +504,12 @@ void main() {
       await media.events.close();
     }
   });
+}
+
+/// Real time: waits until [ok] holds, at most [within].
+Future<void> _until(bool Function() ok, {Duration within = const Duration(seconds: 5)}) async {
+  final end = DateTime.now().add(within);
+  while (!ok() && DateTime.now().isBefore(end)) {
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
 }

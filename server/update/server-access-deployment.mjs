@@ -82,8 +82,15 @@ async function freePort(host, port) {
   });
 }
 // This machine's own address (or a name for it): no router can map ports there.
+// The updater's sandbox has no netlink sockets, so os.networkInterfaces()
+// throws there: only the loopback addresses are known then, and the
+// post-apply check of the real address decides, as for an unknown name.
+export function localAddresses(read = networkInterfaces) {
+  try { return new Set(Object.values(read()).flat().map(row => row.address.split('%')[0].toLowerCase())); }
+  catch { return new Set(); }
+}
 async function ownHost(hostname) {
-  const local = new Set(Object.values(networkInterfaces()).flat().map(row => row.address.split('%')[0].toLowerCase()));
+  const local = localAddresses();
   const own = address => local.has(address.toLowerCase()) || address.startsWith('127.') || address === '::1';
   if (isIP(hostname)) return own(hostname);
   try { return (await Promise.race([lookup(hostname, { all: true }), new Promise((_, reject) => setTimeout(reject, 2000).unref())])).some(row => own(row.address)); }

@@ -338,6 +338,7 @@ class ClipboardSession extends ChangeNotifier {
     if (_pullQueueSupported)
       clipboardPullQueueHeader: clipboardPullQueueHeaderValue,
     if (_deferredSupported) clipboardDeferredHeader: clipboardDeferredHeaderValue,
+    clipboardLivePolicyHeader: clipboardLivePolicyHeaderValue,
   };
 
   Future<WebSocket> _dial(Uri url, String token) => connectRelaySocket(

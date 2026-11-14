@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import dgram from 'node:dgram';
 import { networkInterfaces } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { HttpError } from './errors.mjs';
 
 // Power for approved physical PCs (pc-power-v1).
@@ -39,11 +40,37 @@ export function magicPacket(mac) {
   return Buffer.concat([Buffer.alloc(6, 0xff), ...Array.from({ length: 16 }, () => address)]);
 }
 
+// The broadcast address of each IPv4 network this machine is directly on, from the kernel's routing table
+// (/proc/net/route: a route without a gateway; addresses in the kernel's little-endian hex). Host routes and the
+// default route say nothing about a network.
+export function routeBroadcasts(text) {
+  const out = [];
+  for (const line of String(text).split('\n').slice(1)) {
+    const [, destination, gateway, flags, , , , mask] = line.trim().split(/\s+/);
+    if (!/^[0-9A-Fa-f]{8}$/.test(destination ?? '') || !/^[0-9A-Fa-f]{8}$/.test(gateway ?? '') || !/^[0-9A-Fa-f]{1,8}$/.test(flags ?? '') || !/^[0-9A-Fa-f]{8}$/.test(mask ?? '')) continue;
+    const up = (parseInt(flags, 16) & 1) === 1, net = parseInt(destination, 16) >>> 0, bits = parseInt(mask, 16) >>> 0;
+    if (!up || parseInt(gateway, 16) !== 0 || bits === 0 || bits === 0xffffffff) continue;
+    const broadcast = (net | ~bits) >>> 0;
+    out.push([broadcast & 255, broadcast >>> 8 & 255, broadcast >>> 16 & 255, broadcast >>> 24].join('.'));
+  }
+  return out;
+}
+
 // The limited broadcast plus each of this broker's own IPv4 networks'
-// broadcast address. Never an address a Host or client supplied.
-export function broadcastTargets(interfaces = networkInterfaces()) {
+// broadcast address. Never an address a Host or client supplied. The broker's
+// systemd sandbox has no netlink sockets, so os.networkInterfaces() throws
+// there (EAFNOSUPPORT): the networks are then read from the routing table, and
+// failing that the limited broadcast alone leaves through the default route's network.
+export function broadcastTargets(interfaces, read = networkInterfaces, routes = () => readFileSync('/proc/net/route', 'utf8')) {
   const targets = new Set(['255.255.255.255']);
-  for (const list of Object.values(interfaces)) for (const entry of list ?? []) {
+  if (interfaces === undefined) {
+    try { interfaces = read(); }
+    catch {
+      try { for (const target of routeBroadcasts(routes())) targets.add(target); } catch { /* the limited broadcast alone */ }
+      return [...targets];
+    }
+  }
+  for (const list of Object.values(interfaces ?? {})) for (const entry of list ?? []) {
     if ((entry.family !== 'IPv4' && entry.family !== 4) || entry.internal || entry.netmask === '255.255.255.255') continue;
     const address = entry.address.split('.').map(Number), mask = entry.netmask.split('.').map(Number);
     if (address.length !== 4 || mask.length !== 4 || [...address, ...mask].some(part => !Number.isInteger(part) || part < 0 || part > 255)) continue;
@@ -52,19 +79,30 @@ export function broadcastTargets(interfaces = networkInterfaces()) {
   return [...targets];
 }
 
+// Why no wake packet left: the system's error code (EPERM, ENETUNREACH...),
+// a fixed token only, never a message or an address.
+export function wakeFailureReason(error) {
+  const reason = error?.reason ?? error?.code;
+  return typeof reason === 'string' && /^[A-Z][A-Z0-9_]{1,31}$/.test(reason) ? reason : 'unknown';
+}
+const wakeFailure = error => Object.assign(new Error('wake_send_failed'), { reason: wakeFailureReason(error) });
+
 // UDP port 9 (discard), three rounds. Resolves with the packets handed to the
-// network; throws when not one could be sent.
-export async function sendWakePackets(macs, { targets = broadcastTargets(), port = 9, rounds = 3 } = {}) {
-  const socket = dgram.createSocket('udp4');
+// network; throws wake_send_failed with the first failure's reason when not
+// one could be sent.
+export async function sendWakePackets(macs, { targets = broadcastTargets(), port = 9, rounds = 3, createSocket = () => dgram.createSocket('udp4') } = {}) {
+  const socket = createSocket();
   try {
-    await new Promise((resolve, reject) => { socket.once('error', reject); socket.bind(0, () => { socket.off('error', reject); resolve(); }); });
-    socket.setBroadcast(true);
-    let sent = 0;
+    try {
+      await new Promise((resolve, reject) => { socket.once('error', reject); socket.bind(0, () => { socket.off('error', reject); resolve(); }); });
+      socket.setBroadcast(true);
+    } catch (error) { throw wakeFailure(error); }
+    let sent = 0, first = null;
     for (let round = 0; round < rounds; round++) for (const mac of macs) for (const target of targets) {
       try { await new Promise((resolve, reject) => socket.send(magicPacket(mac), port, target, error => error ? reject(error) : resolve())); sent++; }
-      catch { /* Another network may still reach the PC. */ }
+      catch (error) { first ??= error; /* Another network may still reach the PC. */ }
     }
-    if (!sent) throw new Error('wake_send_failed');
+    if (!sent) throw wakeFailure(first);
     return sent;
   } finally { socket.close(); }
 }
@@ -204,9 +242,9 @@ export class PcPower {
     this.audit('power_submitted', actor, `${id}:${action}`);
     if (action === 'start') {
       try { await this.sendWake(adapters.map(adapter => adapter.mac)); }
-      catch {
+      catch (error) {
         this.finish(operation, 'stopped', 'wake_send_failed');
-        this.audit('power_failed', actor, `${id}:start`);
+        this.audit('pc_wake_failed', actor, `${id}:${wakeFailureReason(error)}`);
         return this.view(id, actor, operation);
       }
       // The Host may already be back (a PC that was only offline).

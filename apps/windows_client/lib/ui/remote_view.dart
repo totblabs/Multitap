@@ -3842,6 +3842,12 @@ class _RemoteViewState extends State<RemoteView> with WidgetsBindingObserver {
       );
       session.addListener(_changed);
       _transitionStage(ScreenTransitionStage.firstPicture);
+      // Minimised while connecting: the session says so from its first picture.
+      final lifecycle = WidgetsBinding.instance.lifecycleState;
+      if (lifecycle == AppLifecycleState.hidden ||
+          lifecycle == AppLifecycleState.paused) {
+        session.setBackground(true);
+      }
       unawaited(session.start());
       _startGamepads(session);
     } catch (error) {

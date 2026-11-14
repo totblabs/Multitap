@@ -279,9 +279,16 @@ class UsbRedirection {
   struct Options {
     usb::DriverAccess driver = usb::nativeDriverAccess();
     std::function<int(const std::string&, uint16_t, const std::string&)> attach = [](const std::string& host, uint16_t port, const std::string& busId) { return usb::vhciAttach(host, port, busId); };
-    std::function<bool(int)> detach = [](int port) { return usb::vhciDetach(port); };
+    // A device's port is unplugged by its number after its connection closed: by then vhci may have given the freed
+    // port to the service's own pointer or a pad. Ordered against their plug-ins (controllerLock), a port they keep
+    // is never unplugged here; the session's device is already gone from it.
+    std::function<bool(int)> detach = [](int port) {
+      std::lock_guard serial(usb::controllerLock());
+      if (usb::keptPorts().contains(port)) return true;
+      return usb::vhciDetach(port);
+    };
     std::function<void()> cancelAttach = [] { usb::vhciCancelAttach(); };
-    std::function<UsbVmState(uint16_t, uint16_t)> deviceState = [](uint16_t vendor, uint16_t product) { return usb::vmDeviceState(vendor, product); };
+    std::function<UsbVmState(uint16_t, uint16_t)> deviceState = [](uint16_t vendor, uint16_t product) { return usb::vmDeviceState(vendor, product, true); };
     usb::UsbIpServer::Access server;
   };
   ~UsbRedirection() { stop(); }

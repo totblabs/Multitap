@@ -65,7 +65,8 @@ async function fixture(t,{tls,relayOptions={},policy=allowedPolicy,sync=false}={
   }
   const limitsHeader={'X-Multitap-Clipboard-Limits':'2'};
   async function pair(session,extended={}){
-    const client=await socket(url(session.connection.clipboardWebSocketUrl),'Bearer '+tokens.alice,{...options,headers:extended.client?limitsHeader:undefined});
+    const clientHeaders={...(extended.client?limitsHeader:{}),...(extended.live?{'X-Multitap-Clipboard-Policy':'1'}:{})};
+    const client=await socket(url(session.connection.clipboardWebSocketUrl),'Bearer '+tokens.alice,{...options,headers:Object.keys(clientHeaders).length?clientHeaders:undefined});
     const host=await socket(url(session.start.clipboardUrl),'Host '+hostTokens[810],{...options,headers:extended.host?limitsHeader:undefined});
     const clientReady=await client.take(v=>v.type==='clipboard.ready'),hostReady=await host.take(v=>v.type==='clipboard.ready');
     assert.equal(clientReady.protocol,'clipboard-v1');assert.equal(hostReady.limits.chunkBytes,32768);
@@ -95,6 +96,8 @@ async function transferText(sender,receiver,requestId,text){
   await sendItem(sender,receiver,requestId,0,bytes);await commit(sender,receiver,requestId);
 }
 async function ready(t,options){const f=await fixture(t,options),host=await f.host(),session=await f.session(host),pair=await f.pair(session);return{...f,mainHost:host,...session,...pair};}
+// A client that takes the ready policy as its own (clipboard.mjs clipboardLivePolicyHeader, Windows/Android app 1.1.13 on).
+async function liveReady(t,options){const f=await fixture(t,options),host=await f.host(),session=await f.session(host),pair=await f.pair(session,{live:true});return{...f,mainHost:host,...session,...pair};}
 
 test('Streaming clipboard capability is explicit, typed and independent of RDP or legacy stream availability',async t=>{
   const f=await fixture(t),host=await f.host(null);let session=await f.session(host);
@@ -184,16 +187,48 @@ test('direction denial is enforced before a read request or manifest reaches the
   });
 });
 
-test('policy grants never expand an old session, while revocation immediately aborts a pending transfer and stream',async t=>{
+test('a wider grant reaches a live stream through a new clipboard pair, while revocation immediately aborts a pending transfer and stream',async t=>{
   const textOnly={textToRemote:true,textToLocal:false,filesToRemote:false,filesToLocal:false};
-  await t.test('grant requires a new session',async t=>{
+  await t.test('a wider grant replaces the pair; its ready and the relay\'s checks carry the grant; the stream goes on',async t=>{
+    // The owner allowed files while a stream ran and files stayed refused until the stream was opened again.
+    const f=await liveReady(t,{policy:textOnly});
+    assert.deepEqual(f.hostReady.clipboardPolicy,textOnly);
+    f.store.updateAssignmentPolicy('alice','pve-810',{clipboardPolicy:allowedPolicy},'fixture-admin');f.relay.clipboardPolicyChanged(f.users.alice,'pve-810');
+    // Both sides are told with a reason they dial again on (a policy change would be final for the stream).
+    assert.equal((await f.client.take(v=>v.type==='clipboard.error')).reason,'clipboard_transport_closed');
+    assert.equal((await f.host.take(v=>v.type==='clipboard.error')).reason,'clipboard_transport_closed');
+    assert.equal(f.media.readyState,WebSocket.OPEN,'the stream goes on');
+    const client=await socket(f.url(f.connection.clipboardWebSocketUrl),'Bearer '+f.tokens.alice,{...f.options,headers:{'X-Multitap-Clipboard-Policy':'1'}});
+    const host=await socket(f.url(f.start.clipboardUrl),'Host '+f.hostTokens[810],f.options);
+    t.after(()=>{client.close();host.close();});
+    await client.take(v=>v.type==='clipboard.ready');
+    assert.deepEqual((await host.take(v=>v.type==='clipboard.ready')).clipboardPolicy,allowedPolicy);
+    client.json({type:'clipboard.begin',requestId:'new-pair-files',format:'files',files:[{name:'allowed.txt',size:0}]});
+    assert.equal((await host.take(v=>v.type==='clipboard.begin')).requestId,'new-pair-files');
+  });
+  await t.test('a pair in the middle of a transfer is replaced only after it',async t=>{
+    const f=await liveReady(t,{policy:textOnly});
+    f.client.json({type:'clipboard.begin',requestId:'running-text',format:'text',size:3});await f.host.take(v=>v.type==='clipboard.begin');
+    f.store.updateAssignmentPolicy('alice','pve-810',{clipboardPolicy:allowedPolicy},'fixture-admin');f.relay.clipboardPolicyChanged(f.users.alice,'pve-810');
+    await new Promise(resolve=>setTimeout(resolve,100));
+    assert.equal(f.client.queue.some(v=>v.type==='clipboard.error')||f.host.queue.some(v=>v.type==='clipboard.error'),false,'the copy is not cut off');
+    await sendItem(f.client,f.host,'running-text',0,Buffer.from('abc'));await commit(f.client,f.host,'running-text');
+    assert.equal((await f.client.take(v=>v.type==='clipboard.error')).reason,'clipboard_transport_closed');
+  });
+  await t.test('a client that intersects the ready with the start of its stream (before 1.1.13) keeps the start policy and its pair',async t=>{
+    // Given the wider grant, the Host would offer what such a client refuses, which ends its whole clipboard.
     const f=await ready(t,{policy:textOnly});
-    f.store.updateUser('alice',{clipboardPolicy:allowedPolicy},'fixture-admin');f.relay.clipboardPolicyChanged(f.users.alice);
-    f.client.json({type:'clipboard.begin',requestId:'old-session-files',format:'files',files:[{name:'blocked.txt',size:0}]});
-    assert.equal((await f.host.take(v=>v.type==='clipboard.error')).reason,'clipboard_policy_denied');
-    assert.equal(f.media.readyState,WebSocket.OPEN);
-    f.relay.stop(f.relay.sessions.get(f.connection.sessionId));await f.mainHost.take(v=>v.type==='session.stop');
-    const fresh=await f.session(f.mainHost);assert.deepEqual(fresh.connection.clipboardPolicy,allowedPolicy);
+    f.store.updateAssignmentPolicy('alice','pve-810',{clipboardPolicy:allowedPolicy},'fixture-admin');f.relay.clipboardPolicyChanged(f.users.alice,'pve-810');
+    await new Promise(resolve=>setTimeout(resolve,100));
+    assert.deepEqual(f.relay.sessions.get(f.connection.sessionId).clipboardPolicy,textOnly);
+    assert.equal(f.client.queue.some(v=>v.type==='clipboard.error')||f.host.queue.some(v=>v.type==='clipboard.error'),false,'the pair stays');
+  });
+  await t.test('a stream that started with the clipboard off still needs a new connection',async t=>{
+    const off={textToRemote:false,textToLocal:false,filesToRemote:false,filesToLocal:false};
+    const f=await fixture(t,{policy:off}),host=await f.host(),session=await f.session(host);
+    assert.equal(session.connection.clipboardWebSocketUrl,undefined);
+    f.store.updateAssignmentPolicy('alice','pve-810',{clipboardPolicy:allowedPolicy},'fixture-admin');f.relay.clipboardPolicyChanged(f.users.alice,'pve-810');
+    assert.deepEqual(f.relay.sessions.get(session.connection.sessionId).clipboardPolicy,off);
   });
   await t.test('pending transfer revoked',async t=>{
     const f=await ready(t);

@@ -656,7 +656,8 @@ inline bool protectionProven() {
 
 // The VM's own device node of an attached device (matched by vendor and product, the parent node only):
 // started, present but not started (with Windows' problem code), or not in the tree. Read-only.
-inline UsbVmState vmDeviceState(uint16_t vendor, uint16_t product) {
+// [sessionDevices]: a USB session's check, which never counts the service's own devices.
+inline UsbVmState vmDeviceState(uint16_t vendor, uint16_t product, bool sessionDevices = false) {
   UsbVmState out;
   wchar_t prefix[48]{};
   swprintf_s(prefix, L"USB\\VID_%04X&PID_%04X\\", vendor, product);
@@ -667,6 +668,9 @@ inline UsbVmState vmDeviceState(uint16_t vendor, uint16_t product) {
   const size_t prefixLength = wcslen(prefix);
   for (wchar_t* id = list.data(); *id; id += wcslen(id) + 1) {
     if (_wcsnicmp(id, prefix, prefixLength) != 0) continue;
+    // The service's own devices (gamepad_device.hpp, pointer_device.hpp; their serials) are never a session's: a
+    // shared wired Xbox 360 pad (045E:028E) must not be taken for a virtual pad that started.
+    if (sessionDevices && (_wcsnicmp(id + prefixLength, L"MULTITAP-PAD-", 13) == 0 || _wcsicmp(id + prefixLength, L"MULTITAP-POINTER") == 0)) continue;
     DEVINST node = 0; ULONG status = 0, problem = 0;
     if (CM_Locate_DevNodeW(&node, id, CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS || CM_Get_DevNode_Status(&status, &problem, node, 0) != CR_SUCCESS) continue;
     if (problem == 0 && (status & DN_STARTED)) return {2, 0};

@@ -594,7 +594,7 @@ test('each assigned desktop edits its own clipboard and device sharing in place,
   assert.match(panel().textContent, /PC → 데스크톱/); assert.match(panel().textContent, /데스크톱 → PC/);
   for (const label of ['글·그림 PC → 데스크톱', '글·그림 데스크톱 → PC', '파일 PC → 데스크톱', '파일 데스크톱 → PC']) assert.ok([...panel().querySelectorAll('[data-clipboard-permission]')].some(input => input.getAttribute('aria-label') === label + ' 허용'), label);
   for (const label of ['공유 폴더', '프린터', 'USB 장치', '스마트 카드', '직렬(COM) 포트']) assert.ok([...panel().querySelectorAll('[data-device-permission]')].some(input => input.getAttribute('aria-label') === label + ' 허용'), label);
-  assert.match(panel().textContent, /켠 것은 다음 접속부터 적용돼요\./); assert.match(panel().textContent, /복사·붙여넣기를 끄면 그 데스크톱의 진행 중인 연결과 전송이 끝나요\./);
+  assert.match(panel().textContent, /복사·붙여넣기를 켜면 연결 중에도 바로 적용돼요\(앱 1\.1\.13부터\)\. 그 밖에 켠 것은 다음 접속부터예요\./); assert.match(panel().textContent, /복사·붙여넣기를 끄면 그 데스크톱의 진행 중인 연결과 전송이 끝나요\./);
   assert.match(content.querySelector('#assignments .note').textContent, /바꾸면 바로 저장돼요\./);
   assert.equal(panel().querySelector('input[type=password]'), null);
   assert.deepEqual(writes, [], 'opening and reading sends nothing');

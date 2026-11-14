@@ -40,3 +40,14 @@ test('a wrong administrator password in the backup dialog has its own reason in 
 test('an unknown event still shows its code rather than nothing', () => {
   assert.equal(eventLabel('some_future_event'), 'some_future_event');
 });
+
+test('a PC wake that sent nothing says why in 기록, not "원인 미확인"', async () => {
+  const { auditEntry, causeCell } = await import('../admin/js/timeline.js');
+  const ko = (await import('../admin/i18n/ko.js')).default;
+  const desktops = new Map([['pc-fixture', { id: 'pc-fixture', name: 'PC' }]]);
+  const entry = auditEntry({ id: 8, created_at: Date.now(), event: 'pc_wake_failed', actor: 'u1', subject: 'pc-fixture:EPERM' }, new Map([['u1', { id: 'u1', username: 'owner' }]]), desktops);
+  assert.equal(entry.failure, true); assert.equal(entry.desktopId, 'pc-fixture'); assert.equal(entry.code, 'EPERM');
+  assert.equal(causeCell(entry), '켜기 신호를 보내지 못함 (시스템 오류 EPERM)'); assert.notEqual(causeCell(entry), ko['labels.108']);
+  const unknown = auditEntry({ id: 9, created_at: Date.now(), event: 'pc_wake_failed', actor: 'u1', subject: 'pc-fixture:unknown' }, new Map(), desktops);
+  assert.equal(causeCell(unknown), '켜기 신호를 보내지 못함 (이유 모름)');
+});

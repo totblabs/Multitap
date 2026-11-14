@@ -44,7 +44,7 @@ const headerButtons = () => [...document.querySelectorAll('header .page-actions 
 
 test('a complete installation: no permission buttons, no warning, the console permission shown as present, nothing about a sound card', t => {
   const f = fixture(t);
-  assert.deepEqual(headerButtons(), ['새로고침', '토큰 갱신'], 'the separate 긴급 콘솔 권한 and 사운드카드 권한 buttons are gone');
+  assert.deepEqual(headerButtons(), ['새로고침', '토큰 갱신', '다시 연결'], 'the separate 긴급 콘솔 권한 and 사운드카드 권한 buttons are gone');
   assert.equal(f.alert(), null);
   assert.deepEqual([...document.querySelectorAll('.pve-detail span')].map(node => node.textContent), ['연결 계정', '마지막 확인', '토큰 유효기간', '긴급 콘솔 권한']);
   assert.deepEqual([f.tile('긴급 콘솔 권한').querySelector('strong').textContent, f.tile('긴급 콘솔 권한').querySelector('small').textContent, f.tile('긴급 콘솔 권한').classList.contains('is-warn')], ['있음', 'Proxmox 권한 VM.Console', false]);
@@ -60,7 +60,7 @@ test('a complete installation: no permission buttons, no warning, the console pe
 
 test('an installation without VM.Console: one inline line where the account is shown, one copyable command, one check; still missing stays inline', async t => {
   const f = fixture(t, { consolePrivilege: 'missing' });
-  assert.deepEqual(headerButtons(), ['새로고침', '토큰 갱신'], 'no header button: the line carries the fix');
+  assert.deepEqual(headerButtons(), ['새로고침', '토큰 갱신', '다시 연결'], 'no header button for it: the line carries the fix');
   const alert = f.alert();
   assert.ok(alert.closest('.pve-connection-card'), 'inside the card of the connection it talks about');
   assert.equal(alert.getAttribute('role'), 'status'); assert.equal(alert.querySelector('strong').textContent, '긴급 콘솔 권한(VM.Console)이 없어요');
@@ -134,4 +134,39 @@ test('notices have one place: a toast at the bottom, never in the page flow unde
   for (const [name, text] of Object.entries(css)) if (name !== 'console.css') assert.doesNotMatch(text, /#notice\s*\{/, name + ' does not reposition the notice');
   assert.equal((css['console.css'].match(/#notice\{/g) ?? []).length, 2, 'the rule and its phone variant only');
   assert.doesNotMatch(css['console.css'], /#notice\{[^}]*(?:position:(?:relative|static|absolute)|top:)/);
+});
+
+// 토큰 갱신 only moves the expiry of the token the server holds. A token Proxmox
+// refuses (removed or remade there, or brought by a backup from another server)
+// needs a new one: the failure says so and offers 다시 연결, which opens
+// ‘연결 설정 변경’ with the setup command; the header offers it always.
+test('a refused token: the failure says renewing will not fix it and 다시 연결 opens the connection change', t => {
+  const f = fixture(t, { state: 'error', errorCode: 'proxmox_permission_denied' });
+  const failure = document.querySelector('.pve-connection-card .inline-alert.is-error');
+  assert.equal(failure.querySelector('span').textContent, 'Proxmox 토큰 또는 접근 권한을 확인하세요.');
+  assert.equal(failure.querySelector('.pve-reconnect-hint').textContent, '토큰 갱신은 만료일만 늘려요. 토큰이 거절되면 ‘다시 연결’로 새 토큰을 받으세요.');
+  assert.deepEqual([...failure.querySelectorAll('button')].map(node => node.textContent), ['다시 확인', '다시 연결']);
+  assert.deepEqual(headerButtons(), ['새로고침', '토큰 갱신', '다시 연결']);
+  const change = () => document.querySelector('details.pve-change');
+  assert.equal(change().hasAttribute('open'), false);
+  assert.equal(change().getAttribute('data-keep-open'), 'pve-change');
+  failure.querySelectorAll('button')[1].dispatchEvent(new f.window.Event('click'));
+  assert.equal(change().hasAttribute('open'), true, 'the connection change is open');
+  assert.equal(change().querySelector('summary').textContent, '연결 설정 변경');
+  assert.ok(change().querySelector('#shell-setup'), 'with the command that makes a new integration account');
+  assert.equal(f.dialogs.length, 0); assert.equal(f.requests.length, 0);
+  // The header button does the same.
+  const g = fixture(t);
+  assert.equal(document.querySelector('details.pve-change').hasAttribute('open'), false);
+  g.click('다시 연결');
+  assert.equal(document.querySelector('details.pve-change').hasAttribute('open'), true);
+});
+
+test('a failure that a new token does not fix offers no 다시 연결 in the alert', t => {
+  for (const errorCode of ['proxmox_unreachable', 'proxmox_request_failed']) {
+    fixture(t, { state: 'error', errorCode });
+    const failure = document.querySelector('.pve-connection-card .inline-alert.is-error');
+    assert.equal(failure.querySelector('.pve-reconnect-hint'), null, errorCode);
+    assert.deepEqual([...failure.querySelectorAll('button')].map(node => node.textContent), ['다시 확인'], errorCode);
+  }
 });

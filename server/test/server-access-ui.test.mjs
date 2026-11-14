@@ -841,12 +841,34 @@ test('an address check the page cannot read is not shown as a result: its addres
     assert.equal(f.find('.server-access-error').textContent, '검사 응답을 확인하지 못했어요. 다시 검사하세요.');
     assert.equal(f.find('[data-access-save]').disabled, true);
   }
-  // A proxy the server does not trust is named, so it can be added to the list.
+  // A proxy the server does not trust is named, with one button that lists it and tests again.
   const f = fixture(t, { handler: async () => ({ ...modernTest, testId: undefined, checks: [{ name: 'configuration', status: 'passed' }, { name: 'address', origin: 'https://vdi.example.com', peer: '172.18.0.1', status: 'failed', code: 'server_access_address_proxy_untrusted' }] }) });
   await testedHttp(f);
-  assert.equal(f.find('[data-access-address-check="failed"]').textContent, 'https://vdi.example.com프록시(172.18.0.1)가 ‘신뢰할 프록시 IP’에 없어요. 추가한 뒤 다시 테스트하세요.');
+  assert.equal(f.find('[data-access-address-check="failed"]').textContent, 'https://vdi.example.com프록시(172.18.0.1)가 ‘신뢰할 프록시 IP’에 없어요.172.18.0.1 추가하고 다시 테스트');
   assert.match(f.find('[data-access-test-status]').textContent, /닿지 못했어요\.\n저장하지 않았고, 지금 연결은 그대로예요\./);
   assert.equal(f.find('[data-access-save]').disabled, true);
+  assert.equal(f.find('[name="trustedProxies"]').value, '127.0.0.1', 'nothing is added unasked');
+});
+
+test('a proxy the test came through is listed and tested again with one press, and only that address', async t => {
+  const untrusted = { ...modernTest, testId: undefined, checks: [{ name: 'configuration', status: 'passed' }, { name: 'address', origin: 'https://remote.example.com', peer: '10.20.30.40', status: 'failed', code: 'server_access_address_proxy_untrusted' }] };
+  const reached = { ...modernTest, checks: [{ name: 'configuration', status: 'passed' }, { name: 'address', origin: 'https://remote.example.com', status: 'passed', code: 'server_access_address_reached' }] };
+  const answers = [untrusted, reached];
+  const f = fixture(t, { handler: async path => path.endsWith('/test') ? answers.shift() : { accepted: true, operationId: 'fixture-operation', state: 'waiting_idle' } });
+  await testedHttp(f);
+  const trust = f.find('[data-access-proxy-trust]');
+  assert.equal(trust.textContent, '10.20.30.40 추가하고 다시 테스트'); assert.equal(trust.disabled, false);
+  trust.click(); await flush();
+  const tests = f.writes.filter(write => write.path.endsWith('/test'));
+  assert.equal(tests.length, 2);
+  assert.deepEqual(tests[1].body.config.trustedProxies, ['127.0.0.1', '10.20.30.40']);
+  assert.equal(f.find('[name="trustedProxies"]').value, '127.0.0.1\n10.20.30.40');
+  assert.equal(f.find('[data-access-proxy-trust]'), null, 'nothing left to add');
+  assert.equal(f.find('[data-access-save]').disabled, false, 'the second test can be saved');
+  // Other reasons offer no such button.
+  const g = fixture(t, { handler: async () => ({ ...modernTest, testId: undefined, checks: [{ name: 'address', origin: 'https://remote.example.com', peer: '10.20.30.40', status: 'failed', code: 'server_access_address_proxy_headers' }] }) });
+  await testedHttp(g);
+  assert.equal(g.find('[data-access-proxy-trust]'), null);
 });
 
 // ---- the switch for picture and sound over UDP ----

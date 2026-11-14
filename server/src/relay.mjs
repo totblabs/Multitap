@@ -27,7 +27,7 @@ import { inputLatencyProtocol, inputFrameTimingProtocol, inputLatencyCapability,
 import { cursorProtocol, cursorTracksProtocol, cursorKind, cursorCapability, cursorTracksCapability, requestedCursor, requestedCursorTracks, negotiateCursor, cursorState, cursorPacket, trackCursorPacket, cursorSource, cursorEchoProtocol, cursorEchoCapability, requestedCursorEcho, negotiateCursorEcho, validCursorEcho, cursorComposeProtocol, cursorComposeCapability, requestedCursorCompose, negotiateCursorCompose, validCursorCompose } from './cursor.mjs';
 import { textInputProtocol, textInputCapability, requestedTextInput, negotiateTextInput, validTextInput } from './text-input.mjs';
 import { backgroundVideoProtocol, backgroundVideoCapability, requestedBackgroundVideo, negotiateBackgroundVideo, validBackgroundVideo } from './background-video.mjs';
-import { gamepadProtocol, gamepadCapability, requestedGamepad, negotiateGamepad, validGamepadState, validGamepadRemove, gamepadRumble } from './gamepad.mjs';
+import { gamepadProtocol, gamepadCapability, requestedGamepad, negotiateGamepad, validGamepadState, validGamepadRemove, gamepadRumble, trackGamepadMessage, trackGamepadRumble } from './gamepad.mjs';
 import { displayScaleProtocol, displayScaleOutputsProtocol, displayScaleCapability, displayScaleOutputsCapability, requestedDisplayScale, requestedDisplayScaleOutputs, negotiateDisplayScale, negotiateDisplayScaleControl, validDisplayScaleRequest, displayScaleResult } from './display-scale.mjs';
 import { touchInputProtocol, touchInputCapability, requestedTouchInput, negotiateTouchInput, validTouchInput } from './touch-input.mjs';
 import { relativeMouseProtocol, relativeMouseTracksProtocol, relativeMouseCapability, relativeMouseTracksCapability, requestedRelativeMouse, negotiateRelativeMouse, relativeMouseInput, validRelativeMouse, validRelativeTrackMouse } from './relative-mouse.mjs';
@@ -432,12 +432,30 @@ export class Relay {
   }
   clipboardPolicyChanged(userId, desktopId) {
     this.channels.policyChanged(userId, desktopId);
-    for (const session of this.policySessions(userId, desktopId)) if (session.mode === 'stream' && clipboardPolicyRestricted(session.clipboardPolicy, this.store.clipboardPolicy(userId, session.desktopId))) {
-      // Only the clipboard ends, as USB, printers
-      // and drives keep the stream: available() refuses a new pair until the
-      // next connection takes the narrower grant.
-      this.clipboard.closeSession(session, 'clipboard_policy_changed');
+    for (const session of this.policySessions(userId, desktopId)) {
+      if (session.mode !== 'stream') continue;
+      const stored = this.store.clipboardPolicy(userId, session.desktopId);
+      if (clipboardPolicyRestricted(session.clipboardPolicy, stored)) {
+        // Only the clipboard ends, as USB, printers
+        // and drives keep the stream: available() refuses a new pair until the
+        // next connection takes the narrower grant.
+        session.clipboardWiden = false;
+        this.clipboard.closeSession(session, 'clipboard_policy_changed');
+      } else if (session.clipboardEnabled && session.clipboardLivePolicy === true && clipboardPolicyRestricted(stored, session.clipboardPolicy)) {
+        // A wider grant reaches the live stream of a client that takes the ready as its policy (clipboard.mjs
+        // clipboardLivePolicyHeader): the session takes it, and its clipboard pair is closed with a reason both
+        // sides dial again on, so the new pair's ready carries it (revalidate, once no transfer or pull runs). A
+        // stream that started with the clipboard off has no clipboard address: the next connection.
+        session.clipboardPolicy = { ...stored };
+        session.clipboardWiden = true;
+      }
     }
+  }
+  // The pair of a session whose grant was widened is replaced between transfers and pulls (a paste), never in one.
+  clipboardWidened(session) {
+    if (!session.clipboardWiden || session.clipboardPair?.transfer || session.clipboardPair?.pulls?.length) return;
+    session.clipboardWiden = false;
+    if (session.clipboardPair) this.clipboard.closeSession(session, 'clipboard_transport_closed');
   }
   // The stored device permissions (devicePolicy) for streaming.
   devicePolicyChanged(userId, desktopId) {
@@ -1086,6 +1104,7 @@ export class Relay {
       if (!this.authorized(session) || (!session.ws && !this.resume.held(session) && session.expiresAt < Date.now())) { this.stop(session, this.store.sessionRevocationReason(session.tokenHash, Date.now(), session.userId) ?? 'authorization_revoked'); continue; }
       // A narrower clipboard grant closes only the clipboard; the stream's other checks still run.
       if (session.mode === 'stream' && session.clipboardPair && clipboardPolicyRestricted(session.clipboardPolicy, this.store.clipboardPolicy(session.userId, session.desktopId))) this.clipboard.closeSession(session, 'clipboard_policy_changed');
+      else if (session.clipboardWiden) this.clipboardWidened(session);
       if (session.signinPolicy && (session.signinLease.closed || ['invalidated','expired','closed'].includes(session.signinPolicy.state))) this.signinInvalidate(session);
       else if (session.profilePreparing && Date.now() >= session.profileDeadline) this.unavailable(session, 'virtual_display_required');
       else if (session.resize && session.resize.deadline < Date.now()) this.resizeFailed(session, session.resize, 'resize_timeout');
@@ -1399,6 +1418,8 @@ export class Relay {
         if (!rumble) return this.dropHost(host, 'invalid_control');
         if (rumble.sessionId !== session.id) return;
         if (!session.gamepad) return this.dropHost(host, 'invalid_control');
+        // Kept also while the client is away: a client that resumes gets each pad's latest (SessionResume.attached).
+        trackGamepadRumble(session, rumble);
         if (session.ws && !this.send(session.ws, { type: 'gamepad.rumble', pad: rumble.pad, low: rumble.low, high: rumble.high })) this.stop(session, 'client_backpressure');
         return;
       }
@@ -1606,7 +1627,9 @@ export class Relay {
       if (value.type === 'gamepad.state' || value.type === 'gamepad.remove') {
         const state = value.type === 'gamepad.state';
         if (!session.gamepad || session.mode !== 'stream' || !(state ? validGamepadState(value) : validGamepadRemove(value))) return this.stop(session, 'invalid_input');
-        if (!this.send(session.host.ws, { ...value, sessionId: session.id })) this.dropHost(session.host, 'host_backpressure');
+        if (!this.send(session.host.ws, { ...value, sessionId: session.id })) return this.dropHost(session.host, 'host_backpressure');
+        // The pads the Host holds for this session: set neutral when the client goes away (SessionResume.resetInput).
+        trackGamepadMessage(session, value);
         return;
       }
       // text-input-v1: committed text only in a session that negotiated it,

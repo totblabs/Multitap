@@ -65,6 +65,10 @@ const offerFormats=new Set(['tree','text','richtext','image']);
 const waitingPattern=/^wait-[1-9][0-9]{0,8}$/;
 export const clipboardPullHeader='x-multitap-clipboard-pull';
 export const clipboardLimitsHeader='x-multitap-clipboard-limits';
+// A client that takes a pair's ready policy as its own (1.1.13 on): only its stream is given a grant the
+// administrator widens (Relay.clipboardPolicyChanged); an older client intersects the ready with the stream's start
+// and would refuse what the Host is then allowed to offer.
+export const clipboardLivePolicyHeader='x-multitap-clipboard-policy';
 export const clipboardFormatsHeader='x-multitap-clipboard-formats';
 const maxMessage=256*1024,maxManifest=48*1024,maxEntriesMessage=96*1024;
 const requestPattern=/^[A-Za-z0-9_-]{1,64}$/;
@@ -271,7 +275,8 @@ export class ClipboardRelay{
     const deferred=onPaste&&req.headers[clipboardDeferredHeader]==='1';
     const observedPair=session.clipboardPair;
     const guard=()=>!socket.destroyed&&this.available(session)&&session.clipboardPair===observedPair&&!observedPair?.[role]&&!observedPair?.closed&&(observedPair||this.pairs.size<128);
-    const accept=()=>this.wss.handleUpgrade(req,socket,head,ws=>this.attach(ws,session,role,extended,formats,pull,scale,onPaste,settled,intent,pullQueue,deferred));
+    const livePolicy=req.headers[clipboardLivePolicyHeader]==='1';
+    const accept=()=>{if(role==='client')session.clipboardLivePolicy=livePolicy;this.wss.handleUpgrade(req,socket,head,ws=>this.attach(ws,session,role,extended,formats,pull,scale,onPaste,settled,intent,pullQueue,deferred));};
     if(session.signinPolicy&&this.relay.admitSigninRedirect)void this.relay.admitSigninRedirect(session,guard,accept,()=>reject(401,'Unauthorized'));
     else if(!session.signinPolicy&&guard())accept();else reject(401,'Unauthorized');return true;
   }

@@ -375,6 +375,8 @@ class MainActivity : FlutterActivity() {
         reportImeVisibility()
         if (!hasFocus) gameMouse?.background()
         if (!hasFocus) media?.releaseInput()
+        // A controller held now would come back as held (its later moves go elsewhere).
+        if (!hasFocus) gamepad?.released()
         // Android lets only the focused app read the clipboard: a copy made in
         // another app is noticed when the user comes back.
         clipboard?.focusChanged(hasFocus)

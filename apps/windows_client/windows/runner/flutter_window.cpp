@@ -1654,7 +1654,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
   if (relative_mouse_.HandleMessage(hwnd, message, wparam, lparam)) return 0;
   if (game_mouse_usb_ && game_mouse_usb_->HandleMessage(message)) return 0;
-  if (gamepad_input_ && gamepad_input_->HandleMessage(message)) return 0;
+  // gamepad-v1: a pad moved while this window is in front is input for the idle sign-out, as a key or the mouse.
+  if (bool human = false; gamepad_input_ && gamepad_input_->HandleMessage(message, &human)) {
+    if (human && GetAncestor(GetForegroundWindow(), GA_ROOT) == GetHandle()) AuthenticationHuman();
+    return 0;
+  }
   if (message == multitap::kRelativeMouseToggleMessage) {
     // A queued chord belongs to the capture/arming epoch that posted it.
     // Never release or toggle a successor session after focus or ownership

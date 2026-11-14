@@ -418,3 +418,37 @@ test('Relay WebSockets refuse permessage-deflate and run without Nagle on every 
   assert.ok(delayed.has(session.ws._socket), 'Nagle is on for the client session socket');
   assert.ok(delayed.has(hostRecord.ws._socket), 'Nagle is on for the Host channel socket');
 });
+
+test('gamepad-v1: a Host hold forgets the kept rumble, and a client that went away during it has its pads set neutral when the Host is back', async t => {
+  // A rumble the game stops while the Host is away never reaches the broker: replaying the kept level to a resuming
+  // client would make its pad vibrate without end. And the input.reset of a client that left during the hold could
+  // not be sent then.
+  const f = await fixture(t, { hostResumeGraceMs: 3000, resumeGraceMs: 3000 });
+  const padCapabilities = { ...resumeCapabilities, gamepadProtocol: 'gamepad-v1' };
+  const first = await host(f, padCapabilities);
+  const connection = await f.call('/desktops/pve-170/connect', { method: 'POST', token: f.alice, data: { mode: 'stream', sessionResumeProtocol: 'session-resume-v1', gamepadProtocol: 'gamepad-v1' } });
+  assert.equal(connection.status, 200, JSON.stringify(connection.body)); assert.equal(connection.body.gamepadProtocol, 'gamepad-v1');
+  const id = connection.body.sessionId, url = f.wsUrl('/api/v1/sessions/' + id);
+  const client = await socket(url, 'Bearer ' + f.alice);
+  await first.take(type('session.start'));
+  first.json(streamInfo); await client.take(type('stream.info'));
+  first.send(frame(true, 1)); await client.take(Buffer.isBuffer);
+  const token = (await client.take(type('session.resume.token'))).token;
+  client.json({ type: 'gamepad.state', pad: 0, buttons: 0x1000, lt: 0, rt: 255, lx: 0, ly: 0, rx: 0, ry: 0 });
+  await first.take(type('gamepad.state'));
+  first.json({ type: 'gamepad.rumble', sessionId: id, pad: 0, low: 255, high: 255 });
+  assert.equal((await client.take(type('gamepad.rumble'))).low, 255);
+  first.terminate();
+  await client.take(type('session.resuming'));
+  client.terminate();                               // the client goes away during the Host's hold
+  await delay(100);
+  const second = await host(f, padCapabilities);
+  second.json({ type: 'host.session.resume', sessions: [id] });
+  await second.take(type('host.session.resumed'));
+  assert.deepEqual(await second.take(type('input.reset')), { type: 'input.reset', sessionId: id });
+  assert.deepEqual(await second.take(type('gamepad.state')), { type: 'gamepad.state', pad: 0, buttons: 0, lt: 0, rt: 0, lx: 0, ly: 0, rx: 0, ry: 0, sessionId: id });
+  const back = await socket(url, 'Bearer ' + f.alice, { 'X-Multitap-Resume': token });
+  t.after(() => back.terminate());
+  await back.take(type('session.resumed'));
+  await back.none(type('gamepad.rumble'));
+});

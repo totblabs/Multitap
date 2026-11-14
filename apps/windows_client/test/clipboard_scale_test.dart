@@ -112,6 +112,7 @@ void main() {
         clipboardFormatsHeader: clipboardFormatsHeaderValue,
         clipboardPullHeader: clipboardPullHeaderValue,
         clipboardScaleHeader: clipboardScaleHeaderValue,
+        clipboardLivePolicyHeader: clipboardLivePolicyHeaderValue,
       });
       final plain = make(with_: pull.PullClipboard());
       expect(plain.dialHeaders.containsKey(clipboardScaleHeader), isFalse);

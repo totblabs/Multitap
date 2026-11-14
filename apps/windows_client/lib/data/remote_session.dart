@@ -1471,9 +1471,17 @@ class RemoteSession extends ChangeNotifier {
   final _gamepadRumble = StreamController<GamepadRumble>.broadcast();
   Stream<GamepadRumble> get gamepadRumble => _gamepadRumble.stream;
 
-  /// False, with nothing sent, when not granted, closed or not connected.
+  /// False, with nothing sent, when not granted or closed, before the first
+  /// picture (the Host takes pads only once its session runs), while the
+  /// socket is replaced, or while the Host is away (the broker drops what the
+  /// client sends then). [gamepadResync] says when to send them again.
   bool sendGamepad(Map<String, Object?> message) {
-    if (!gamepad || _closed || _socket == null || _resumingTransport) {
+    if (!gamepad ||
+        _closed ||
+        _socket == null ||
+        _resumingTransport ||
+        _hostResuming ||
+        !frameReady) {
       if (gamepad) _gamepadTally.message(message, taken: false);
       return false;
     }
@@ -1484,6 +1492,19 @@ class RemoteSession extends ChangeNotifier {
 
   /// gamepad-v1 counts for the statistics rows (gamepadStatsFields).
   final _gamepadTally = GamepadTally();
+
+  /// gamepad-v1: the stream takes pad states again (its first picture, a
+  /// replaced socket, the Host back). Every pad's state is sent again then: one
+  /// sent meanwhile may never have reached the Host (the broker set the pads
+  /// neutral when the client went away), and a pad that does not change sends
+  /// nothing by itself.
+  Stream<void> get gamepadResync => _gamepadResync.stream;
+  final _gamepadResync = StreamController<void>.broadcast();
+  void _resyncGamepads() {
+    if (gamepad && !_closed && !_gamepadResync.isClosed) {
+      _gamepadResync.add(null);
+    }
+  }
 
   /// A request sent just before the socket was lost may never have reached
   /// the Host: a session that ever hid says where it stands again.
@@ -2539,6 +2560,7 @@ class RemoteSession extends ChangeNotifier {
         if (replaced) {
           _channelsAfterResume();
           _backgroundAfterResume();
+          _resyncGamepads();
         }
         notifyListeners();
       }
@@ -3221,6 +3243,9 @@ class RemoteSession extends ChangeNotifier {
           _hostResuming = false;
           _resumeClocks();
           _channelsAfterResume();
+          // The broker dropped what was sent while the Host was away.
+          _backgroundAfterResume();
+          _resyncGamepads();
           notifyListeners();
         }
       case 'session.resuming':
@@ -3660,6 +3685,10 @@ class RemoteSession extends ChangeNotifier {
             _startClipboard();
             _streamReady(stats);
           }
+          // A hide made before the socket opened was never sent; pads read
+          // before the first picture were not taken (sendGamepad).
+          _backgroundAfterResume();
+          _resyncGamepads();
         }
         final framePending = _resize;
         if (framePending != null &&
@@ -4661,6 +4690,7 @@ class RemoteSession extends ChangeNotifier {
     if (notifyHost) _send({'type': 'session.stop'});
     _closed = true;
     unawaited(_gamepadRumble.close());
+    unawaited(_gamepadResync.close());
     _mediaRevision++;
     _captureRevision++;
     final pending = _resize;

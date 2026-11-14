@@ -709,9 +709,11 @@ with the session.
 **Client.** Android sends `on:true` when the app is hidden or paused and
 `on:false` when it is visible again (also while merely inactive, e.g. under
 the notification shade); the Windows app likewise when minimised and
-restored. A session that ever hid sends where it stands again after its
-socket was replaced (session-resume-v1), since the last request may have been
-lost with the old socket.
+restored. A session that ever hid sends where it stands again at its first
+picture (a hide before the socket opened was never sent), after its socket was
+replaced (session-resume-v1) and when the Host is back after a hold (the
+broker drops what the client sends meanwhile), since the last request may have
+been lost.
 
 ## Gamepads (gamepad-v1)
 
@@ -740,16 +742,44 @@ the first state of a pad (also a neutral one) plugs it in; while its view is
 not focused or in front, every pad is sent neutral once, and its state again
 when it is.
 
+**When the stream takes pads.** The client sends pad messages only from the
+stream's first picture (the Host takes pads once its session runs), never
+while its socket is replaced or while the Host is away (the broker drops what
+comes then). At the first picture, after a replaced socket and when the Host
+is back (`session.resumed` after `session.resuming`) it sends every pad's
+state again, and every removal the session could not take: a pad that is
+idle sends nothing by itself, so without this a pad connected before the
+connection appeared only on its first press, and a release lost in a gap
+left a button held. Android also sends a neutral state for a controller
+already connected when the session starts or connected during it.
+
+**While a side is away.** `input.reset` does not reach the Host's virtual
+pads (its own devices, not the worker's input). The broker keeps the pads a
+client gave a state for and sends a neutral `gamepad.state` for each after the
+`input.reset` of a client that went away or whose socket was replaced; the
+Host sets its pads neutral itself while its own channel or the client is away
+(both without unplugging them).
+
 **Host to client.** `{"type":"gamepad.rumble","sessionId","pad","low",
 "high"}` (each motor 0..255) when the VM's game changes it; the relay passes it
 to the client without the `sessionId`, and drops a Host that sends it
 ungranted. The client sets the local pad's motors (Android: the controller's
-one vibrator at the stronger of the two).
+one vibrator at the stronger of the two, held until the next level). A rumble
+changed while a side was away would never come again (only changes are sent):
+the broker keeps each pad's latest level and sends it to a client that resumes
+while the Host is there, and the Host sends its pads' latest levels again once
+both sides are back. A client stops the motors while a resume runs. Only the
+view in front drives the motors: an inactive view keeps the Host's level and
+applies it when it is active again, and a view stops only the motors it set
+(the PC's pads are shared by every session window).
 
 **Host.** The service owns the pads (no worker is involved): plugging in and
-unplugging run in order on one thread, a state never waits for them, a pad
-that could not be plugged in is not tried again in that session, and every pad
-goes when the session ends. The controller is the device as it describes
+unplugging run in order on one thread, coalesced per pad (a client that plugs
+and unplugs without end queues at most four jobs), a state never waits for
+them, a pad that could not be plugged in is not tried again in that session
+(a removal does not change that), and every pad goes when the session ends.
+Pad messages are ordered against the session's start and end, so a state that
+races the end never plugs a pad in again. The controller is the device as it describes
 itself (four vendor interfaces, the 20-byte input report on 0x81, the 8-byte
 rumble report on 0x01; the facts were cross-checked with VIIPER's
 device/xbox360, GPL-3.0, no code used), with Multitap's own strings. A read of
@@ -760,11 +790,18 @@ hostAction 250 stages 36-38.
 
 **Clients.** Windows: XInput (`xinput1_4`, loaded at run time), the connected
 slots every 4 ms on a high-resolution timer and an absent slot once a second
-(`windows/runner/gamepad_input.h`). Android: the key and motion events of a
-gamepad or joystick device, taken while a granted session runs so B is not
-Back (`AndroidGamepad.kt`). Both: `lib/data/session_gamepads.dart`. The
+(`windows/runner/gamepad_input.h`); a button, a trigger past XInput's
+threshold or a stick outside its dead zone counts as input for the idle
+sign-out, as a key or the mouse. Android: the key and motion events of a game
+controller (sticks, or the gamepad A button: a TV remote or a keyboard that
+Android also lists as a gamepad keeps steering the app), taken while a
+granted session runs so B is not Back; an analog trigger is its axis (L2/R2
+keys count only without one); when the window loses focus every pad is
+released (`AndroidGamepad.kt`). Both: `lib/data/session_gamepads.dart`. The
 Windows app reads only XInput pads: a pad in DirectInput mode (an 8BitDo
-switched to D, for one) or a PlayStation controller is not seen there.
+switched to D, for one) or a PlayStation controller is not seen there. On
+Android 16 a controller button that sends Android's Back still reaches the
+app's Back.
 
 **Records.** Each `streamStats` row of a client carries `gamepad` (granted)
 and, in a granted session, `gamepadPads` (pads the Host was asked to hold at

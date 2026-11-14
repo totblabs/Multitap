@@ -135,3 +135,22 @@ test('USB detach diagnostic projection retains exact raw cause without synthesiz
   assert.equal(entry.event, 'hostAction');
   assert.equal(entry.version, '1.0.14');
 });
+
+test('The Host\'s own devices (stages 33-38) read as their port, pad and preparation, never as a session reason', () => {
+  // Stage 34/37's error is usb_driver.hpp's Prepare (1..7), 20 or 21, not an index into the session reason table.
+  const row = (values, ok = true) => ({ time: '2026-11-14T09:00:00.000Z', event: 'hostAction', values: { action: 250, ok, ...values } });
+  const diagnostics = { version: '1.1.11', events: [
+    row({ stage: 33, error: 0, expected: 1 }), row({ stage: 34, error: 1, expected: 0 }, false), row({ stage: 34, error: 20, expected: 10048 }, false),
+    row({ stage: 36, error: 0, expected: 2 }), row({ stage: 37, error: 4, expected: 0 }, false), row({ stage: 37, error: 21, expected: 1 }, false), row({ stage: 38, error: 0, expected: 3 }), row({ stage: 35 })] };
+  const text = hostEntries([{ desktopId: 'pc-fixture', diagnostics }]).map(entry => entry.detail.join(' | '));
+  const header = read('../../apps/windows_host/src/usb_driver.hpp');
+  assert.match(header, /enum class Prepare \{ ready, packageMissing, platformUnsupported, signatureInvalid, otherInstallation, installFailed, restartRequired, protectionFailed \}/, 'the labels follow this order');
+  assert.ok(text[0].includes('포트 1'), text[0]);
+  assert.ok(text[1].includes('USB 드라이버 파일 없음'), text[1]);
+  assert.ok(text[2].includes('10048'), text[2]);
+  assert.ok(text[3].includes('패드 2'), text[3]);
+  assert.ok(text[4].includes('다른 프로그램'), text[4]);
+  assert.ok(text[5].includes('Windows가 장치를 연결하지 못함'), text[5]);
+  assert.ok(text[6].includes('패드 3'), text[6]);
+  for (const line of text) assert.doesNotMatch(line, /허용되지 않는|키보드·마우스|장치 수 한도|복원 대상|usb_restart_required/, line);
+});
