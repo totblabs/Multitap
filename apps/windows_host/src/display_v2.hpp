@@ -176,6 +176,33 @@ inline void displayV2SlideRight(NativeCcdData& plan,int64_t reach,LONG top=0){
     if(!displayRectangleFits(s.position.x,s.position.y,s.width,s.height))throw std::runtime_error("display_v2_layout_bounds");
   }
 }
+// The displays left in `plan` once owned outputs are taken out of it (the
+// restore beside another display): with a display still at the origin, it and
+// everything left of it keep their place and the displays to its right close
+// the horizontal gaps the owned outputs left; without one (an owned output was
+// primary), the group slides so that its top-left display is at the origin.
+inline void displayV2CloseOwnedGaps(NativeCcdData& plan){
+  if(plan.paths.empty())return;
+  const bool origin=std::any_of(plan.paths.begin(),plan.paths.end(),[&](const auto& path){const auto& s=nativeCcdSource(plan,path);return !s.position.x&&!s.position.y;});
+  if(!origin){displayV2SlideRight(plan,0,0);return;}
+  std::vector<UINT32> sources;
+  for(const auto& path:plan.paths){const auto index=nativeSourceIndex(path);if(std::find(sources.begin(),sources.end(),index)==sources.end())sources.push_back(index);}
+  const auto before=plan.modes;
+  std::stable_sort(sources.begin(),sources.end(),[&](UINT32 a,UINT32 b){return plan.modes[a].sourceMode.position.x<plan.modes[b].sourceMode.position.x;});
+  int64_t reach=0;
+  for(const auto index:sources){auto& s=plan.modes[index].sourceMode;
+    if(s.position.x<0)continue;
+    if(s.position.x>reach)s.position.x=LONG(reach);
+    reach=std::max<int64_t>(reach,int64_t(s.position.x)+s.width);
+    if(!displayRectangleFits(s.position.x,s.position.y,s.width,s.height))throw std::runtime_error("display_v2_layout_bounds");
+  }
+  // A layout this would make overlap (a display left of the origin reaching
+  // under one that moved) keeps its saved places instead.
+  for(size_t i=0;i<sources.size();++i)for(size_t j=0;j<i;++j){
+    const auto& a=plan.modes[sources[i]].sourceMode;const auto& b=plan.modes[sources[j]].sourceMode;
+    if(displayV2Overlap(displayV2Rect(a),displayV2Rect(b))){plan.modes=before;return;}
+  }
+}
 
 // --------------------------------------------------------- streaming geometry
 // Owned output at (0,0) with the requested size (= primary); the identified
@@ -480,7 +507,9 @@ inline bool displayV2RestoreTargetsMatch(const NativeCcdData& actual,std::span<c
 // Saved active paths re-applied with their saved modes; owned outputs mapped by
 // public id to the CURRENT SDK targets (IDs change when the SDK recreates a
 // target) at their saved position. Targets that no longer exist are skipped.
-inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const NativeCcdData& fresh,std::span<const NativeDisplayTarget> current,std::vector<DisplayV2Expected>* expected=nullptr,const DisplayV2Retired& retired={}){
+// `ownedOff`: the plan leaves every current owned output off beside another
+// display (the layout Windows should remember, DisplaySessionV2::restore).
+inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const NativeCcdData& fresh,std::span<const NativeDisplayTarget> current,std::vector<DisplayV2Expected>* expected=nullptr,const DisplayV2Retired& retired={},bool* ownedOff=nullptr){
   const auto identity=preflightDisplayV2Restore(saved,fresh,current,retired);if(!identity.resolved)throw DisplayV2RestoreIdentityError(identity.stale);
   NativeCcdData plan;std::map<UINT32,UINT32> copied;std::set<DisplayV2SourceKey> taken;
   struct Owned {NativeDisplayTarget target;LONG left=0,top=0;DWORD width=0,height=0;};std::vector<Owned> owned;
@@ -501,17 +530,21 @@ inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const Nati
   for(const auto& path:kept)if(displayV2KeepForeign(plan,copied,taken,fresh,saved.ccd,path,reserved)){
     if(expected)expected->push_back({path.targetInfo.adapterId,path.targetInfo.id});
   }
-  for(const auto& item:owned){
+  // An owned output is never an invisible screen extending a PC's monitor or
+  // a VM's own display. One that was on at snapshot time beside such a
+  // display (left on by an earlier Host, the owner saw it in the field
+  // 2026-11-15) goes off with the restore like one created for the stream;
+  // owned outputs come back only when nothing else would be active (a VM
+  // without a display of its own), so Windows keeps a desktop: the saved
+  // ones at their saved place, else the current ones appended to the right.
+  const bool foreign=!plan.paths.empty();
+  if(ownedOff)*ownedOff=foreign&&!current.empty();
+  if(foreign&&!owned.empty())displayV2CloseOwnedGaps(plan);
+  if(!foreign)for(const auto& item:owned){
     const auto chosen=displayV2OwnedPath(fresh,item.target,taken);if(!chosen)continue;
     displayV2AddOwned(plan,fresh.paths[*chosen],item.width,item.height,item.left,item.top,false);taken.insert(nativeSourceKey(fresh.paths[*chosen]));
     if(expected)expected->push_back({item.target.adapter,item.target.target,true,item.width,item.height,item.left,item.top});
   }
-  // An owned output that did not exist at snapshot time (created for the
-  // stream, or by a count change) goes back to off with the rest of the
-  // original configuration: a PC's monitor or a VM's own display keeps the
-  // desktop, with no invisible screen extending it. Only when nothing else
-  // would be active (a VM without a display of its own) does it stay on,
-  // appended to the right, so Windows keeps a desktop.
   LONG right=0;for(const auto& path:plan.paths)right=std::max(right,displayV2Rect(nativeCcdSource(plan,path)).right);
   if(plan.paths.empty())for(const auto& target:current){
     if(std::any_of(saved.owned.begin(),saved.owned.end(),[&](const auto& old){return old.id==target.id;}))continue;
@@ -523,6 +556,55 @@ inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const Nati
   if(plan.paths.empty())throw std::runtime_error("display_v2_restore_unavailable");
   return plan;
 }
+// ------------------------------------------------------------- at rest
+// No stream: an owned output is not an invisible screen beside a PC's monitor
+// or a VM's own display (the owner, 2026-11-15). The service's probe, which
+// used to switch a new lease's outputs on (worker.native.activate), asks for
+// this first. `nullopt`: nothing else is on (a VM without a display of its
+// own), the outputs stay or come on as before. `change` false: they are
+// already off (DisplayState::standby). Otherwise the current configuration
+// without them (planDisplayV2Restore of a snapshot taken now: the other
+// displays as they are, the gaps the owned outputs leave closed).
+struct DisplayV2Rest {NativeCcdData plan;std::vector<DisplayV2Expected> expected;bool change=false;};
+inline std::optional<DisplayV2Rest> planDisplayV2Rest(const NativeCcdData& fresh,std::span<const NativeDisplayTarget> owned,const DisplayV2Retired& retired={}){
+  if(owned.empty())return {};
+  const auto active=displayV2ActiveCcd(fresh,retired);bool other=false,on=false;
+  for(const auto& path:active.paths){if(nativeOwnedPath(path,owned))on=true;else other=true;}
+  if(!other)return {};
+  DisplayV2Rest rest;if(!on)return rest;
+  const DisplayV2State now{"rest",active,{owned.begin(),owned.end()},std::nullopt};
+  bool ownedOff=false;rest.plan=planDisplayV2Restore(now,fresh,owned,&rest.expected,retired,&ownedOff);
+  if(!ownedOff)return {};
+  rest.change=true;return rest;
+}
+// Applies a rest plan like a restore that leaves owned outputs off: validate,
+// apply with SDC_SAVE_TO_DATABASE (Windows remembers it and does not extend onto
+// them when they are plugged again), else without; then waits up to [waitMs]
+// until every other display is as planned and no owned output is on.
+inline NativeTopologyResult applyDisplayV2Rest(const DisplayV2Rest& rest,std::span<const NativeDisplayTarget> owned,
+    const std::function<LONG(const NativeCcdData&,UINT32)>& configure,const std::function<NativeCcdData()>& query,
+    const std::function<void()>& pause,const std::function<uint64_t()>& now,uint64_t waitMs=2000){
+  NativeTopologyResult result;result.reason.clear();
+  if(!rest.change){result.ok=true;return result;}
+  const auto apply=[&](UINT32 flags,bool remember){
+    const auto validated=configure(rest.plan,SDC_VALIDATE|flags);if(validated!=ERROR_SUCCESS)return validated;
+    return configure(rest.plan,SDC_APPLY|flags|(remember?SDC_SAVE_TO_DATABASE:0));
+  };
+  constexpr UINT32 supplied=SDC_USE_SUPPLIED_DISPLAY_CONFIG|SDC_VIRTUAL_MODE_AWARE;
+  result.applyAttempted=true;
+  LONG code=apply(supplied,true);if(code!=ERROR_SUCCESS)code=apply(supplied|SDC_ALLOW_CHANGES,true);
+  if(code!=ERROR_SUCCESS){code=apply(supplied,false);if(code!=ERROR_SUCCESS)code=apply(supplied|SDC_ALLOW_CHANGES,false);}
+  if(code!=ERROR_SUCCESS){result.reason="native_topology_apply_failed";result.systemError=DWORD(code);return result;}
+  const auto until=now()+waitMs;
+  for(;;){
+    const auto fresh=query();
+    const bool off=std::none_of(fresh.paths.begin(),fresh.paths.end(),[&](const auto& path){return displayV2Active(path)&&nativeOwnedPath(path,owned);});
+    if(off&&displayV2RestoreTargetsMatch(fresh,rest.expected)){result.ok=true;return result;}
+    if(now()>=until)break;pause();
+  }
+  result.reason="native_topology_not_applied";return result;
+}
+
 // Fallback: keep whatever is active now and add the identified console to the
 // right of it, using its saved modes when known.
 inline std::optional<NativeCcdData> planDisplayV2ConsoleReturn(const NativeCcdData& fresh,const DisplayV2Console& console,const NativeCcdData* saved){
@@ -989,9 +1071,15 @@ class DisplaySessionV2 {
     waitUntil(std::min(deadline,access_.now()+3000),[&](const NativeCcdData& ccd){return std::all_of(current.begin(),current.end(),[&](const auto& t){return displayV2OwnedPath(ccd,t,{}).has_value();});});
     std::vector<DisplayV2Expected> expected;
     try{
-      const auto plan=planDisplayV2Restore(*saved,access_.query(),current,&expected,access_.retired);
+      bool ownedOff=false;
+      const auto plan=planDisplayV2Restore(*saved,access_.query(),current,&expected,access_.retired,&ownedOff);
       const auto foreign=displayV2Foreign(plan,current,std::nullopt);
-      LONG code=apply(plan,displayV2Supplied);if(code!=ERROR_SUCCESS)code=apply(plan,displayV2Supplied|SDC_ALLOW_CHANGES);
+      // Owned outputs left off beside another display: Windows also remembers
+      // that layout (as '1에만 표시' does), else it extends onto them again the
+      // next time one is plugged (the SDK size, a restart). Without the database
+      // save if Windows refuses it.
+      LONG code=apply(plan,displayV2Supplied,ownedOff);if(code!=ERROR_SUCCESS)code=apply(plan,displayV2Supplied|SDC_ALLOW_CHANGES,ownedOff);
+      if(code!=ERROR_SUCCESS&&ownedOff){code=apply(plan,displayV2Supplied);if(code!=ERROR_SUCCESS)code=apply(plan,displayV2Supplied|SDC_ALLOW_CHANGES);}
       out.error=DWORD(code);
       if(code==ERROR_SUCCESS&&waitUntil(std::min(deadline,access_.now()+2500),[&](const NativeCcdData& ccd){
           out.consoleActive=console&&displayV2ConsoleActive(ccd,*console);
@@ -1044,11 +1132,14 @@ class DisplaySessionV2 {
       if(access_.now()>=until)return false;if(access_.poll)access_.poll();else access_.pause();
     }
   }
-  LONG apply(const NativeCcdData& plan,UINT32 flags){
+  // `remember`: the apply (never the validation) also saves the layout to
+  // Windows' display database. Only a restore that leaves owned outputs off
+  // beside another display asks for it; a stream's layout is never saved.
+  LONG apply(const NativeCcdData& plan,UINT32 flags,bool remember=false){
     if(!eligible())return LONG(ERROR_ACCESS_DENIED);
     const auto validated=access_.configure(plan,SDC_VALIDATE|flags);if(validated!=ERROR_SUCCESS)return validated;
     if(!eligible())return LONG(ERROR_ACCESS_DENIED);
-    return access_.configure(plan,SDC_APPLY|flags);
+    return access_.configure(plan,SDC_APPLY|flags|(remember?SDC_SAVE_TO_DATABASE:0));
   }
   // `created` = this call wrote a new snapshot (no older original existed).
   bool snapshot(const std::string& session,const NativeCcdData& before,bool* created=nullptr){

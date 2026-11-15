@@ -2166,6 +2166,7 @@
   "nowSendConnectionRequest": "Now send the connection request.",
   "firstFinishServerConnectionTest": "First finish the server connection test.",
   "text20": "{monitorsLength, plural, =1{1 virtual monitor on} other{{monitorsLength} virtual monitors on}}",
+  "virtualMonitorsStandby": "{monitorsLength, plural, =1{1 virtual monitor, on during a connection} other{{monitorsLength} virtual monitors, on during a connection}}",
   "switchStreamingScreen2": "Switch to streaming screen",
   "monitor2": "Monitor {index}",
   "noMultitapVirtualMonitor": "No Multitap virtual monitor is on.",

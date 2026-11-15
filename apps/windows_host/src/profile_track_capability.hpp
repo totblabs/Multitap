@@ -7,7 +7,7 @@ namespace host {
 inline bool nativeStreamProfileTracksCapability(const DisplayState& display,const Json& config,bool nativeSelected,
     bool eligible,bool activeProfile,const Json& snapshot,DWORD servicePid){
   try{
-    if(!initialProfileTracksEnabled(config,nativeSelected)||!nativeConfigMatchesLease(config,snapshot)||!eligible||!display.ready()||display.remoteSession||
+    if(!initialProfileTracksEnabled(config,nativeSelected)||!nativeConfigMatchesLease(config,snapshot)||!eligible||!display.streamable()||display.remoteSession||
        !display.viewportProvisioning||(!activeProfile&&!display.monitorControlSupported)||
        display.monitors.empty()||display.monitors.size()>2)return false;
     NativeTrackResize actual;multitap::tracks::Configuration shape;shape.topology=1;
@@ -19,8 +19,9 @@ inline bool nativeStreamProfileTracksCapability(const DisplayState& display,cons
     }
     if(!multitap::tracks::valid(shape))return false;
     std::sort(actual.outputs.begin(),actual.outputs.end(),[](const auto& a,const auto& b){return a.id<b.id;});
-    return initialProfileTrackDisplayMatches(display,actual,activeProfile)&&
-      initialProfileTrackLeaseMatches(snapshot,display,actual,servicePid,snapshot.get("deviceInstanceId").string());
+    // Standby counts here (advertisement); the stream path stays strict.
+    return initialProfileTrackDisplayMatches(display,actual,activeProfile,true)&&
+      initialProfileTrackLeaseMatches(snapshot,display,actual,servicePid,snapshot.get("deviceInstanceId").string(),true);
   }catch(...){return false;}
 }
 // The owned group is "active" ("0" primary at the origin, count changes off)

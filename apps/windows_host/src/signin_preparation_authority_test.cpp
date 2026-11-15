@@ -185,6 +185,9 @@ int restorationAuthorityCases(){
     original.current()==std::optional(bytes),"Parent did not derive sealed Windows mode independently of peer width/height");++passed;
   const auto& target=restored->targets.front();world.owned().target=target.target;world.ownedTarget=target.target;
   world.ownedWidth=target.width;world.ownedHeight=target.height;
+  // What the restorer's plan leaves: the console as it was, the owned output
+  // off beside it (planDisplayV2Restore), back at its original size.
+  world.owned().active=false;
   restore::Receipt receipt;receipt.binding=binding;receipt.outcome=restore::Outcome::topologyRestoredOriginalHeld;
   receipt.underlyingOutcome=DisplayV2Outcome::failed;receipt.stage=displayV2Stage::state;receipt.fallback=1;
   receipt.originalSha256=admission.originalSha256;receipt.observedLease=restored->lease;receipt.observedAt=GetTickCount64();
@@ -195,8 +198,8 @@ int restorationAuthorityCases(){
   require(!authority.finish(wrong)&&original.current()==std::optional(bytes),"Real apply failure was rewritten as full restoration");++passed;
   wrong=receipt;wrong.binding.operation[0]^=1;
   require(!authority.finish(wrong),"Another restore operation retired original");++passed;
-  wrong=receipt;world.console().active=false;
-  wrong.observedState=displayV2StateBytes({stream,displayV2ActiveCcd(world.query()),restored->targets,{}});world.console().active=true;
+  wrong=receipt;world.console().active=false;world.owned().active=true;world.owned().x=0;
+  wrong.observedState=displayV2StateBytes({stream,displayV2ActiveCcd(world.query()),restored->targets,{}});world.console().active=true;world.owned().active=false;
   require(!authority.finish(wrong)&&original.current()==std::optional(bytes),"Owned-only/console-missing observation retired full original");++passed;
   require(authority.finish(receipt)&&authority.completed()&&original.absent()&&!original.current(),
     "Fresh full topology/exact exit/exact file retirement did not complete");++passed;

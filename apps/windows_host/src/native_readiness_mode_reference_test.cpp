@@ -40,6 +40,23 @@ int main(){try{unsigned passed=0;
   NativeBootstrapAccess access{[]{return true;},[]{return true;},[&]{return readiness(captured);},lease,[&](std::span<const NativeDisplayTarget>,const std::string&){++activationCalls;NativeTopologyResult result;result.ok=true;result.reason.clear();return result;}};
   const auto result=bootstrapNativeDisplays(access);
   require(activationCalls==1&&!result.applyAttempted&&result.display.ready()&&result.diagnostic&&result.diagnostic->windowsVerified&&result.diagnostic->reason.empty(),"Matching activation ACK could not complete actual readiness contract");++passed;
+  // Display manager v2 at rest: the rest step leaves the owned output off beside
+  // another display (standby); readiness completes without activation.
+  {unsigned activations=0,rests=0;
+    const auto standby=[&]{auto state=readiness(captured);state.active=false;state.standby=true;state.name.clear();for(auto& monitor:state.monitors)monitor.name.clear();return state;};
+    NativeBootstrapAccess rest{[]{return true;},[]{return true;},standby,lease,
+      [&](std::span<const NativeDisplayTarget>,const std::string&){++activations;NativeTopologyResult value;value.ok=true;value.reason.clear();return value;},
+      [&](std::span<const NativeDisplayTarget>,const std::string&)->std::optional<NativeTopologyResult>{++rests;NativeTopologyResult value;value.ok=true;value.applyAttempted=true;value.reason.clear();return value;}};
+    const auto rested=bootstrapNativeDisplays(rest);
+    require(rests==1&&!activations&&rested.applyAttempted&&rested.display.standby&&rested.display.streamable()&&!rested.display.ready()&&!rested.display.configurationPending&&
+      rested.diagnostic&&rested.diagnostic->windowsVerified,"Standby at rest did not complete readiness without activation");++passed;}
+  // Nothing else on (nullopt), or a rest that did not end in standby: activation as before.
+  for(const bool settled:{false,true}){unsigned activations=0;
+    NativeBootstrapAccess fallback{[]{return true;},[]{return true;},[&]{return readiness(captured);},lease,
+      [&](std::span<const NativeDisplayTarget>,const std::string&){++activations;NativeTopologyResult value;value.ok=true;value.reason.clear();return value;},
+      [&](std::span<const NativeDisplayTarget>,const std::string&)->std::optional<NativeTopologyResult>{if(!settled)return std::nullopt;NativeTopologyResult value;value.ok=true;value.reason.clear();return value;}};
+    const auto activated=bootstrapNativeDisplays(fallback);
+    require(activations==1&&activated.display.ready()&&!activated.display.standby,"Without standby the owned output was not activated as before");++passed;}
   for(unsigned scenario=0;scenario<13;++scenario){auto changed=captured;
     switch(scenario){
       case 0:changed.paths[0].sourceInfo.modeInfoIdx=(4u<<16)|65534;break;

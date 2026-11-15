@@ -111,7 +111,8 @@ int sdkCcdMismatchCases(){
   const auto stopped=session.restore();
   std::cout<<"{\"kind\":\"display-v2-sdk-ccd-mismatch\",\"savedSdkWidth\":"<<saved.owned.front().width<<",\"savedCcdWidth\":1920,\"restoredOutcome\":"<<int(stopped.outcome)<<",\"actualWidth\":"<<w.owned().width<<",\"actualHeight\":"<<w.owned().height<<",\"actualLeft\":"<<w.owned().x<<",\"actualTop\":"<<w.owned().y<<",\"osDisplayChanges\":false}"<<std::endl;
   require(stopped.outcome==DisplayV2Outcome::restored&&!m.bytes,"Mismatched-source fixture did not finish restore");
-  require(w.owned().width==1920&&w.owned().height==1080&&w.owned().x==1280&&w.owned().y==0,"Restore lost the original CCD mode or primary relationship when SDK size differed");
+  // The SDK output goes back to the saved CCD size; beside the console it is off.
+  require(w.ownedWidth==1920&&w.ownedHeight==1080&&!w.owned().active,"Restore lost the original CCD size, or left the owned output on beside the console, when SDK size differed");
   require(w.console().active&&w.console().width==1280&&w.console().height==720&&w.console().x==0,"Mode correction changed the original foreign console");
   }
   {World w;Memory m;w.console().active=false;w.consoleReturns=false;w.owned().x=0;w.ownedWidth=1280;w.ownedHeight=720;
@@ -124,29 +125,48 @@ int sdkCcdMismatchCases(){
   return 3;
 }
 
+World dualWorld(bool extra,bool inactive);
+void requireDual(World& w,bool consoleActive,bool extra,const char* reason);
 int primaryRelayoutCase(){
-  World w;Memory m;DisplaySessionV2 session(access(w,m));
-  const std::array<DisplayV2Output,1> group{{{"0",1280,720,0,0}}};
+  // Owned outputs come back only where nothing else is active (a VM without a
+  // display of its own, here with both outputs). Windows swapping them after
+  // the apply is never reported as the exact original.
+  World w=dualWorld(false,true);Memory m;DisplaySessionV2 session(access(w,m));
+  const std::vector<DisplayV2Output> group{{"0",1600,900,0,0},{"1",1280,720,1600,0}};
   require(session.startGroup("primary-relayout",group,true,deadline(w)).ok,"Primary-relayout fixture could not start");
-  w.afterApply=[](World& value){value.owned().x=0;value.owned().y=0;value.console().x=LONG(value.owned().width);value.console().y=0;};
+  w.afterApply=[](World& value){value.second().x=0;value.second().y=0;value.owned().x=LONG(value.second().width);value.owned().y=0;};
   const auto result=session.restore();
-  const bool changed=w.owned().x==0&&w.owned().y==0;
-  std::cout<<"{\"kind\":\"display-v2-primary-relayout\",\"savedOwnedPrimary\":false,\"actualOwnedPrimary\":"<<(changed?"true":"false")<<",\"restoreOutcome\":"<<int(result.outcome)<<",\"stateKept\":"<<(m.bytes?"true":"false")<<",\"osDisplayChanges\":false}"<<std::endl;
+  const bool changed=w.owned().x!=0;
+  std::cout<<"{\"kind\":\"display-v2-primary-relayout\",\"savedOwnedPrimary\":true,\"actualOwnedPrimary\":"<<(changed?"false":"true")<<",\"restoreOutcome\":"<<int(result.outcome)<<",\"stateKept\":"<<(m.bytes?"true":"false")<<",\"osDisplayChanges\":false}"<<std::endl;
   require(result.outcome!=DisplayV2Outcome::restored||!changed,"A changed primary display was reported as exact restored configuration");
-  require(result.outcome==DisplayV2Outcome::consoleOnly&&!m.bytes,"A failed owned-position verification changed the existing console fallback contract");
-  {World another;Memory state;DisplaySessionV2 noProof(access(another,state,false));
-    require(noProof.start("owned-position-no-proof",1280,720,false,deadline(another)).ok,"Owned-position fixture could not start");
-    another.afterApply=[](World& value){value.owned().x=0;value.console().x=LONG(value.owned().width);};
-    require(noProof.restore().outcome==DisplayV2Outcome::failed&&state.bytes,"Misplaced owned output deleted the recovery state without a verified console fallback");
-    another.afterApply=nullptr;
-    require(noProof.restore().outcome==DisplayV2Outcome::restored&&!state.bytes&&another.owned().x==1024,"A later recovery did not restore owned placement");
+  require(result.outcome==DisplayV2Outcome::failed&&m.bytes,"Misplaced owned outputs deleted the recovery state");
+  w.afterApply=nullptr;
+  require(session.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"A later recovery did not restore owned placement");
+  requireDual(w,false,false,"A later recovery did not put both owned outputs back in place");
+  require(!w.remembered,"A VM without a display of its own saved a layout to the display database");
+  // Beside the console (a PC's monitor alike) the owned output that was on at
+  // snapshot time is not restored, with or without a console proof.
+  for(const bool proof:{true,false}){World another;Memory state;DisplaySessionV2 beside(access(another,state,proof));
+    require(beside.start("owned-beside-console",1280,720,proof,deadline(another)).ok,"Owned-beside-console fixture could not start");
+    require(!another.remembered,"A stream start saved its layout to the display database");
+    require(beside.restore().outcome==DisplayV2Outcome::restored&&!state.bytes,"Restore beside the console failed");
+    requireOriginal(another,false,"Restore left the owned output extending the console");
+    // Windows remembers it, so a re-plugged owned output is not extended again.
+    require(another.remembered==1,"The layout with the owned output off was not saved to the display database");
+  }
+  // Windows refuses the database save: the same layout without it.
+  {World another;Memory state;DisplaySessionV2 beside(access(another,state));
+    require(beside.start("owned-beside-console-no-save",1280,720,true,deadline(another)).ok,"No-save fixture could not start");
+    another.reject=[](const NativeCcdData&,UINT32 flags)->LONG{return (flags&SDC_SAVE_TO_DATABASE)?LONG(ERROR_INVALID_PARAMETER):LONG(ERROR_SUCCESS);};
+    require(beside.restore().outcome==DisplayV2Outcome::restored&&!state.bytes&&!another.remembered,"A refused database save failed the restore");
+    requireOriginal(another,false,"A refused database save left the owned output on");
   }
   {World another(true);Memory state;DisplaySessionV2 movable(access(another,state));
     require(movable.start("foreign-placement-flexible",1280,720,true,deadline(another)).ok,"Foreign-placement fixture could not start");
     another.afterApply=[](World& value){value.extra().x+=500;value.extra().y+=90;};
-    require(movable.restore().outcome==DisplayV2Outcome::restored&&!state.bytes&&another.owned().x==1024,"Owned-position verification accidentally pinned foreign geometry");
+    require(movable.restore().outcome==DisplayV2Outcome::restored&&!state.bytes&&!another.owned().active,"Restore verification accidentally pinned foreign geometry");
   }
-  return 3;
+  return 5;
 }
 
 int happyPathCases(){
@@ -218,7 +238,8 @@ int positionToleranceCases(){
       w.afterResize=nullptr;w.afterApply=nullptr;w.autoActivate=false;
       require(session.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Restore after arbitrary re-layout failed");
       const auto& c=w.console();const auto& o=w.owned();
-      require(c.active&&c.x==0&&c.y==0&&o.active&&o.x==1024&&o.width==1580&&o.height==952&&w.extra().active&&w.extra().x==1024+1580&&w.extra().width==800,"Restore did not put the original positions/modes back");++passed;
+      // The owned output back at its SDK size but off; the extra output closes the gap it left.
+      require(c.active&&c.x==0&&c.y==0&&!o.active&&w.ownedWidth==1580&&w.ownedHeight==952&&w.extra().active&&w.extra().x==1024&&w.extra().width==800,"Restore did not put the original positions/modes back");++passed;
     }
   }
   // With console proof: Windows brings the console back at an arbitrary
@@ -340,12 +361,13 @@ int restoreVerificationCases(){
     w.failResize=false;DisplaySessionV2 later(access(w,m,false));
     require(later.restore().outcome==DisplayV2Outcome::restored&&!m.bytes&&w.owned().width==1920&&w.owned().height==1080,"Later accepted SDK size restore did not complete normally");++passed;
   }
-  // A safe console return is still allowed, but it is explicitly partial.
+  // Beside the console the owned output goes off, so an SDK size it kept from
+  // the stream is out of sight: the console is back alone, a full restore.
   {World w;Memory m;DisplaySessionV2 session(access(w,m));
-    require(session.start("s",2560,1440,true,deadline(w)).ok,"Partial console restore fixture start failed");
-    w.failResize=true;const auto partial=session.restore();
-    require(partial.outcome==DisplayV2Outcome::consoleOnly&&partial.stage==displayV2Stage::verify&&partial.fallback==1&&partial.consoleActive&&!m.bytes,"Console-only fallback was mislabeled full restore or changed its state policy");
-    require(w.owned().width==2560,"SDK refusal was not retained by the fixture");++passed;
+    require(session.start("s",2560,1440,true,deadline(w)).ok,"Console restore fixture start failed");
+    w.failResize=true;const auto restored=session.restore();
+    require(restored.outcome==DisplayV2Outcome::restored&&restored.consoleActive&&!m.bytes,"The console alone was not a full restore beside an SDK refusal");
+    require(w.owned().width==2560&&!w.owned().active,"SDK refusal was not retained by the fixture, or the owned output stayed on");++passed;
   }
   // Modes, refresh, rotation and format are preserved; active flags alone are
   // insufficient when Windows accepts a plan but changes one of those fields.
@@ -380,10 +402,12 @@ int restoreFailureCases(){
   {World w;Memory m;DisplaySessionV2 session(access(w,m));
     require(session.start("s",2560,1440,true,deadline(w)).ok,"Fixture start failed");
     w.consoleReturns=false;w.autoActivate=true;
+    // Windows refuses the exact restore (the console alone, the owned output
+    // off) but takes the fallback (what is active now plus the console).
     w.reject=[](const NativeCcdData& plan,UINT32 flags)->LONG{
       if(flags&SDC_TOPOLOGY_SUPPLIED)return LONG(ERROR_SUCCESS);
-      for(const auto& p:plan.paths)if(same(p.targetInfo.adapterId,ownedAdapter)&&nativeCcdSource(plan,p).position.x!=0)return LONG(ERROR_GEN_FAILURE);
-      return LONG(ERROR_SUCCESS);};
+      for(const auto& p:plan.paths)if(same(p.targetInfo.adapterId,ownedAdapter))return LONG(ERROR_SUCCESS);
+      return LONG(ERROR_GEN_FAILURE);};
     const auto restored=session.restore();
     require(restored.outcome==DisplayV2Outcome::consoleOnly&&!m.bytes,"Failed exact restore did not fall back to the console");
     require(restored.consoleExpected&&restored.consoleActive&&restored.fallback==1,"Console fallback diagnostics were wrong");
@@ -553,7 +577,28 @@ int planCases(){
     const std::vector<NativeDisplayTarget> current{w.target(),{"1",ownedAdapter,50,1280,720}};std::vector<DisplayV2Expected> expected;
     const auto plan=planDisplayV2Restore(saved,w.query(),current,&expected);bool second=false;
     for(const auto& p:plan.paths)if(same(p.targetInfo.adapterId,ownedAdapter)&&p.targetInfo.id==50)second=true;
-    require(!second&&expected.size()==2,"Restore kept an owned output added after the snapshot");++passed;
+    require(!second&&expected.size()==1,"Restore kept an owned output added after the snapshot");++passed;
+  }
+  // The field case (2026-11-15): the owned output was already on beside the
+  // monitor (or a VM's own display) when the stream started. The restore
+  // leaves it off too; the monitor stays where it was.
+  {World w;const DisplayV2State saved{"s",displayV2ActiveCcd(w.query()),{w.target()},std::nullopt};
+    std::vector<DisplayV2Expected> expected;
+    const auto plan=planDisplayV2Restore(saved,w.query(),std::vector<NativeDisplayTarget>{w.target()},&expected);bool owned=false;LONG consoleX=-1;
+    for(const auto& p:plan.paths){if(same(p.targetInfo.adapterId,ownedAdapter))owned=true;if(same(p.targetInfo.adapterId,consoleAdapter))consoleX=nativeCcdSource(plan,p).position.x;}
+    require(!owned&&consoleX==0&&plan.paths.size()==1&&expected.size()==1&&!expected[0].owned,"Restore kept an owned output that was on beside the monitor");++passed;
+  }
+  // An owned output that was primary beside another display: that display
+  // comes to the origin. One between two displays: the right one closes the gap.
+  {World w(true);w.owned().x=0;w.console().x=1920;w.extra().x=1920+1024;const DisplayV2State saved{"s",displayV2ActiveCcd(w.query()),{w.target()},std::nullopt};
+    const auto plan=planDisplayV2Restore(saved,w.query(),std::vector<NativeDisplayTarget>{w.target()});LONG consoleX=-1,extraX=-1;bool owned=false;
+    for(const auto& p:plan.paths){const auto x=nativeCcdSource(plan,p).position.x;if(same(p.targetInfo.adapterId,ownedAdapter))owned=true;if(same(p.targetInfo.adapterId,consoleAdapter))consoleX=x;if(same(p.targetInfo.adapterId,extraAdapter))extraX=x;}
+    require(!owned&&consoleX==0&&extraX==1024,"Restore left no display at the origin after taking a primary owned output away");++passed;
+  }
+  {World w(true);const DisplayV2State saved{"s",displayV2ActiveCcd(w.query()),{w.target()},std::nullopt};
+    const auto plan=planDisplayV2Restore(saved,w.query(),std::vector<NativeDisplayTarget>{w.target()});LONG consoleX=-1,extraX=-1;
+    for(const auto& p:plan.paths){const auto x=nativeCcdSource(plan,p).position.x;if(same(p.targetInfo.adapterId,consoleAdapter))consoleX=x;if(same(p.targetInfo.adapterId,extraAdapter))extraX=x;}
+    require(consoleX==0&&extraX==1024&&plan.paths.size()==2,"Restore left the gap of an owned output between two displays");++passed;
   }
   // A PC's monitor (or a VM's own display) was the only display before the
   // stream and the owned output was created for it: the restore leaves the
@@ -581,7 +626,7 @@ int planCases(){
     std::vector<DisplayV2Expected> expected;
     const auto plan=planDisplayV2Restore(saved,w.query(),std::vector<NativeDisplayTarget>{w.target()},&expected,retired);bool revived=false;
     for(const auto& p:plan.paths)if(same(p.targetInfo.adapterId,legacy))revived=true;
-    require(!revived&&plan.paths.size()==2&&expected.size()==2,"Restore planned a retired legacy output");++passed;
+    require(!revived&&plan.paths.size()==1&&expected.size()==1,"Restore planned a retired legacy output");++passed;
     // Still present and active (not yet disabled): restore does not keep it.
     w.displays.push_back({legacy,2,5,true,true,3000,0,1920,1080,60,1,DISPLAYCONFIG_ROTATION_IDENTITY,1920,1080});
     const auto live=planDisplayV2Restore(saved,w.query(),std::vector<NativeDisplayTarget>{w.target()},nullptr,retired);bool liveKept=false;
@@ -651,7 +696,12 @@ int planCases(){
     }
     {World w;w.displays.push_back(old);Memory m;DisplaySessionV2 first(access(w,m));
       require(first.start("s",2560,1440,true,deadline(w)).ok,"Fallback legacy fixture start failed");
-      gone(w);w.failResize=true;
+      gone(w);
+      // Windows refuses the exact restore (the console alone) but takes the fallback.
+      w.reject=[](const NativeCcdData& plan,UINT32 flags)->LONG{
+        if(flags&SDC_TOPOLOGY_SUPPLIED)return LONG(ERROR_SUCCESS);
+        for(const auto& p:plan.paths)if(same(p.targetInfo.adapterId,ownedAdapter))return LONG(ERROR_SUCCESS);
+        return LONG(ERROR_GEN_FAILURE);};
       DisplaySessionV2 later(hooked(w,m));const auto partial=later.restore();
       require(partial.outcome==DisplayV2Outcome::consoleOnly&&partial.fallback==1&&!m.bytes,"A retired adapter blocked the console fallback");++passed;
     }
@@ -772,6 +822,15 @@ void requireDual(World& w,bool consoleActive,bool extra,const char* reason){
   if(consoleActive){const auto& c=w.console();require(c.x==3840&&c.y==0&&c.width==1024&&c.height==768,reason);}
   if(extra)require(extraOriginal(w)&&w.extra().x==(consoleActive?3840+1024:3840),reason);
 }
+// What a restore beside the console puts back from the post-count
+// configuration: both owned outputs off (at their SDK sizes), the console at
+// the origin and the extra display right of it. Owned outputs are never an
+// invisible screen extending another display (planDisplayV2Restore).
+void requireDualBeside(World& w,bool extra,const char* reason){
+  require(!w.owned().active&&w.hasSecond()&&!w.second().active&&w.ownedWidth==1920&&w.ownedHeight==1080&&w.secondWidth==1920&&w.secondHeight==1080,reason);
+  const auto& c=w.console();require(c.active&&c.x==0&&c.y==0&&c.width==1024&&c.height==768&&!overlapping(w),reason);
+  if(extra)require(extraOriginal(w)&&w.extra().x==1024,reason);
+}
 const std::vector<DisplayV2Output> rightGroup{{"0",1600,900,0,0},{"1",1280,720,1600,0}};
 int groupCases(){
   int passed=0;
@@ -791,7 +850,7 @@ int groupCases(){
     require(session.resizeGroup(std::vector<DisplayV2Output>{{"0",1920,1080,0,0},{"1",1600,900,1920,0}},deadline(w)).ok&&w.resizes==resizes+1&&w.sizeCalls==calls+2,"A one-output group change did not use one SDK resize");
     requireGroup(w,{1920,1080,0,0},{1600,900,1920,0},true,"One-output group change left a wrong layout");
     const auto stopped=session.restore();require(stopped.outcome==DisplayV2Outcome::restored&&!m.bytes&&!session.active(),"Group stop did not restore and delete the state file");
-    requireDual(w,true,true,"Group stop did not put the post-count configuration back");++passed;}
+    requireDualBeside(w,true,"Group stop did not put the post-count configuration back");++passed;}
   // "1" left, below, above, offset; client coordinates are relative ("0" is
   // moved to the origin) and the request order does not matter.
   {const std::array<std::pair<POINT,POINT>,5> layouts{{{{0,0},{-1280,0}},{{0,0},{0,900}},{{0,0},{0,-720}},{{0,0},{1600,100}},{{500,200},{2100,200}}}};
@@ -802,7 +861,7 @@ int groupCases(){
       const LONG x=one.x-zero.x,y=one.y-zero.y;requireGroup(w,{1600,900,0,0},{1280,720,x,y},true,"Output 1 not at its relative place");
       const LONG reach=std::max<LONG>(1600,x+1280),top=x+1280>1600?y:0;
       require(extraOriginal(w)&&w.extra().x==reach&&w.extra().y==top,"Other display not slid right of the group, top-aligned with its right-most output");
-      require(session.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Arrangement restore failed");requireDual(w,true,true,"Arrangement stop did not restore");++passed;
+      require(session.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Arrangement restore failed");requireDualBeside(w,true,"Arrangement stop did not restore");++passed;
     }}
   // Refusals without any change: overlapping or invalid outputs, a group that
   // does not name exactly the owned outputs (the count is a separate step).
@@ -849,12 +908,12 @@ int groupCases(){
   {World w=dualWorld(true);Memory m;DisplaySessionV2 session(access(w,m));
     w.afterResize=[](World& world){world.extra().refreshN=60;world.extra().x=0;world.extra().y=900;};
     require(session.startGroup("g",rightGroup,true,deadline(w)).ok&&extraOriginal(w)&&w.extra().x==2880,"A foreign change made by the SDK recreation was not put back");
-    w.afterResize=nullptr;require(session.restore().ok(),"Restore failed");requireDual(w,true,true,"Restore after a corrected foreign change failed");++passed;}
+    w.afterResize=nullptr;require(session.restore().ok(),"Restore failed");requireDualBeside(w,true,"Restore after a corrected foreign change failed");++passed;}
   {World w=dualWorld(true);Memory m;DisplaySessionV2 session(access(w,m));
     w.afterResize=[](World& world){world.extra().refreshN=60;};w.afterApply=[](World& world){if(world.ownedWidth==1600)world.extra().refreshN=60;};
     const auto failed=session.startGroup("g",rightGroup,true,deadline(w));
     require(!failed.ok&&failed.stage==displayV2Stage::foreign&&failed.foreignDifference==displayV2ForeignCode::refresh&&failed.restore&&failed.restore->outcome==DisplayV2Outcome::restored&&!m.bytes&&!session.active(),"Persistent foreign change did not fail with its code and restore");
-    requireDual(w,true,true,"Failed group start did not restore the post-count configuration");
+    requireDualBeside(w,true,"Failed group start did not restore the post-count configuration");
     w.afterResize=nullptr;w.afterApply=nullptr;require(session.startGroup("g",rightGroup,true,deadline(w)).ok,"Group start after a foreign failure latched");
     require(session.restore().ok(),"Restore failed");++passed;}
   // SDK refusal: clean failure, nothing left, no latch. Without the
@@ -862,11 +921,11 @@ int groupCases(){
   {World w=dualWorld();Memory m;w.failSizes=true;
     for(int attempt=0;attempt<2;++attempt){DisplaySessionV2 session(access(w,m));const auto result=session.startGroup("g",rightGroup,true,deadline(w));
       require(!result.ok&&result.stage==displayV2Stage::sdk&&result.restore&&result.restore->ok()&&!m.bytes&&!session.active(),"SDK refusal left a state file or an active session");
-      requireDual(w,true,false,"SDK refusal changed the displays");}
+      requireDualBeside(w,false,"SDK refusal changed the displays");}
     w.failSizes=false;auto a=access(w,m);a.sizes=nullptr;DisplaySessionV2 session(std::move(a));const auto resizes=w.resizes,calls=w.sizeCalls;
     require(session.startGroup("g",rightGroup,true,deadline(w)).ok&&w.resizes==resizes+2&&w.sizeCalls==calls,"Per-output SDK fallback did not size both outputs");
     requireGroup(w,{1600,900,0,0},{1280,720,1600,0},true,"Per-output fallback left a wrong layout");
-    require(session.restore().outcome==DisplayV2Outcome::restored&&w.resizes==resizes+4,"Per-output restore failed");requireDual(w,true,false,"Per-output restore did not restore");++passed;}
+    require(session.restore().outcome==DisplayV2Outcome::restored&&w.resizes==resizes+4,"Per-output restore failed");requireDualBeside(w,false,"Per-output restore did not restore");++passed;}
   // Windows re-lays the group once more after our apply: re-planned.
   {World w=dualWorld();Memory m;DisplaySessionV2 session(access(w,m));int late=0;
     w.afterApply=[&](World& world){if(world.ownedWidth==1600&&!late++){world.second().x=0;world.second().y=900;}};
@@ -881,7 +940,7 @@ int groupCases(){
     w.autoActivate=autoActivate;w.serviceRestart();const auto calls=w.sizeCalls;
     DisplaySessionV2 recovery(access(w,m,false));const auto restored=recovery.restore();
     require(restored.outcome==DisplayV2Outcome::restored&&!m.bytes&&w.sizeCalls==calls+1,"Recovery of a group stream did not restore both outputs in one SDK call");
-    requireDual(w,true,true,"Recovery did not restore both outputs and the console");
+    requireDualBeside(w,true,"Recovery did not restore both outputs and the console");
     w.autoActivate=false;DisplaySessionV2 next(access(w,m));require(next.startGroup("g",rightGroup,true,deadline(w)).ok,"Group start after recovery failed");require(next.restore().ok(),"Restore failed");++passed;}
   // Locked: refused without any change, then works.
   {World w=dualWorld();Memory m;w.eligible=false;DisplaySessionV2 session(access(w,m));const auto applies=w.applies,calls=w.sizeCalls;const auto result=session.startGroup("g",rightGroup,true,deadline(w));
@@ -893,7 +952,7 @@ int groupCases(){
     require(session.startGroup("g",rightGroup,true,deadline(w)).ok,"Fixture group start failed");
     const auto wrong=session.resizeGroup(std::vector<DisplayV2Output>{{"0",1600,900,0,0}},deadline(w));
     require(!wrong.ok&&wrong.stage==displayV2Stage::ineligible&&wrong.restore&&wrong.restore->outcome==DisplayV2Outcome::restored&&!m.bytes,"A mismatching group resize did not restore");
-    requireDual(w,true,false,"A mismatching group resize did not put the configuration back");++passed;}
+    requireDualBeside(w,false,"A mismatching group resize did not put the configuration back");++passed;}
   return passed;
 }
 int groupPlanCases(){
@@ -938,14 +997,21 @@ int groupPlanCases(){
     w.console().x=3000;w.console().y=0;require(!displayV2GroupSatisfied(w.query(),group,targets,targets,std::nullopt,&why)&&why=="display_v2_overlap","Overlap accepted");w.console().x=3840;
     w.displays.push_back({ownedAdapter,2,77,true,true,5000,0,1280,720,60,1,DISPLAYCONFIG_ROTATION_IDENTITY,1280,720});auto ours=targets;ours.push_back({"1",ownedAdapter,77,1280,720});
     require(!displayV2GroupSatisfied(w.query(),group,targets,ours,std::nullopt,&why)&&why=="display_v2_owned_departure_pending","Departed owned generation still active accepted");++passed;}
-  // Restore from a two-output state: both owned outputs at their saved place
-  // under their current target ids, retaining the original source sizes even
-  // while the SDK's current sizes still belong to the stream.
-  {World w=dualWorld(true);const DisplayV2State saved{"s",displayV2ActiveCcd(w.query()),w.targets(),std::nullopt};
+  // Restore from a two-output state (a VM without a display of its own): both
+  // owned outputs at their saved place under their current target ids,
+  // retaining the original source sizes even while the SDK's current sizes
+  // still belong to the stream.
+  {World w=dualWorld(false,true);w.consoleReturns=false;const DisplayV2State saved{"s",displayV2ActiveCcd(w.query()),w.targets(),std::nullopt};
     w.setSizes(rightGroup);std::vector<DisplayV2Expected> expected;
     const auto plan=planDisplayV2Restore(saved,w.query(),w.targets(),&expected);int owned=0;
     for(const auto& p:plan.paths)if(same(p.targetInfo.adapterId,ownedAdapter)){const auto& s=nativeCcdSource(plan,p);if(p.targetInfo.id==w.ownedTarget&&!s.position.x&&s.width==1920&&s.height==1080)++owned;if(p.targetInfo.id==w.secondTarget&&s.position.x==1920&&s.width==1920&&s.height==1080)++owned;}
-    require(owned==2&&expected.size()==4,"Restore of a two-output state lost an owned output");++passed;}
+    require(owned==2&&expected.size()==2,"Restore of a two-output state lost an owned output");++passed;}
+  // The same two outputs beside the console are both left off.
+  {World w=dualWorld(true);const DisplayV2State saved{"s",displayV2ActiveCcd(w.query()),w.targets(),std::nullopt};
+    w.setSizes(rightGroup);std::vector<DisplayV2Expected> expected;
+    const auto plan=planDisplayV2Restore(saved,w.query(),w.targets(),&expected);int owned=0;
+    for(const auto& p:plan.paths)if(same(p.targetInfo.adapterId,ownedAdapter))++owned;
+    require(!owned&&expected.size()==2,"Restore kept owned outputs beside the console and another display");++passed;}
   return passed;
 }
 int groupRpcCases(){
@@ -1126,7 +1192,7 @@ int rapidChangeCases(){
       while(const auto kept=backlog.next()){require(kept->get("type").string()=="ping","A kept track packet changed type");++pings;}
     }
     require(!failures&&pings>0,"Rapid group changes failed or kept no pings");
-    w.afterResize=nullptr;require(session.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Stop after rapid group changes did not restore");requireDual(w,true,true,"Stop after rapid group changes did not restore");++passed;}
+    w.afterResize=nullptr;require(session.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Stop after rapid group changes did not restore");requireDualBeside(w,true,"Stop after rapid group changes did not restore");++passed;}
   // Rapid mode switches: window -> 모든 모니터 -> window ... Each switch ends
   // one stream (restore), changes the owned output count (the client's
   // separate step) and starts the next stream, with resizes in between.
@@ -1241,7 +1307,7 @@ int groupFallbackCases(){
     const auto back=session.resizeGroup(rightGroup,deadline(w));
     require(back.ok&&session.active(),"The previous group could not be put back");requireGroup(w,{1600,900,0,0},{1280,720,1600,0},true,"The previous group is not back in place");
     w.reject=nullptr;require(session.resizeGroup(std::vector<DisplayV2Output>{{"0",1920,1080,0,0},{"1",1280,720,1920,0}},deadline(w)).ok,"A change after the fallback latched");
-    require(session.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Stop after the fallback did not restore");requireDual(w,true,true,"Stop after the fallback did not restore the original");++passed;}
+    require(session.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Stop after the fallback did not restore");requireDualBeside(w,true,"Stop after the fallback did not restore the original");++passed;}
   return passed;
 }
 int configCases(){
@@ -1305,6 +1371,44 @@ int stageTimingCases(){
     const auto same=session.resize(1920,1080,deadline(w));require(same.ok&&same.sdkMs==0&&same.settleMs==0,"An unchanged size reported SDK or settling time");++passed;}
   return passed;
 }
+// At rest (no stream, the service's probe): owned outputs beside another
+// display go off and Windows remembers it; already off is standby (nothing
+// applied); with nothing else on they stay. A stream starts from standby and
+// its stop leaves them off again.
+int restCases(){
+  int passed=0;
+  const auto apply=[](World& w,const DisplayV2Rest& rest){
+    return applyDisplayV2Rest(rest,w.targets(),[&w](const NativeCcdData& plan,UINT32 flags){return w.configure(plan,flags);},[&w]{return w.query();},[&w]{w.clock+=50;},[&w]{return w.clock;});
+  };
+  {World w;Memory m;
+    const auto rest=planDisplayV2Rest(w.query(),w.targets());
+    require(rest&&rest->change&&rest->expected.size()==1,"The owned output on beside the console was not planned off");
+    const auto result=apply(w,*rest);
+    require(result.ok&&result.applyAttempted&&w.remembered==1&&!w.owned().active&&w.console().active&&!w.console().x&&!w.console().y,"Rest did not leave the console alone and remember it");++passed;
+    const auto again=planDisplayV2Rest(w.query(),w.targets());
+    require(again&&!again->change&&apply(w,*again).ok&&!apply(w,*again).applyAttempted&&w.remembered==1,"Standby was changed again");++passed;
+    // A stream starts from standby; its stop leaves the owned output off.
+    DisplaySessionV2 session(access(w,m));
+    require(session.start("from-standby",1600,900,true,deadline(w)).ok,"A stream did not start from standby");requireStreaming(w,1600,900,true,"A stream from standby is not streaming");
+    require(session.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"The stop after a stream from standby failed");
+    require(w.console().active&&!w.console().x&&!w.owned().active&&w.ownedWidth==1920,"The stop after a stream from standby left the owned output on");++passed;
+    const auto after=planDisplayV2Rest(w.query(),w.targets());require(after&&!after->change,"The stop did not end in standby");++passed;
+  }
+  // The gap between the console and an extra display closes.
+  {World w(true);const auto rest=planDisplayV2Rest(w.query(),w.targets());
+    require(rest&&rest->change&&apply(w,*rest).ok&&!w.owned().active&&w.extra().active&&w.extra().x==1024&&w.console().x==0,"Rest left the owned output's gap");++passed;}
+  // A VM without a display of its own: nothing to do here (activation as before).
+  {World w;w.console().active=false;w.owned().x=0;require(!planDisplayV2Rest(w.query(),w.targets()),"Rest planned a VM without a display of its own");++passed;}
+  // Windows refuses the database save: the same layout without it.
+  {World w;w.reject=[](const NativeCcdData&,UINT32 flags)->LONG{return (flags&SDC_SAVE_TO_DATABASE)?LONG(ERROR_INVALID_PARAMETER):LONG(ERROR_SUCCESS);};
+    const auto rest=planDisplayV2Rest(w.query(),w.targets());
+    require(rest&&apply(w,*rest).ok&&!w.remembered&&!w.owned().active,"A refused database save failed the rest");++passed;}
+  // Windows refuses everything: not settled, nothing changed (the probe then activates as before).
+  {World w;w.reject=[](const NativeCcdData&,UINT32){return LONG(ERROR_GEN_FAILURE);};
+    const auto rest=planDisplayV2Rest(w.query(),w.targets());const auto result=apply(w,*rest);
+    require(!result.ok&&result.applyAttempted&&result.reason=="native_topology_apply_failed"&&w.owned().active&&!w.applies,"A refused rest reported success or changed the displays");++passed;}
+  return passed;
+}
 int main(int argc,char** argv){
   try{
     if(argc==2&&std::string(argv[1])=="--sdk-ccd-mismatch"){sdkCcdMismatchCases();return 0;}
@@ -1313,6 +1417,7 @@ int main(int argc,char** argv){
     passed+=preparedHandoffCases();
     passed+=stoppingServiceCleanupCases();
     passed+=primaryRelayoutCase();
+    passed+=restCases();
     passed+=sdkCcdMismatchCases();
     passed+=stageTimingCases();
     passed+=happyPathCases();

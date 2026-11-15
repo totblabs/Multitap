@@ -45,7 +45,9 @@ void cases(){
     // That restore point is the stream's original: the console's end puts it back, foreign display included.
     const auto end=consoleEnd(f);require(end.outcome==DisplayV2Outcome::restored&&!f.memory.bytes,"The console's end did not restore and retire its restore point");requireOriginal(f.world,true,"The console's end did not bring back the original topology");}
   {Fixture f;f.world.console().x=1920;f.world.owned().x=0;f.memory.bytes.reset();const auto r=f.run();require(r.ok&&r.attempted&&consoleOnly(f.world),"An active secondary QEMU remained a side display");require(f.memory.saves==1&&f.memory.bytes&&f.memory.removes==0,"Active QEMU normalization lacked a protected restore point");
-    const auto end=consoleEnd(f);require(end.ok()&&!f.memory.bytes&&f.world.console().active&&f.world.console().x==1920&&f.world.owned().active&&!f.world.owned().x&&foreignBack(f.world,2944),"The console's end did not restore the secondary-QEMU topology");}
+    const auto end=consoleEnd(f);// The owned output that was primary beside them stays off (it never
+    // extends another display after a restore): the QEMU output takes the origin.
+    require(end.ok()&&!f.memory.bytes&&f.world.console().active&&f.world.console().x==0&&!f.world.owned().active&&foreignBack(f.world,1024),"The console's end did not restore the secondary-QEMU topology");}
   {Fixture f;const auto r=f.run();require(r.ok&&r.attempted&&consoleOnly(f.world),"Active primary QEMU with an owned output was treated as a no-op");}
   {Fixture f;f.world.setCount(2);f.save();const auto r=f.run();require(r.ok&&consoleOnly(f.world),"Dual owned outputs stayed active in console mode");}
   {Fixture f;f.world.owned().active=false;f.world.extra().x=0;const auto r=f.run();require(r.ok&&r.attempted&&consoleOnly(f.world),"A foreign clone/overlap at the primary origin was treated as an isolated no-op");}
@@ -59,14 +61,15 @@ void cases(){
       displayV2TargetActive(point.ccd,extraAdapter,extraTarget)&&displayV2TargetActive(point.ccd,ownedAdapter,f.world.ownedTarget),"The restore point lost the foreign display, the owned output or the console's name");
     const auto end=consoleEnd(f);
     require(end.outcome==DisplayV2Outcome::restored&&!f.memory.bytes,"The console's end did not restore its restore point");
-    require(foreignBack(f.world,1920)&&f.world.owned().active&&!f.world.owned().x&&!f.world.console().active&&!overlapping(f.world),"The console's end did not bring the foreign display and the owned output back as they were");}
+    // The vGPU output back alone at the origin; the owned output that was on beside it stays off.
+    require(foreignBack(f.world,0)&&!f.world.owned().active&&!f.world.console().active&&!overlapping(f.world),"The console's end did not bring the foreign display back and leave the owned output off");}
   // The default world (console, owned output, foreign display, all on) without a restore point: the same round trip.
   {Fixture f;f.memory.bytes.reset();const auto r=f.run();require(r.ok&&consoleOnly(f.world)&&f.memory.bytes,"Console-only from a three-display topology failed");
     const auto end=consoleEnd(f);require(end.outcome==DisplayV2Outcome::restored&&!f.memory.bytes,"The console's end left its restore point");requireOriginal(f.world,true,"The console's end did not bring back console, owned output and foreign display");}
   // The console is opened again before its end was restored and is still alone: nothing changes, the restore point stays.
   {Fixture f;f.suppress();f.memory.bytes.reset();require(f.run().ok,"First console failed");const auto point=f.memory.bytes;const auto applies=f.world.applies;
     const auto r=f.run();require(r.ok&&!r.attempted&&r.reason=="qemu_console_active"&&f.memory.bytes==point&&f.world.applies==applies,"A second console open changed the pending restore point or the displays");
-    require(consoleEnd(f).outcome==DisplayV2Outcome::restored&&foreignBack(f.world,1920),"The pending restore point did not survive a second console open");}
+    require(consoleEnd(f).outcome==DisplayV2Outcome::restored&&foreignBack(f.world,0),"The pending restore point did not survive a second console open");}
   // A pending restore point whose foreign display has another mode or is off now: the console proceeds and its
   // end puts the saved one back, as the ordinary recovery would have.
   for(const bool off:{false,true}){Fixture f;f.suppress();if(off)f.world.extra().active=false;else{f.world.extra().width+=100;f.world.extra().dbWidth+=100;}const auto old=f.memory.bytes;
@@ -75,7 +78,7 @@ void cases(){
   // A pending restore point that had the console off (a stream's original on a VM whose console was off):
   // the console is activated with Windows' modes, and its end switches it off again.
   {Fixture f;f.suppress();f.save();const auto r=f.run();require(r.ok&&consoleOnly(f.world)&&f.world.topologyApplies==1,"A restore point with the console off blocked the console");
-    require(consoleEnd(f).outcome==DisplayV2Outcome::restored&&!f.world.console().active&&f.world.owned().active&&foreignBack(f.world,1920),"The console's end did not return to the console-off original");}
+    require(consoleEnd(f).outcome==DisplayV2Outcome::restored&&!f.world.console().active&&!f.world.owned().active&&foreignBack(f.world,0),"The console's end did not return to the console-off original");}
   {Fixture f;f.memory.bytes.reset();f.world.reject=[](const auto&,UINT32){return LONG(ERROR_GEN_FAILURE);};const auto r=f.run();require(!r.ok&&!r.attempted&&f.memory.saves==1&&f.memory.removes==1&&!f.memory.bytes,"Validation-only failure did not safely retire its newly created rollback snapshot");}
   {Fixture f;const auto old=f.memory.bytes;f.world.reject=[](const auto&,UINT32){return LONG(ERROR_GEN_FAILURE);};const auto r=f.run();require(!r.ok&&!r.attempted&&f.memory.bytes==old&&f.memory.removes==0,"Validation-only failure deleted a pre-existing recovery record");}
   {Fixture f;f.suppress();const auto original=f.world.query();const auto old=f.memory.bytes;auto access=f.access();const auto configure=access.display.configure;int applies=0;access.display.configure=[&](const auto& plan,UINT32 flags){const auto result=configure(plan,flags);return (flags&SDC_APPLY)&&++applies==1?LONG(ERROR_GEN_FAILURE):result;};const auto r=prepareQemuConsoleOutput(std::move(access));require(!r.ok&&r.attempted&&qemuConsoleRollbackMatches(original,f.world.query()),"A partially applied failure was not restored to its original topology");require(f.memory.bytes==old,"Partial failure discarded protected recovery evidence");
@@ -143,7 +146,7 @@ void cases(){
     const auto r=f.run();
     require(r.ok&&r.attempted&&r.reason=="qemu_console_restored"&&consoleOnly(f.world),"A state from an earlier boot blocked the console");
     require(f.memory.saves==1&&f.memory.removes==0&&f.memory.bytes&&f.world.topologyApplies==(inactive?1:0),"The earlier-boot state was not replaced by a restore point of this boot");
-    require(!displayV2StateFromEarlierBoot(parseDisplayV2State(*f.memory.bytes),f.world.query(),f.world.targets())&&consoleEnd(f).outcome==DisplayV2Outcome::restored&&f.world.owned().active,"The restore point of this boot was not restored at the console's end");}
+    require(!displayV2StateFromEarlierBoot(parseDisplayV2State(*f.memory.bytes),f.world.query(),f.world.targets())&&consoleEnd(f).outcome==DisplayV2Outcome::restored&&f.world.owned().active==inactive,"The restore point of this boot was not restored at the console's end");}
   // No restore point can be stored: the only remaining state_missing.
   rejected([](auto& f){f.memory.bytes.reset();f.memory.failSave=true;},"qemu_console_state_missing");
   rejected([](auto& f){f.memory.bytes="invalid";},"qemu_console_state_invalid");

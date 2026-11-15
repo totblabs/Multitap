@@ -2,6 +2,7 @@
 #include "owned_output_size.hpp"
 #include "native_ccd_mode_reference.hpp"
 #include <functional>
+#include <optional>
 #include <span>
 // Public monitor IDs stay compatible with the released host/relay protocol.
 // Driver display IDs and the lease capability never leave the protected service.
@@ -134,5 +135,44 @@ inline std::vector<VirtualMonitor> nativeDisplayMonitors(
     for(const auto& owned:verified)if(std::max<int64_t>(foreign.position.x,owned.left)<std::min<int64_t>(int64_t(foreign.position.x)+foreign.width,int64_t(owned.left)+owned.width)&&std::max<int64_t>(foreign.position.y,owned.top)<std::min<int64_t>(int64_t(foreign.position.y)+foreign.height,int64_t(owned.top)+owned.height))fail();
   }
   return verified;
+}
+// Display manager v2 standby: every owned target is present and available but
+// off while another display is on in this session ([paths]/[modes]: all paths,
+// QDC_ALL_PATHS). A stream switches the owned outputs on (DisplaySessionV2), so
+// at rest a PC's monitor or a VM's own display is not extended by an invisible
+// screen. The monitors are the lease sizes where a stream would add them: "0"
+// right of the rightmost other display (top-aligned with it), "1" right of
+// "0". They have no device name: nothing captures them before the stream.
+inline std::optional<std::vector<VirtualMonitor>> nativeStandbyMonitors(
+    std::span<const NativeDisplayTarget> targets,std::span<const DISPLAYCONFIG_PATH_INFO> paths,
+    std::span<const DISPLAYCONFIG_MODE_INFO> modes){
+  if(targets.empty()||targets.size()>2||paths.size()>256||modes.size()>512)return {};
+  std::vector<DISPLAYCONFIG_PATH_INFO> normalized(paths.begin(),paths.end());
+  normalizeNativeCcdModeReferences(normalized,modes);
+  const auto ownedPath=[&](const DISPLAYCONFIG_PATH_INFO& path,const NativeDisplayTarget& target){return path.targetInfo.id==target.target&&path.targetInfo.adapterId.LowPart==target.adapter.LowPart&&path.targetInfo.adapterId.HighPart==target.adapter.HighPart;};
+  for(const auto& target:targets){
+    if(!ownedOutputSize(target.width,target.height))return {};
+    bool available=false;
+    for(const auto& path:normalized)if(ownedPath(path,target)){if(path.flags&DISPLAYCONFIG_PATH_ACTIVE)return {};if(path.targetInfo.targetAvailable)available=true;}
+    if(!available)return {};
+  }
+  bool other=false;int64_t right=0;LONG top=0;
+  for(const auto& path:normalized){
+    if(!(path.flags&DISPLAYCONFIG_PATH_ACTIVE)||std::any_of(targets.begin(),targets.end(),[&](const auto& target){return ownedPath(path,target);}))continue;
+    const auto index=(path.flags&DISPLAYCONFIG_PATH_SUPPORT_VIRTUAL_MODE)?path.sourceInfo.sourceModeInfoIdx:path.sourceInfo.modeInfoIdx;
+    if(index>=modes.size())return {};const auto& mode=modes[index];
+    if(mode.infoType!=DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE||mode.id!=path.sourceInfo.id||mode.adapterId.LowPart!=path.sourceInfo.adapterId.LowPart||mode.adapterId.HighPart!=path.sourceInfo.adapterId.HighPart||!mode.sourceMode.width||!mode.sourceMode.height)return {};
+    const auto& source=mode.sourceMode;if(!displayRectangleFits(source.position.x,source.position.y,source.width,source.height))return {};
+    const auto edge=int64_t(source.position.x)+source.width;
+    if(!other||edge>right){right=edge;top=source.position.y;}other=true;
+  }
+  if(!other)return {};
+  std::vector<VirtualMonitor> monitors;
+  for(const auto* id:{"0","1"})for(const auto& target:targets)if(target.id==id){
+    if(!displayRectangleFits(right,top,target.width,target.height))return {};
+    monitors.push_back({target.id,{},LONG(right),top,target.width,target.height,false});right+=target.width;
+  }
+  if(monitors.size()!=targets.size())return {};
+  return monitors;
 }
 }

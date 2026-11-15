@@ -17,11 +17,14 @@ struct Parent final:Authority {
   uint32_t generation=9;uint64_t serial=0;
   bool predecessorsExited=true,currentOwner=true,originalAvailable=true,refuseSize=false;
   unsigned sizeRequests=0;
-  explicit Parent(bool console=false,bool sdkMismatch=false,bool ownedInitiallyInactive=false){
+  // ownedAlone: a VM without a display of its own (console and extra off,
+  // Windows does not bring the console back): the restore keeps the owned output.
+  explicit Parent(bool console=false,bool sdkMismatch=false,bool ownedInitiallyInactive=false,bool ownedAlone=false){
     admission.service={101,10001};admission.stream.fill(0x24);admission.operation.fill(0x35);admission.installedImageSha256.fill(0x46);
     admission.predecessors={{202,20002},{303,30003}};admission.consoleSession=4;
     if(sdkMismatch){world.owned().width=1280;world.owned().height=720;world.extra().x=2304;}
     if(ownedInitiallyInactive){world.owned().active=false;world.extra().x=1024;}
+    if(ownedAlone){world.console().active=false;world.extra().active=false;world.owned().x=0;world.consoleReturns=false;}
     DisplaySessionV2 prepare(v2world::worldAccess(world,memory,console));
     const auto modeWidth=sdkMismatch?1600u:1280u,modeHeight=sdkMismatch?900u:720u;
     expect(prepare.start(uuid(admission.stream),modeWidth,modeHeight,console,v2world::deadline(world)).ok,"actual V2 fixture prepared original before stream");
@@ -103,26 +106,41 @@ void originalSdkMismatch(){
 }
 void semanticNegatives(){
   Parent p(true);const auto receipt=p.run();expect(receipt.outcome==Outcome::topologyRestoredOriginalHeld,"semantic negatives start from real complete fixture");
-  for(unsigned failure=0;failure<10;++failure){auto observed=parseDisplayV2State(receipt.observedState);
+  // Beside the console and the extra display the owned output is off after the
+  // restore (planDisplayV2Restore): the foreign displays and the console must
+  // come back exactly, the owned output must stay off and at its original size.
+  for(unsigned failure=0;failure<7;++failure){auto observed=parseDisplayV2State(receipt.observedState);
     auto foreign=std::find_if(observed.ccd.paths.begin(),observed.ccd.paths.end(),[](const auto& path){return displayV2Active(path)&&nativeSameLuid(path.targetInfo.adapterId,v2world::extraAdapter);});
-    auto owned=std::find_if(observed.ccd.paths.begin(),observed.ccd.paths.end(),[&](const auto& path){return displayV2Active(path)&&nativeSameTarget(path,observed.owned[0]);});
-    expect(foreign!=observed.ccd.paths.end()&&owned!=observed.ccd.paths.end(),"semantic fixture identities are actual parsed paths");
+    const bool ownedOn=std::any_of(observed.ccd.paths.begin(),observed.ccd.paths.end(),[&](const auto& path){return displayV2Active(path)&&nativeSameTarget(path,observed.owned[0]);});
+    expect(foreign!=observed.ccd.paths.end()&&!ownedOn,"semantic fixture identities are actual parsed paths, the owned output off");
     if(failure==0)foreign->flags&=~DISPLAYCONFIG_PATH_ACTIVE;
     else if(failure==1)observed.ccd.modes[nativeSourceIndex(*foreign)].sourceMode.width+=2;
     else if(failure==2)foreign->targetInfo.refreshRate.Numerator=60;
     else if(failure==3)foreign->targetInfo.rotation=DISPLAYCONFIG_ROTATION_ROTATE90;
     else if(failure==4)observed.ccd.modes[nativeSourceIndex(*foreign)].sourceMode.pixelFormat=DISPLAYCONFIG_PIXELFORMAT_16BPP;
-    else if(failure==5)observed.ccd.modes[nativeSourceIndex(*owned)].sourceMode.position.x+=2;
-    else if(failure==6)owned->targetInfo.refreshRate.Numerator=75;
-    else if(failure==7)owned->targetInfo.rotation=DISPLAYCONFIG_ROTATION_ROTATE180;
-    else if(failure==8)observed.ccd.modes[nativeSourceIndex(*owned)].sourceMode.pixelFormat=DISPLAYCONFIG_PIXELFORMAT_16BPP;
+    else if(failure==5)observed.owned[0].width=1280;
     else for(auto& path:observed.ccd.paths)if(nativeSameLuid(path.targetInfo.adapterId,v2world::consoleAdapter))path.flags&=~DISPLAYCONFIG_PATH_ACTIVE;
     observed.ccd=displayV2ActiveCcd(observed.ccd);
-    expect(!originalLayoutMatches(p.saved.bytes,displayV2StateBytes(observed)),"missing foreign/console or wrong mode/owned geometry cannot qualify full restore");
+    expect(!originalLayoutMatches(p.saved.bytes,displayV2StateBytes(observed)),"missing foreign/console, wrong mode or owned size cannot qualify full restore");
   }
+  {auto on=p.world;on.owned().active=true;on.owned().x=4000;
+    const auto observed=displayV2StateBytes({parseDisplayV2State(receipt.observedState).session,displayV2ActiveCcd(on.query()),on.targets(),parseDisplayV2State(p.saved.bytes).console});
+    expect(!originalLayoutMatches(p.saved.bytes,observed),"an owned output on beside the console cannot qualify full restore");}
+  // A VM without a display of its own: the owned output comes back, exactly.
+  {Parent alone(false,false,false,true);const auto own=alone.run();expect(own.outcome==Outcome::topologyRestoredOriginalHeld,"a VM without a display of its own restores its owned output");
+    for(unsigned failure=0;failure<4;++failure){auto observed=parseDisplayV2State(own.observedState);
+      auto owned=std::find_if(observed.ccd.paths.begin(),observed.ccd.paths.end(),[&](const auto& path){return displayV2Active(path)&&nativeSameTarget(path,observed.owned[0]);});
+      expect(owned!=observed.ccd.paths.end(),"the owned output is an actual parsed path");
+      if(failure==0)observed.ccd.modes[nativeSourceIndex(*owned)].sourceMode.position.x+=2;
+      else if(failure==1)owned->targetInfo.refreshRate.Numerator=75;
+      else if(failure==2)owned->targetInfo.rotation=DISPLAYCONFIG_ROTATION_ROTATE180;
+      else observed.ccd.modes[nativeSourceIndex(*owned)].sourceMode.pixelFormat=DISPLAYCONFIG_PIXELFORMAT_16BPP;
+      observed.ccd=displayV2ActiveCcd(observed.ccd);
+      expect(!originalLayoutMatches(alone.saved.bytes,displayV2StateBytes(observed)),"wrong owned geometry cannot qualify full restore");
+    }}
   auto repositioned=parseDisplayV2State(receipt.observedState);
   for(auto& path:repositioned.ccd.paths)if(displayV2Active(path)&&nativeSameLuid(path.targetInfo.adapterId,v2world::extraAdapter))repositioned.ccd.modes[nativeSourceIndex(path)].sourceMode.position.x+=2000;
-  expect(originalLayoutMatches(p.saved.bytes,displayV2StateBytes(repositioned)),"foreign reposition remains allowed while exact modes and owned geometry are retained");
+  expect(originalLayoutMatches(p.saved.bytes,displayV2StateBytes(repositioned)),"foreign reposition remains allowed while exact modes are retained and the owned output stays off");
   for(unsigned failure=0;failure<8;++failure){auto altered=receipt;auto lease=p.lease();
     if(failure==0)altered.error=87;else if(failure==1)altered.stage=displayV2Stage::apply;else if(failure==2)altered.fallback=2;
     else if(failure==3)altered.observedAt=p.world.clock+1;else if(failure==4)altered.observedAt=p.world.clock>2001?p.world.clock-2001:1;
@@ -137,7 +155,8 @@ void inactiveObservationPaths(){
   const auto receipt=p.run();
   expect(receipt.outcome==Outcome::topologyRestoredOriginalHeld,"inactive QDC_ALL_PATHS alternatives do not make canonical active observation fail");
   const auto parsed=parseDisplayV2State(receipt.observedState);
-  expect(parsed.ccd.paths.size()==3&&p.world.query().paths.size()==4,"numeric observation projects actual active paths only");
+  // The console and the extra display; the owned output is off beside them.
+  expect(parsed.ccd.paths.size()==2&&p.world.query().paths.size()==4,"numeric observation projects actual active paths only");
   expect(verifiedReceipt(p.admission,p.bound,p.saved,p.lease(),receipt,p.world.clock),"inactive alternatives never become evidence of an extra active foreign display");
   Parent originallyInactive(false,false,true);const auto restored=originallyInactive.run();
   expect(restored.outcome==Outcome::topologyRestoredOriginalHeld&&!originallyInactive.world.owned().active,"saved inactive owned output remains inactive after restoring foreign topology");

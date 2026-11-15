@@ -4,7 +4,8 @@
 
 namespace host {
 inline bool nativeStreamProfileViewportCapability(const DisplayState& display,const Json& config,bool nativeSelected,bool eligible,bool activeProfile){
-  if(!nativeSelected||!eligible||!display.ready()||display.remoteSession||!display.viewportProvisioning||(!activeProfile&&!display.monitorControlSupported)||display.monitors.size()!=1||display.monitors.front().id!="0"||!std::holds_alternative<bool>(config.get("streamProfileTrialEnabled").value)||!config.get("streamProfileTrialEnabled").boolean()||config.get("provider").string()!="libvirtualdisplay-1.6.4"||!std::holds_alternative<bool>(config.get("enabled").value)||!config.get("enabled").boolean())return false;
+  // Standby counts (display manager v2 at rest): the stream switches output "0" on.
+  if(!nativeSelected||!eligible||!display.streamable()||display.remoteSession||!display.viewportProvisioning||(!activeProfile&&!display.monitorControlSupported)||display.monitors.size()!=1||display.monitors.front().id!="0"||!std::holds_alternative<bool>(config.get("streamProfileTrialEnabled").value)||!config.get("streamProfileTrialEnabled").boolean()||config.get("provider").string()!="libvirtualdisplay-1.6.4"||!std::holds_alternative<bool>(config.get("enabled").value)||!config.get("enabled").boolean())return false;
   const auto& output=display.monitors.front();return ownedOutputSize(output.width,output.height)&&(!activeProfile||output.primary);
 }
 // stream-size-v1 extends separate-v1: full-size encoding within the client's

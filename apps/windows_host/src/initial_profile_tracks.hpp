@@ -27,8 +27,10 @@ inline std::optional<NativeTrackResize> initialProfileTrackRequest(const Json& c
   const auto width=limit("maxWidth",v2?int(ownedOutputMaxSide):3840),height=limit("maxHeight",v2?int(ownedOutputMaxSide):2160);for(const auto& output:request.outputs)if(!ownedOutputSize(output.width,output.height)||(!v2&&(output.width>uint32_t(width)||output.height>uint32_t(height))))throw std::runtime_error("initial_profile_tracks_invalid");
   return request;
 }
-inline bool initialProfileTrackDisplayMatches(const DisplayState& display,const NativeTrackResize& request,bool activeProfile){
-  if(!display.ready()||display.remoteSession||!display.viewportProvisioning||display.monitors.size()!=request.outputs.size())return false;
+// [allowStandby]: the advertisement may describe owned outputs a v2 stream
+// switches on (DisplayState::standby); preparing a stream needs them on.
+inline bool initialProfileTrackDisplayMatches(const DisplayState& display,const NativeTrackResize& request,bool activeProfile,bool allowStandby=false){
+  if(!(allowStandby?display.streamable():display.ready())||display.remoteSession||!display.viewportProvisioning||display.monitors.size()!=request.outputs.size())return false;
   const auto root=std::find_if(display.monitors.begin(),display.monitors.end(),[](const auto& m){return m.id=="0";});if(root==display.monitors.end()||(activeProfile&&(!root->primary||root->left||root->top)))return false;
   const auto& requestedRoot=request.outputs.front();
   for(const auto& output:request.outputs){const auto m=std::find_if(display.monitors.begin(),display.monitors.end(),[&](const auto& value){return value.id==output.id;});if(m==display.monitors.end()||m->width!=output.width||m->height!=output.height||int64_t(m->left)-root->left!=int64_t(output.left)-requestedRoot.left||int64_t(m->top)-root->top!=int64_t(output.top)-requestedRoot.top)return false;}
@@ -41,11 +43,11 @@ inline bool initialProfileTrackPreparedMatches(const Json& original,const Json& 
     return initialViewportJsonEqual(expected,prepared);
   }catch(...){return false;}
 }
-inline bool initialProfileTrackLeaseMatches(const Json& snapshot,const DisplayState& display,const NativeTrackResize& request,DWORD servicePid,std::string_view instance){
+inline bool initialProfileTrackLeaseMatches(const Json& snapshot,const DisplayState& display,const NativeTrackResize& request,DWORD servicePid,std::string_view instance,bool allowStandby=false){
   try{
     for(const auto* name:{"leaseActive","activationVerified","configurationPending","recoveryRequired"})if(!std::holds_alternative<bool>(snapshot.get(name).value))return false;
     const auto lease=nativeStreamProfileLease(snapshot,servicePid);
-    if(snapshot.get("deviceInstanceId").string()!=instance||lease.targets.size()!=request.outputs.size()||!initialProfileTrackDisplayMatches(display,request,false))return false;
+    if(snapshot.get("deviceInstanceId").string()!=instance||lease.targets.size()!=request.outputs.size()||!initialProfileTrackDisplayMatches(display,request,false,allowStandby))return false;
     for(const auto& output:request.outputs){const auto target=std::find_if(lease.targets.begin(),lease.targets.end(),[&](const auto& value){return value.id==output.id;});if(target==lease.targets.end()||target->width!=output.width||target->height!=output.height)return false;}
     return true;
   }catch(...){return false;}

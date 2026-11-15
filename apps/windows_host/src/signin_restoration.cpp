@@ -119,9 +119,19 @@ bool originalLayoutMatches(const std::string& originalBytes,const std::string& o
     // SDK public id remaps the owned target only. Its original active state,
     // source geometry/format, refresh and rotation must also really return.
     const auto find=[](const NativeCcdData& ccd,const NativeDisplayTarget& t){return std::find_if(ccd.paths.begin(),ccd.paths.end(),[&](const auto& p){return displayV2Active(p)&&nativeSameTarget(p,t);});};
+    // Its active state is the one the restore gives it: off beside another
+    // display even when it was on at snapshot time (planDisplayV2Restore).
     const auto before=find(saved.ccd,saved.owned[0]),after=find(observed.ccd,observed.owned[0]);
-    if((before==saved.ccd.paths.end())!=(after==observed.ccd.paths.end()))return false;
-    if(before!=saved.ccd.paths.end()){
+    const bool restored=std::any_of(expected.begin(),expected.end(),[](const auto& item){return item.owned;});
+    if(restored!=(after!=observed.ccd.paths.end()))return false;
+    if(restored&&before==saved.ccd.paths.end())return false;
+    if(!restored){
+      // Off, but back at its original size (the saved CCD source when it was
+      // on, else its saved SDK size): an SDK refusal is no full recovery.
+      DWORD width=saved.owned[0].width,height=saved.owned[0].height;
+      if(before!=saved.ccd.paths.end()){const auto& source=nativeCcdSource(saved.ccd,*before);width=source.width;height=source.height;}
+      if(observed.owned[0].width!=width||observed.owned[0].height!=height)return false;
+    }else{
       const auto& a=nativeCcdSource(saved.ccd,*before);const auto& b=nativeCcdSource(observed.ccd,*after);
       if(a.width!=b.width||a.height!=b.height||a.position.x!=b.position.x||a.position.y!=b.position.y||a.pixelFormat!=b.pixelFormat||before->targetInfo.rotation!=after->targetInfo.rotation)return false;
       const auto& x=before->targetInfo.refreshRate;const auto& y=after->targetInfo.refreshRate;

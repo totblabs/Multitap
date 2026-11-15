@@ -43,6 +43,10 @@ struct NativeBootstrapAccess {
   std::function<DisplayState()> probe;
   std::function<Json()> snapshot;
   std::function<NativeTopologyResult(std::span<const NativeDisplayTarget>,const std::string&)> activate;
+  // Display manager v2 at rest: with another display on, the owned outputs are
+  // put (or left) off instead of switched on (planDisplayV2Rest); nullopt when
+  // nothing else is on, then `activate` as before. Unset: always `activate`.
+  std::function<std::optional<NativeTopologyResult>(std::span<const NativeDisplayTarget>,const std::string&)> rest;
 };
 struct NativeBootstrapResult {DisplayState display;bool applyAttempted=false;std::optional<NativeActivationDiagnostic> diagnostic;};
 inline NativeBootstrapResult bootstrapNativeDisplays(const NativeBootstrapAccess& access){
@@ -55,21 +59,26 @@ inline NativeBootstrapResult bootstrapNativeDisplays(const NativeBootstrapAccess
     // Set this before crossing the mutation boundary. A lost/throwing reply is
     // uncertainty, not permission to repeat a display transition every probe.
     result.applyAttempted=true;result.diagnostic=NativeActivationDiagnostic{"native_topology_failed",0,true,false};
-    const auto applied=access.activate(targets,key);result.applyAttempted=applied.applyAttempted;
+    // Standby is kept only when the fresh probe shows it; anything else (a rest
+    // that did not settle) falls back to switching the outputs on, as before.
+    NativeTopologyResult applied;bool rested=false;
+    if(access.rest)if(const auto standby=access.rest(targets,key);standby&&standby->ok&&access.eligible()&&access.probe().standby){applied=*standby;rested=true;}
+    if(!rested)applied=access.activate(targets,key);
+    result.applyAttempted=applied.applyAttempted;
     result.diagnostic=NativeActivationDiagnostic{applied.reason,applied.systemError,applied.applyAttempted,false};
     result.diagnostic->ccd=applied.ccdDiagnostic;
     result.display=access.probe();
     // Only this worker's fresh successful CCD verification can stage initial
     // readiness. General read-only probes keep activation pending until the
     // service durably acknowledges this exact generation.
-    if(applied.ok&&access.eligible()&&result.display.active&&result.display.error=="native_display_activation_pending"){const auto fresh=access.snapshot();if(!fresh.get("configurationPending").boolean()&&nativeDisplayLeaseKey(fresh)==key){result.display.configurationPending=false;result.display.error.clear();}}
+    if(applied.ok&&access.eligible()&&(result.display.active||result.display.standby)&&result.display.error=="native_display_activation_pending"){const auto fresh=access.snapshot();if(!fresh.get("configurationPending").boolean()&&nativeDisplayLeaseKey(fresh)==key){result.display.configurationPending=false;result.display.error.clear();}}
     const bool eligible=access.eligible(),sameLease=nativeDisplayLeaseKey(access.snapshot())==key;
     if(!applied.ok||!eligible||!sameLease){
       if(applied.ok)result.diagnostic->reason=!eligible?"interactive_console_required":"native_activation_lease_changed";
       result.display.active=false;result.display.viewportProvisioning=false;result.display.monitorControlSupported=false;
       result.display.recoveryRequired=result.display.recoveryRequired||applied.recoveryRequired;
       result.display.configurationPending=true;result.display.error=applied.recoveryRequired?"native_topology_recovery_required":"native_topology_not_ready";
-    }else if(result.display.ready())result.diagnostic->windowsVerified=true;
+    }else if(result.display.streamable())result.diagnostic->windowsVerified=true;
     else result.diagnostic->reason="native_activation_observation_pending";
   }catch(const std::exception& error){
     if(!result.diagnostic)result.diagnostic=NativeActivationDiagnostic{};

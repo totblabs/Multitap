@@ -122,7 +122,8 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   Timer? _transitionBudget;
   String? _approvalIdentity;
   DateTime? _approvalDeadline;
-  String _operation = l10n.checkingHostStatus, _phase = l10n.waitingWindowsRespond;
+  String _operation = l10n.checkingHostStatus,
+      _phase = l10n.waitingWindowsRespond;
   // What the running request says it is doing (settings-progress-v1), when the
   // backend tells: the step replaces the request's own sentence, and its bar
   // is filled only when the step comes with a measure. [_runningAction] is the
@@ -924,7 +925,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       context,
       icon: summary.ok ? Icons.check_rounded : Icons.warning_amber_rounded,
       tone: summary.ok ? AppTone.success : AppTone.warn,
-      title: summary.ok ? l10n.installationFinished : l10n.couldNotFinishInstallation,
+      title: summary.ok
+          ? l10n.installationFinished
+          : l10n.couldNotFinishInstallation,
       message: _forMachine(summary.message),
       dialogKey: const Key('host-result-dialog'),
       closeKey: const Key('host-result-close'),
@@ -1055,9 +1058,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     try {
       _mutating = !{'testBroker', 'elevate'}.contains(action);
       if (_mutating && !await _syncClose()) {
-        throw HostSettingsException(
-          l10n.couldNotStartTaskOpen,
-        );
+        throw HostSettingsException(l10n.couldNotStartTaskOpen);
       }
       if (!owns()) return false;
       final response = await _api.request(action, fields);
@@ -1103,9 +1104,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         setState(() {
           _error = true;
           if (accepted) _approvalReadError = true;
-          _notice = accepted
-              ? l10n.taskRespondedButChangedStatus
-              : message;
+          _notice = accepted ? l10n.taskRespondedButChangedStatus : message;
         });
       }
     } finally {
@@ -1148,14 +1147,12 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     if (action == 'saveRdpCredentials' || action == 'clearRdpCredentials') {
       return switch (code) {
         'rdp_credentials_confirmation' => l10n.passwordsDoNotMatchEnter,
-        'rdp_credentials_invalid_input' => l10n.checkFormatWindowsAccountPassword,
+        'rdp_credentials_invalid_input' =>
+          l10n.checkFormatWindowsAccountPassword,
         'rdp_credentials_invalid' => l10n.checkWindowsAccountPassword,
-        'rdp_account_restricted' =>
-          l10n.windowsAccountLockedItsSign,
-        'rdp_credentials_validation_failed' =>
-          l10n.windowsCouldNotCheckAccount,
-        'rdp_credentials_storage_failed' =>
-          l10n.couldNotSaveDeleteWindows,
+        'rdp_account_restricted' => l10n.windowsAccountLockedItsSign,
+        'rdp_credentials_validation_failed' => l10n.windowsCouldNotCheckAccount,
+        'rdp_credentials_storage_failed' => l10n.couldNotSaveDeleteWindows,
         _ => l10n.couldNotFinishSettingUp,
       };
     }
@@ -1387,9 +1384,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       return;
     }
     if (_section('service')['restartProtocol'] != 'service-restart-v1') {
-      await _hostUpdateRequired(
-        l10n.updateHostRestartSafelyCurrent,
-      );
+      await _hostUpdateRequired(l10n.updateHostRestartSafelyCurrent);
       return;
     }
     if (!await _confirm(
@@ -1517,7 +1512,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     final ok = reset['ok'] == true;
     final moved = reset['moved'];
     final head = ok
-        ? l10n.backedUpRecoveryLogsPrepared(moved is int ? l10n.text18(moved) : l10n.text19)
+        ? l10n.backedUpRecoveryLogsPrepared(
+            moved is int ? l10n.text18(moved) : l10n.text19,
+          )
         : l10n.nothingWasResetLogsScreens;
     return (ok: ok, message: [head, '', ...lines].join('\n'));
   }
@@ -1701,7 +1698,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     final items = (plan['items'] as List).cast<Map>();
     final description = items
         .map((item) {
-          final kind = item['kind'] == 'device' ? l10n.devices : l10n.leftoverSetting;
+          final kind = item['kind'] == 'device'
+              ? l10n.devices
+              : l10n.leftoverSetting;
           final location = item['kind'] == 'device'
               ? item['instanceId']
               : '${item['registryPath']} · ${item['registryValue'] ?? ''}';
@@ -1823,7 +1822,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     }
     final minimum = setup?.minimumLength ?? 0;
     setState(() {
-      _accountUsernameError = username.isEmpty ? l10n.enterWindowsAccount : null;
+      _accountUsernameError = username.isEmpty
+          ? l10n.enterWindowsAccount
+          : null;
       _accountPasswordError = _accountPassword.text.isEmpty
           ? setup != null
                 ? l10n.enterNewPassword
@@ -2248,44 +2249,37 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       display['remoteSession'] == true &&
       display['configurationPending'] == true;
 
-  String? _displayFailure(Map<String, dynamic> display) =>
-      switch (display['error']) {
-        null || '' => null,
-        'administrator_required' => l10n.virtualDisplaySetupNeedsAdministrator,
-        'signed_driver_install_failed' || 'virtual_device_driver_bind_failed' =>
-          l10n.windowsCouldNotFinishPreparing,
-        'existing_virtual_display_configuration' =>
-          l10n.existingVirtualDisplaySetupNeeds,
-        'existing_virtual_display_requires_review' ||
-        'stale_virtual_display_ownership_requires_review' ||
-        'owned_virtual_display_identity_mismatch' ||
-        'monitor_ownership_changed' =>
-          l10n.virtualDisplayDeviceOwnershipDuplicate,
-        'driver_hash_mismatch' ||
-        'driver_signature_untrusted' ||
-        'driver_catalog_membership_invalid' =>
-          l10n.couldNotVerifyDriverFiles,
-        'driver_file_unavailable' || 'driver_package_lock_failed' =>
-          l10n.couldNotVerifyVirtualDisplay,
-        'registry_write_denied' ||
-        'registry_write_failed' ||
-        'owned_device_naming_failed' =>
-          l10n.couldNotSaveVirtualDisplay,
-        'viewport_recovery_required' =>
-          l10n.previousScreenChangeNeedsRecovery,
-        'native_display_legacy_operation_blocked' =>
-          l10n.hostServiceManagesVirtualDisplay,
-        'native_display_snapshot_invalid' =>
-          l10n.couldNotReadVirtualDisplay2,
-        'native_display_topology_mismatch' =>
-          l10n.couldNotCheckCurrentDisplay,
-        'native_display_configuration_untrusted' ||
-        'native_display_provider_unavailable' =>
-          l10n.couldNotVerifyVirtualDisplay,
-        'interactive_console_required' =>
-          l10n.youSignedViaRdpSwitch2,
-        _ => l10n.couldNotCheckVirtualDisplay2,
-      };
+  String? _displayFailure(
+    Map<String, dynamic> display,
+  ) => switch (display['error']) {
+    null || '' => null,
+    'administrator_required' => l10n.virtualDisplaySetupNeedsAdministrator,
+    'signed_driver_install_failed' ||
+    'virtual_device_driver_bind_failed' => l10n.windowsCouldNotFinishPreparing,
+    'existing_virtual_display_configuration' =>
+      l10n.existingVirtualDisplaySetupNeeds,
+    'existing_virtual_display_requires_review' ||
+    'stale_virtual_display_ownership_requires_review' ||
+    'owned_virtual_display_identity_mismatch' ||
+    'monitor_ownership_changed' => l10n.virtualDisplayDeviceOwnershipDuplicate,
+    'driver_hash_mismatch' ||
+    'driver_signature_untrusted' ||
+    'driver_catalog_membership_invalid' => l10n.couldNotVerifyDriverFiles,
+    'driver_file_unavailable' ||
+    'driver_package_lock_failed' => l10n.couldNotVerifyVirtualDisplay,
+    'registry_write_denied' ||
+    'registry_write_failed' ||
+    'owned_device_naming_failed' => l10n.couldNotSaveVirtualDisplay,
+    'viewport_recovery_required' => l10n.previousScreenChangeNeedsRecovery,
+    'native_display_legacy_operation_blocked' =>
+      l10n.hostServiceManagesVirtualDisplay,
+    'native_display_snapshot_invalid' => l10n.couldNotReadVirtualDisplay2,
+    'native_display_topology_mismatch' => l10n.couldNotCheckCurrentDisplay,
+    'native_display_configuration_untrusted' ||
+    'native_display_provider_unavailable' => l10n.couldNotVerifyVirtualDisplay,
+    'interactive_console_required' => l10n.youSignedViaRdpSwitch2,
+    _ => l10n.couldNotCheckVirtualDisplay2,
+  };
 
   @override
   void dispose() {
@@ -2900,7 +2894,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         : (HostRouteState.idle, l10n.checkingStatus2);
     final desktopDetail = _desktopRouteDetail(facts, route.desktop);
     final serverDetail = _serverRouteDetail(route.server);
-    final clientDetail = route.client == HostRouteState.ok ? l10n.readyConnect2 : '';
+    final clientDetail = route.client == HostRouteState.ok
+        ? l10n.readyConnect2
+        : '';
     final d = _section('display');
     final monitors = (d['monitors'] as List? ?? []).length;
     final states = _setupStates;
@@ -3200,8 +3196,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         );
       case HostProblem.serverUnregistered:
         return banner(
-          _terminalRequestMessage ??
-              l10n.notRegisteredServerYetRequest,
+          _terminalRequestMessage ?? l10n.notRegisteredServerYetRequest,
           messageKey: _terminalRequestMessage == null
               ? null
               : 'host-connection-result',
@@ -3246,7 +3241,11 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         // login on.
         final where = local ? l10n.fromLocalPcScreen : l10n.fromConsoleClient;
         return banner(
-          l10n.windowsSignedOutLocked(_autoLoginOn ? l10n.signRestartDesktopSignAutomatically(where) : l10n.sign2(where)),
+          l10n.windowsSignedOutLocked(
+            _autoLoginOn
+                ? l10n.signRestartDesktopSignAutomatically(where)
+                : l10n.sign2(where),
+          ),
           action: l10n.signSettings,
           run: () => open(5),
         );
@@ -3383,9 +3382,10 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     'cancelled' => l10n.connectionRequestCanceled,
     // host-machine-v1: the Host kept a registration copied with the disk
     // (full clone) aside; this Windows asks for its own.
-    _ => !_registered && _state['copiedRegistration'] == true
-        ? l10n.hostCopiedRegistrationRequestAgain
-        : null,
+    _ =>
+      !_registered && _state['copiedRegistration'] == true
+          ? l10n.hostCopiedRegistrationRequestAgain
+          : null,
   };
 
   String _safeOrigin(String value) {
@@ -3561,7 +3561,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   Widget _server() => _connectionWorkflow
       ? _approvalPanel()
       : _panel(
-          title: _registered && !_editRegistration ? l10n.serverConnection3 : l10n.connectServer,
+          title: _registered && !_editRegistration
+              ? l10n.serverConnection3
+              : l10n.connectServer,
           subtitle: _registered && !_editRegistration
               ? l10n.registrationKeptAfterUpdates
               : l10n.checkServerAddressRequestConnection,
@@ -3675,7 +3677,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
                       ? null
                       : _test,
                   child: KeepAllText(
-                    _tested == _origin.text.trim() ? l10n.connectionChecked : l10n.testServerConnection,
+                    _tested == _origin.text.trim()
+                        ? l10n.connectionChecked
+                        : l10n.testServerConnection,
                   ),
                 ),
               ),
@@ -3734,8 +3738,12 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _panel(
+          // Standby: beside a monitor or a VM's own display the virtual
+          // monitors stay off until a connection switches them on.
           title: _displayOutputReady
-              ? l10n.text20(monitors.length)
+              ? d['standby'] == true
+                    ? l10n.virtualMonitorsStandby(monitors.length)
+                    : l10n.text20(monitors.length)
               : d['provider'] == 'native' && d['rebootRequired'] == true
               ? l10n.windowsRestartNeeded
               : d['provider'] == 'native' &&
@@ -3746,7 +3754,10 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
           children: [
             ..._rows([
               for (final (index, m) in monitors.indexed)
-                _info(l10n.monitor2(index + 1), '${m['width']} × ${m['height']}'),
+                _info(
+                  l10n.monitor2(index + 1),
+                  '${m['width']} × ${m['height']}',
+                ),
             ]),
             if (monitors.isEmpty &&
                 !(d['provider'] == 'native' && d['remoteSession'] == true))
@@ -3837,7 +3848,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
                     key: const Key('host-display-repair-scan'),
                     onPressed: _busy || !_admin ? null : _readDisplayRepairPlan,
                     icon: const Icon(Icons.manage_search_rounded, size: 19),
-                    label: KeepAllText(l10n.checkExistingDevicesLeftoverSettings),
+                    label: KeepAllText(
+                      l10n.checkExistingDevicesLeftoverSettings,
+                    ),
                   ),
               ],
             ),
@@ -3883,7 +3896,10 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     return _panel(
       key: _repairPlanAnchor,
       title: l10n.conflictsFound,
-      subtitle: l10n.devicesLeftoverSettingsNothingDeleted(devices, configurations),
+      subtitle: l10n.devicesLeftoverSettingsNothingDeleted(
+        devices,
+        configurations,
+      ),
       children: [
         if (items.isEmpty && plan['canRepair'] == true)
           KeepAllText(l10n.noConflictsCleanUp, style: TextStyle(fontSize: 13)),
@@ -3987,8 +4003,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     'driver_file_unavailable' ||
     'driver_path_reparse_point' ||
     'driver_path_type_invalid' ||
-    'driver_package_lock_failed' =>
-      l10n.couldNotSafelyVerifyVirtual,
+    'driver_package_lock_failed' => l10n.couldNotSafelyVerifyVirtual,
     'reboot_required' ||
     'repair_restart_required' => l10n.restartWindowsThenCheckConflict,
     'remote_session' ||
@@ -4021,9 +4036,15 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
           key: const Key('host-repair-cleanup-state'),
         ),
         if (result['removeRequestedCount'] is int)
-          _info(l10n.devicesRequestedRemoval, l10n.text21(result['removeRequestedCount'])),
+          _info(
+            l10n.devicesRequestedRemoval,
+            l10n.text21(result['removeRequestedCount']),
+          ),
         if (result['removedDeviceCount'] is int)
-          _info(l10n.devicesConfirmedRemoved, l10n.text21(result['removedDeviceCount'])),
+          _info(
+            l10n.devicesConfirmedRemoved,
+            l10n.text21(result['removedDeviceCount']),
+          ),
         _info(
           l10n.driverInstall,
           _repairTimedOut || result['repairInstalled'] is! bool
@@ -4078,7 +4099,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
               ? l10n.autoSignOffRecoveryNeeded
               : l10n.checkChangeResultRecoveryStatus,
         _ =>
-          status.supported ? l10n.couldNotCheckCurrentSetting : l10n.hostDoesNotSupportAuto2,
+          status.supported
+              ? l10n.couldNotCheckCurrentSetting
+              : l10n.hostDoesNotSupportAuto2,
       };
 
   String _windowsReason(String code) => switch (code) {
@@ -4163,9 +4186,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     });
     try {
       if (!await _syncClose()) {
-        throw HostSettingsException(
-          l10n.couldNotPrepareWindowProtection,
-        );
+        throw HostSettingsException(l10n.couldNotPrepareWindowProtection);
       }
       final fresh = WindowsAutologonStatus.parse(
         (await _api.request('windowsAutologonStatus'))['autologon'],
@@ -4180,9 +4201,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         );
       }
       if (!await _syncClose()) {
-        throw HostSettingsException(
-          l10n.couldNotVerifyWindowProtection,
-        );
+        throw HostSettingsException(l10n.couldNotVerifyWindowProtection);
       }
       if (!mounted || !_admin || _windowsLogin.revision != before.revision) {
         return;
@@ -4471,10 +4490,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
             ),
           ),
         if (status.state == 'external' && !status.supportsTakeOwnership)
-          KeepAllText(
-            l10n.updateHostThenCheckAgain,
-            style: note,
-          ),
+          KeepAllText(l10n.updateHostThenCheckAgain, style: note),
         const SizedBox(height: 14),
         if (!saved || _editAccount)
           ..._accountForm(
@@ -4519,10 +4535,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
           ),
         if (_windowsPendingId != null) ...[
           const SizedBox(height: 12),
-          KeepAllText(
-            l10n.unclearWhetherAutoSignFinished,
-            style: note,
-          ),
+          KeepAllText(l10n.unclearWhetherAutoSignFinished, style: note),
           const SizedBox(height: 6),
           OutlinedButton.icon(
             key: const Key('host-windows-result-check'),
@@ -4562,12 +4575,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         const SizedBox(height: 8),
         // No in-stream sign-in screen: a signed-out or locked
         // Windows is reached through the Proxmox console or a restart.
-        KeepAllText(
-          _forMachine(
-            l10n.ifWindowsSignsOutLocks,
-          ),
-          style: note,
-        ),
+        KeepAllText(_forMachine(l10n.ifWindowsSignsOutLocks), style: note),
       ],
     );
   }
@@ -4621,7 +4629,11 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       ),
       const SizedBox(height: 4),
       KeepAllText(
-        l10n.accountHasNoWindowsPassword(setup.minimumLength > 0 ? l10n.leastCharacters(setup.minimumLength) : ''),
+        l10n.accountHasNoWindowsPassword(
+          setup.minimumLength > 0
+              ? l10n.leastCharacters(setup.minimumLength)
+              : '',
+        ),
         key: const Key('host-new-password-policy'),
         style: TextStyle(fontSize: 12.5, color: _palette.muted, height: 1.6),
       ),
@@ -4643,8 +4655,12 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
           _accountConfirmationError = null;
         }),
         decoration: InputDecoration(
-          labelText: _passwordSetup != null ? l10n.newWindowsPassword : l10n.windowsPassword,
-          helperText: _passwordSetup != null ? null : l10n.leaveBlankSaveIfThere,
+          labelText: _passwordSetup != null
+              ? l10n.newWindowsPassword
+              : l10n.windowsPassword,
+          helperText: _passwordSetup != null
+              ? null
+              : l10n.leaveBlankSaveIfThere,
           errorText: _accountPasswordError,
           counterText: '',
           prefixIcon: const Icon(Icons.lock_outline_rounded),
@@ -4667,7 +4683,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
           _accountConfirmationError = null;
         }),
         decoration: InputDecoration(
-          labelText: _passwordSetup != null ? l10n.confirmNewPassword : l10n.confirmPassword,
+          labelText: _passwordSetup != null
+              ? l10n.confirmNewPassword
+              : l10n.confirmPassword,
           errorText: _accountConfirmationError,
           counterText: '',
           prefixIcon: const Icon(Icons.lock_outline_rounded),
@@ -4745,7 +4763,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
   String get _brokerStateText {
     final service = _section('service');
     if (service['running'] != true) {
-      return service['running'] == false ? l10n.serviceStartNeeded : l10n.checkServiceStatus;
+      return service['running'] == false
+          ? l10n.serviceStartNeeded
+          : l10n.checkServiceStatus;
     }
     if (_approvalReadError) return l10n.connectionStatusDelayed;
     if (_brokerOnline) return l10n.serverConnectionConfirmed;
@@ -4788,9 +4808,11 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       'protocol_rejected' => l10n.hostServerVersionsDoNot,
       'heartbeat_timeout' ||
       'clock_changed' => l10n.couldNotConfirmRecentServer,
-      'transport_closed' || 'send_failed' => l10n.serverConnectionDroppedServiceReconnects,
+      'transport_closed' ||
+      'send_failed' => l10n.serverConnectionDroppedServiceReconnects,
       _ => switch (broker['state']) {
-        'connecting' || 'reconnecting' => l10n.serviceConnectingServerPleaseWait,
+        'connecting' ||
+        'reconnecting' => l10n.serviceConnectingServerPleaseWait,
         'awaiting_ack' => l10n.connectedServerWaitingResponse,
         'stale' || 'online' => l10n.couldNotConfirmRecentServer2,
         _ => l10n.couldNotCheckServerConnection,
@@ -4903,7 +4925,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
             : Icons.play_arrow_rounded,
         size: 17,
       ),
-      label: KeepAllText(s['running'] == true ? l10n.restartService : l10n.startService),
+      label: KeepAllText(
+        s['running'] == true ? l10n.restartService : l10n.startService,
+      ),
     );
     final info = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4990,7 +5014,10 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         ..._rows([
           _info(l10n.hostVersion2, '${_state['version'] ?? '—'}'),
           _info(l10n.service, _serviceText(s)),
-          _info(l10n.serverConnection, _registered ? _brokerStateText : l10n.serverRegistrationNeeded),
+          _info(
+            l10n.serverConnection,
+            _registered ? _brokerStateText : l10n.serverRegistrationNeeded,
+          ),
           _info(
             l10n.windowsSign2,
             label(_state['interactiveSession'], l10n.signed, l10n.checkSign),
@@ -5011,23 +5038,40 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
           initiallyExpanded: _diagnosticsDetails,
           onExpansionChanged: (open) => _diagnosticsDetails = open,
           children: _rows([
-            _info(l10n.serviceInstall2, label(s['installed'], l10n.installed, l10n.notInstalled)),
+            _info(
+              l10n.serviceInstall2,
+              label(s['installed'], l10n.installed, l10n.notInstalled),
+            ),
             if (_registered) ...[
               _info(l10n.sinceServerResponse, _brokerResponseAge(response.age)),
               _info(l10n.lastConnected, _brokerAckTime(broker['lastReadyAt'])),
               _info(l10n.lastResponse, _brokerAckTime(response.at)),
               _info(l10n.connectionGuidance, _brokerGuidance),
             ],
-            _info(l10n.virtualDisplayDriver2, label(d['installed'], l10n.installed, l10n.notInstalled)),
-            _info(l10n.virtualDisplayDevice2, label(d['deviceReady'], l10n.started, l10n.needsCheck)),
+            _info(
+              l10n.virtualDisplayDriver2,
+              label(d['installed'], l10n.installed, l10n.notInstalled),
+            ),
+            _info(
+              l10n.virtualDisplayDevice2,
+              label(d['deviceReady'], l10n.started, l10n.needsCheck),
+            ),
             _info(l10n.virtualMonitors, l10n.text22(outputs)),
-            _info(l10n.screenRecovery, label(d['recoveryRequired'], l10n.needed, l10n.notNeeded)),
-            _info(l10n.windowsRestart2, label(d['rebootRequired'], l10n.needed, l10n.notRequested2)),
+            _info(
+              l10n.screenRecovery,
+              label(d['recoveryRequired'], l10n.needed, l10n.notNeeded),
+            ),
+            _info(
+              l10n.windowsRestart2,
+              label(d['rebootRequired'], l10n.needed, l10n.notRequested2),
+            ),
             for (final row in _deviceRows)
               _info(
                 row.title,
-                [row.level.label, if (row.status.isNotEmpty) row.status]
-                    .join(' · '),
+                [
+                  row.level.label,
+                  if (row.status.isNotEmpty) row.status,
+                ].join(' · '),
               ),
           ]),
         ),
@@ -5048,11 +5092,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
             child: KeepAllText(
               l10n.couldNotReadDeviceStatus,
               key: const Key('host-devices-unavailable'),
-              style: TextStyle(
-                color: _palette.red,
-                fontSize: 13,
-                height: 1.5,
-              ),
+              style: TextStyle(color: _palette.red, fontSize: 13, height: 1.5),
             ),
           ),
         for (var index = 0; index < rows.length; index++) ...[
@@ -5062,11 +5102,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         Divider(height: 1, color: _palette.line),
         _details(
           key: const Key('host-devices-help'),
-          children: [
-            _detailText(
-              l10n.permissionsTurnedPerUserDesktop,
-            ),
-          ],
+          children: [_detailText(l10n.permissionsTurnedPerUserDesktop)],
         ),
       ],
     );
@@ -5174,7 +5210,10 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         .join('\n');
     if (!await _confirm(
       l10n.remove(adapters.extras.length),
-      l10n.adapterUseDevicesFromOther(list, adapters.unproven > 0 ? l10n.devicesWithoutMultitapRecordMay : ''),
+      l10n.adapterUseDevicesFromOther(
+        list,
+        adapters.unproven > 0 ? l10n.devicesWithoutMultitapRecordMay : '',
+      ),
       accept: l10n.clear,
       danger: true,
     )) {
@@ -5349,11 +5388,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
               116 * MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.5),
           child: KeepAllText(
             name,
-            style: TextStyle(
-              color: _palette.muted,
-              fontSize: 13,
-              height: 1.45,
-            ),
+            style: TextStyle(color: _palette.muted, fontSize: 13, height: 1.45),
           ),
         ),
         const SizedBox(width: 8),

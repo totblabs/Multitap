@@ -49,6 +49,34 @@ int main(){try{
   {auto mixed=paths;auto data=modes;auto foreign=paths[0];foreign.targetInfo.adapterId.LowPart=77;foreign.sourceInfo.adapterId.LowPart=77;foreign.sourceInfo.id=5;foreign.sourceInfo.sourceModeInfoIdx=2;
     auto mode=modes[0];mode.adapterId=foreign.sourceInfo.adapterId;mode.id=5;mode.sourceMode.position={3200,0};mode.sourceMode.width=800;data.push_back(mode);mixed.push_back(foreign);auto inactive=paths[0];inactive.flags&=~DISPLAYCONFIG_PATH_ACTIVE;mixed.push_back(inactive);require(nativeDisplayMonitors(targets,mixed,data,name).size()==2,"Unrelated foreign/inactive path displaced an owned path");++passed;}
   for(const bool malformed:{false,true}){auto mixed=paths;auto foreign=paths[0];foreign.targetInfo.adapterId.LowPart++;if(malformed)foreign.sourceInfo.sourceModeInfoIdx=200;mixed.push_back(foreign);bool rejected=false;try{nativeDisplayMonitors(targets,mixed,modes,name);}catch(...){rejected=true;}require(rejected,"Console/foreign clone or unknown foreign source was offered as an independent output");++passed;}
+  // Standby (display manager v2 at rest): both owned outputs present but off
+  // beside two other displays; offered right of them, top-aligned with the
+  // right-most, "1" right of "0", without a device name.
+  {
+    std::vector<DISPLAYCONFIG_PATH_INFO> all;std::vector<DISPLAYCONFIG_MODE_INFO> data;
+    const auto other=[&](DWORD low,UINT32 id,LONG x,LONG y,UINT32 w,UINT32 h){DISPLAYCONFIG_PATH_INFO path{};path.flags=DISPLAYCONFIG_PATH_ACTIVE;path.targetInfo.targetAvailable=TRUE;path.targetInfo.adapterId={low,0};path.targetInfo.id=id;path.sourceInfo.adapterId={low,0};path.sourceInfo.id=id;path.sourceInfo.modeInfoIdx=UINT32(data.size());
+      DISPLAYCONFIG_MODE_INFO mode{};mode.infoType=DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;mode.id=id;mode.adapterId={low,0};mode.sourceMode.width=w;mode.sourceMode.height=h;mode.sourceMode.position={x,y};data.push_back(mode);all.push_back(path);};
+    other(77,9,0,0,1280,800);other(78,4,1280,100,2560,1600);
+    for(const auto& target:targets){DISPLAYCONFIG_PATH_INFO path{};path.targetInfo.targetAvailable=TRUE;path.targetInfo.adapterId=target.adapter;path.targetInfo.id=target.target;path.sourceInfo.adapterId=target.adapter;path.sourceInfo.modeInfoIdx=DISPLAYCONFIG_PATH_MODE_IDX_INVALID;path.targetInfo.modeInfoIdx=DISPLAYCONFIG_PATH_MODE_IDX_INVALID;all.push_back(path);}
+    const auto standby=nativeStandbyMonitors(targets,all,data);
+    require(standby&&standby->size()==2&&(*standby)[0].id=="0"&&(*standby)[0].left==3840&&(*standby)[0].top==100&&(*standby)[0].width==targets[0].width&&(*standby)[0].height==targets[0].height&&
+      (*standby)[1].id=="1"&&(*standby)[1].left==LONG(3840+targets[0].width)&&(*standby)[1].top==100&&(*standby)[0].name.empty()&&!(*standby)[0].primary,"Standby outputs were not offered right of the other displays");++passed;
+    // Not standby: an owned output on, one unavailable or missing, nothing else on.
+    {auto on=all;on[2].flags|=DISPLAYCONFIG_PATH_ACTIVE;require(!nativeStandbyMonitors(targets,on,data),"An owned output on was standby");++passed;}
+    {auto gone=all;gone[3].targetInfo.targetAvailable=FALSE;require(!nativeStandbyMonitors(targets,gone,data),"An unavailable owned target was standby");++passed;}
+    {auto missing=all;missing.pop_back();require(!nativeStandbyMonitors(targets,missing,data),"A missing owned target was standby");++passed;}
+    {auto alone=all;alone[0].flags&=~DISPLAYCONFIG_PATH_ACTIVE;alone[1].flags&=~DISPLAYCONFIG_PATH_ACTIVE;require(!nativeStandbyMonitors(targets,alone,data),"Owned outputs with nothing else on were standby");++passed;}
+    // Standby is streamable, never ready (capture needs the outputs on).
+    DisplayState state;state.installed=state.deviceReady=state.owned=true;state.foreign=0;state.standby=true;state.monitors=*standby;
+    require(state.standbyReady()&&state.streamable()&&!state.ready(),"Standby was not streamable only");++passed;
+    state.configurationPending=true;require(!state.streamable(),"A pending standby was streamable");++passed;state.configurationPending=false;
+    state.active=true;require(!state.standbyReady(),"An active display was standby");++passed;state.active=false;
+    // Through the worker reply; unnamed monitors only with standby.
+    const auto parsed=parseDisplayState(JsonParser::parse(workerDisplayJson(state)));
+    require(parsed.standby&&parsed.monitors.size()==2&&parsed.streamable()&&!parsed.ready(),"Standby did not survive the worker reply");++passed;
+    auto plain=JsonParser::parse(workerDisplayJson(state));std::get<Json::Object>(plain.value)["standby"].value=false;
+    require(parseDisplayState(plain).monitors.empty(),"Unnamed monitors were accepted without standby");++passed;
+  }
   for(int scenario=0;scenario<10;++scenario){auto changed=paths;auto data=modes;auto resolver=std::function<std::wstring(const DISPLAYCONFIG_PATH_INFO&)>(name);
     switch(scenario){
       case 0:changed.push_back(paths[0]);break;

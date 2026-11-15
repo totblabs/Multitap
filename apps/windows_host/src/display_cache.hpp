@@ -46,7 +46,7 @@ class DisplayReadinessCache {
     // Activation's worker sample precedes the service's durable ACK. Keep its
     // actual observation age, but re-read capabilities after that exact ACK
     // instead of retaining incomplete viewport/count flags until the next signal.
-    std::lock_guard lock(mutex_); return refreshPending_ || session_ != session || key_ != key || now - checked_ >= (display_.ready()&&desktopAvailable_ ? readyMaxAge : notReadyMaxAge);
+    std::lock_guard lock(mutex_); return refreshPending_ || session_ != session || key_ != key || now - checked_ >= (display_.streamable()&&desktopAvailable_ ? readyMaxAge : notReadyMaxAge);
   }
  private: std::mutex mutex_; uint64_t generation_ = 0; DWORD session_ = 0xffffffff; DisplayState display_; Clock::time_point checked_{};bool desktopAvailable_=false,refreshPending_=false;DisplayProbeKey key_;
 };

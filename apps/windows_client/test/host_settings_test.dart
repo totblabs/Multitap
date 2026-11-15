@@ -8,6 +8,7 @@ import 'package:multitap_client/data/window_close_guard.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/host_overview_panels.dart';
 import 'package:multitap_client/ui/host_settings_screen.dart';
+
 import 'helpers/pump_work.dart';
 
 // The status reads of the Host tool (settings_rpc.hpp): nothing is changed.
@@ -59,7 +60,10 @@ class FakeHostSettings implements HostSettingsApi {
       failStatus = false,
       cancelPending = false,
       credentialsConfigured = false,
-      rejectCredentials = false;
+      rejectCredentials = false,
+          // Owned outputs off beside a monitor until a connection (standby).
+          standby =
+          false;
   String credentialUsername = '';
   String credentialRevision = 'a' * 64;
   int displays = 0;
@@ -342,8 +346,9 @@ class FakeHostSettings implements HostSettingsApi {
           'installed': true,
           'deviceReady': true,
           'owned': true,
-          'activeDisplay': displays > 0,
+          'activeDisplay': displays > 0 && !standby,
           'ready': displays > 0 && !recoveryRequired,
+          'standby': standby,
           'recoveryRequired': recoveryRequired,
           'rebootRequired': rebootRequired,
           'foreignDeviceCount': 0,
@@ -757,10 +762,7 @@ void main() {
           ..statusOverrides = {'broker': testCase.$1};
         await open(t, api);
         expect(serverLine(t), testCase.$3 ? confirmed : isNot(confirmed));
-        expect(
-          pill(t),
-          testCase.$3 ? '스트리밍할 수 있어요' : isNot(contains('스트리밍')),
-        );
+        expect(pill(t), testCase.$3 ? '스트리밍할 수 있어요' : isNot(contains('스트리밍')));
         await t.pumpWidget(const SizedBox());
         await pumpWork(t);
       }
@@ -2628,6 +2630,20 @@ void main() {
       );
       expect(api.requests.where((r) => r['action'] == 'display'), isEmpty);
       expect(find.text('가상 모니터 1대 켜짐'), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'Standby: the virtual monitor is ready but off until a connection',
+    (t) async {
+      final api = FakeHostSettings(registered: true)
+        ..displays = 1
+        ..standby = true;
+      await open(t, api);
+      await nav(t, 2);
+      expect(find.text('가상 모니터 1대 · 연결할 때 켜짐'), findsOneWidget);
+      expect(find.text('가상 모니터 1대 켜짐'), findsNothing);
+      expect(api.requests.every(isReadOnlyHostRequest), isTrue);
+      expect(t.takeException(), isNull);
     },
   );
   testWidgets(

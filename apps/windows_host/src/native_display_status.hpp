@@ -12,7 +12,7 @@ namespace host {
 inline bool nativeViewportTrialReady(const DisplayState& display,const Json& config,bool interactive){
   return interactive&&config.get("provider").string()=="libvirtualdisplay-1.6.4"&&
     config.get("enabled").boolean()&&config.get("viewportTrialEnabled").boolean()&&
-    display.ready()&&!display.remoteSession;
+    display.streamable()&&!display.remoteSession;
 }
 // The service loop reads the marker every second and each readiness check reads
 // it again; Host setup and settings change it rarely. Its trusted read is kept
@@ -72,9 +72,13 @@ inline Json nativeDisplayCleanupLeaseSnapshot(DWORD expectedServicePid,const std
      !nativeDisplayCleanupSnapshotAllowed(nativeDisplayConfig(),snapshot,status.dwCurrentState,status.dwProcessId,expectedServicePid,instance,generation,GetTickCount64()))throw std::runtime_error("native_display_snapshot_invalid");
   return snapshot;
 }
-inline DisplayState nativeDisplayStatus(){
+// [standbyAllowed] (display manager v2 at rest: the probe, settings,
+// diagnostics): owned outputs that are present but off beside another display
+// are reported as standby instead of a mismatch. Capture paths keep the default.
+inline DisplayState nativeDisplayStatus(bool standbyAllowed=false){
   DisplayState state;state.owned=true;state.configurationPending=true;state.error="native_display_not_ready";state.foreign=0;
 #ifndef MULTITAP_NATIVE_DISPLAY
+  (void)standbyAllowed;
   state.error="native_display_provider_unavailable";return state;
 #else
   DWORD session=0;state.remoteSession=!ProcessIdToSessionId(GetCurrentProcessId(),&session)||session==0||session!=WTSGetActiveConsoleSessionId()||GetSystemMetrics(SM_REMOTESESSION)!=0;
@@ -94,13 +98,31 @@ inline DisplayState nativeDisplayStatus(){
     if(GetDisplayConfigBufferSizes(queryFlags,&pathCount,&modeCount)!=ERROR_SUCCESS||pathCount>64||modeCount>256)return state;
     std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
     if(QueryDisplayConfig(queryFlags,&pathCount,paths.data(),&modeCount,modes.data(),nullptr)!=ERROR_SUCCESS)return state;paths.resize(pathCount);modes.resize(modeCount);
-    state.monitors=nativeDisplayMonitors(targets,paths,modes,[](const auto& path){
-      DISPLAYCONFIG_SOURCE_DEVICE_NAME name{};name.header={DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,sizeof(name),path.sourceInfo.adapterId,path.sourceInfo.id};
-      if(DisplayConfigGetDeviceInfo(&name.header)!=ERROR_SUCCESS)throw std::runtime_error("native_display_topology_mismatch");return std::wstring(name.viewGdiDeviceName);
-    });
+    const auto pending=[&]{
+      const bool activationPending=!snapshot.get("activationVerified").boolean();state.configurationPending=snapshot.get("configurationPending").boolean()||activationPending;
+      state.error=state.recoveryRequired?"native_topology_recovery_required":snapshot.get("configurationPending").boolean()?"native_display_change_pending":activationPending?"native_display_activation_pending":"";
+    };
+    try{
+      state.monitors=nativeDisplayMonitors(targets,paths,modes,[](const auto& path){
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME name{};name.header={DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,sizeof(name),path.sourceInfo.adapterId,path.sourceInfo.id};
+        if(DisplayConfigGetDeviceInfo(&name.header)!=ERROR_SUCCESS)throw std::runtime_error("native_display_topology_mismatch");return std::wstring(name.viewGdiDeviceName);
+      });
+    }catch(const std::exception& error){
+      if(!standbyAllowed||std::string(error.what())!="native_display_topology_mismatch")throw;
+      UINT32 allPaths=0,allModes=0;const UINT32 allFlags=QDC_ALL_PATHS|QDC_VIRTUAL_MODE_AWARE;
+      if(GetDisplayConfigBufferSizes(allFlags,&allPaths,&allModes)!=ERROR_SUCCESS||allPaths>256||allModes>512)throw;
+      std::vector<DISPLAYCONFIG_PATH_INFO> every(allPaths);std::vector<DISPLAYCONFIG_MODE_INFO> everyMode(allModes);
+      if(QueryDisplayConfig(allFlags,&allPaths,every.data(),&allModes,everyMode.data(),nullptr)!=ERROR_SUCCESS)throw;every.resize(allPaths);everyMode.resize(allModes);
+      auto standby=nativeStandbyMonitors(targets,every,everyMode);if(!standby)throw;
+      state.standby=true;state.monitors=std::move(*standby);
+      const auto& first=state.monitors.front();state.left=first.left;state.top=first.top;LONG right=first.left+LONG(first.width),bottom=first.top+LONG(first.height);
+      for(const auto& monitor:state.monitors){right=std::max(right,monitor.left+LONG(monitor.width));bottom=std::max(bottom,monitor.top+LONG(monitor.height));}
+      state.width=DWORD(right-state.left);state.height=DWORD(bottom-state.top);pending();
+      state.viewportProvisioning=nativeViewportTrialReady(state,config,true);state.monitorControlSupported=state.streamable()&&!state.remoteSession&&snapshot.get("countControlAvailable").boolean();return state;
+    }
     const auto& first=state.monitors.front();state.name=first.name;state.left=first.left;state.top=first.top;LONG right=first.left+LONG(first.width),bottom=first.top+LONG(first.height);
     for(const auto& monitor:state.monitors){state.left=std::min(state.left,monitor.left);state.top=std::min(state.top,monitor.top);right=std::max(right,monitor.left+LONG(monitor.width));bottom=std::max(bottom,monitor.top+LONG(monitor.height));}
-    state.width=DWORD(right-state.left);state.height=DWORD(bottom-state.top);state.active=true;const bool activationPending=!snapshot.get("activationVerified").boolean();state.configurationPending=snapshot.get("configurationPending").boolean()||activationPending;state.error=state.recoveryRequired?"native_topology_recovery_required":snapshot.get("configurationPending").boolean()?"native_display_change_pending":activationPending?"native_display_activation_pending":"";state.viewportProvisioning=nativeViewportTrialReady(state,config,true);state.monitorControlSupported=state.ready()&&!state.remoteSession&&snapshot.get("countControlAvailable").boolean();return state;
+    state.width=DWORD(right-state.left);state.height=DWORD(bottom-state.top);state.active=true;pending();state.viewportProvisioning=nativeViewportTrialReady(state,config,true);state.monitorControlSupported=state.ready()&&!state.remoteSession&&snapshot.get("countControlAvailable").boolean();return state;
   }catch(const std::exception& error){const std::string reason=error.what();if(reason=="native_display_snapshot_invalid"||reason=="native_display_configuration_untrusted"||reason=="native_display_topology_mismatch")state.error=reason;return state;}
   catch(...){return state;}
 #endif

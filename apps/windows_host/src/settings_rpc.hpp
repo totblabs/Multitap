@@ -19,6 +19,7 @@
 #include <mmdeviceapi.h>
 #include <iostream>
 #include "desktop_name.hpp"
+#include "display_v2_rpc.hpp"
 namespace host {
 // The Print Spooler service as Host settings shows it (device_status.hpp `spooler`).
 inline const char* printSpoolerServiceState() {
@@ -204,7 +205,8 @@ inline std::string serviceRestartRpc(const Json& request,const std::function<ser
     (complete?"":",\"error\":\"host_service_restart_unverified\"")+'}';
 }
 inline std::string settingsStatus() {
-  const auto config = readPublicConfig(); const auto display = virtualDisplayStatus();
+  // Standby (display manager v2): the owned outputs off beside another display, ready for a stream.
+  const auto config = readPublicConfig(); const auto display = virtualDisplayStatus(displayManagerV2Selected());
   const bool native=nativeDisplaySelected();
   const auto service = readHostServiceSnapshot();
   std::string monitors = "["; for (const auto& item : display.monitors) { if (monitors.size() > 1) monitors += ','; monitors += "{\"id\":" + jsonQuote(item.id) + ",\"width\":" + std::to_string(item.width) + ",\"height\":" + std::to_string(item.height) + '}'; } monitors += ']';
@@ -215,7 +217,7 @@ inline std::string settingsStatus() {
     // host-machine-v1 (credential_binding.hpp): this Windows is a copy of a registered desktop; its registration was kept aside.
     ",\"copiedRegistration\":" + booleanJson(config.get("desktopId").string().empty() && !config.get("copiedRegistration").string().empty()) +
     ",\"service\":{\"installed\":" + (service.presenceKnown?booleanJson(service.installed):"null") + ",\"running\":" + (service.runningKnown?booleanJson(service.running):"null") + ",\"state\":" + jsonQuote(service.key()) + ",\"queryError\":" + std::to_string(service.error) + ",\"restartProtocol\":"+jsonQuote(service_restart::protocol)+"},\"broker\":"+publicBrokerStatus()+",\"interactiveSession\":" + booleanJson(sessionUnlocked(interactiveSession())) +
-    ",\"windowsAutologon\":"+autologon::windowsAutologonStatus()+",\"display\":{\"installed\":" + booleanJson(display.installed) + ",\"deviceReady\":" + booleanJson(display.deviceReady) + ",\"activeDisplay\":" + booleanJson(display.active) + ",\"owned\":" + booleanJson(display.owned) + ",\"ready\":" + booleanJson(display.ready()) + ",\"foreignDeviceCount\":" + std::to_string(display.foreign) + ",\"remoteSession\":" + booleanJson(display.remoteSession) + ",\"configurationPending\":" + booleanJson(display.configurationPending) + ",\"recoveryRequired\":" + booleanJson(display.recoveryRequired) + ",\"rebootRequired\":" + booleanJson(display.rebootRequired) + ",\"error\":" + jsonQuote(display.error) + ",\"monitors\":" + monitors +
+    ",\"windowsAutologon\":"+autologon::windowsAutologonStatus()+",\"display\":{\"installed\":" + booleanJson(display.installed) + ",\"deviceReady\":" + booleanJson(display.deviceReady) + ",\"activeDisplay\":" + booleanJson(display.active) + ",\"owned\":" + booleanJson(display.owned) + ",\"ready\":" + booleanJson(display.streamable()) + ",\"standby\":" + booleanJson(display.standby) + ",\"foreignDeviceCount\":" + std::to_string(display.foreign) + ",\"remoteSession\":" + booleanJson(display.remoteSession) + ",\"configurationPending\":" + booleanJson(display.configurationPending) + ",\"recoveryRequired\":" + booleanJson(display.recoveryRequired) + ",\"rebootRequired\":" + booleanJson(display.rebootRequired) + ",\"error\":" + jsonQuote(display.error) + ",\"monitors\":" + monitors +
     ",\"provider\":"+jsonQuote(native?"native":"legacy")+",\"monitorControlSupported\":"+booleanJson(display.monitorControlSupported)+",\"viewportProvisioning\":"+booleanJson(display.viewportProvisioning)+
     "},\"consoleTransfer\":"+publicConsoleTransfer(observeConsoleTransfer(display,native))+",\"connectionRequest\":" + connectionRequestStatus() + ",\"windowsAccount\":{\"configured\":"+booleanJson(account.configured)+",\"username\":"+jsonQuote(account.username)+",\"error\":"+jsonQuote(account.error)+",\"clearProtocol\":"+jsonQuote(account.clearProtocol)+",\"clearRevision\":"+jsonQuote(account.clearRevision)+"},\"devices\":"+observeDevices()+",\"displayAdapters\":"+observeDisplayAdapters()+'}';
 }

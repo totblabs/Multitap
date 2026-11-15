@@ -65,7 +65,7 @@ the service keeps it for a worker that is not an administrator's):
 
 | Step | Who does it | Needs an administrator? |
 |---|---|---|
-| Read and change Windows' display configuration (`QueryDisplayConfig`, `SetDisplayConfig`: validate, apply, `SDC_ALLOW_CHANGES`, topology-only; never `SDC_SAVE_TO_DATABASE`) | worker, in its own session | No. The documentation names one access condition, `ERROR_ACCESS_DENIED`: "The caller does not have access to the console session ... does not have access to the current desktop or is running on a remote session" (learn.microsoft.com, `nf-winuser-setdisplayconfig`, read 2026-11-10). No privilege is listed there or for `ChangeDisplaySettingsEx`. |
+| Read and change Windows' display configuration (`QueryDisplayConfig`, `SetDisplayConfig`: validate, apply, `SDC_ALLOW_CHANGES`, topology-only; `SDC_SAVE_TO_DATABASE` only for a restore that leaves owned outputs off beside another display) | worker, in its own session | No. The documentation names one access condition, `ERROR_ACCESS_DENIED`: "The caller does not have access to the console session ... does not have access to the current desktop or is running on a remote session" (learn.microsoft.com, `nf-winuser-setdisplayconfig`, read 2026-11-10). No privilege is listed there or for `ChangeDisplaySettingsEx`. |
 | Create, remove and size the owned virtual outputs | service (SDK calls to the driver) | The service is SYSTEM; the worker never talks to the driver. |
 | Keep the state file | service for a worker that is not an administrator; an administrator's worker opens it itself as before | The folder stays SYSTEM and Administrators only. |
 | Read the lease the service publishes, the provider marker | worker | No: `ProgramData\Multitap\Host` is readable by Users. |
@@ -257,9 +257,10 @@ stream. It is a persistent user choice, not a temporary stream layout:
    three re-plans. Then capture must list exactly the owned outputs with
    output `0` primary.
 5. On success the snapshot this operation created is deleted: the new layout
-   is Windows' current configuration and the baseline of the next stream. On
-   failure the previous count is put back first, then the snapshot is
-   restored.
+   is Windows' current configuration and the baseline of the next stream
+   (its stop leaves owned outputs beside another display off: step 2 of "Stop,
+   failure and recovery"). On failure the previous count is put back first,
+   then the snapshot is restored.
 
 The service applies the requested count only while the operation is current
 (applied, not cancelled, before its deadline, unlocked console). Putting the
@@ -277,18 +278,28 @@ background recovery. With no state file there is nothing to do.
    use its saved SDK size. This also applies to state files written by older
    Hosts. Put both outputs back in one SDK call when
    possible; best effort) and wait up to 3 s for Windows to list them.
-2. Apply the saved active paths with their saved modes. Owned outputs are
-   mapped by public id to the current SDK targets (target ids change when the
-   SDK recreates them) at their saved positions. An owned output that did not
-   exist at snapshot time (made for the stream, or by a count change) goes back
-   to off with the rest of the original configuration, so a PC's monitor or a
-   VM's own display is not extended by an invisible screen. Only when nothing
-   else would be active (a VM without a display of its own) does it stay
-   active, appended to the right.
-3. Verify that every expected target is active, owned outputs have their saved
-   sizes and positions (including which owned output was primary), other
-   displays have their saved modes, and the console is active if
-   it was before. Then delete the state file.
+2. Apply the saved active paths of the other displays with their saved modes.
+   An owned output never stays on beside them: a PC's monitor or a VM's own
+   display (console, vGPU head) is not extended by an invisible screen. That
+   holds for one made for the stream or by a count change and for one that
+   was already on at snapshot time (left on by an earlier Host). Where an
+   owned output leaves a gap, the displays to the right of the origin close
+   it; where it was primary, the others slide so that the top-left one is at
+   the origin. Only when nothing else would be active (a VM without a display
+   of its own) do owned outputs come back: those saved active at their saved
+   positions, mapped by public id to the current SDK targets (target ids
+   change when the SDK recreates them), else the current ones appended to the
+   right. A count is kept either way: both outputs still exist, off. A plan
+   that leaves owned outputs off beside another display is applied with
+   `SDC_SAVE_TO_DATABASE` (on the apply, never the validation), so Windows
+   remembers that layout like the user's '1에만 표시'; otherwise it extends
+   onto an owned output again the next time one is plugged (the SDK size here,
+   a restart; seen on a VM 2026-11-15). If Windows refuses the save, the same
+   layout is applied without it.
+3. Verify that every expected target is active, owned outputs that came back
+   have their saved sizes and positions (including which owned output was
+   primary), other displays have their saved modes, and the console is active
+   if it was before. Then delete the state file.
 4. If the exact restore fails and the console was active in the saved state,
    activate the identified console on its own (saved modes, then a
    topology-only `SDC_TOPOLOGY_SUPPLIED` request) and delete the state file.
@@ -325,6 +336,37 @@ older transaction model (`native-stream-profile.json`,
 the v1 profile still had the console switched off, its pre-stream topology
 becomes the v2 state, so the ordinary recovery brings the console back.
 
+## At rest (standby)
+
+Without a stream, owned outputs are not an invisible screen beside a PC's
+monitor or a VM's own display (console, vGPU head).
+
+- **Standby.** Every owned target is present and available but off while
+  another display is on in the console session. The at-rest readers (the
+  service's probe, Host settings, `--diagnostics`) report it as `standby`
+  (`nativeDisplayStatus(true)`, `nativeStandbyMonitors`). The outputs are the
+  lease sizes where a stream adds them: `0` right of the right-most other
+  display (top-aligned with it), `1` right of `0`; no device name, nothing
+  captures them.
+- **Ready to stream.** `DisplayState::streamable()` is ready (on) or standby.
+  The Host offers streaming, the virtual display, viewport provisioning,
+  monitor control and the profile and track capabilities from it. Admission
+  reads the lease only, and the v2 start switches the outputs on before
+  anything reads their geometry; capture and every stream-path check keep
+  `ready()` (on).
+- **The probe on a new lease.** It used to switch the outputs on
+  (`worker.native.activate`, `activateNativeTopology`), which extended the
+  desktop again after every SDK size change and restart. Under v2 it first
+  asks the rest step (`planDisplayV2Rest`, `applyDisplayV2Rest`): with another
+  display on, owned outputs that are on go off (the other displays as they
+  are, gaps closed, `SDC_SAVE_TO_DATABASE` on the apply, without it if
+  refused); owned outputs already off are left alone. Only a fresh probe that
+  shows standby counts; anything else, and a VM without a display of its own,
+  falls back to switching the outputs on as before. Standby verifies the lease
+  generation like an activation (`activationVerified`).
+- A count change switches the outputs on (output `0` primary) as before; the
+  probe on its new lease puts them back to standby.
+
 ## Private call robustness
 
 - Session packets that reach the worker while it waits for an SDK reply
@@ -339,8 +381,10 @@ becomes the v2 state, so the ordinary recovery brings the console back.
 
 ## What v2 never does
 
-It never uses `SDC_SAVE_TO_DATABASE` or the `SDC_TOPOLOGY_EXTEND`, `CLONE`,
-`INTERNAL` or `EXTERNAL` shortcuts, changes drivers, restarts Windows or
+It never saves a stream's layout to Windows' display database: `SDC_SAVE_TO_DATABASE`
+is used only by a restore that leaves owned outputs off beside another
+display (step 2 of "Stop, failure and recovery"). It never uses the
+`SDC_TOPOLOGY_EXTEND`, `CLONE`, `INTERNAL` or `EXTERNAL` shortcuts, changes drivers, restarts Windows or
 changes security settings. Capture selects only owned outputs; when none is
 ready the stream fails instead of falling back to the console or another
 display.

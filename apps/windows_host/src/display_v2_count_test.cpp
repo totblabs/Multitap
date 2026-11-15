@@ -68,8 +68,9 @@ int countCases(){
     require(stream.start("s",1600,900,true,deadline(w)).ok,"Stream after a count change did not start");
     requireStreaming(w,1600,900,true,"Stream after a count change is not streaming");
     require(stream.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Stop after a count change failed");
-    requireCount(w,1,"Stop after a count change did not return to the post-count configuration");
-    require(w.console().active&&w.console().x==1920,"Stop after a count change lost the console");++passed;
+    // Beside the console the owned output does not stay on after the stop: the
+    // console takes the origin again.
+    require(!w.owned().active&&!w.hasSecond()&&w.console().active&&w.console().x==0&&w.console().width==1024,"Stop after a count change did not leave the console alone");++passed;
   }
   // Field shape: the console is inactive at rest and Windows re-activates it
   // (at an arbitrary place) whenever the SDK adds or removes an owned target.
@@ -126,8 +127,10 @@ int countCases(){
     const auto failed=session.count("c",1,true,deadline(w));
     require(!failed.ok&&failed.stage==displayV2Stage::foreign&&failed.foreignDifference==displayV2ForeignCode::refresh&&failed.restore&&failed.restore->outcome==DisplayV2Outcome::restored,"Persistent foreign change on 2->1 did not fail with its code and restore");
     w.afterCount=nullptr;w.afterApply=nullptr;
-    require(w.hasSecond()&&w.secondWidth==1280&&w.secondHeight==720&&w.second().active&&w.second().x==1920&&w.second().width==1280,"Failed 2->1 did not bring output 1 back at its saved size and place");
-    require(w.owned().x==0&&w.console().active&&w.console().x==3200&&extraOriginal(w)&&w.extra().x==4224&&!m.bytes,"Failed 2->1 did not restore the other displays");++passed;}
+    // Output 1 back at its saved SDK size; beside the console both owned
+    // outputs are off and the console and the extra display close up at the origin.
+    require(w.hasSecond()&&w.secondWidth==1280&&w.secondHeight==720&&!w.second().active&&!w.owned().active,"Failed 2->1 did not bring output 1 back at its saved size, off beside the console");
+    require(w.console().active&&w.console().x==0&&extraOriginal(w)&&w.extra().x==1024&&!m.bytes,"Failed 2->1 did not restore the other displays");++passed;}
   // SDK refusal: every attempt fails cleanly with nothing left behind; no latch.
   {World w;Memory m;w.failCount=true;
     for(int attempt=0;attempt<3;++attempt){
@@ -168,7 +171,9 @@ int countCases(){
     require(up.ok&&up.stateKept&&m.bytes==std::optional(original),"Count replaced or deleted an older unrestored original");
     requireCount(w,2,"Count with an older original left a wrong topology");
     DisplaySessionV2 recovery(access(w,m,false));require(recovery.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Recovery after the count did not restore the older original");
-    require(w.console().active&&w.console().x==0&&w.owned().active&&w.owned().x==1024&&w.owned().width==1920&&w.hasSecond()&&w.second().active&&w.second().x==1024+1920,"Recovery lost the console or the user's new count");++passed;}
+// Beside the console no owned output stays on after a restore; the SDK keeps
+    // the user's count (both outputs exist), both off.
+    require(w.console().active&&w.console().x==0&&!w.owned().active&&w.ownedWidth==1920&&w.hasSecond()&&!w.second().active,"Recovery lost the console or the user's new count");++passed;}
   // Worker/service gone in the middle (snapshot written, SDK count already
   // committed, Windows half-done): the service-start recovery restores the
   // other displays, keeps the committed count and never blocks a new change.
@@ -179,7 +184,9 @@ int countCases(){
     w.serviceRestart();
     DisplaySessionV2 recovery(access(w,m,false));
     require(recovery.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Recovery after an interrupted count change failed");
-    require(w.console().active&&w.console().x==0&&w.owned().active&&w.owned().x==1024&&w.hasSecond()&&w.second().active&&w.second().x==1024+1920&&!overlapping(w),"Recovery after an interrupted count change lost a display or the committed count");
+// Beside the console no owned output stays on after a restore; the SDK keeps
+    // the committed count, both outputs off.
+    require(w.console().active&&w.console().x==0&&!w.owned().active&&w.hasSecond()&&!w.second().active&&!overlapping(w),"Recovery after an interrupted count change lost a display or the committed count");
     DisplaySessionV2 next(access(w,m));require(next.count("c",1,true,deadline(w)).ok&&!m.bytes,"Count after recovery latched");requireCount(w,1,"Count after recovery is wrong");++passed;}
   // Invalid count requests change nothing.
   for(const size_t invalid:{size_t(0),size_t(3)}){World w;Memory m;DisplaySessionV2 session(access(w,m));const auto result=session.count("c",invalid,true,deadline(w));
@@ -187,8 +194,9 @@ int countCases(){
   return passed;
 }
 // Count 2 -> the v2 dual-output stream (DisplaySessionV2::startGroup) -> stop
-// returns to the post-count configuration, with the console active at rest and
-// with it inactive while Windows re-activates it on every target change.
+// returns to the post-count configuration without owned outputs beside the
+// console (console active at rest), or as it was with the console inactive
+// while Windows re-activates it on every target change.
 int groupAfterCountCases(){
   int passed=0;
   const std::vector<DisplayV2Output> group{{"0",1600,900,0,0},{"1",1280,720,1600,0}};
@@ -202,13 +210,16 @@ int groupAfterCountCases(){
     const auto& o=w.owned();const auto& s=w.second();
     require(o.active&&!o.x&&!o.y&&o.width==1600&&s.active&&s.x==1600&&!s.y&&s.width==1280&&s.height==720&&!overlapping(w),"Dual stream after a count change left a wrong layout");
     require(stream.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Dual stream stop after a count change failed");
-    requireCount(w,2,"Dual stream stop did not return to the post-count topology");
-    require(w.console().active==!inactive&&(inactive||(w.console().x==3840&&w.console().width==1024)),"Dual stream stop lost or invented the console");
+    // With the console at rest both owned outputs go off and it takes the
+    // origin; without it they come back as the count left them.
+    if(inactive)requireCount(w,2,"Dual stream stop did not return to the post-count topology");
+    else require(!w.owned().active&&w.hasSecond()&&!w.second().active&&w.console().x==0&&!overlapping(w),"Dual stream stop left an owned output extending the console");
+    require(w.console().active==!inactive&&(inactive||w.console().width==1024),"Dual stream stop lost or invented the console");
     w.afterResize=nullptr;require(count.count("count",1,true,deadline(w)).ok&&!m.bytes,"Count 1 after a dual stream failed");requireCount(w,1,"Count 1 after a dual stream is wrong");++passed;
   }
   // An older unrestored original (a single-output stream whose restore failed,
   // from before the count) stays the original through count 2 and a dual
-  // stream; the stop restores it and keeps output 1 (unknown to it) active.
+  // stream; the stop restores it and keeps output 1 (unknown to it), off.
   {World w;Memory m;
     {DisplaySessionV2 first(access(w,m));require(first.start("a",2560,1440,true,deadline(w)).ok,"Fixture start failed");
       w.reject=[](const NativeCcdData&,UINT32){return LONG(ERROR_GEN_FAILURE);};w.consoleReturns=false;
@@ -217,7 +228,9 @@ int groupAfterCountCases(){
     {DisplaySessionV2 count(access(w,m));require(count.count("c",2,false,deadline(w)).ok&&m.bytes==std::optional(original),"Count replaced an older unrestored original");}
     DisplaySessionV2 stream(access(w,m));require(stream.startGroup("g",group,true,deadline(w)).ok&&m.bytes==std::optional(original),"Dual stream replaced an older unrestored original");
     require(stream.restore().outcome==DisplayV2Outcome::restored&&!m.bytes,"Dual stream stop did not restore the older original");
-    require(w.console().active&&!w.console().x&&w.owned().active&&w.owned().x==1024&&w.owned().width==1920&&w.hasSecond()&&w.second().active&&w.second().x==1024+1920&&!overlapping(w),"Restoring the older original lost the console or output 1");
+// Beside the console no owned output stays on after a restore; the SDK keeps
+    // output 1, both outputs off.
+    require(w.console().active&&!w.console().x&&!w.owned().active&&w.ownedWidth==1920&&w.hasSecond()&&!w.second().active&&!overlapping(w),"Restoring the older original lost the console or output 1");
     DisplaySessionV2 next(access(w,m));require(next.startGroup("g",group,true,deadline(w)).ok&&next.restore().ok(),"Dual stream after the older original was restored failed");++passed;}
   return passed;
 }

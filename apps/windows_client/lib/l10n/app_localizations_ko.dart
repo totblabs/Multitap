@@ -7629,6 +7629,11 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
+  String virtualMonitorsStandby(num monitorsLength) {
+    return '가상 모니터 $monitorsLength대 · 연결할 때 켜짐';
+  }
+
+  @override
   String get switchStreamingScreen2 => '스트리밍 화면으로 전환';
 
   @override

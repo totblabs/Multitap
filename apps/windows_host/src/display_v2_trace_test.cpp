@@ -43,7 +43,8 @@ void baselineCases(){
     require(collector.accept(JsonParser::parse(displayV2TraceBytes(session,p)),session,emit),"Actual private prepared packet was rejected");
     const auto n=journal.size();require(collector.accept(JsonParser::parse(displayV2TraceBytes(session,p)),session,emit)&&journal.size()==n,"Duplicate prepared trace flooded the journal");
     const auto outcome=display.restore();const auto end=stopped(display,evidence,outcome);
-    require(outcome.outcome==DisplayV2Outcome::restored&&end.statePreserved==false&&end.after.rows[0].left==(older?1024u:3840u),"Restore fixture did not expose its actual original result");
+    // The owned output was on beside the console in both originals: the restore leaves it off.
+    require(outcome.outcome==DisplayV2Outcome::restored&&end.statePreserved==false&&end.after.count==1&&!end.after.rows[0].active,"Restore fixture did not expose its actual original result");
     const auto mutationCount=w.applies+w.resizes+w.sizeCalls+m.saves+m.removes+m.discards;
     require(collector.accept(JsonParser::parse(displayV2TraceBytes(session,end)),session,emit),"Actual private stopped packet was rejected");
     collector.finished(emit);

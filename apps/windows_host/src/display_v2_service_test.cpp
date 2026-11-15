@@ -208,12 +208,15 @@ int countSessionCases(){
     DisplaySessionV2 session(h.access());const auto failed=session.count("c",2,true,h.w.clock+90000);
     require(!failed.ok&&failed.stage==displayV2Stage::foreign&&failed.foreignDifference==displayV2ForeignCode::refresh&&failed.restore&&failed.restore->outcome==DisplayV2Outcome::restored&&h.countCalls==2,"End-to-end persistent foreign change did not fail with its code and put the count back");
     require(h.f.runtime().phase=="stable"&&h.f.runtime().outputs.size()==1&&nativeDisplayTargets(h.f.state()).size()==1&&!h.w.hasSecond()&&!h.m.bytes,"End-to-end failure left the SDK count or the state file");
-    require(h.w.console().refreshN==60&&h.w.console().active&&h.w.console().x==0&&h.w.owned().x==1024,"End-to-end failure did not restore the original configuration");
+    // The console as it was; the owned output that was on beside it is off
+    // (an owned output never extends another display after a restore).
+    require(h.w.console().refreshN==60&&h.w.console().active&&h.w.console().x==0&&!h.w.owned().active,"End-to-end failure did not restore the original configuration");
     h.w.afterApply=nullptr;require(session.count("c",2,true,h.w.clock+90000).ok&&h.f.runtime().outputs.size()==2,"End-to-end count after a failure latched");
     h.f.transport.checkForeign();++passed;}
-  // A cancelled operation cannot apply its own count; nothing changes.
+  // A cancelled operation cannot apply its own count; its restore leaves the
+  // console as it was and the owned output off beside it.
   {CountHarness h;h.cancelled=true;DisplaySessionV2 session(h.access());const auto refused=session.count("c",2,true,h.w.clock+90000);
-    require(!refused.ok&&refused.stage==displayV2Stage::sdk&&h.f.runtime().outputs.size()==1&&!h.w.hasSecond()&&!h.m.bytes&&h.w.owned().x==1024&&h.w.console().active,"A cancelled count operation changed the SDK or Windows");++passed;}
+    require(!refused.ok&&refused.stage==displayV2Stage::sdk&&h.f.runtime().outputs.size()==1&&!h.w.hasSecond()&&!h.m.bytes&&!h.w.owned().active&&h.w.console().active&&h.w.console().x==0,"A cancelled count operation changed the SDK or Windows");++passed;}
   return passed;
 }
 // ------------------------------------------ independent outputs (v2 group)
@@ -263,7 +266,8 @@ int groupSessionCases(){
     require(started.ok&&h.m.bytes&&h.sizesCalls==1&&h.f.state().get("generation").number()==generation+1&&h.f.runtime().outputs[0].width==1600&&h.f.runtime().outputs[1].width==1280,"End-to-end group start did not size both outputs in one SDK generation");
     require(h.w.owned().active&&!h.w.owned().x&&!h.w.owned().y&&h.w.owned().width==1600&&h.w.second().active&&h.w.second().x==1600&&!h.w.second().y&&h.w.second().width==1280&&!h.w.console().active&&!v2world::overlapping(h.w),"End-to-end group start left a wrong Windows topology");
     require(stream.restore().outcome==DisplayV2Outcome::restored&&!h.m.bytes&&h.sizesCalls==2&&h.f.runtime().phase=="stable"&&h.f.runtime().outputs[0].width==1920&&h.f.runtime().outputs[1].width==1920,"End-to-end group stop did not restore the SDK sizes");
-    require(!h.w.owned().x&&h.w.second().active&&h.w.second().x==1920&&h.w.console().active==!inactive&&(inactive||h.w.console().x==3840),"End-to-end group stop did not restore Windows");
+    // Without the console both owned outputs come back in place; beside it both are off.
+    require(inactive?(h.w.owned().active&&!h.w.owned().x&&h.w.second().active&&h.w.second().x==1920&&!h.w.console().active):(!h.w.owned().active&&!h.w.second().active&&h.w.console().active&&!h.w.console().x),"End-to-end group stop did not restore Windows");
     h.f.transport.checkForeign();++passed;
   }
   return passed;

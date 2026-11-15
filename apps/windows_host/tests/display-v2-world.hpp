@@ -25,6 +25,8 @@ struct World {
   // after it (hidden from query() until then).
   uint64_t sdkMs=0,arrivalMs=0,hiddenUntil=0;UINT32 hiddenTarget=0;
   int applies=0,validations=0,resizes=0,counts=0,topologyApplies=0,sizeCalls=0;
+  // Applies that also saved Windows' display database (SDC_SAVE_TO_DATABASE).
+  int remembered=0;
   std::function<LONG(const NativeCcdData&,UINT32)> reject;
   // Windows' own reaction after an SDK size change, after an apply, and after
   // an owned output arrived or departed (count change).
@@ -64,7 +66,14 @@ struct World {
     return ccd;
   }
   LONG configure(const NativeCcdData& plan,UINT32 options){
-    worldRequire(!(options&(SDC_SAVE_TO_DATABASE|SDC_TOPOLOGY_EXTEND|SDC_TOPOLOGY_CLONE|SDC_TOPOLOGY_INTERNAL|SDC_TOPOLOGY_EXTERNAL|SDC_USE_DATABASE_CURRENT)),"v2 used a persistent or global display flag");
+    worldRequire(!(options&(SDC_TOPOLOGY_EXTEND|SDC_TOPOLOGY_CLONE|SDC_TOPOLOGY_INTERNAL|SDC_TOPOLOGY_EXTERNAL|SDC_USE_DATABASE_CURRENT)),"v2 used a global display flag");
+    // The database is saved only by an apply of a supplied layout that leaves
+    // every owned output off beside another display (a restore).
+    if(options&SDC_SAVE_TO_DATABASE){
+      worldRequire((options&SDC_APPLY)&&(options&SDC_USE_SUPPLIED_DISPLAY_CONFIG)&&!(options&SDC_VALIDATE),"v2 saved the display database outside a supplied apply");
+      bool owned=false,other=false;for(const auto& p:plan.paths)if(p.flags&DISPLAYCONFIG_PATH_ACTIVE){if(same(p.targetInfo.adapterId,ownedAdapter))owned=true;else other=true;}
+      worldRequire(!owned&&other,"v2 saved a layout with an owned output on (or nothing else) to the display database");
+    }
     if(!eligible)return LONG(ERROR_ACCESS_DENIED);
     if(reject)if(const auto code=reject(plan,options))return code;
     const bool topology=(options&SDC_TOPOLOGY_SUPPLIED)!=0;
@@ -96,7 +105,7 @@ struct World {
     }
     if(options&SDC_VALIDATE){++validations;return LONG(ERROR_SUCCESS);}
     worldRequire((options&SDC_APPLY)!=0,"Neither validate nor apply");
-    ++applies;if(topology)++topologyApplies;
+    ++applies;if(topology)++topologyApplies;if(options&SDC_SAVE_TO_DATABASE)++remembered;
     for(auto& d:displays)d.active=false;
     for(const auto& w:wanted){auto& d=*w.display;d.active=true;d.x=w.x;d.y=w.y;d.width=w.w;d.height=w.h;d.refreshN=w.rn;d.refreshD=w.rd;d.rotation=w.rotation;d.format=w.format;if(!same(d.adapter,ownedAdapter)){d.dbWidth=w.w;d.dbHeight=w.h;}}
     if(afterApply)afterApply(*this);
@@ -194,9 +203,14 @@ inline DisplayV2Access worldAccess(World& w,Memory& m,bool console=true){
 inline void requireStreaming(World& w,DWORD width,DWORD height,bool consoleOff,const char* reason){
   const auto& o=w.owned();worldRequire(o.active&&o.x==0&&o.y==0&&o.width==width&&o.height==height&&w.console().active==!consoleOff&&!overlapping(w),reason);
 }
+// The world's original configuration (console at the origin, the owned output
+// on beside it at 1024) after a restore: the console and other displays as
+// they were, the owned output back at its SDK size but off. An owned output is
+// never an invisible screen extending another display (planDisplayV2Restore);
+// it stays on only where nothing else is active.
 inline void requireOriginal(World& w,bool extra,const char* reason){
   const auto& c=w.console();const auto& o=w.owned();
-  worldRequire(c.active&&c.x==0&&c.y==0&&c.width==1024&&c.height==768&&o.active&&o.x==1024&&o.y==0&&o.width==1920&&o.height==1080&&w.ownedWidth==1920&&!overlapping(w),reason);
+  worldRequire(c.active&&c.x==0&&c.y==0&&c.width==1024&&c.height==768&&!o.active&&w.ownedWidth==1920&&w.ownedHeight==1080&&!overlapping(w),reason);
   if(extra){const auto& e=w.extra();worldRequire(e.active&&e.width==800&&e.height==600&&e.refreshN==75&&e.refreshD==1&&e.format==DISPLAYCONFIG_PIXELFORMAT_32BPP&&e.rotation==DISPLAYCONFIG_ROTATION_IDENTITY,reason);}
 }
 inline uint64_t deadline(World& w){return w.clock+90000;}

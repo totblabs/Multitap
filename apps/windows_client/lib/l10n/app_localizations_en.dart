@@ -8142,6 +8142,17 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String virtualMonitorsStandby(num monitorsLength) {
+    String _temp0 = intl.Intl.pluralLogic(
+      monitorsLength,
+      locale: localeName,
+      other: '$monitorsLength virtual monitors, on during a connection',
+      one: '1 virtual monitor, on during a connection',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get switchStreamingScreen2 => 'Switch to streaming screen';
 
   @override

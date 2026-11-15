@@ -13120,6 +13120,12 @@ abstract class AppLocalizations {
   /// **'가상 모니터 {monitorsLength}대 켜짐'**
   String text20(num monitorsLength);
 
+  /// No description provided for @virtualMonitorsStandby.
+  ///
+  /// In ko, this message translates to:
+  /// **'가상 모니터 {monitorsLength}대 · 연결할 때 켜짐'**
+  String virtualMonitorsStandby(num monitorsLength);
+
   /// No description provided for @switchStreamingScreen2.
   ///
   /// In ko, this message translates to:

@@ -149,7 +149,7 @@ struct WorkerViewportProbeAccess {
   bool desktop = false, console = false, privileged = false, clipboard = false;
   std::function<bool()> cancelled = [] { return false; };
   std::function<bool()> nativeProvider = nativeDisplaySelected;
-  std::function<DisplayState()> nativeProbe = nativeDisplayStatus;
+  std::function<DisplayState()> nativeProbe = [] { return nativeDisplayStatus(); };
 };
 // Resize-only read-only probe: unlike the ordinary diagnostic fallback, both
 // helpers consume one explicit budget and no third status helper is launched.
@@ -189,15 +189,15 @@ inline std::string viewportFailureReason(const DisplayState& display,bool intera
   if(!console)return "interactive_console_required";
   if(!display.error.empty())return safeViewportFailure(display.error);
   if(display.recoveryRequired)return "viewport_recovery_required";
-  if(!display.ready())return "owned_virtual_display_not_ready";
+  if(!display.streamable())return "owned_virtual_display_not_ready";
   if(!capture)return "viewport_probe_pending";
-  if(display.ready()&&display.viewportProvisioning)return "";
+  if(display.streamable()&&display.viewportProvisioning)return "";
   return display.error.empty()?"viewport_support_unavailable":safeViewportFailure(display.error);
 }
 inline std::string workerDisplayJson(const DisplayState& display) {
   std::string monitors = "[";
   for (const auto& monitor : display.monitors) { if (monitors.size() > 1) monitors += ','; monitors += "{\"id\":" + jsonQuote(monitor.id) + ",\"displayDeviceName\":" + jsonQuote(utf8(monitor.name)) + ",\"left\":" + std::to_string(monitor.left) + ",\"top\":" + std::to_string(monitor.top) + ",\"width\":" + std::to_string(monitor.width) + ",\"height\":" + std::to_string(monitor.height) + ",\"primary\":" + (monitor.primary ? "true" : "false") + ",\"virtual\":true}"; }
-  return "{\"installed\":" + std::string(display.installed ? "true" : "false") + ",\"deviceReady\":" + (display.deviceReady ? "true" : "false") + ",\"activeDisplay\":" + (display.active ? "true" : "false") + ",\"owned\":" + (display.owned ? "true" : "false") + ",\"foreignDeviceCount\":" + std::to_string(display.foreign) + ",\"width\":" + std::to_string(display.width) + ",\"height\":" + std::to_string(display.height) + ",\"left\":" + std::to_string(display.left) + ",\"top\":" + std::to_string(display.top) + ",\"displayDeviceName\":" + jsonQuote(utf8(display.name)) + ",\"remoteSession\":" + (display.remoteSession ? "true" : "false") + ",\"configurationPending\":" + (display.configurationPending ? "true" : "false") + ",\"rebootRequired\":" + (display.rebootRequired ? "true" : "false") + ",\"clipboardSupported\":" + (display.clipboardSupported ? "true" : "false") + ",\"recoveryRequired\":" + (display.recoveryRequired ? "true" : "false") + ",\"viewportProvisioning\":" + (display.viewportProvisioning ? "true" : "false") + ",\"error\":"+jsonQuote(safeViewportFailure(display.error))+",\"monitorControlSupported\":" + (display.monitorControlSupported ? "true" : "false") + ",\"displays\":" + monitors + "]}";
+  return "{\"installed\":" + std::string(display.installed ? "true" : "false") + ",\"deviceReady\":" + (display.deviceReady ? "true" : "false") + ",\"activeDisplay\":" + (display.active ? "true" : "false") + ",\"owned\":" + (display.owned ? "true" : "false") + ",\"foreignDeviceCount\":" + std::to_string(display.foreign) + ",\"width\":" + std::to_string(display.width) + ",\"height\":" + std::to_string(display.height) + ",\"left\":" + std::to_string(display.left) + ",\"top\":" + std::to_string(display.top) + ",\"displayDeviceName\":" + jsonQuote(utf8(display.name)) + ",\"remoteSession\":" + (display.remoteSession ? "true" : "false") + ",\"configurationPending\":" + (display.configurationPending ? "true" : "false") + ",\"rebootRequired\":" + (display.rebootRequired ? "true" : "false") + ",\"clipboardSupported\":" + (display.clipboardSupported ? "true" : "false") + ",\"recoveryRequired\":" + (display.recoveryRequired ? "true" : "false") + ",\"viewportProvisioning\":" + (display.viewportProvisioning ? "true" : "false") + ",\"error\":"+jsonQuote(safeViewportFailure(display.error))+",\"monitorControlSupported\":" + (display.monitorControlSupported ? "true" : "false") + ",\"standby\":" + (display.standby ? "true" : "false") + ",\"displays\":" + monitors + "]}";
 }
 // A read-only worker can run topology and viewport helpers sequentially.
 // Keep their explicit budgets and the whole-message IPC deadline together.
@@ -274,12 +274,14 @@ inline bool workerDisplayAuthority(){
   static const bool standard=[]{try{return workerDisplayAuthority(false,nativeDisplaySelected(),displayManagerV2Selected());}catch(...){return false;}}();
   return standard;
 }
-inline DisplayState workerDisplayProbe() {
+// [standbyAllowed]: the at-rest probe under display manager v2 (owned outputs
+// present but off beside another display are standby, nativeDisplayStatus).
+inline DisplayState workerDisplayProbe(bool standbyAllowed = false) {
   DWORD session = 0xffffffff; ProcessIdToSessionId(GetCurrentProcessId(), &session);
   const bool desktop = interactiveDesktopAvailable(), console = sameInteractiveConsole(session);
   if(nativeDisplaySelected()){
     const bool authority=workerDisplayAuthority();
-    auto display=nativeDisplayStatus();display.clipboardSupported=clipboardRuntimeReady();
+    auto display=nativeDisplayStatus(standbyAllowed);display.clipboardSupported=clipboardRuntimeReady();
     display.viewportProvisioning=nativeViewportTrialReady(display,nativeDisplayConfig(),desktop&&console&&authority);
     if(!desktop||!console||!authority){display.viewportProvisioning=false;display.monitorControlSupported=false;display.error=!desktop?"no_interactive_session":!console?"interactive_console_required":"administrator_required";}
     return display;
@@ -315,12 +317,27 @@ inline NativeBootstrapAccess nativeWorkerBootstrapAccess(){
 #else
     return false;
 #endif
-  },eligible,workerDisplayProbe,nativeDisplayLeaseSnapshot,
+  },eligible,[]{return workerDisplayProbe(displayManagerV2Selected());},nativeDisplayLeaseSnapshot,
     [eligible](std::span<const NativeDisplayTarget> targets,const std::string& key){
       auto access=windowsNativeTopologyAccess([eligible,key]{try{const auto state=nativeDisplayLeaseSnapshot();return eligible()&&!state.get("configurationPending").boolean()&&nativeDisplayLeaseKey(state)==key;}catch(...){return false;}});
       std::optional<NativeCcdDiagnostic> diagnostic;
       access.query=[&]{try{return queryNativeActivationCcd();}catch(const NativeActivationCcdError& error){diagnostic=error.diagnostic;throw;}};
       auto result=activateNativeTopology(targets,std::move(access));result.ccdDiagnostic=diagnostic;return result;
+    },
+    // Display manager v2 at rest beside another display: the owned outputs off
+    // (planDisplayV2Rest). Never throws: anything unexpected falls back to the
+    // activation above (nullopt).
+    [eligible](std::span<const NativeDisplayTarget> targets,const std::string& key)->std::optional<NativeTopologyResult>{
+      if(!displayManagerV2Selected())return std::nullopt;
+      try{
+        const auto current=[eligible,key]{try{const auto state=nativeDisplayLeaseSnapshot();return eligible()&&!state.get("configurationPending").boolean()&&nativeDisplayLeaseKey(state)==key;}catch(...){return false;}};
+        DisplayV2Retired retired;if(nativeDisplayConfirmed())retired=legacyRetiredResolver(nativeConsoleAdapterIdentity,legacyOwnerInstanceFromRegistry);
+        const auto rest=planDisplayV2Rest(queryNativeCcd(),targets,retired);
+        if(!rest||!current())return std::nullopt;
+        const auto configure=windowsNativeCcdConfigure();
+        return applyDisplayV2Rest(*rest,targets,[&](const NativeCcdData& plan,UINT32 flags)->LONG{return current()?configure(plan,flags):LONG(ERROR_ACCESS_DENIED);},
+          []{return queryNativeCcd();},[]{Sleep(50);},[]{return uint64_t(GetTickCount64());});
+      }catch(...){return std::nullopt;}
     }};
 }
 inline NativeWorkerTrackAccess nativeWorkerTrackAccess(HANDLE pipe,const NativeTrackResize& request,std::atomic<bool>& stopped,std::mutex& writing,const StreamResizeBudget& budget,std::function<bool(const Json&)> interleave={}){
@@ -660,8 +677,8 @@ class ServiceBridge final : public AgentBridge {
     const bool maintenance=privateDiagnosticBusy()||recovering||(maintenance_&&maintenance_->busy());
     // An invalidated cache (every stream start/stop) is "not yet observed", not
     // a device teardown; recording its defaults showed false installed:false.
-    if(sampled)recordHostEvent("displayObserved",{{"installed",display.installed},{"started",display.deviceReady},{"active",display.active},{"owned",display.owned},{"pending",display.configurationPending},{"recovery",display.recoveryRequired},{"reboot",display.rebootRequired},{"remote",display.remoteSession},{"monitors",int64_t(display.monitors.size())},{"ok",display.ready()},{"running",1}},true);
-    const bool console=capabilityConsole(view);const bool viewport=!viewportDegraded&&!maintenance&&interactive&&captureAvailable&&console&&display.ready()&&display.viewportProvisioning;
+    if(sampled)recordHostEvent("displayObserved",{{"installed",display.installed},{"started",display.deviceReady},{"active",display.active},{"owned",display.owned},{"pending",display.configurationPending},{"recovery",display.recoveryRequired},{"reboot",display.rebootRequired},{"remote",display.remoteSession},{"monitors",int64_t(display.monitors.size())},{"ok",display.streamable()},{"running",1}},true);
+    const bool console=capabilityConsole(view);const bool viewport=!viewportDegraded&&!maintenance&&interactive&&captureAvailable&&console&&display.streamable()&&display.viewportProvisioning;
     bool profileViewport=false,profileTracks=false;
 #ifdef MULTITAP_NATIVE_DISPLAY
     try{profileViewport=nativeStreamProfileViewportCapability(display,nativeDisplayConfig(),nativeDisplaySelected(),viewport,profileSession_&&!stopped_&&streaming_);}catch(...){ }
@@ -686,7 +703,7 @@ class ServiceBridge final : public AgentBridge {
     // rdpSupported and rdpEnabled are always false: the Host has no RDP, and the
     // broker requires both booleans in every capability report.
     // keyframe-v1: stream.keyframe reaches the worker as an IDR request (keyFrame()).
-    const auto original="{\"observabilityProtocol\":\"stream-observability-v1\",\"streamSizeProtocol\":\"stream-size-v1\",\"streamSizeProtocols\":[\"stream-size-v1\",\"stream-size-v2\"],\"sessionStopProtocol\":\"stop-v1\",\"keyFrameProtocol\":\"" + std::string(keyFrameProtocol) + "\",\"hostResumeProtocol\":\"" + std::string(hostResumeProtocol) + "\",\"hostChannelResumeProtocol\":\"" + std::string(channelResumeProtocol) + "\",\"udpMediaProtocol\":\"" + std::string(udpMediaProtocol) + "\",\"udpDirectHostProtocol\":\"udp-direct-v1\",\"udpTracksHostProtocol\":\"udp-tracks-v1\",\"audioCodecProtocol\":\"" + std::string(audioOpusProtocol) + "\",\"audioCodecTracksProtocol\":\"" + std::string(audioOpusTracksProtocol) + "\",\"trackResumeProtocol\":\"" + std::string(trackResumeProtocol) + "\",\"bitrateProtocol\":\"" + std::string(bitrateAdaptiveProtocol) + "\",\"maxBitrate\":" + std::to_string(adaptiveMaximumBitrate) + ",\"inputLatencyProtocol\":\"" + std::string(inputLatencyProtocol) + "\",\"cursorProtocol\":\"" + std::string(cursor::protocol) + "\",\"cursorTracksProtocol\":\"" + std::string(cursor::tracksProtocol) + "\",\"cursorEchoProtocol\":\"" + std::string(cursor::echoProtocol) + "\",\"cursorComposeProtocol\":\"" + std::string(cursor::composeProtocol) + "\",\"backgroundVideoProtocol\":\"" + std::string(backgroundVideoProtocol) + "\",\"textInputProtocol\":\"" + std::string(textInputProtocol) + "\",\"displayScaleProtocol\":\"" + std::string(displayScaleProtocolName) + "\",\"displayScaleOutputsProtocol\":\"" + std::string(displayScaleOutputsProtocolName) + "\",\"touchInputProtocol\":\"" + std::string(touchInputProtocol) + "\",\"relativeMouseProtocol\":\"" + std::string(relativeMouseProtocol) + "\",\"relativeMouseTracksProtocol\":\"" + std::string(relativeMouseTracksProtocol) + "\",\"caretProtocol\":\"" + std::string(caretProtocol) + "\"" + printCapabilityFields() + usbCapabilityFields() + gamepadCapabilityFields() + (interactive && driveCapable() ? ",\"driveProtocol\":\"" + std::string(drive::protocol) + "\"" + (driveFsCapable() ? ",\"driveFs\":true" : "") : std::string()) + (interactive && !driveCapable() ? ",\"driveUnavailableReason\":\"drive_webclient_unavailable\"" : std::string()) + ",\"diagnosticsSupported\":true,\"imeStateProtocol\":\"" + std::string(ime::protocol) + "\",\"service\":true,\"interactiveSession\":" + std::string(interactive ? "true" : "false") + ",\"streaming\":" + (!maintenance&&interactive && display.ready() && captureAvailable ? "true" : "false") + ",\"rdpSupported\":false,\"rdpEnabled\":false,\"virtualDisplayReady\":" + (!maintenance&&display.ready() ? "true" : "false") + ",\"clipboard\":" + (!maintenance&&interactive && captureAvailable && display.ready() && display.clipboardSupported ? "true" : "false") + ",\"clipboardSync\":" + (!maintenance&&interactive && captureAvailable && display.ready() && display.clipboardSupported ? "true" : "false") + ",\"virtualMonitorControl\":" + (!maintenance&&interactive && captureAvailable && console && display.ready() && display.monitorControlSupported ? "true" : "false") + ",\"dynamicResolution\":"+(viewport?"true":"false")+",\"viewportProvisioning\":"+(viewport?"true":"false")+",\"viewportFailureReason\":"+jsonQuote(viewportReason)+(viewport?",\"resizeProtocol\":\"epoch-v1\"":"")+consoleFields+thumbnailFields+",\"monitors\":"+monitors+'}';
+    const auto original="{\"observabilityProtocol\":\"stream-observability-v1\",\"streamSizeProtocol\":\"stream-size-v1\",\"streamSizeProtocols\":[\"stream-size-v1\",\"stream-size-v2\"],\"sessionStopProtocol\":\"stop-v1\",\"keyFrameProtocol\":\"" + std::string(keyFrameProtocol) + "\",\"hostResumeProtocol\":\"" + std::string(hostResumeProtocol) + "\",\"hostChannelResumeProtocol\":\"" + std::string(channelResumeProtocol) + "\",\"udpMediaProtocol\":\"" + std::string(udpMediaProtocol) + "\",\"udpDirectHostProtocol\":\"udp-direct-v1\",\"udpTracksHostProtocol\":\"udp-tracks-v1\",\"audioCodecProtocol\":\"" + std::string(audioOpusProtocol) + "\",\"audioCodecTracksProtocol\":\"" + std::string(audioOpusTracksProtocol) + "\",\"trackResumeProtocol\":\"" + std::string(trackResumeProtocol) + "\",\"bitrateProtocol\":\"" + std::string(bitrateAdaptiveProtocol) + "\",\"maxBitrate\":" + std::to_string(adaptiveMaximumBitrate) + ",\"inputLatencyProtocol\":\"" + std::string(inputLatencyProtocol) + "\",\"cursorProtocol\":\"" + std::string(cursor::protocol) + "\",\"cursorTracksProtocol\":\"" + std::string(cursor::tracksProtocol) + "\",\"cursorEchoProtocol\":\"" + std::string(cursor::echoProtocol) + "\",\"cursorComposeProtocol\":\"" + std::string(cursor::composeProtocol) + "\",\"backgroundVideoProtocol\":\"" + std::string(backgroundVideoProtocol) + "\",\"textInputProtocol\":\"" + std::string(textInputProtocol) + "\",\"displayScaleProtocol\":\"" + std::string(displayScaleProtocolName) + "\",\"displayScaleOutputsProtocol\":\"" + std::string(displayScaleOutputsProtocolName) + "\",\"touchInputProtocol\":\"" + std::string(touchInputProtocol) + "\",\"relativeMouseProtocol\":\"" + std::string(relativeMouseProtocol) + "\",\"relativeMouseTracksProtocol\":\"" + std::string(relativeMouseTracksProtocol) + "\",\"caretProtocol\":\"" + std::string(caretProtocol) + "\"" + printCapabilityFields() + usbCapabilityFields() + gamepadCapabilityFields() + (interactive && driveCapable() ? ",\"driveProtocol\":\"" + std::string(drive::protocol) + "\"" + (driveFsCapable() ? ",\"driveFs\":true" : "") : std::string()) + (interactive && !driveCapable() ? ",\"driveUnavailableReason\":\"drive_webclient_unavailable\"" : std::string()) + ",\"diagnosticsSupported\":true,\"imeStateProtocol\":\"" + std::string(ime::protocol) + "\",\"service\":true,\"interactiveSession\":" + std::string(interactive ? "true" : "false") + ",\"streaming\":" + (!maintenance&&interactive && display.streamable() && captureAvailable ? "true" : "false") + ",\"rdpSupported\":false,\"rdpEnabled\":false,\"virtualDisplayReady\":" + (!maintenance&&display.streamable() ? "true" : "false") + ",\"clipboard\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"clipboardSync\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"virtualMonitorControl\":" + (!maintenance&&interactive && captureAvailable && console && display.streamable() && display.monitorControlSupported ? "true" : "false") + ",\"dynamicResolution\":"+(viewport?"true":"false")+",\"viewportProvisioning\":"+(viewport?"true":"false")+",\"viewportFailureReason\":"+jsonQuote(viewportReason)+(viewport?",\"resizeProtocol\":\"epoch-v1\"":"")+consoleFields+thumbnailFields+",\"monitors\":"+monitors+'}';
     return original;
   }
   // thumbnail-capture-v1 (thumbnail_capture.hpp). The privacy ticket is taken
@@ -2335,13 +2352,13 @@ class ServiceBridge final : public AgentBridge {
         // 265: stage=sample*10+role, error=issue, expected=index, width/height=mode types.
         recordHostEvent("hostAction",{{"action",uint32_t(265)},{"stage",detail.stage},{"error",detail.issue},{"expected",detail.index},{"width",detail.expected},{"height",detail.observed},{"ok",false}});}
 #endif
-      if(activation)nativeActivationGate_.observed(activationKey,!commandBegan||result.nativeActivationAcknowledged,commandBegan&&(!result.nativeActivationAcknowledged||result.nativeActivationAttempted),result.display.ready());
+      if(activation)nativeActivationGate_.observed(activationKey,!commandBegan||result.nativeActivationAcknowledged,commandBegan&&(!result.nativeActivationAcknowledged||result.nativeActivationAttempted),result.display.streamable());
       if(!activationKey.empty()&&!nativeActivationGate_.readinessAllowed(activationKey)){
         if(nativeDisplay_)nativeDisplay_->activationRecovery(activationGeneration,activation&&workerExited);
         result.display.active=false;result.display.viewportProvisioning=false;result.display.monitorControlSupported=false;
         result.display.recoveryRequired=true;result.display.configurationPending=true;result.display.error="native_topology_recovery_required";
       }
-      const bool eligible=result.display.ready()&&result.desktopAvailable&&result.privileged&&sameInteractiveConsole(session);
+      const bool eligible=result.display.streamable()&&result.desktopAvailable&&result.privileged&&sameInteractiveConsole(session);
       bool activationCommitted=false;
       if(eligible&&activation&&nativeDisplay_&&!result.cancelled&&!probeStopped_&&interactiveSession()==session&&sessionUnlocked(session)){
         activationCommitted=nativeDisplay_->activationReady(activationGeneration);
@@ -2370,7 +2387,7 @@ inline WorkerDisplayAccess nativeWorkerDisplayAccess() {
   DWORD session = 0xffffffff; ProcessIdToSessionId(GetCurrentProcessId(), &session);
   // `privileged`: a count change under display manager v2 needs no more than a
   // stream does (workerDisplayAuthority); v1 and the older helper keep elevated().
-  return {workerDisplayProbe, [session] { return sameInteractiveConsole(session) && sessionUnlocked(session) && interactiveDesktopAvailable(); }, [] { return workerDisplayAuthority(); },
+  return {[] { return workerDisplayProbe(); }, [session] { return sameInteractiveConsole(session) && sessionUnlocked(session) && interactiveDesktopAvailable(); }, [] { return workerDisplayAuthority(); },
     [](int count) { return displayHelper(count == 1 ? L"topology 1" : L"topology 2", 20000); },nativeDisplaySelected};
 }
 // Display manager v2 count change in the interactive worker: real CCD, the
@@ -3045,7 +3062,7 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
     if(command.get("type").string()=="worker.catalog.prepare") {configureWorkerCatalog(pipe.value,command,stopped,writeMutex);break;}
     if(command.get("type").string()=="worker.probe"||command.get("type").string()=="worker.native.activate"){
       const bool activation=command.get("type").string()=="worker.native.activate";
-      const auto result=activation?bootstrapNativeDisplays(nativeWorkerBootstrapAccess()):NativeBootstrapResult{workerDisplayProbe()};
+      const auto result=activation?bootstrapNativeDisplays(nativeWorkerBootstrapAccess()):NativeBootstrapResult{workerDisplayProbe(displayManagerV2Selected())};
       // `privileged` tells the service whether this worker may act on the display it reports (workerDisplayAuthority).
       const auto response=workerProbeReply(result.display,interactiveDesktopAvailable(),workerDisplayAuthority(),activation?std::optional<bool>(result.applyAttempted):std::nullopt,result.diagnostic);
       if(!pipePacket(pipe.value,true,{response.begin(),response.end()},stopped,writeMutex))break;continue;
@@ -3162,7 +3179,7 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
       if(streamProfile){
         const auto request=nativeTrackResizeRequest(command);StreamResizeBudget budget;budget.deadline=workerResizeDeadline(command,streamMonotonicMillis());budget.cancelled=[&]{return stopped.load();};profileCancelDeadline=budget.deadline;ProfileCancelDeadlineReset cancelDeadlineReset{profileCancelDeadline};
         DWORD ownSession=UINT32_MAX;ProcessIdToSessionId(GetCurrentProcessId(),&ownSession);
-        ProfileTrackResizeAccess access;access.eligible=[&]{return !stopped&&sameInteractiveConsole(ownSession)&&sessionUnlocked(ownSession)&&interactiveDesktopAvailable()&&elevated();};access.reserve=[&](const auto& value){return streamProfile->reserveTracks(value);};access.stop=[&]{worker.suspendStreaming();};access.complete=[&](const auto& value,bool applied){return streamProfile->completeTracks(value,applied);};access.probe=workerDisplayProbe;access.observed=currentCaptureMonitors;
+        ProfileTrackResizeAccess access;access.eligible=[&]{return !stopped&&sameInteractiveConsole(ownSession)&&sessionUnlocked(ownSession)&&interactiveDesktopAvailable()&&elevated();};access.reserve=[&](const auto& value){return streamProfile->reserveTracks(value);};access.stop=[&]{worker.suspendStreaming();};access.complete=[&](const auto& value,bool applied){return streamProfile->completeTracks(value,applied);};access.probe=[]{return workerDisplayProbe();};access.observed=currentCaptureMonitors;
         access.apply=[&]{
           const auto interleave=[&](const Json& value){const auto type=value.get("type").string();if(type=="clip.packet"){if(clipboard&&value.get("sessionId").string()==clipboardSession)clipboard->message(value.get("payload"),clipboardGenerationNumber(value.get("generation").number()));return true;}if(type=="input.reset"){worker.localControl(jsonObject(value));return true;}if(type=="session.stop"||type=="session.ended"){stopped=true;return false;}return backlog.defer(value);};
           auto native=nativeWorkerTrackAccess(pipe.value,request,stopped,writeMutex,budget,interleave);

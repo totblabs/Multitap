@@ -5517,6 +5517,12 @@
       "monitorsLength": {}
     }
   },
+  "virtualMonitorsStandby": "가상 모니터 {monitorsLength}대 · 연결할 때 켜짐",
+  "@virtualMonitorsStandby": {
+    "placeholders": {
+      "monitorsLength": {}
+    }
+  },
   "switchStreamingScreen2": "스트리밍 화면으로 전환",
   "@switchStreamingScreen2": {},
   "monitor2": "모니터 {index}",
