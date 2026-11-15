@@ -14,6 +14,7 @@ import 'ui/workspace_shell.dart';
 import 'data/broker_api.dart';
 import 'data/preview_desktops.dart';
 import 'models/desktop_machine.dart';
+import 'models/desktop_organize.dart' show DesktopGroup, DesktopGroupDraft;
 import 'data/login_memory.dart';
 import 'data/remote_session.dart';
 import 'data/track_stream.dart';
@@ -155,6 +156,13 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
   int _authenticationRevision = 0;
   Future<void> _authenticationRetirement = Future<void>.value();
   List<DesktopMachine> _desktops = [];
+
+  /// This account's desktop groups from the last list read of [_groupsOf]
+  /// (null: the broker keeps none).
+  List<DesktopGroup>? _groups;
+  BrokerSession? _groupsOf;
+  List<DesktopGroup>? get _shownGroups =>
+      _groupsOf != null && _groupsOf == _session ? _groups : null;
   _HostBatchScope? _hostBatch;
   int _assignedReadSequence = 0;
   bool _busy = false;
@@ -1407,9 +1415,12 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
       });
     }
     try {
-      final result = await _api!.desktops(session.token);
+      final list = await readDesktopList(_api!, session.token);
+      final result = list.desktops;
       if (mounted && _session == session && _listSequence == request) {
         setState(() {
+          _groups = list.groups;
+          _groupsOf = session;
           _desktops = _keepNewerResources(result.map(_toMachine).toList());
           if (thumbnailObservation == _thumbnailObservationRevision) {
             _applyThumbnailPolicies(_desktops);
@@ -2298,6 +2309,95 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     }
   }
 
+  /// Saves this account's whole group list (desktop groups). The list shows
+  /// the broker's answer at once (a deleted group's desktops in none), and a
+  /// read of the list follows; a read that started before is dropped.
+  Future<List<DesktopGroup>> _saveGroups(List<DesktopGroupDraft> groups) async {
+    final session = _session, api = _api;
+    if (session == null || api == null) {
+      throw const BrokerException('session_expired', 401);
+    }
+    if (api is! DesktopGroupBrokerApi) {
+      throw const BrokerException('groups_unavailable');
+    }
+    _invalidateListReads();
+    try {
+      final saved = await (api as DesktopGroupBrokerApi).saveDesktopGroups(
+        session.token,
+        groups,
+      );
+      if (mounted && _session == session) {
+        final ids = {for (final group in saved) group.id};
+        setState(() {
+          _groups = saved;
+          _groupsOf = session;
+          _desktops = [
+            for (final machine in _desktops)
+              if (machine.organize.group != null &&
+                  !ids.contains(machine.organize.group))
+                machine.withOrganize(machine.organize.withGroup(null))
+              else
+                machine,
+          ];
+        });
+      }
+      return saved;
+    } on BrokerException catch (error) {
+      if ((error.status == 401 ||
+              pcLoginTerminalCode(error.code, error.status) != null) &&
+          mounted &&
+          _session == session) {
+        _expired(error);
+      }
+      rethrow;
+    } finally {
+      if (mounted && _session == session) {
+        unawaited(_refresh(quiet: true, force: true));
+      }
+    }
+  }
+
+  /// Puts one desktop in a group of this account, or in none.
+  Future<void> _setGroup(String desktopId, String? group) async {
+    final session = _session, api = _api;
+    if (session == null || api == null) {
+      throw const BrokerException('session_expired', 401);
+    }
+    if (api is! DesktopGroupBrokerApi) {
+      throw const BrokerException('groups_unavailable');
+    }
+    _invalidateListReads();
+    try {
+      final saved = await (api as DesktopGroupBrokerApi).setDesktopGroup(
+        session.token,
+        desktopId,
+        group,
+      );
+      if (!mounted || _session != session) return;
+      setState(
+        () => _desktops = [
+          for (final machine in _desktops)
+            if (machine.id == desktopId)
+              machine.withOrganize(machine.organize.withGroup(saved))
+            else
+              machine,
+        ],
+      );
+    } on BrokerException catch (error) {
+      if ((error.status == 401 ||
+              pcLoginTerminalCode(error.code, error.status) != null) &&
+          mounted &&
+          _session == session) {
+        _expired(error);
+      }
+      rethrow;
+    } finally {
+      if (mounted && _session == session) {
+        unawaited(_refresh(quiet: true, force: true));
+      }
+    }
+  }
+
   Future<DesktopMachine> _configureDisplays(String desktopId, int count) async {
     final session = _session, api = _api;
     if (session == null || api == null) {
@@ -2496,6 +2596,16 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
             onFavorite: _previewOpen || _api is! FavoriteBrokerApi
                 ? null
                 : _setFavorite,
+            // Desktop groups only where the broker keeps them.
+            groups: _previewOpen || _api is! DesktopGroupBrokerApi
+                ? null
+                : _shownGroups,
+            onSaveGroups: _previewOpen || _api is! DesktopGroupBrokerApi
+                ? null
+                : _saveGroups,
+            onSetGroup: _previewOpen || _api is! DesktopGroupBrokerApi
+                ? null
+                : _setGroup,
             localMonitors: _localMonitors,
             machines: _previewOpen ? previewDesktops : _desktops,
             isDemo: _previewOpen,

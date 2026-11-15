@@ -302,6 +302,13 @@ class AndroidStore {
   Future<void> saveLauncherPreviews(bool enabled) =>
       _save('launcher.previews', enabled ? 'on' : 'off');
 
+  /// 작게: the same cards drawn smaller (보통 otherwise), on this device.
+  Future<bool> launcherSmallCards() async =>
+      (await _preferences())['launcher.cards'] == 'small';
+
+  Future<void> saveLauncherSmallCards(bool small) =>
+      _save('launcher.cards', small ? 'small' : 'normal');
+
   Future<AndroidStreamQuality> quality() async =>
       AndroidStreamQuality.parse((await _preferences())['stream.quality']);
 
@@ -354,6 +361,7 @@ class AndroidStore {
           status: status is String ? status : 'all',
           sort: data['sort'] as String,
           kind: kind is String ? kind : 'all',
+          folded: OrganizePreference.foldedFrom(data['folded']),
         ).migrated();
       }
     } on FormatException {
@@ -373,6 +381,7 @@ class AndroidStore {
       'status': value.status,
       'sort': value.sort,
       'kind': value.kind,
+      if (value.folded.isNotEmpty) 'folded': value.folded,
     }),
   );
 

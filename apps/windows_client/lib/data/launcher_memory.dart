@@ -26,18 +26,39 @@ enum LauncherView {
 /// local view choices. Connection modes are never remembered for the next open.
 /// Never keeps credentials, tokens or screen content.
 /// The 분류 chip, the 상태 and 구분 filters and the sort one account last
-/// chose (never the search text).
+/// chose (never the search text), and the group sections it folded.
 class OrganizePreference {
   const OrganizePreference({
     this.chip = 'all',
     this.status = 'all',
     this.sort = 'number',
     this.kind = 'all',
+    this.folded = const [],
   });
   final String chip, status, sort, kind;
 
+  /// The folded sections' keys (DesktopSection.key), on this device only.
+  final List<String> folded;
+
   static const _statuses = {'all', 'running', 'stopped'};
   static const _kinds = {'all', 'vm', 'pc'};
+
+  /// The folded keys a saved file may hold: strings of a sane size, at most
+  /// one per possible section.
+  static List<String> foldedFrom(Object? raw) {
+    if (raw is! List) return const [];
+    final keys = <String>[];
+    for (final key in raw) {
+      if (key is String &&
+          key.isNotEmpty &&
+          key.length <= 140 &&
+          !keys.contains(key)) {
+        keys.add(key);
+      }
+      if (keys.length >= 64) break;
+    }
+    return List.unmodifiable(keys);
+  }
 
   /// Older versions kept 실행 중 / 꺼짐 as chips: they read as the 상태 filter
   /// now, and an unknown status or kind means 전체.
@@ -53,6 +74,7 @@ class OrganizePreference {
       status: status,
       sort: sort,
       kind: _kinds.contains(kind) ? kind : 'all',
+      folded: folded,
     );
   }
 }
@@ -64,6 +86,7 @@ class LauncherPreferences {
     this.organize = const {},
     LauncherView view = LauncherView.cards,
     this.showPreviews = true,
+    this.smallCards = false,
   }) : _legacyView = view;
   final String? lastDesktop;
   // Legacy constructor input only; never used as a connection default or saved.
@@ -75,14 +98,21 @@ class LauncherPreferences {
       _legacyView == LauncherView.cards ? _legacyView : LauncherView.cards;
   final bool showPreviews;
 
-  LauncherPreferences withView(LauncherView view, {bool? showPreviews}) =>
-      LauncherPreferences(
-        lastDesktop: lastDesktop,
-        modes: modes,
-        organize: organize,
-        view: view,
-        showPreviews: showPreviews ?? this.showPreviews,
-      );
+  /// 작게: the same cards drawn smaller, more to a row (보통 when false).
+  final bool smallCards;
+
+  LauncherPreferences withView(
+    LauncherView view, {
+    bool? showPreviews,
+    bool? smallCards,
+  }) => LauncherPreferences(
+    lastDesktop: lastDesktop,
+    modes: modes,
+    organize: organize,
+    view: view,
+    showPreviews: showPreviews ?? this.showPreviews,
+    smallCards: smallCards ?? this.smallCards,
+  );
 
   /// By account name on this server.
   final Map<String, OrganizePreference> organize;
@@ -97,6 +127,7 @@ class LauncherPreferences {
         organize: {...organize, account: value},
         view: view,
         showPreviews: showPreviews,
+        smallCards: smallCards,
       );
 
   SessionDisplayMode modeFor(String desktopId) => SessionDisplayMode.windowed;
@@ -107,6 +138,7 @@ class LauncherPreferences {
         organize: organize,
         view: view,
         showPreviews: showPreviews,
+        smallCards: smallCards,
       );
 }
 
@@ -258,6 +290,7 @@ class FileLauncherMemory implements LauncherMemory, SessionGuideStoreProvider {
           status: status is String && status.length <= 16 ? status : 'all',
           sort: sort is String && sort.length <= 16 ? sort : 'number',
           kind: kind is String && kind.length <= 16 ? kind : 'all',
+          folded: OrganizePreference.foldedFrom(value['folded']),
         ).migrated();
       }
     }
@@ -266,6 +299,7 @@ class FileLauncherMemory implements LauncherMemory, SessionGuideStoreProvider {
       organize: organize,
       view: LauncherView.fromName(entry['view']),
       showPreviews: entry['showPreviews'] != false,
+      smallCards: entry['cards'] == 'small',
     );
   }
 
@@ -275,6 +309,7 @@ class FileLauncherMemory implements LauncherMemory, SessionGuideStoreProvider {
     all[server] = {
       'view': preferences.view.name,
       'showPreviews': preferences.showPreviews,
+      if (preferences.smallCards) 'cards': 'small',
       if (preferences.lastDesktop != null)
         'lastDesktop': preferences.lastDesktop,
       if (preferences.organize.isNotEmpty)
@@ -285,6 +320,7 @@ class FileLauncherMemory implements LauncherMemory, SessionGuideStoreProvider {
               'status': entry.value.status,
               'sort': entry.value.sort,
               'kind': entry.value.kind,
+              if (entry.value.folded.isNotEmpty) 'folded': entry.value.folded,
             },
         },
     };

@@ -48,7 +48,7 @@ test('schema 12→13 adds a deny-all device permission column and preserves ever
   store = new Store(path);
   assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 19);
   assert.deepEqual(store.db.prepare('SELECT rowid,* FROM users ORDER BY rowid').all().map(({ rdp_redirections, authorization_revision, ...row }) => { assert.equal(rdp_redirections, 0); assert.equal(authorization_revision, 1); return { ...row }; }), before.users);
-  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ clipboard_permissions, rdp_redirections, favorite, last_used_at, sound_card_add, ...row }) => { assert.equal(clipboard_permissions, 1); assert.equal(rdp_redirections, 0); return { ...row }; }), before.assignments);
+  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ clipboard_permissions, rdp_redirections, favorite, last_used_at, sound_card_add, group_id, ...row }) => { assert.equal(clipboard_permissions, 1); assert.equal(rdp_redirections, 0); assert.equal(group_id, null); return { ...row }; }), before.assignments);
   assert.equal(store.setting('hostless_assignments_cleanup'), '0');
   for (const table of ['sessions', 'desktops', 'settings']) assert.deepEqual(store.db.prepare('SELECT rowid,* FROM ' + table + (table === 'settings' ? " WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')" : '') + ' ORDER BY rowid').all().map(({ pve_tags, pve_pool, issuer, replaced_at, ...row }) => ({ ...row })), before[table]);
   for (const id of [admin, member]) assert.deepEqual(store.devicePolicy(id, 'pve-730'), deny);

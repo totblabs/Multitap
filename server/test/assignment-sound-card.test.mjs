@@ -126,7 +126,7 @@ test('schema15 migration preserves rows and all old permissions while adding onl
   assert.equal(store.setting('hostless_assignments_cleanup'), '0', 'the one-time cleanup found nothing to remove');
   for (const table of ['users', 'desktops', 'settings', 'audit_events']) assert.deepEqual(store.db.prepare(`SELECT rowid,* FROM ${table}${table === 'settings' ? " WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')" : ''} ORDER BY rowid`).all().map(row => ({ ...row })), old[table].map(row => table === 'users' ? { ...row, authorization_revision: 1 } : { ...row }));
   const upgraded = store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all();
-  assert.deepEqual(upgraded.map(({ sound_card_add, ...row }) => { assert.equal(sound_card_add, 0); return { ...row }; }), old.assignments.map(row => ({ ...row })));
+  assert.deepEqual(upgraded.map(({ sound_card_add, group_id, ...row }) => { assert.equal(sound_card_add, 0); assert.equal(group_id, null); return { ...row }; }), old.assignments.map(row => ({ ...row })));
   assert.throws(() => store.db.prepare('UPDATE assignments SET sound_card_add=2').run(), /CHECK/);
   store.updateAssignmentPolicy('alice', 'pve-701', { soundCardAdd: true });
   store.close(); store = null; store = new Store(path);

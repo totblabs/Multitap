@@ -1771,6 +1771,43 @@ abstract interface class FavoriteBrokerApi {
   Future<bool> setFavorite(String token, String desktopId, bool favorite);
 }
 
+/// A desktop list read with this account's groups beside it: [groups] is
+/// null where the broker sends none (a broker before desktop groups).
+class BrokerDesktopList {
+  const BrokerDesktopList(this.desktops, {this.groups});
+  final List<BrokerDesktop> desktops;
+  final List<DesktopGroup>? groups;
+}
+
+/// Desktop groups, kept per account by the broker: the list read carries
+/// them (GET /api/v1/desktops, top-level `groups`), PUT
+/// /api/v1/desktop-groups replaces the whole list in its order (an entry
+/// without id is new; a group left out is deleted and its desktops are in
+/// none), and PUT /api/v1/desktops/:id/group puts one desktop in a group or
+/// in none. A broker before them sends no `groups` and answers 404.
+abstract interface class DesktopGroupBrokerApi {
+  Future<BrokerDesktopList> desktopList(String token);
+
+  /// The saved list, in its order.
+  Future<List<DesktopGroup>> saveDesktopGroups(
+    String token,
+    List<DesktopGroupDraft> groups,
+  );
+
+  /// The group the desktop is in now (null: none).
+  Future<String?> setDesktopGroup(
+    String token,
+    String desktopId,
+    String? group,
+  );
+}
+
+/// The desktop list, with the groups where [api] reads them.
+Future<BrokerDesktopList> readDesktopList(BrokerApi api, String token) async =>
+    api is DesktopGroupBrokerApi
+    ? await (api as DesktopGroupBrokerApi).desktopList(token)
+    : BrokerDesktopList(await api.desktops(token));
+
 /// [displayScale]: a Windows scale for every owned output
 /// (display-scale-outputs-v1), sent only where the inventory advertises it.
 abstract interface class TrackBrokerApi {
@@ -1989,6 +2026,7 @@ class HttpBrokerApi
         ConsoleRecoveryApi,
         HostUpdateBrokerApi,
         FavoriteBrokerApi,
+        DesktopGroupBrokerApi,
         TrackBrokerApi,
         ProfileTrackBrokerApi,
         TakeoverBrokerApi,
@@ -3729,10 +3767,24 @@ class HttpBrokerApi
   }
 
   @override
+  Future<BrokerDesktopList> desktopList(String token) async {
+    // Through [desktops], so whatever reads the list reads it one way; the
+    // groups that came with this very list travel on it.
+    final desktops = await this.desktops(token);
+    return BrokerDesktopList(desktops, groups: _listGroups[desktops]?.groups);
+  }
+
+  /// The groups each list read carried (desktop groups), by the list
+  /// [desktops] answered.
+  final _listGroups = Expando<({List<DesktopGroup>? groups})>();
+
+  @override
   Future<List<BrokerDesktop>> desktops(String token) async {
     final sequence = ++_inventorySequence;
     final response = await _request('/api/v1/desktops', token: token);
     final inventory = response['desktops'] as List;
+    // Desktop groups: absent from a broker before them (no group features).
+    final groups = DesktopGroup.listFromJson(response['groups']);
     // The server states its version beside the list (the info window's
     // 서버 section); where it says nothing the version stays unknown.
     final server = response['server'];
@@ -3871,7 +3923,61 @@ class HttpBrokerApi
             value['id'] as String,
       };
     }
+    _listGroups[desktops] = (groups: groups);
     return desktops;
+  }
+
+  @override
+  Future<List<DesktopGroup>> saveDesktopGroups(
+    String token,
+    List<DesktopGroupDraft> groups,
+  ) async {
+    if (groups.length > DesktopGroup.maxCount) {
+      throw const BrokerException('too_many_groups', 400);
+    }
+    final value = await _request(
+      '/api/v1/desktop-groups',
+      method: 'PUT',
+      token: token,
+      data: {
+        'groups': [
+          for (final group in groups)
+            {'id': ?group.id, 'name': group.name.trim()},
+        ],
+      },
+    );
+    final saved = DesktopGroup.listFromJson(value['groups'], strict: true);
+    if (saved == null) throw const BrokerException('invalid_response');
+    return saved;
+  }
+
+  @override
+  Future<String?> setDesktopGroup(
+    String token,
+    String desktopId,
+    String? group,
+  ) async {
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(desktopId)) {
+      throw const BrokerException('desktop_not_found', 404);
+    }
+    if (group != null && !DesktopGroup.validId(group)) {
+      throw const BrokerException('unknown_group', 400);
+    }
+    final value = await _request(
+      '/api/v1/desktops/${Uri.encodeComponent(desktopId)}/group',
+      method: 'PUT',
+      token: token,
+      data: {'group': group},
+    );
+    // The broker's own answer where it gives one (the list read after the
+    // change is the record either way).
+    if (!value.containsKey('group')) return group;
+    final answer = value['group'];
+    if (answer != null &&
+        (answer is! String || !DesktopGroup.validId(answer))) {
+      throw const BrokerException('invalid_response');
+    }
+    return answer as String?;
   }
 
   @override

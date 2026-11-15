@@ -9,6 +9,7 @@ import '../data/desktop_thumbnails.dart';
 import '../data/desktop_previews.dart';
 import '../models/desktop_organize.dart';
 import 'desktop_organizer.dart';
+import 'desktop_groups.dart';
 import '../data/launcher_memory.dart';
 import 'launcher_view_menu.dart';
 import 'launcher_scenes.dart';
@@ -117,10 +118,26 @@ class WorkspaceShell extends StatefulWidget {
     this.loadHostRelease,
     this.checkClientUpdate,
     this.onFavorite,
+    this.groups,
+    this.onSaveGroups,
+    this.onSetGroup,
     this.sessionAccess,
     this.notices,
     this.noticesActive = true,
   });
+
+  /// This account's desktop groups in their order, where the broker keeps
+  /// them; null: none at all (an older broker, the design demo), and the
+  /// list and its menus are what they always were. With groups the list is
+  /// in sections, one per group and 기타.
+  final List<DesktopGroup>? groups;
+
+  /// Saves the whole group list in its order (an entry without id is new, a
+  /// group left out is deleted) and resolves to the saved list.
+  final SaveDesktopGroups? onSaveGroups;
+
+  /// Puts a desktop in a group, or in none (null).
+  final Future<void> Function(String desktopId, String? group)? onSetGroup;
 
   /// 공지 (notice_widgets.dart): this sign-in's notices. The header gets the
   /// bell and a notice that arrives rises as a banner over the list's
@@ -331,6 +348,14 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   final _favoriteOverride = <String, bool>{};
   final _favoriteSending = <String>{};
 
+  /// A desktop's group change in flight (shown at once), the ones being
+  /// sent, the folded sections (DesktopSection.key) and a group list change
+  /// being saved.
+  final _groupOverride = <String, String?>{};
+  final _groupSending = <String>{};
+  Set<String> _folded = {};
+  bool _groupsSaving = false;
+
   void _searchTextChanged() {
     if (_search.text == _query) return;
     setState(() {
@@ -419,15 +444,26 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     if (changed) _saveOrganize();
   }
 
-  List<DesktopMachine> _baseMachines() => _favoriteOverride.isEmpty
+  List<DesktopMachine> _baseMachines() =>
+      _favoriteOverride.isEmpty && _groupOverride.isEmpty
       ? widget.machines
       : [
           for (final m in widget.machines)
-            _favoriteOverride.containsKey(m.id)
-                ? m.withOrganize(
-                    m.organize.withFavorite(_favoriteOverride[m.id]!),
-                  )
-                : m,
+            if (_favoriteOverride.containsKey(m.id) ||
+                _groupOverride.containsKey(m.id))
+              m.withOrganize(
+                m.organize
+                    .withFavorite(
+                      _favoriteOverride[m.id] ?? m.organize.favorite,
+                    )
+                    .withGroup(
+                      _groupOverride.containsKey(m.id)
+                          ? _groupOverride[m.id]
+                          : m.organize.group,
+                    ),
+              )
+            else
+              m,
         ];
 
   void _saveOrganize() {
@@ -439,6 +475,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         status: _status.id,
         sort: _sort.name,
         kind: _kind.id,
+        folded: [..._folded],
       ),
     );
     _prefs = next;
@@ -453,9 +490,19 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         .catchError((Object _) {});
   }
 
-  void _selectView(LauncherView view, {bool? showPreviews}) {
+  void _selectView(
+    LauncherView view, {
+    bool? showPreviews,
+    bool? smallCards,
+  }) {
     _viewEdited = true;
-    setState(() => _prefs = _prefs.withView(view, showPreviews: showPreviews));
+    setState(
+      () => _prefs = _prefs.withView(
+        view,
+        showPreviews: showPreviews,
+        smallCards: smallCards,
+      ),
+    );
     if (_prefsLoaded) _savePreferences(_prefs);
     if (_desktopScroll.hasClients) _desktopScroll.jumpTo(0);
     _bindThumbnails();
@@ -533,16 +580,138 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
   }
 
+  /// The cards on screen in their order: the sorted, filtered list, or with
+  /// groups the open sections' cards one section after another.
   List<DesktopMachine> _shownMachines() {
     final base = _baseMachines();
-    return organizeDesktops(
+    final chip = _effectiveChip(base);
+    final status = _effectiveStatus(base);
+    final kind = _effectiveKind(base);
+    final shown = organizeDesktops(
       base,
       query: _query,
-      chip: _effectiveChip(base),
-      status: _effectiveStatus(base),
-      kind: _effectiveKind(base),
+      chip: chip,
+      status: status,
+      kind: kind,
       sort: _sort,
     );
+    final sections = _sections(shown, base, chip, status, kind);
+    if (sections == null) return shown;
+    return [
+      for (final section in sections)
+        if (!_folded.contains(section.key)) ...section.machines,
+    ];
+  }
+
+  // --- desktop groups -------------------------------------------------------
+
+  /// The groups shown and offered: only where the broker keeps them.
+  List<DesktopGroup>? get _groups =>
+      !widget.isDemo &&
+          widget.onSaveGroups != null &&
+          widget.onSetGroup != null
+      ? widget.groups
+      : null;
+
+  List<DesktopSection>? _sections(
+    List<DesktopMachine> shown,
+    List<DesktopMachine> base,
+    DesktopChip chip,
+    DesktopStatus status,
+    DesktopKind kind,
+  ) => desktopSections(
+    shown,
+    base,
+    _groups,
+    filtering:
+        !DesktopQuery(_query).isEmpty ||
+        chip != DesktopChip.all ||
+        status != DesktopStatus.all ||
+        kind != DesktopKind.all,
+  );
+
+  /// A section header was pressed: it folds or unfolds, remembered for this
+  /// account on this PC.
+  void _toggleFold(String key) {
+    final known = {
+      DesktopSection.otherKey,
+      for (final group in _groups ?? const <DesktopGroup>[])
+        DesktopSection.sectionKey(group),
+    };
+    setState(() {
+      _folded = {
+        for (final folded in _folded)
+          if (known.contains(folded) && folded != key) folded,
+        if (!_folded.contains(key)) key,
+      };
+    });
+    _saveOrganize();
+  }
+
+  DesktopGroupFlows? get _groupFlows {
+    final groups = _groups, save = widget.onSaveGroups;
+    return groups == null || save == null
+        ? null
+        : DesktopGroupFlows(groups, save);
+  }
+
+  void _groupFailed(Object error) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: KeepAllText(desktopGroupFailureText(error))),
+    );
+  }
+
+  /// Puts [machine] in [group] (null: in none); the card moves at once and
+  /// comes back if the broker refuses.
+  Future<void> _setGroup(DesktopMachine machine, String? group) async {
+    final send = widget.onSetGroup;
+    if (send == null || _groupSending.contains(machine.id)) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() {
+      _groupOverride[machine.id] = group;
+      _groupSending.add(machine.id);
+    });
+    try {
+      await send(machine.id, group);
+    } catch (error) {
+      if (messenger.mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: KeepAllText(desktopGroupFailureText(error))),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _groupOverride.remove(machine.id);
+          _groupSending.remove(machine.id);
+        });
+      }
+    }
+  }
+
+  /// One group list change at a time; a failure [change] does not show
+  /// itself (the name dialog does) is said in a line at the bottom.
+  Future<T?> _changeGroups<T>(
+    Future<T> Function(DesktopGroupFlows flows) change,
+  ) async {
+    final flows = _groupFlows;
+    if (flows == null || _groupsSaving) return null;
+    setState(() => _groupsSaving = true);
+    try {
+      return await change(flows);
+    } catch (error) {
+      _groupFailed(error);
+      return null;
+    } finally {
+      if (mounted) setState(() => _groupsSaving = false);
+    }
+  }
+
+  /// 새 그룹… on a card: the group is made, then the card goes in it.
+  Future<void> _newGroup(DesktopMachine machine) async {
+    final created = await _changeGroups((flows) => flows.create(context));
+    if (created != null && mounted) await _setGroup(machine, created);
   }
 
   @override
@@ -783,12 +952,17 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       final organize = prefs.organizeFor(widget.displayName).migrated();
       setState(() {
         _prefs = _viewEdited
-            ? prefs.withView(_prefs.view, showPreviews: _prefs.showPreviews)
+            ? prefs.withView(
+                _prefs.view,
+                showPreviews: _prefs.showPreviews,
+                smallCards: _prefs.smallCards,
+              )
             : prefs;
         _chip = DesktopChip.parse(organize.chip);
         _status = DesktopStatus.byId(organize.status);
         _kind = DesktopKind.byId(organize.kind);
         _sort = DesktopSort.byName(organize.sort);
+        _folded = {...organize.folded};
       });
     } catch (_) {
       // Preferences are a convenience; the defaults remain usable.
@@ -809,6 +983,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       organize: _prefs.organize,
       view: _prefs.view,
       showPreviews: _prefs.showPreviews,
+      smallCards: _prefs.smallCards,
     );
     setState(() => _prefs = next);
     _savePreferences(next);
@@ -902,6 +1077,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     _flows.removeWhere((id, _) => !ids.contains(id));
     _favoriteOverride.removeWhere((id, _) => !ids.contains(id));
     _favoriteSending.removeWhere((id) => !ids.contains(id));
+    _groupOverride.removeWhere((id, _) => !ids.contains(id));
+    _groupSending.removeWhere((id) => !ids.contains(id));
     _normalizeChip();
     final listed = !identical(widget.machines, oldWidget.machines);
     // The time of the last successful check: a real list read, never a
@@ -2005,6 +2182,20 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       toggleFavorite: _favoriteSending.contains(m.id)
           ? null
           : () => unawaited(_toggleFavorite(m)),
+      // 그룹 only where the broker keeps groups; a change shows at once.
+      groups: _groups,
+      group: m.organize.group,
+      setGroup: _groupSending.contains(m.id)
+          ? null
+          : (group) => unawaited(_setGroup(m, group)),
+      newGroup:
+          _groupsSaving ||
+              (_groups?.length ?? 0) >= DesktopGroup.maxCount
+          ? null
+          : () => unawaited(_newGroup(m)),
+      newGroupReason: (_groups?.length ?? 0) >= DesktopGroup.maxCount
+          ? l10n.tooManyGroups
+          : null,
       // Only an update that can be installed now; its version and state
       // otherwise appear in the readiness check.
       hostUpdate:
@@ -2122,6 +2313,14 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     showPreviews: _prefs.showPreviews,
     onSelected: (view) => _selectView(view),
     onPreviews: (value) => _selectView(_prefs.view, showPreviews: value),
+    compact: compact,
+    compactChrome: true,
+  );
+
+  /// 보통 / 작게 beside 미리보기, remembered on this PC.
+  Widget _cardSizeButton({bool compact = false}) => LauncherCardSizeButton(
+    small: _prefs.smallCards,
+    onChanged: (small) => _selectView(_prefs.view, smallCards: small),
     compact: compact,
     compactChrome: true,
   );
@@ -2259,6 +2458,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         ? DesktopSortMenu(sort: _sort, onSelected: _selectSort)
         : null;
     final toggle = hasDesktops ? _viewSelector(compact: !labels) : null;
+    final cardSize = hasDesktops ? _cardSizeButton(compact: !labels) : null;
     final refresh = widget.isDemo ? null : _refreshButton(compact: !labels);
     if (inline) {
       return Row(
@@ -2278,6 +2478,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
             const SizedBox(width: 8),
           ],
           if (toggle != null) ...[toggle, const SizedBox(width: 8)],
+          if (cardSize != null) ...[cardSize, const SizedBox(width: 8)],
           ?refresh,
         ],
       );
@@ -2290,6 +2491,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
             _titleBlock(p, count, shown),
             const SizedBox(width: 12),
             ?toggle,
+            if (cardSize != null) ...[const SizedBox(width: 8), cardSize],
             if (toggle != null && refresh != null) const SizedBox(width: 8),
             ?refresh,
           ],
@@ -2643,6 +2845,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     BuildContext context,
     List<DesktopMachine> shown,
     double width,
+    List<DesktopSection>? sections,
   ) {
     final scaler = MediaQuery.textScalerOf(context);
     final view = _prefs.view;
@@ -2672,22 +2875,27 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         ),
       );
     }
-    final indexByKey = {
-      for (var i = 0; i < shown.length; i++)
-        '${view == LauncherView.cards ? 'slot' : 'row'}-${shown[i].id}': i,
-    };
-    int? indexOf(Key key) =>
-        key is ValueKey<String> ? indexByKey[key.value] : null;
-    // One grid rule with Android's launcher (desktopTileGrid).
+    // One grid rule with Android's launcher (desktopTileGrid); 작게 draws the
+    // same card smaller.
     final grid = desktopTileGrid(
       width,
       scaler,
       viewport: MediaQuery.sizeOf(context),
       previews: _prefs.showPreviews,
+      small: _prefs.smallCards,
     );
-    Widget desktop(BuildContext context, int index) {
-      final machine = shown[index], readiness = _readiness(machine);
-      if (view != LauncherView.cards) {
+    if (view == LauncherView.cards) {
+      return sections == null
+          ? _cardGrid(shown, grid)
+          : _sectionSlivers(sections, grid);
+    }
+    final indexByKey = {
+      for (var i = 0; i < shown.length; i++) 'row-${shown[i].id}': i,
+    };
+    return SliverList.builder(
+      itemCount: shown.length,
+      itemBuilder: (context, index) {
+        final machine = shown[index], readiness = _readiness(machine);
         return Padding(
           key: ValueKey('row-${machine.id}'),
           padding: EdgeInsets.only(bottom: view == LauncherView.mini ? 6 : 10),
@@ -2702,9 +2910,22 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
             dense: view == LauncherView.mini,
           ),
         );
-      }
-      return SizedBox(
-        key: ValueKey('slot-${machine.id}'),
+      },
+      findChildIndexCallback: (key) =>
+          key is ValueKey<String> ? indexByKey[key.value] : null,
+    );
+  }
+
+  /// One card of the grid, drawn smaller in 작게.
+  Widget _card(
+    DesktopMachine machine,
+    DesktopTileGrid grid,
+  ) {
+    final readiness = _readiness(machine);
+    return SizedBox(
+      key: ValueKey('slot-${machine.id}'),
+      child: DesktopTileScale(
+        grid: grid,
         child: DesktopTile(
           machine: machine,
           readiness: readiness,
@@ -2718,27 +2939,89 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
           previewNote: _previewNoteFor(machine),
           pictureHeight: grid.picture,
         ),
-      );
-    }
+      ),
+    );
+  }
 
-    if (view != LauncherView.cards) {
-      return SliverList.builder(
-        itemCount: shown.length,
-        itemBuilder: desktop,
-        findChildIndexCallback: indexOf,
-      );
-    }
+  Widget _cardGrid(
+    List<DesktopMachine> machines,
+    DesktopTileGrid grid,
+  ) {
+    final indexByKey = {
+      for (var i = 0; i < machines.length; i++) 'slot-${machines[i].id}': i,
+    };
     return SliverGrid.builder(
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: grid.columns,
-        mainAxisExtent: grid.height,
-        crossAxisSpacing: desktopTileGap,
-        mainAxisSpacing: desktopTileGap,
+        mainAxisExtent: grid.extent,
+        crossAxisSpacing: grid.gap,
+        mainAxisSpacing: grid.gap,
       ),
-      itemCount: shown.length,
-      itemBuilder: desktop,
-      findChildIndexCallback: indexOf,
+      itemCount: machines.length,
+      itemBuilder: (context, index) => _card(machines[index], grid),
+      findChildIndexCallback: (key) =>
+          key is ValueKey<String> ? indexByKey[key.value] : null,
     );
+  }
+
+  /// The list in groups: each section's header (it folds and unfolds the
+  /// section; a group's ⋯ renames, moves or deletes it), then its cards.
+  Widget _sectionSlivers(
+    List<DesktopSection> sections,
+    DesktopTileGrid grid,
+  ) {
+    final groups = _groups ?? const <DesktopGroup>[];
+    final saving = _groupsSaving;
+    final slivers = <Widget>[];
+    var cardsAbove = false;
+    for (final (index, section) in sections.indexed) {
+      final folded = _folded.contains(section.key);
+      final group = section.group;
+      final at = group == null
+          ? -1
+          : groups.indexWhere((item) => item.id == group.id);
+      final open = !folded && section.machines.isNotEmpty;
+      slivers.add(
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: index == 0 ? 0 : (cardsAbove ? 22 : 4),
+              bottom: open ? 10 : 0,
+            ),
+            child: DesktopSectionHeader(
+              key: ValueKey('section-header-${section.key}'),
+              section: section,
+              folded: folded,
+              onToggle: () => _toggleFold(section.key),
+              manage: group != null && _groupFlows != null,
+              onRename: group == null || saving
+                  ? null
+                  : () => unawaited(
+                      _changeGroups((flows) => flows.rename(context, group)),
+                    ),
+              onMoveUp: group == null || saving || at <= 0
+                  ? null
+                  : () => unawaited(
+                      _changeGroups((flows) => flows.move(group, -1)),
+                    ),
+              onMoveDown: group == null || saving || at >= groups.length - 1
+                  ? null
+                  : () => unawaited(
+                      _changeGroups((flows) => flows.move(group, 1)),
+                    ),
+              onDelete: group == null || saving
+                  ? null
+                  : () => unawaited(
+                      _changeGroups((flows) => flows.delete(context, group)),
+                    ),
+            ),
+          ),
+        ),
+      );
+      if (open) slivers.add(_cardGrid(section.machines, grid));
+      cardsAbove = open;
+    }
+    return SliverMainAxisGroup(slivers: slivers);
   }
 
   @override
@@ -2759,14 +3042,15 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     );
     final base = _baseMachines();
     final kinds = kindFilterUseful(base);
-    // The 구분 filter needs its own room on the title line.
-    final extra = kinds ? 210.0 : 0.0;
+    // The 구분 filter needs its own room on the title line, and so does
+    // 작게 beside 미리보기.
+    final extra = (kinds ? 210.0 : 0.0) + 90;
     final inline = columnWidth >= (720 + extra) * textScale;
     final wide = columnWidth >= (940 + extra) * textScale;
-    // A short title line keeps 미리보기 and 새로고침 as round icons.
+    // A short title line keeps 미리보기, 작게 and 새로고침 as round icons.
     final labels =
         inline ||
-        columnWidth >= 400 * MediaQuery.textScalerOf(context).scale(1);
+        columnWidth >= 480 * MediaQuery.textScalerOf(context).scale(1);
     final organize = organizeUseful(base);
     final chip = _effectiveChip(base);
     final status = _effectiveStatus(base);
@@ -2779,6 +3063,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       kind: kind,
       sort: _sort,
     );
+    final sections = _sections(shown, base, chip, status, kind);
     // The same full-window scenery as sign-in (dusk in dark, daylight in
     // light) behind the header, tiles and rows. Surfaces over it are
     // translucent fills with hairline edges; nothing uses a backdrop blur.
@@ -2900,7 +3185,12 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                           padding: EdgeInsets.symmetric(
                             horizontal: (size.width - columnWidth) / 2,
                           ),
-                          sliver: _desktopSliver(context, shown, columnWidth),
+                          sliver: _desktopSliver(
+                            context,
+                            shown,
+                            columnWidth,
+                            sections,
+                          ),
                         ),
                       SliverToBoxAdapter(
                         child: SizedBox(

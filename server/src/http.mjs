@@ -45,6 +45,7 @@ import { createSessionAccessStore } from './session-access-store.mjs';
 import { MfaProvider } from './mfa.mjs';
 import { NoticeService } from './notices.mjs';
 import { AdminResources, ServerResources } from './admin-resources.mjs';
+import { desktopGroupErrors } from './desktop-organize.mjs';
 
 export const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 // Pages and their static assets: same-origin scripts, styles and images only;
@@ -112,6 +113,12 @@ async function body(req, max = 8192) {
   return parsed;
 }
 const publicUser = user => ({ id: user.id, username: user.username, displayName: user.username, role: user.role });
+// A desktop group write; what the store refuses about the request is a 400
+// with the store's code (invalid_group_name, duplicate_group_name, ...).
+function desktopGroupWrite(write) {
+  try { return write(); }
+  catch (error) { if (desktopGroupErrors.includes(error?.message)) throw new HttpError(400, error.message); throw error; }
+}
 // Power refusals decided before Proxmox is asked (audited as power_refused).
 // Rate-limited attempts are not audited: a looping client must not grow the
 // audit table without bound.
@@ -153,6 +160,9 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
   const takeoverAttempts = new Limiter(10);
   const hostUpdateAttempts = new Limiter(20);
   const favoriteAttempts = new Limiter(60);
+  // Desktop group writes (the whole list and each desktop's group) share one
+  // budget per account: moving a handful of desktops is a handful of requests.
+  const groupAttempts = new Limiter(120);
   // desktop-preview-v1: about one read per assigned desktop a minute, plus refreshes.
   const previewAttempts = new Limiter(300);
   const relay = new Relay({ store, vault, proxmox, publicOrigin, ...relayOptions, brokerVersion: VERSION });
@@ -266,9 +276,12 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
     if (current.must_change_credentials) throw new HttpError(428, 'credentials_change_required');
     // The live channel reads without asking Proxmox, so its freshness bound is
     // the background sync, not the short request cache.
-    const decorated = power.decorate(relay.decorate(store.listDesktops(current.id), current.id, origin), current.id, refresh ? {} : { staleMs: desktopSyncMs * 2 + 10000 });
+    // The account's desktop groups are read in the same step as the desktops,
+    // so every desktop's group is one of the groups in the same answer.
+    const listed = store.listDesktops(current.id), groups = store.desktopGroups(current.id);
+    const decorated = power.decorate(relay.decorate(listed, current.id, origin), current.id, refresh ? {} : { staleMs: desktopSyncMs * 2 + 10000 });
     const views = await withHostUpdates(vmStates.decorate(decorated), current);
-    return signinProtocol === 'signin-stream-v1' ? relay.withSigninAvailability(views, hash, current.id) : views;
+    return { desktops: signinProtocol === 'signin-stream-v1' ? relay.withSigninAvailability(views, hash, current.id) : views, groups };
   }
   let powerTaskCursor = 0;
   async function refreshDesktopObservations(userIds) {
@@ -792,7 +805,27 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
       if (req.method === 'GET' && path === '/api/v1/desktops') {
         // features: what this broker adds to the list (a client that does not
         // find it, or finds a lower number, runs without that feature).
-        send(200, { desktops: await desktopSnapshot(hash, { origin: requestOrigin, signinProtocol: req.headers['x-multitap-signin-protocol'] }), features: { desktopOrganize: 1 }, server: { version: VERSION } }); return;
+        // groups: the account's own desktop groups [{id, name}] in its order;
+        // each desktop's `group` is one of their ids or null. Released clients
+        // ignore both.
+        const { desktops, groups } = await desktopSnapshot(hash, { origin: requestOrigin, signinProtocol: req.headers['x-multitap-signin-protocol'] });
+        send(200, { desktops, groups, features: { desktopOrganize: 1 }, server: { version: VERSION } }); return;
+      }
+      // 데스크톱 그룹 (desktop-organize.mjs): PUT replaces the account's whole
+      // group list in the order sent. A listed id keeps (and renames) its
+      // group, an entry without one makes a new group, a group left out is
+      // deleted and its desktops become ungrouped.
+      if (path === '/api/v1/desktop-groups') {
+        if (req.method !== 'PUT') throw new HttpError(405, 'method_not_allowed');
+        if (!groupAttempts.take(user.id, Date.now())) throw new HttpError(429, 'too_many_group_attempts');
+        const input = await body(req, 16384); fields(input, ['groups']);
+        const current = store.authenticate(hash);
+        if (!current || current.id !== user.id || current.must_change_credentials) throw new HttpError(401, 'session_expired');
+        const groups = desktopGroupWrite(() => store.replaceDesktopGroups(current.id, input.groups));
+        if (!groups) throw new HttpError(401, 'session_expired');
+        // send() wakes the live channel, as for a favourite: every signed-in
+        // device of this account re-reads its list.
+        send(200, { groups }); return;
       }
       const favoriteMatch = /^\/api\/v1\/desktops\/([^/]+)\/favorite$/.exec(path);
       if (favoriteMatch) {
@@ -809,6 +842,21 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
         // send() wakes the live channel: every signed-in device of this account
         // (including the one that asked) gets desktops.changed and re-reads.
         send(200, { favorite: input.favorite }); return;
+      }
+      // The account's own group of one assigned desktop: {"group": id | null}.
+      // Checked like a favourite (same 404 for unknown and unassigned).
+      const groupMatch = /^\/api\/v1\/desktops\/([^/]+)\/group$/.exec(path);
+      if (groupMatch) {
+        if (req.method !== 'PUT') throw new HttpError(405, 'method_not_allowed');
+        let id; try { id = desktopId(decodeURIComponent(groupMatch[1])); } catch { throw new HttpError(404, 'desktop_not_found'); }
+        if (!store.assignedDesktop(user.id, id)) throw new HttpError(404, 'desktop_not_found');
+        if (!groupAttempts.take(user.id, Date.now())) throw new HttpError(429, 'too_many_group_attempts');
+        const input = await body(req, 256); fields(input, ['group']);
+        if (input.group !== null && typeof input.group !== 'string') throw new HttpError(400, 'invalid_group');
+        const current = store.authenticate(hash);
+        if (!current || current.id !== user.id || current.must_change_credentials) throw new HttpError(401, 'session_expired');
+        if (!desktopGroupWrite(() => store.setDesktopGroup(current.id, id, input.group))) throw new HttpError(404, 'desktop_not_found');
+        send(200, { group: input.group }); return;
       }
       // desktop-preview-v1 (desktop-previews.mjs): the launcher picture of one
       // assigned VM. The Host is asked at most every 30 s; the picture stays in

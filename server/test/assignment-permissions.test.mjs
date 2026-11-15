@@ -50,8 +50,8 @@ test('schema 13→14 copies every account mask into each of its existing assignm
   assert.equal(store.setting('hostless_assignments_cleanup'), '0', 'the one-time cleanup found nothing to remove');
   for (const table of ['users', 'sessions', 'desktops', 'settings', 'audit_events']) assert.deepEqual(store.db.prepare('SELECT rowid,* FROM ' + table + (table === 'settings' ? " WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')" : '') + ' ORDER BY rowid').all().map(({ pve_tags, pve_pool, issuer, replaced_at, authorization_revision, ...row }) => { if (table === 'users') assert.equal(authorization_revision, 1); return { ...row }; }), before[table], table + ' is unchanged');
   const masks = Object.fromEntries(before.users.map(user => [user.id, [user.clipboard_permissions, user.rdp_redirections]]));
-  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ clipboard_permissions, rdp_redirections, favorite, last_used_at, sound_card_add, ...row }) => {
-    assert.deepEqual([clipboard_permissions, rdp_redirections, favorite, last_used_at], [...masks[row.user_id], 0, null], 'each assignment keeps its account mask'); return { ...row };
+  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ clipboard_permissions, rdp_redirections, favorite, last_used_at, sound_card_add, group_id, ...row }) => {
+    assert.deepEqual([clipboard_permissions, rdp_redirections, favorite, last_used_at, group_id], [...masks[row.user_id], 0, null, null], 'each assignment keeps its account mask'); return { ...row };
   }), before.assignments);
   const aliceClipboard = { ...clipDeny, textToRemote: true, filesToRemote: true }, aliceDevices = { ...deny, drives: true, serialPorts: true };
   for (const id of ['pve-750', 'pve-751']) { assert.deepEqual(store.clipboardPolicy(alice, id), aliceClipboard); assert.deepEqual(store.devicePolicy(alice, id), aliceDevices); }

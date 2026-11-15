@@ -28,7 +28,8 @@ test('Schema 8→9 preserves existing accounts, assignments, hosts, sessions, se
     assert.equal(store.db.prepare('PRAGMA user_version').get().user_version,19);
     // The registered Host keeps its assignment through the upgrade; the only new
     // setting is the mark of the one-time cleanup, which removed nothing.
-    for(const table of ['assignments','hosts','sessions','settings','power_tasks'])assert.deepEqual(store.db.prepare('SELECT rowid,* FROM '+table+(table==='settings'?" WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')":'')+' ORDER BY rowid').all(),expected[table]);
+    // Assignments also gain the empty desktop group (desktop_groups).
+    for(const table of ['assignments','hosts','sessions','settings','power_tasks'])assert.deepEqual(store.db.prepare('SELECT rowid,* FROM '+table+(table==='settings'?" WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')":'')+' ORDER BY rowid').all().map(({group_id,...row})=>{assert.equal(group_id,table==='assignments'?null:undefined);return{...row};}),expected[table].map(row=>({...row})));
     assert.equal(store.setting('hostless_assignments_cleanup'),'0');assert.equal(store.db.prepare("SELECT count(*) AS n FROM audit_events WHERE event='hostless_assignments_removed'").get().n,0);
     assert.deepEqual(store.db.prepare('SELECT rowid,* FROM users ORDER BY rowid').all().map(({clipboard_permissions,rdp_redirections,authorization_revision,...row})=>{assert.equal(clipboard_permissions,0);assert.equal(rdp_redirections,0);assert.equal(authorization_revision,1);return row;}),expected.users.map(row=>({...row})));
     assert.deepEqual(store.db.prepare('SELECT rowid,* FROM desktops ORDER BY rowid').all().map(({pve_machine_uuid,pve_machine_checked_at,pve_tags,pve_pool,...rest})=>{assert.equal(pve_machine_uuid,null);assert.equal(pve_machine_checked_at,null);return rest;}),expected.desktops.map(row=>({...row})));

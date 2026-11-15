@@ -11273,4 +11273,99 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get otherAppUsingSound => '다른 앱이 소리를 쓰고 있어요. 그 앱이 끝나면 다시 나요.';
+
+  @override
+  String get group => '그룹';
+
+  @override
+  String get removeFromGroup => '그룹에서 빼기';
+
+  @override
+  String get newGroupEllipsis => '새 그룹…';
+
+  @override
+  String get newGroup => '새 그룹';
+
+  @override
+  String get groupName => '그룹 이름';
+
+  @override
+  String get create => '만들기';
+
+  @override
+  String get renameGroup => '그룹 이름 바꾸기';
+
+  @override
+  String get rename => '이름 바꾸기';
+
+  @override
+  String get moveUp => '위로 옮기기';
+
+  @override
+  String get moveDown => '아래로 옮기기';
+
+  @override
+  String get deleteGroup => '그룹 삭제';
+
+  @override
+  String deleteGroupTitle(Object name) {
+    return '\'$name\' 그룹을 삭제할까요?';
+  }
+
+  @override
+  String get deleteGroupMessage => '이 그룹의 카드는 \'기타\'로 옮겨져요. 데스크톱은 그대로예요.';
+
+  @override
+  String get delete => '삭제';
+
+  @override
+  String get otherGroup => '기타';
+
+  @override
+  String groupOptions(Object name) {
+    return '\'$name\' 그룹 메뉴';
+  }
+
+  @override
+  String groupSection(Object name, Object count) {
+    return '$name · 데스크톱 $count';
+  }
+
+  @override
+  String get expand => '펼치기';
+
+  @override
+  String get enterGroupName => '그룹 이름을 입력하세요.';
+
+  @override
+  String get groupNameRules => '그룹 이름은 1~40자로 써 주세요.';
+
+  @override
+  String get groupNameTaken => '같은 이름의 그룹이 있어요.';
+
+  @override
+  String get tooManyGroups => '그룹은 30개까지 만들 수 있어요.';
+
+  @override
+  String get groupNoLongerExists => '그 그룹은 이제 없어요.';
+
+  @override
+  String get couldntChangeGroupsTryAgain => '그룹을 바꾸지 못했어요. 잠시 후 다시 시도하세요.';
+
+  @override
+  String get smallCards => '작게';
+
+  @override
+  String get smallCardsTapNormal => '작은 카드 · 누르면 보통 크기';
+
+  @override
+  String get normalCardsTapSmall => '보통 카드 · 누르면 작게';
+
+  @override
+  String get couldntSaveCardSize => '카드 크기 설정을 저장하지 못했어요.';
+
+  @override
+  String currentGroup(Object name) {
+    return '$name, 지금 그룹';
+  }
 }

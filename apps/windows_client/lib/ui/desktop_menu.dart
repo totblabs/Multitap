@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/desktop_machine.dart';
+import '../models/desktop_organize.dart' show DesktopGroup;
 import '../models/session_display_mode.dart';
 import 'app_dialog.dart';
 import 'app_menu.dart';
@@ -89,9 +90,28 @@ class DesktopActions {
     this.consoleReason,
     this.favorite,
     this.toggleFavorite,
+    this.groups,
+    this.group,
+    this.setGroup,
+    this.newGroup,
+    this.newGroupReason,
     this.working,
     this.powerSince,
   });
+
+  /// This account's groups in their order, where the broker keeps groups
+  /// (null: no 그룹 row at all); [group] is the one this desktop is in.
+  final List<DesktopGroup>? groups;
+  final String? group;
+
+  /// Puts the desktop in a group, or in none (null); null while a change is
+  /// being sent.
+  final ValueChanged<String?>? setGroup;
+
+  /// 새 그룹…: asks for a name, makes the group and puts the desktop in it.
+  /// Null with [newGroupReason] saying why (30 groups already).
+  final VoidCallback? newGroup;
+  final String? newGroupReason;
 
   /// What this client is doing for the desktop right now, as one sentence
   /// (opening its Console or its remote window, asking for a Host update):
@@ -270,6 +290,8 @@ class _DesktopMenuState extends State<DesktopMenu> {
       required String label,
       VoidCallback? onPressed,
       String? note,
+      Widget? trailing,
+      String? semanticsLabel,
       String? disabledReason,
       bool danger = false,
     }) {
@@ -287,6 +309,7 @@ class _DesktopMenuState extends State<DesktopMenu> {
       final button = MenuItemButton(
         key: Key(key),
         onPressed: onPressed,
+        semanticsLabel: semanticsLabel,
         style: !touch
             ? (red ?? const ButtonStyle()).merge(
                 MenuItemButton.styleFrom(
@@ -313,7 +336,7 @@ class _DesktopMenuState extends State<DesktopMenu> {
         // Name the launcher's default in words. An explicit choice connects
         // only this attempt and never becomes the next launcher's default.
         trailingIcon: note == null
-            ? null
+            ? trailing
             : KeepAllText(
                 note,
                 key: Key('$key-note'),
@@ -417,6 +440,75 @@ class _DesktopMenuState extends State<DesktopMenu> {
       ],
     ];
 
+    // 그룹: this account's groups (the current one checked), 그룹에서 빼기
+    // while it is in one, and 새 그룹….
+    final groups = actions.groups;
+    final setGroup = actions.setGroup;
+    final inGroup =
+        groups != null && groups.any((group) => group.id == actions.group);
+    final groupMenu = groups == null
+        ? null
+        : SubmenuButton(
+            key: Key('group-menu-$id'),
+            style: MenuItemButton.styleFrom(
+              minimumSize: Size(0, touch ? 48 : 40),
+              maximumSize: const Size(double.infinity, double.infinity),
+              padding: EdgeInsets.symmetric(horizontal: touch ? 16 : 12),
+              textStyle: touch
+                  ? uiText(size: 14)
+                  : uiText(size: 13, weight: FontWeight.w500),
+            ),
+            menuStyle: AppMenu.menuStyle(p, minWidth: 192),
+            leadingIcon: AppMenu.icon(p, Icons.folder_outlined, color: p.blue),
+            // A chevron, as the client's other "more" marks (no filled
+            // triangle).
+            trailingIcon: Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: p.muted,
+            ),
+            menuChildren: [
+              for (final group in groups)
+                item(
+                  key: 'group-${group.id}-$id',
+                  icon: group.id == actions.group
+                      ? Icons.folder_rounded
+                      : Icons.folder_outlined,
+                  color: p.blue,
+                  label: group.name,
+                  // The current one only closes the menu.
+                  onPressed: setGroup == null
+                      ? null
+                      : group.id == actions.group
+                      ? () {}
+                      : () => setGroup(group.id),
+                  trailing: group.id == actions.group ? AppMenu.check(p) : null,
+                  // The check is read out too.
+                  semanticsLabel: group.id == actions.group
+                      ? l10n.currentGroup(group.name)
+                      : null,
+                ),
+              if (inGroup)
+                item(
+                  key: 'group-none-$id',
+                  icon: Icons.folder_off_outlined,
+                  color: p.muted,
+                  label: l10n.removeFromGroup,
+                  onPressed: setGroup == null ? null : () => setGroup(null),
+                ),
+              if (groups.isNotEmpty) divider(),
+              item(
+                key: 'group-new-$id',
+                icon: Icons.create_new_folder_outlined,
+                color: p.amber,
+                label: l10n.newGroupEllipsis,
+                onPressed: actions.newGroup,
+                disabledReason: actions.newGroupReason,
+              ),
+            ],
+            child: KeepAllText(l10n.group),
+          );
+
     final manage = <Widget>[
       // No sound-card row: the card is added in Proxmox; the
       // tile's sound badge still opens the dialog.
@@ -442,6 +534,7 @@ class _DesktopMenuState extends State<DesktopMenu> {
           label: actions.favorite! ? l10n.removeFromFavorites : l10n.addFavorites,
           onPressed: actions.toggleFavorite,
         ),
+      ?groupMenu,
       item(
         key: 'details-$id',
         icon: Icons.fact_check_outlined,

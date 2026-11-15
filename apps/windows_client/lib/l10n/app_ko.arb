@@ -8283,5 +8283,80 @@
     }
   },
   "otherAppUsingSound": "다른 앱이 소리를 쓰고 있어요. 그 앱이 끝나면 다시 나요.",
-  "@otherAppUsingSound": {}
+  "@otherAppUsingSound": {},
+  "group": "그룹",
+  "@group": {},
+  "removeFromGroup": "그룹에서 빼기",
+  "@removeFromGroup": {},
+  "newGroupEllipsis": "새 그룹…",
+  "@newGroupEllipsis": {},
+  "newGroup": "새 그룹",
+  "@newGroup": {},
+  "groupName": "그룹 이름",
+  "@groupName": {},
+  "create": "만들기",
+  "@create": {},
+  "renameGroup": "그룹 이름 바꾸기",
+  "@renameGroup": {},
+  "rename": "이름 바꾸기",
+  "@rename": {},
+  "moveUp": "위로 옮기기",
+  "@moveUp": {},
+  "moveDown": "아래로 옮기기",
+  "@moveDown": {},
+  "deleteGroup": "그룹 삭제",
+  "@deleteGroup": {},
+  "deleteGroupTitle": "'{name}' 그룹을 삭제할까요?",
+  "@deleteGroupTitle": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "deleteGroupMessage": "이 그룹의 카드는 '기타'로 옮겨져요. 데스크톱은 그대로예요.",
+  "@deleteGroupMessage": {},
+  "delete": "삭제",
+  "@delete": {},
+  "otherGroup": "기타",
+  "@otherGroup": {},
+  "groupOptions": "'{name}' 그룹 메뉴",
+  "@groupOptions": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "groupSection": "{name} · 데스크톱 {count}",
+  "@groupSection": {
+    "placeholders": {
+      "name": {},
+      "count": {}
+    }
+  },
+  "expand": "펼치기",
+  "@expand": {},
+  "enterGroupName": "그룹 이름을 입력하세요.",
+  "@enterGroupName": {},
+  "groupNameRules": "그룹 이름은 1~40자로 써 주세요.",
+  "@groupNameRules": {},
+  "groupNameTaken": "같은 이름의 그룹이 있어요.",
+  "@groupNameTaken": {},
+  "tooManyGroups": "그룹은 30개까지 만들 수 있어요.",
+  "@tooManyGroups": {},
+  "groupNoLongerExists": "그 그룹은 이제 없어요.",
+  "@groupNoLongerExists": {},
+  "couldntChangeGroupsTryAgain": "그룹을 바꾸지 못했어요. 잠시 후 다시 시도하세요.",
+  "@couldntChangeGroupsTryAgain": {},
+  "smallCards": "작게",
+  "@smallCards": {},
+  "smallCardsTapNormal": "작은 카드 · 누르면 보통 크기",
+  "@smallCardsTapNormal": {},
+  "normalCardsTapSmall": "보통 카드 · 누르면 작게",
+  "@normalCardsTapSmall": {},
+  "couldntSaveCardSize": "카드 크기 설정을 저장하지 못했어요.",
+  "@couldntSaveCardSize": {},
+  "currentGroup": "{name}, 지금 그룹",
+  "@currentGroup": {
+    "placeholders": {
+      "name": {}
+    }
+  }
 }

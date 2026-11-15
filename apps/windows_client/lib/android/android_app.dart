@@ -39,8 +39,10 @@ import '../ui/desktop_menu.dart'
         stopUnavailableReason;
 import '../ui/pc_power_help.dart';
 import '../ui/desktop_readiness.dart';
+import '../ui/desktop_groups.dart';
 import '../ui/desktop_tile.dart'
-    show DesktopTile, StartProgress, desktopTileGap, desktopTileGrid;
+    show DesktopTile, DesktopTileScale, StartProgress, desktopTileGrid;
+import '../ui/launcher_view_menu.dart' show LauncherCardSizeButton;
 import '../ui/korean_text.dart';
 import '../ui/mfa_login_dialog.dart';
 import '../ui/mfa_account_dialog.dart';
@@ -567,6 +569,23 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   bool _viewSaving = false;
   bool _showPreviews = true, _exitBusy = false;
 
+  /// 작게: the same cards drawn smaller (보통 otherwise), on this device.
+  bool _smallCards = false;
+
+  Future<void> _selectCardSize() async {
+    if (_viewSaving) return;
+    final next = !_smallCards;
+    setState(() => _viewSaving = true);
+    try {
+      await _store.saveLauncherSmallCards(next);
+      if (mounted) setState(() => _smallCards = next);
+    } catch (_) {
+      if (mounted) _notice(l10n.couldntSaveCardSize);
+    } finally {
+      if (mounted) setState(() => _viewSaving = false);
+    }
+  }
+
   Future<void> _selectPreviews() async {
     if (_viewSaving) return;
     final next = !_showPreviews;
@@ -633,6 +652,24 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   final _favoritePending = <String, bool>{};
   final _favoriteDone = <String, (bool, DateTime)>{};
 
+  /// This account's desktop groups from the last list read (or save) of
+  /// [_groupsOf]; null where the broker keeps none. A group change being
+  /// sent and the answers not yet confirmed by a later list read, as for
+  /// favourites; the folded sections; a group list change being saved and
+  /// when the last one was.
+  List<DesktopGroup>? _groups;
+  BrokerSession? _groupsOf;
+  final _groupPending = <String, String?>{};
+  final _groupDone = <String, (String?, DateTime)>{};
+  Set<String> _folded = {};
+  bool _groupsSaving = false;
+  DateTime? _groupsSavedAt;
+
+  List<DesktopGroup>? get _shownGroups =>
+      _groupsOf != null && _groupsOf == _session && _api is DesktopGroupBrokerApi
+      ? _groups
+      : null;
+
   void _searchTextChanged() {
     if (_search.text == _query) return;
     setState(() {
@@ -698,6 +735,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       _status = DesktopStatus.byId(organize.status);
       _kind = DesktopKind.byId(organize.kind);
       _sort = DesktopSort.byName(organize.sort);
+      _folded = {...organize.folded};
     });
   }
 
@@ -714,6 +752,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
               status: _status.id,
               sort: _sort.name,
               kind: _kind.id,
+              folded: [..._folded],
             ),
           )
           .catchError((Object _) {}),
@@ -787,6 +826,112 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     } finally {
       if (mounted) setState(() => _favoritePending.remove(machine.id));
     }
+  }
+
+  // --- desktop groups ---------------------------------------------------------
+
+  /// A section header was pressed: it folds or unfolds, remembered for this
+  /// account on this device.
+  void _toggleFold(String key) {
+    final known = {
+      DesktopSection.otherKey,
+      for (final group in _shownGroups ?? const <DesktopGroup>[])
+        DesktopSection.sectionKey(group),
+    };
+    setState(() {
+      _folded = {
+        for (final folded in _folded)
+          if (known.contains(folded) && folded != key) folded,
+        if (!_folded.contains(key)) key,
+      };
+    });
+    _saveOrganize();
+  }
+
+  /// Saves the whole group list; the list shows the answer at once and is
+  /// read again after it.
+  Future<List<DesktopGroup>> _saveGroups(List<DesktopGroupDraft> groups) async {
+    final api = _api, session = _session;
+    if (api is! DesktopGroupBrokerApi || session == null) {
+      throw const BrokerException('groups_unavailable');
+    }
+    try {
+      final saved = await (api as DesktopGroupBrokerApi).saveDesktopGroups(
+        session.token,
+        groups,
+      );
+      if (mounted && _session == session) {
+        setState(() {
+          _groups = saved;
+          _groupsOf = session;
+          _groupsSavedAt = DateTime.now();
+        });
+        unawaited(_refresh(quiet: true));
+      }
+      return saved;
+    } on BrokerException catch (error) {
+      if (error.status == 401 && mounted && _session == session) {
+        _expired(error);
+      }
+      rethrow;
+    }
+  }
+
+  DesktopGroupFlows? get _groupFlows {
+    final groups = _shownGroups;
+    return groups == null ? null : DesktopGroupFlows(groups, _saveGroups);
+  }
+
+  /// One group list change at a time; a failure the change does not show
+  /// itself (the name dialog does) is said in a notice.
+  Future<T?> _changeGroups<T>(
+    Future<T> Function(DesktopGroupFlows flows) change,
+  ) async {
+    final flows = _groupFlows;
+    if (flows == null || _groupsSaving) return null;
+    setState(() => _groupsSaving = true);
+    try {
+      return await change(flows);
+    } catch (error) {
+      if (mounted && !(error is BrokerException && error.status == 401)) {
+        _notice(desktopGroupFailureText(error));
+      }
+      return null;
+    } finally {
+      if (mounted) setState(() => _groupsSaving = false);
+    }
+  }
+
+  /// Puts [machine] in [group] (null: in none); the card moves at once and
+  /// comes back if the broker refuses.
+  Future<void> _setGroup(DesktopMachine machine, String? group) async {
+    final api = _api, session = _session;
+    if (api is! DesktopGroupBrokerApi || session == null) return;
+    if (_groupPending.containsKey(machine.id)) return;
+    setState(() => _groupPending[machine.id] = group);
+    try {
+      final saved = await (api as DesktopGroupBrokerApi).setDesktopGroup(
+        session.token,
+        machine.id,
+        group,
+      );
+      if (mounted) _groupDone[machine.id] = (saved, DateTime.now());
+      if (mounted && _session == session) unawaited(_refresh(quiet: true));
+    } catch (error) {
+      if (error is BrokerException && error.status == 401) {
+        if (mounted && _session == session) _expired(error);
+      } else if (mounted) {
+        _notice(desktopGroupFailureText(error));
+      }
+    } finally {
+      if (mounted) setState(() => _groupPending.remove(machine.id));
+    }
+  }
+
+  /// 새 그룹… on a card: the group is made, then the card goes in it.
+  Future<void> _newGroup(DesktopMachine machine) async {
+    final created = await _changeGroups((flows) => flows.create(context));
+    if (created != null && mounted) await _setGroup(machine, created);
   }
 
   @override
@@ -1122,6 +1267,11 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       _showPreviews = true;
     }
     try {
+      _smallCards = await _store.launcherSmallCards();
+    } catch (_) {
+      _smallCards = false;
+    }
+    try {
       _version = await _store.appVersion();
     } catch (_) {
       _version = null;
@@ -1308,7 +1458,8 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         await api.logout(authenticated.token);
         return;
       }
-      final desktops = await api.desktops(authenticated.token);
+      final list = await readDesktopList(api, authenticated.token);
+      final desktops = list.desktops;
       if (!current()) {
         await api.logout(authenticated.token);
         return;
@@ -1330,6 +1481,8 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         _session = authenticated;
         _hostUpdateReplies.clear();
         _desktops = desktops;
+        _groups = list.groups;
+        _groupsOf = authenticated;
         _checkedAt = DateTime.now();
         _listError = null;
         _password.clear();
@@ -1380,10 +1533,17 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       if (!quiet) _listError = null;
     });
     try {
-      final desktops = await api.desktops(session.token);
+      final list = await readDesktopList(api, session.token);
+      final desktops = list.desktops;
       if (!mounted || _session != session) return;
       setState(() {
         _desktops = desktops;
+        // A group list saved after this read began stays what is shown.
+        if (_groupsOf != session || !(_groupsSavedAt?.isAfter(started) ?? false)) {
+          _groups = list.groups;
+          _groupsOf = session;
+        }
+        _groupDone.removeWhere((_, done) => done.$2.isBefore(started));
         // A read that began after a favourite answer carries it.
         _hostUpdateReplies.removeWhere((id, reply) {
           final listed = desktops.where((d) => d.id == id).firstOrNull;
@@ -2200,9 +2360,17 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       machine = machine.withHostUpdate(reply.$3);
     }
     final mark = _favoritePending[desktop.id] ?? _favoriteDone[desktop.id]?.$1;
-    final organized = mark == null
+    var organized = mark == null
         ? machine
         : machine.withOrganize(machine.organize.withFavorite(mark));
+    // A group change being sent, or answered after the last list read began.
+    if (_groupPending.containsKey(desktop.id)) {
+      organized = organized.withOrganize(
+        organized.organize.withGroup(_groupPending[desktop.id]),
+      );
+    } else if (_groupDone[desktop.id] case (final group, _)) {
+      organized = organized.withOrganize(organized.organize.withGroup(group));
+    }
     // The last refresh failed: the cards show the configured size, not
     // usage that is no longer current.
     return _refreshFailed
@@ -3424,6 +3592,20 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       toggleFavorite: _favoritePending.containsKey(desktop.id)
           ? null
           : () => unawaited(_toggleFavorite(m)),
+      // 그룹 only where the broker keeps groups; a change shows at once.
+      groups: _shownGroups,
+      group: m.organize.group,
+      setGroup: _groupPending.containsKey(desktop.id)
+          ? null
+          : (group) => unawaited(_setGroup(m, group)),
+      newGroup:
+          _groupsSaving ||
+              (_shownGroups?.length ?? 0) >= DesktopGroup.maxCount
+          ? null
+          : () => unawaited(_newGroup(m)),
+      newGroupReason: (_shownGroups?.length ?? 0) >= DesktopGroup.maxCount
+          ? l10n.tooManyGroups
+          : null,
     );
   }
 
@@ -3549,22 +3731,32 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
 
   /// The assigned desktops as the Windows launcher shows them: its
   /// [DesktopTile] by finger, in its grid
-  /// ([desktopTileGrid]: responsive columns, one size for every tile).
-  Widget _tiles(List<DesktopMachine> shown, TextScaler scaler, Size screen) =>
-      LayoutBuilder(
-        builder: (context, bounds) {
-          final grid = desktopTileGrid(
-            bounds.maxWidth,
-            scaler,
-            viewport: screen,
-            previews: _showPreviews,
-            touch: true,
-          );
-          final tiles = [
-            for (final machine in shown)
-              if (_find(machine.id) case final desktop?)
-                DesktopTile(
-                  key: ValueKey('slot-${machine.id}'),
+  /// ([desktopTileGrid]: responsive columns, one size for every tile; 작게
+  /// draws the same tile smaller). With groups, one section per group and
+  /// 기타, each under its header ([sections]).
+  Widget _tiles(
+    List<DesktopMachine> shown,
+    TextScaler scaler,
+    Size screen,
+    List<DesktopSection>? sections,
+  ) => LayoutBuilder(
+    builder: (context, bounds) {
+      final grid = desktopTileGrid(
+        bounds.maxWidth,
+        scaler,
+        viewport: screen,
+        previews: _showPreviews,
+        touch: true,
+        small: _smallCards,
+      );
+      Widget rows(List<DesktopMachine> machines) {
+        final tiles = [
+          for (final machine in machines)
+            if (_find(machine.id) case final desktop?)
+              DesktopTileScale(
+                key: ValueKey('slot-${machine.id}'),
+                grid: grid,
+                child: DesktopTile(
                   machine: machine,
                   readiness: _readiness(machine),
                   actions: _actionsFor(desktop),
@@ -3581,33 +3773,95 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
                   touch: true,
                   focusStyle: AndroidTvFocus.style,
                 ),
-          ];
-          return Column(
-            key: const Key('cards-view'),
-            children: [
-              for (var row = 0; row < tiles.length; row += grid.columns) ...[
-                if (row > 0) const SizedBox(height: desktopTileGap),
-                SizedBox(
-                  height: grid.height,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (var i = row; i < row + grid.columns; i++) ...[
-                        if (i > row) const SizedBox(width: desktopTileGap),
-                        Expanded(
-                          child: i < tiles.length
-                              ? tiles[i]
-                              : const SizedBox.shrink(),
-                        ),
-                      ],
+              ),
+        ];
+        return Column(
+          children: [
+            for (var row = 0; row < tiles.length; row += grid.columns) ...[
+              if (row > 0) SizedBox(height: grid.gap),
+              SizedBox(
+                height: grid.extent,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = row; i < row + grid.columns; i++) ...[
+                      if (i > row) SizedBox(width: grid.gap),
+                      Expanded(
+                        child: i < tiles.length
+                            ? tiles[i]
+                            : const SizedBox.shrink(),
+                      ),
                     ],
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ],
-          );
-        },
+          ],
+        );
+      }
+
+      if (sections == null) {
+        return KeyedSubtree(key: const Key('cards-view'), child: rows(shown));
+      }
+      final groups = _shownGroups ?? const <DesktopGroup>[];
+      final saving = _groupsSaving;
+      final manage = _groupFlows != null;
+      var cardsAbove = false;
+      final children = <Widget>[];
+      for (final (index, section) in sections.indexed) {
+        final folded = _folded.contains(section.key);
+        final group = section.group;
+        final at = group == null
+            ? -1
+            : groups.indexWhere((item) => item.id == group.id);
+        final open = !folded && section.machines.isNotEmpty;
+        children.add(
+          Padding(
+            padding: EdgeInsets.only(
+              top: index == 0 ? 0 : (cardsAbove ? 20 : 4),
+              bottom: open ? 8 : 0,
+            ),
+            child: DesktopSectionHeader(
+              key: ValueKey('section-header-${section.key}'),
+              section: section,
+              folded: folded,
+              touch: true,
+              focusStyle: AndroidTvFocus.style,
+              onToggle: () => _toggleFold(section.key),
+              manage: group != null && manage,
+              onRename: group == null || saving
+                  ? null
+                  : () => unawaited(
+                      _changeGroups((flows) => flows.rename(context, group)),
+                    ),
+              onMoveUp: group == null || saving || at <= 0
+                  ? null
+                  : () => unawaited(
+                      _changeGroups((flows) => flows.move(group, -1)),
+                    ),
+              onMoveDown: group == null || saving || at >= groups.length - 1
+                  ? null
+                  : () => unawaited(
+                      _changeGroups((flows) => flows.move(group, 1)),
+                    ),
+              onDelete: group == null || saving
+                  ? null
+                  : () => unawaited(
+                      _changeGroups((flows) => flows.delete(context, group)),
+                    ),
+            ),
+          ),
+        );
+        if (open) children.add(rows(section.machines));
+        cardsAbove = open;
+      }
+      return Column(
+        key: const Key('cards-view'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
       );
+    },
+  );
 
   Widget _workspace() {
     final p = AppPalette.of(context);
@@ -3681,6 +3935,16 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       compactChrome: true,
       onPressed: () => unawaited(_selectPreviews()),
     );
+    // 보통 / 작게 in 미리보기's toggle style, before 새로고침 as on Windows:
+    // the title row has the room (the filter row keeps its tools on one
+    // line on a phone).
+    Widget cardSize({bool label = true}) => LauncherCardSizeButton(
+      small: _smallCards,
+      compact: !label || compactViewOptions,
+      height: barHeight,
+      compactChrome: true,
+      onChanged: (_) => unawaited(_selectCardSize()),
+    );
     final controls = _desktops.isEmpty
         ? Wrap(
             alignment: WrapAlignment.end,
@@ -3688,7 +3952,10 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
             runSpacing: 8,
             children: [viewMenu, refresh],
           )
-        : refresh;
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [cardSize(), const SizedBox(width: 8), refresh],
+          );
     final organize = organizeUseful(machines);
     final chip = _effectiveChip(machines);
     final status = _effectiveStatus(machines);
@@ -3702,6 +3969,16 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       kind: kind,
       sort: _sort,
     );
+    final sections = desktopSections(
+      shown,
+      machines,
+      _shownGroups,
+      filtering:
+          !DesktopQuery(_query).isEmpty ||
+          chip != DesktopChip.all ||
+          status != DesktopStatus.all ||
+          kind != DesktopKind.all,
+    );
     final organizeKey = '${_origin?.origin}|${session.username}';
     if (_organizeFor != organizeKey) {
       _organizeFor = organizeKey;
@@ -3709,6 +3986,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       _status = DesktopStatus.all;
       _kind = DesktopKind.all;
       _sort = DesktopSort.number;
+      _folded = {};
       final origin = _origin;
       // After this build: clearing the box notifies its listener.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -4159,7 +4437,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
                 ),
               ),
             ),
-          _tiles(shown, scaler, size),
+          _tiles(shown, scaler, size, sections),
         ],
       );
     }
@@ -4175,6 +4453,8 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
                     Expanded(child: statusStrip),
                     const SizedBox(width: 4),
                     tools,
+                    const SizedBox(width: 4),
+                    cardSize(label: false),
                     const SizedBox(width: 4),
                     refreshButton(label: false),
                   ],

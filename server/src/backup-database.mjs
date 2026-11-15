@@ -17,12 +17,13 @@ import { BackupError, backupMaxDatabaseBytes } from './backup-format.mjs';
 
 const fail = code => { throw new BackupError(code); };
 
-// Rows that travel. Accounts and their password hashes, desktops, who is
-// assigned what with which permissions, Host registrations (token hashes),
-// Host requests, approved PCs and their wake addresses, settings (the sealed
+// Rows that travel. Accounts and their password hashes, desktops, each
+// account's own desktop groups, who is assigned what with which permissions
+// (and in which of those groups), Host registrations (token hashes), Host
+// requests, approved PCs and their wake addresses, settings (the sealed
 // Proxmox connection among them), the administration record, usage history
 // and two-step sign-in factors.
-export const backupIncludedTables = Object.freeze(['users', 'desktops', 'assignments', 'hosts', 'host_requests', 'local_pc_approvals', 'pc_wake', 'settings', 'audit_events', 'usage_logins', 'usage_connections', 'account_mfa', 'mfa_recovery_codes']);
+export const backupIncludedTables = Object.freeze(['users', 'desktops', 'desktop_groups', 'assignments', 'hosts', 'host_requests', 'local_pc_approvals', 'pc_wake', 'settings', 'audit_events', 'usage_logins', 'usage_connections', 'account_mfa', 'mfa_recovery_codes']);
 // Rows that stay: live sign-ins and their tokens, one-time enrolment codes,
 // power operations in flight, sign-in lockout counters and the short-lived
 // diagnostic reports of clients and Hosts (7 days, up to tens of megabytes).

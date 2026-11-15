@@ -19,6 +19,7 @@ export const fixtureTotp = 'a1'.repeat(20);
 const sha = text => createHash('sha256').update(text).digest('hex');
 const fakeHash = seed => 'scrypt-v1$' + sha('salt' + seed).slice(0, 32) + '$' + sha('key' + seed);
 export const ids = { owner: '11111111-1111-4111-8111-111111111111', second: '22222222-2222-4222-8222-222222222222', member: '33333333-3333-4333-8333-333333333333', guest: '44444444-4444-4444-8444-444444444444' };
+export const fixtureGroupId = (seed, index) => 'g_' + (seed === 'a' ? 'aaaa' : 'bbbb') + String(index).padStart(8, '0');
 
 export function temporaryDirectory(t, prefix = 'multitap-backup-') {
   const directory = mkdtempSync(join(tmpdir(), prefix));
@@ -45,6 +46,10 @@ export function seedServer(directory, { seed = 'a', passwordHash = null, withSec
   db.prepare('INSERT INTO pc_wake(desktop_id,host_id,adapters,reported_at) VALUES(?,?,?,?)').run('pc-' + seed, 'bbbbbbbb-0000-4000-8000-000000000001', JSON.stringify([{ mac: '02:00:00:00:00:0' + (seed === 'a' ? '1' : '2'), broadcast: '192.0.2.255' }]), now);
   const assign = (userId, desktop, clipboard, redirections, sound, favorite) => db.prepare('INSERT INTO assignments(user_id,desktop_id,clipboard_permissions,rdp_redirections,sound_card_add,favorite,last_used_at) VALUES(?,?,?,?,?,?,?)').run(userId, desktop, clipboard, redirections, sound, favorite, now + clipboard);
   assign(ids.member, 'pve-101', 5, 3, 1, 1); assign(ids.member, 'pve-170', 15, 127, 0, 0); assign(ids.second, 'pve-102', 0, 0, 0, 0); assign(ids.guest, 'pc-' + seed, 1, 0, 0, 1);
+  // Each account's own desktop groups, one of them holding a desktop.
+  const group = (id, userId, name, position) => db.prepare('INSERT INTO desktop_groups(id,user_id,name,position,created_at) VALUES(?,?,?,?,?)').run(id, userId, name, position, now + position);
+  group(fixtureGroupId(seed, 1), ids.member, '업무 ' + seed, 0); group(fixtureGroupId(seed, 2), ids.member, 'Lab ' + seed, 1); group(fixtureGroupId(seed, 3), ids.second, '테스트', 0);
+  db.prepare('UPDATE assignments SET group_id=? WHERE user_id=? AND desktop_id=?').run(fixtureGroupId(seed, 2), ids.member, 'pve-101');
   const setting = (key, value) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
   if (withSecrets) {
     setting('proxmox', vault.seal({ ...fixtureProxmox, secret: fixtureProxmox.secret + seed }));

@@ -54,3 +54,34 @@ class LauncherViewMenu extends StatelessWidget {
     onPressed: () => onPreviews(!showPreviews),
   );
 }
+
+/// 보통 / 작게, beside 미리보기 and in its toggle style: on (amber) draws
+/// the same cards smaller, more to a row. [compact] is its icon alone.
+class LauncherCardSizeButton extends StatelessWidget {
+  const LauncherCardSizeButton({
+    super.key,
+    required this.small,
+    required this.onChanged,
+    this.compact = false,
+    this.compactChrome = false,
+    this.height,
+  });
+  final bool small;
+  final ValueChanged<bool> onChanged;
+  final bool compact, compactChrome;
+
+  /// Null: the title row's height (organizerHeight).
+  final double? height;
+
+  @override
+  Widget build(BuildContext context) => LauncherHeaderButton(
+    key: const Key('desktop-card-size'),
+    compactChrome: compactChrome,
+    height: height,
+    icon: small ? Icons.apps_rounded : Icons.grid_view_rounded,
+    label: compact ? null : l10n.smallCards,
+    tooltip: small ? l10n.smallCardsTapNormal : l10n.normalCardsTapSmall,
+    selected: small,
+    onPressed: () => onChanged(!small),
+  );
+}

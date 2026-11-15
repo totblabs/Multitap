@@ -25,7 +25,7 @@ flowchart LR
 | 인증·중계 | ID/비밀번호 로그인, 서버가 정한 VM 할당. 브로커가 세션 중에도 권한을 확인하고, 할당이나 권한이 회수되면 세션을 끝낸다. |
 | 화면 | 클라이언트 모니터 하나에 소유 가상 출력 하나(1개 또는 2개). 스트리밍하는 동안 다른 화면(Proxmox 콘솔, vGPU 출력, 물리 모니터)은 끄고, 끝나면 저장해 둔 상태로 되돌린다. 준비된 소유 출력이 없으면 콘솔이나 물리 화면으로 대신하지 않고 연결 불가 사유를 알린다. [디스플레이 관리자 v2](display-manager-v2.md), [두 모니터](dual-monitor-design.md) |
 | 해상도 | 창 크기가 바뀌면 가상 출력의 실제 Windows 모드를 바꾸고, 새 영상 세대(epoch)와 키 프레임으로 이어 간다. 화면을 늘리거나 잘라서 맞추지 않는다. Windows 배율은 100~200 % 다섯 단계에서 고른다. |
-| 영상 | H.264, NV12 4:2:0. 기본은 x264(CPU), GPU가 있으면 NVENC나 AMF, 실패하면 같은 시점의 키 프레임부터 Microsoft 소프트웨어 인코더로 바꾼다. 새 연결은 60 fps와 자동 비트레이트(최대 100 Mbps)로 시작한다. 멈춘 영역은 무손실 타일(`tiles-v1`)로 선명하게 보강한다. [x264 인코더](x264-encoder.md), [기본값](stream-default-profile.md), [무손실 타일](lossless-tiles-design.md) |
+| 영상 | H.264, NV12 4:2:0. 기본은 x264(CPU), GPU가 있으면 NVENC, AMF 또는 인텔 하드웨어 인코더(Windows 하드웨어 MFT, Quick Sync), 실패하면 같은 시점의 키 프레임부터 Microsoft 소프트웨어 인코더로 바꾼다. 새 연결은 60 fps와 자동 비트레이트(최대 100 Mbps)로 시작한다. 멈춘 영역은 무손실 타일(`tiles-v1`)로 선명하게 보강한다. [x264 인코더](x264-encoder.md), [기본값](stream-default-profile.md), [무손실 타일](lossless-tiles-design.md) |
 | 전송 | 기본은 WSS. Host, 클라이언트, 브로커가 모두 지원하면 영상과 소리는 브로커의 UDP 중계(`udp-media-v1`, 세션별 AES-256-GCM)로 옮기고, 문제가 생기면 WSS로 돌아간다. 혼잡과 손실에 따라 비트레이트를 조정한다. [적응형 비트레이트](adaptive-bitrate.md) |
 | 입력 | 키보드, 마우스, 터치, 한글 입력. 원격 화면에 포커스가 있으면 Windows 단축키도 VM으로 보내고, 포커스를 잃거나 연결이 끊기면 눌린 키와 버튼을 놓는다. **마우스 잠금**을 켜면 마우스를 VM에 넘겨 상대 이동을 보내고, USB 권한이 있으면 가상 USB HID 마우스를 쓴다. [입력 반응성](input-responsiveness.md) |
 | 소리 | VM의 소리를 WASAPI로 캡처해 Opus로 보낸다. VM에 소리 장치가 있어야 한다(Proxmox VM 사운드 카드). |

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { username, text, notes as accountNotes, desktopId } from './security.mjs';
 import { clipboardPolicyFromMask, clipboardPolicyMask } from './clipboard-policy.mjs';
 import { devicePolicyBits, devicePolicyFromMask, devicePolicyMask } from './device-policy.mjs';
-import { normalizeTags, normalizePool, storedTags } from './desktop-organize.mjs';
+import { normalizeTags, normalizePool, storedTags, groupEntries, newGroupId } from './desktop-organize.mjs';
 import { approvedPcSql, availableDesktopSql } from './local-pc.mjs';
 import { wakeAdapters } from './pc-power.mjs';
 import { pcSessionPolicy, pcLoginReplaced, replacedSessionsPerUser, replacedSessionsTotal } from './client-session-policy.mjs';
@@ -352,6 +352,20 @@ export class Store {
     installUsage(this);
     // 공지 보내기 (notices.mjs): three tables, additive like the ones above (no version change).
     installNotices(this);
+    // 데스크톱 그룹 (desktop-organize.mjs): each account's own named sections of
+    // its desktop list, in its order. Additive like the tables above (no
+    // version change); older brokers ignore the table and the column, and
+    // existing assignments start without a group. A desktop's group is on its
+    // assignment row, so removing the assignment (revoke, Host removal) removes
+    // the membership too, and deleting a group leaves its desktops ungrouped.
+    this.transaction(() => {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS desktop_groups (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name TEXT NOT NULL, position INTEGER NOT NULL, created_at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS desktop_groups_user ON desktop_groups(user_id,position);`);
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('assignments') WHERE name='group_id'").get()) this.db.exec('ALTER TABLE assignments ADD COLUMN group_id TEXT REFERENCES desktop_groups(id) ON DELETE SET NULL');
+      this.db.exec('CREATE INDEX IF NOT EXISTS assignments_group ON assignments(group_id)');
+    });
     // Old releases could already have cached UUID B beside a Host for UUID A.
     // Repair only known mismatches; do not manufacture a fresh Proxmox check.
     this.transaction(() => {
@@ -650,9 +664,10 @@ export class Store {
       const kind = this.db.prepare('SELECT kind FROM desktops WHERE id=?').get(id)?.kind;
       this.db.prepare("UPDATE host_requests SET status='rejected',credentials_sealed=NULL WHERE desktop_id=? AND status='approved'").run(id);
       // A removed Host takes its assignments (and
-      // with them each user's permissions and favourite) along, so a later
-      // Host under the same VM number starts with nobody assigned. The VM
-      // itself, its files and the accounts stay.
+      // with them each user's permissions, favourite and group membership)
+      // along, so a later Host under the same VM number starts with nobody
+      // assigned. The VM itself, its files, the accounts and their desktop
+      // groups stay.
       const removedAssignments = this.db.prepare('DELETE FROM assignments WHERE desktop_id=?').run(id).changes;
       // Everything else bound to the desktop goes too, so adding it again
       // starts clean: the Host row itself (its token stops
@@ -880,8 +895,45 @@ export class Store {
   listDesktops(userId) {
     // Only a current approved Host is a client desktop (removing a Host also
     // removes its assignments). Offline registration remains valid authority.
-    return this.db.prepare(`SELECT d.id,d.name,d.kind,d.description,d.os,d.pve_os_type,d.pve_os_family,d.pve_os_source,d.pve_tags,d.pve_pool,a.favorite,a.last_used_at FROM desktops d JOIN assignments a ON a.desktop_id=d.id JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND u.disabled=0 AND ${availableDesktopSql} AND ${registeredDesktopSql} ORDER BY d.pve_vmid IS NULL,d.pve_vmid,d.name,d.id`).all(userId)
-      .map(({ pve_tags, pve_pool, favorite, last_used_at, ...row }) => ({ ...row, ...(row.kind === 'pc' ? { localPcApproved: true } : {}), tags: storedTags(pve_tags), pool: pve_pool ?? null, favorite: favorite === 1, lastUsedAt: Number.isFinite(last_used_at) ? new Date(last_used_at).toISOString() : null, status: 'host_not_registered', canConnect: false }));
+    // group: the id of the account's own group holding the desktop, or null.
+    return this.db.prepare(`SELECT d.id,d.name,d.kind,d.description,d.os,d.pve_os_type,d.pve_os_family,d.pve_os_source,d.pve_tags,d.pve_pool,a.favorite,a.last_used_at,(SELECT g.id FROM desktop_groups g WHERE g.id=a.group_id AND g.user_id=a.user_id) AS group_id FROM desktops d JOIN assignments a ON a.desktop_id=d.id JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND u.disabled=0 AND ${availableDesktopSql} AND ${registeredDesktopSql} ORDER BY d.pve_vmid IS NULL,d.pve_vmid,d.name,d.id`).all(userId)
+      .map(({ pve_tags, pve_pool, favorite, last_used_at, group_id, ...row }) => ({ ...row, ...(row.kind === 'pc' ? { localPcApproved: true } : {}), tags: storedTags(pve_tags), pool: pve_pool ?? null, favorite: favorite === 1, lastUsedAt: Number.isFinite(last_used_at) ? new Date(last_used_at).toISOString() : null, group: group_id ?? null, status: 'host_not_registered', canConnect: false }));
+  }
+  // The account's own desktop groups, [{id, name}] in its order.
+  desktopGroups(userId) {
+    return this.db.prepare('SELECT id,name FROM desktop_groups WHERE user_id=? ORDER BY position,rowid').all(userId).map(row => ({ id: row.id, name: row.name }));
+  }
+  // Replaces the account's whole group list with `entries` ([{id?, name}] in
+  // the wanted order): a listed id keeps that group under the given name, an
+  // entry without one makes a new group, and a group left out is deleted (its
+  // desktops become ungrouped by the foreign key). Everything is checked before
+  // anything changes. Returns the new list; null when the account is missing
+  // or disabled. Last write wins.
+  replaceDesktopGroups(userId, entries, now = Date.now()) {
+    const wanted = groupEntries(entries);
+    return this.transaction(() => {
+      if (!this.db.prepare('SELECT 1 FROM users WHERE id=? AND disabled=0').get(userId)) return null;
+      const existing = new Set(this.db.prepare('SELECT id FROM desktop_groups WHERE user_id=?').all(userId).map(row => row.id));
+      if (wanted.some(entry => entry.id !== null && !existing.has(entry.id))) throw new Error('unknown_group');
+      const kept = new Set(wanted.map(entry => entry.id));
+      for (const id of existing) if (!kept.has(id)) this.db.prepare('DELETE FROM desktop_groups WHERE id=? AND user_id=?').run(id, userId);
+      wanted.forEach((entry, position) => {
+        if (entry.id !== null) { this.db.prepare('UPDATE desktop_groups SET name=?,position=? WHERE id=? AND user_id=?').run(entry.name, position, entry.id, userId); return; }
+        let id; do id = newGroupId(); while (this.db.prepare('SELECT 1 FROM desktop_groups WHERE id=?').get(id));
+        this.db.prepare('INSERT INTO desktop_groups(id,user_id,name,position,created_at) VALUES(?,?,?,?,?)').run(id, userId, entry.name, position, now);
+      });
+      return this.desktopGroups(userId);
+    });
+  }
+  // The account's own group of one assigned desktop (null: none). False
+  // (nothing written) when the desktop is not assigned to an enabled account,
+  // as for setFavorite; a group that is not this account's is unknown_group.
+  setDesktopGroup(userId, id, groupId) {
+    if (groupId !== null && typeof groupId !== 'string') throw new Error('invalid_group');
+    return this.transaction(() => {
+      if (groupId !== null && !this.db.prepare('SELECT 1 FROM desktop_groups WHERE id=? AND user_id=?').get(groupId, userId)) throw new Error('unknown_group');
+      return this.db.prepare(`UPDATE assignments SET group_id=? WHERE user_id=? AND desktop_id=? AND EXISTS (SELECT 1 FROM users u WHERE u.id=assignments.user_id AND u.disabled=0) AND EXISTS (SELECT 1 FROM desktops d WHERE d.id=assignments.desktop_id AND ${availableDesktopSql} AND ${registeredDesktopSql})`).run(groupId, userId, id).changes > 0;
+    });
   }
   // The account's own favorite mark of one assigned VM. False (nothing
   // written) when the VM is not assigned to an enabled account; the caller

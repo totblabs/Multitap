@@ -36,7 +36,7 @@ test('schema9→10 defaults every retained account to deny and preserves identit
   assert.equal(store.db.prepare('PRAGMA user_version').get().user_version,19);
   const users=store.db.prepare('SELECT rowid,* FROM users ORDER BY rowid').all().map(({clipboard_permissions,rdp_redirections,favorite,last_used_at,sound_card_add,authorization_revision,...row})=>{assert.equal(clipboard_permissions,0);assert.equal(rdp_redirections,0);assert.equal(authorization_revision,1);return row;});
   assert.deepEqual(users,before.users);
-  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({clipboard_permissions,rdp_redirections,favorite,last_used_at,sound_card_add,...row})=>{assert.equal(clipboard_permissions,0);assert.equal(rdp_redirections,0);return row;}),before.assignments);
+  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({clipboard_permissions,rdp_redirections,favorite,last_used_at,sound_card_add,group_id,...row})=>{assert.equal(clipboard_permissions,0);assert.equal(rdp_redirections,0);assert.equal(group_id,null);return row;}),before.assignments);
   assert.equal(store.setting('hostless_assignments_cleanup'),'0');
   for(const table of ['sessions','desktops','settings'])assert.deepEqual(store.db.prepare('SELECT rowid,* FROM '+table+(table==='settings'?" WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')":'')+' ORDER BY rowid').all().map(({pve_tags,pve_pool,issuer,replaced_at,...row})=>({...row})),before[table]);
   for(const id of [admin,member])assert.deepEqual(store.clipboardPolicy(id,'pve-710'),deny);

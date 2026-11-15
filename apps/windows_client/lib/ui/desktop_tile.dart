@@ -85,36 +85,101 @@ const _resourceGap = (top: 6.0, bottom: 12.0);
 /// size for every tile: the picture, 5:3 of the tile but at most 40 % of
 /// the [viewport]'s height (a fifth under 500: a phone on its side keeps the
 /// main button on screen), and the body below it ([tileBodyHeight]).
-({int columns, double width, double picture, double height}) desktopTileGrid(
+///
+/// [small] (작게) keeps that card whole and only draws it smaller: the rule
+/// lays the grid out for a page [desktopSmallTileScale] times as wide (up to
+/// 6 columns), and [scale] draws it back into [width]. Where even then one
+/// card fills the row (a phone), it is the normal card drawn smaller. [width],
+/// [picture] and [height] are the card's own (unscaled) size; [extent] and
+/// [gap] are what it takes on screen.
+DesktopTileGrid desktopTileGrid(
   double width,
   TextScaler scaler, {
   required Size viewport,
   bool previews = true,
   bool touch = false,
+  bool small = false,
 }) {
   const gap = desktopTileGap;
+  final scale = small ? desktopSmallTileScale : 1.0;
+  final page = width / scale;
   final minimum = 288.0 * scaler.scale(1).clamp(1.0, 1.6);
-  final columns = ((width + gap) / (minimum + gap)).floor().clamp(1, 3);
-  final tile = (width - (columns - 1) * gap) / columns;
+  final columns = ((page + gap) / (minimum + gap)).floor().clamp(
+    1,
+    small ? 6 : 3,
+  );
+  final tile = small && columns == 1
+      ? math.min(page, width)
+      : (page - (columns - 1) * gap) / columns;
   // At most 40 % of the window's height (without the limit, one column at
   // 150 % text in an 800 x 600 window draws a 444 px picture and pushes the
-  // main button off screen).
+  // main button off screen). A small card's limit is on screen too.
   final picture = !previews
       ? 0.0
       : math.min(
           tile * 3 / 5,
-          viewport.height * (viewport.height < 500 ? .2 : .4),
+          viewport.height * (viewport.height < 500 ? .2 : .4) / scale,
         );
+  // The tile's 1 px edge above and below.
+  final height = picture + tileBodyHeight(scaler, touch: touch) + 2;
   return (
     columns: columns,
     width: tile,
     picture: picture,
-    // The tile's 1 px edge above and below.
-    height: picture + tileBodyHeight(scaler, touch: touch) + 2,
+    height: height,
+    scale: scale,
+    extent: height * scale,
+    gap: gap * scale,
   );
 }
 
+/// [desktopTileGrid]'s answer.
+typedef DesktopTileGrid = ({
+  int columns,
+  double width,
+  double picture,
+  double height,
+  double scale,
+  double extent,
+  double gap,
+});
+
 const desktopTileGap = 24.0;
+
+/// How large a 작게 card is drawn: the same card at four fifths.
+const desktopSmallTileScale = .8;
+
+/// A card in the 작게 grid: laid out at its own size ([grid]'s width and
+/// height) and drawn [DesktopTileGrid.scale] times as large, so its picture,
+/// name, status and buttons keep their proportions; at the top of its slot,
+/// centred. Taps, focus, menus and the screen reader follow the drawn card.
+/// At scale 1 it is [child].
+class DesktopTileScale extends StatelessWidget {
+  const DesktopTileScale({super.key, required this.grid, required this.child});
+  final DesktopTileGrid grid;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (grid.scale == 1) return child;
+    return Align(
+      alignment: Alignment.topCenter,
+      child: SizedBox(
+        width: grid.width * grid.scale,
+        height: grid.extent,
+        child: FittedBox(
+          fit: BoxFit.fill,
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: grid.width,
+            height: grid.height,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 Color _phaseDot(AppPalette p, TilePhase phase) => switch (phase) {
   TilePhase.ready => p.green,

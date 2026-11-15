@@ -19442,6 +19442,180 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'다른 앱이 소리를 쓰고 있어요. 그 앱이 끝나면 다시 나요.'**
   String get otherAppUsingSound;
+
+  /// No description provided for @group.
+  ///
+  /// In ko, this message translates to:
+  /// **'그룹'**
+  String get group;
+
+  /// No description provided for @removeFromGroup.
+  ///
+  /// In ko, this message translates to:
+  /// **'그룹에서 빼기'**
+  String get removeFromGroup;
+
+  /// No description provided for @newGroupEllipsis.
+  ///
+  /// In ko, this message translates to:
+  /// **'새 그룹…'**
+  String get newGroupEllipsis;
+
+  /// No description provided for @newGroup.
+  ///
+  /// In ko, this message translates to:
+  /// **'새 그룹'**
+  String get newGroup;
+
+  /// No description provided for @groupName.
+  ///
+  /// In ko, this message translates to:
+  /// **'그룹 이름'**
+  String get groupName;
+
+  /// No description provided for @create.
+  ///
+  /// In ko, this message translates to:
+  /// **'만들기'**
+  String get create;
+
+  /// No description provided for @renameGroup.
+  ///
+  /// In ko, this message translates to:
+  /// **'그룹 이름 바꾸기'**
+  String get renameGroup;
+
+  /// No description provided for @rename.
+  ///
+  /// In ko, this message translates to:
+  /// **'이름 바꾸기'**
+  String get rename;
+
+  /// No description provided for @moveUp.
+  ///
+  /// In ko, this message translates to:
+  /// **'위로 옮기기'**
+  String get moveUp;
+
+  /// No description provided for @moveDown.
+  ///
+  /// In ko, this message translates to:
+  /// **'아래로 옮기기'**
+  String get moveDown;
+
+  /// No description provided for @deleteGroup.
+  ///
+  /// In ko, this message translates to:
+  /// **'그룹 삭제'**
+  String get deleteGroup;
+
+  /// No description provided for @deleteGroupTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'\'{name}\' 그룹을 삭제할까요?'**
+  String deleteGroupTitle(Object name);
+
+  /// No description provided for @deleteGroupMessage.
+  ///
+  /// In ko, this message translates to:
+  /// **'이 그룹의 카드는 \'기타\'로 옮겨져요. 데스크톱은 그대로예요.'**
+  String get deleteGroupMessage;
+
+  /// No description provided for @delete.
+  ///
+  /// In ko, this message translates to:
+  /// **'삭제'**
+  String get delete;
+
+  /// No description provided for @otherGroup.
+  ///
+  /// In ko, this message translates to:
+  /// **'기타'**
+  String get otherGroup;
+
+  /// No description provided for @groupOptions.
+  ///
+  /// In ko, this message translates to:
+  /// **'\'{name}\' 그룹 메뉴'**
+  String groupOptions(Object name);
+
+  /// No description provided for @groupSection.
+  ///
+  /// In ko, this message translates to:
+  /// **'{name} · 데스크톱 {count}'**
+  String groupSection(Object name, Object count);
+
+  /// No description provided for @expand.
+  ///
+  /// In ko, this message translates to:
+  /// **'펼치기'**
+  String get expand;
+
+  /// No description provided for @enterGroupName.
+  ///
+  /// In ko, this message translates to:
+  /// **'그룹 이름을 입력하세요.'**
+  String get enterGroupName;
+
+  /// No description provided for @groupNameRules.
+  ///
+  /// In ko, this message translates to:
+  /// **'그룹 이름은 1~40자로 써 주세요.'**
+  String get groupNameRules;
+
+  /// No description provided for @groupNameTaken.
+  ///
+  /// In ko, this message translates to:
+  /// **'같은 이름의 그룹이 있어요.'**
+  String get groupNameTaken;
+
+  /// No description provided for @tooManyGroups.
+  ///
+  /// In ko, this message translates to:
+  /// **'그룹은 30개까지 만들 수 있어요.'**
+  String get tooManyGroups;
+
+  /// No description provided for @groupNoLongerExists.
+  ///
+  /// In ko, this message translates to:
+  /// **'그 그룹은 이제 없어요.'**
+  String get groupNoLongerExists;
+
+  /// No description provided for @couldntChangeGroupsTryAgain.
+  ///
+  /// In ko, this message translates to:
+  /// **'그룹을 바꾸지 못했어요. 잠시 후 다시 시도하세요.'**
+  String get couldntChangeGroupsTryAgain;
+
+  /// No description provided for @smallCards.
+  ///
+  /// In ko, this message translates to:
+  /// **'작게'**
+  String get smallCards;
+
+  /// No description provided for @smallCardsTapNormal.
+  ///
+  /// In ko, this message translates to:
+  /// **'작은 카드 · 누르면 보통 크기'**
+  String get smallCardsTapNormal;
+
+  /// No description provided for @normalCardsTapSmall.
+  ///
+  /// In ko, this message translates to:
+  /// **'보통 카드 · 누르면 작게'**
+  String get normalCardsTapSmall;
+
+  /// No description provided for @couldntSaveCardSize.
+  ///
+  /// In ko, this message translates to:
+  /// **'카드 크기 설정을 저장하지 못했어요.'**
+  String get couldntSaveCardSize;
+
+  /// No description provided for @currentGroup.
+  ///
+  /// In ko, this message translates to:
+  /// **'{name}, 지금 그룹'**
+  String currentGroup(Object name);
 }
 
 class _AppLocalizationsDelegate

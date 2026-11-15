@@ -25,6 +25,14 @@ export function desktopFingerprint(desktops,{omit}={}) {
   }
   return hash.digest('hex');
 }
+// A snapshot is the account's desktop array, or {desktops, groups} with its
+// own desktop groups (store.mjs desktopGroups): renaming, reordering, adding
+// or deleting a group changes the list even when no desktop changes.
+function snapshotFingerprints(value) {
+  const desktops=Array.isArray(value)?value:value?.desktops,groups=Array.isArray(value)?undefined:value?.groups;
+  const withGroups=fingerprint=>groups===undefined?fingerprint:createHash('sha256').update(fingerprint).update('\n').update(JSON.stringify(stable(groups))).digest('hex');
+  return {full:withGroups(desktopFingerprint(desktops)),core:withGroups(desktopFingerprint(desktops,{omit:['resources']})),resources:resourceMap(desktops)};
+}
 // Optional pushes a client asks for with X-ToTB-Live: a client that does not ask
 // (a released one) gets only ready/changed and keeps its list-reread path.
 // notices (notice-v1, notices.mjs): a contentless push; the client then reads
@@ -153,7 +161,7 @@ export class DesktopEvents {
         if(!user||user.id!==entry.userId){entry.ws.close(1008,this.revocationReason(entry));continue;}
         if(entry.ws.readyState!==WebSocket.OPEN)continue;
         try {
-          if(!fingerprints.has(user.id)){const desktops=await this.snapshot(entry.hash);fingerprints.set(user.id,{full:desktopFingerprint(desktops),core:desktopFingerprint(desktops,{omit:['resources']}),resources:resourceMap(desktops)});}
+          if(!fingerprints.has(user.id))fingerprints.set(user.id,snapshotFingerprints(await this.snapshot(entry.hash)));
           if(this.closed)return;
           if(this.identity(entry.hash)?.id!==entry.userId){entry.ws.close(1008,this.revocationReason(entry));continue;}
           const snap=fingerprints.get(user.id),fingerprint=entry.live.has('resources')?snap.core:snap.full;

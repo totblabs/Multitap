@@ -2,9 +2,9 @@ import 'desktop_machine.dart';
 import '../l10n/l10n.dart';
 
 /// How the broker files one assigned desktop (Proxmox tags and pool, this
-/// account's favourite, when this account last connected). All absent from a
-/// broker before desktop organising; [supported] then stays false and the
-/// launcher behaves as it always did.
+/// account's favourite and group, when this account last connected). All
+/// absent from a broker before desktop organising; [supported] then stays
+/// false and the launcher behaves as it always did.
 class DesktopOrganize {
   const DesktopOrganize({
     this.tags = const [],
@@ -12,12 +12,17 @@ class DesktopOrganize {
     this.favorite = false,
     this.lastUsedAt,
     this.supported = false,
+    this.group,
   });
 
   final List<String> tags;
   final String? pool;
   final bool favorite;
   final DateTime? lastUsedAt;
+
+  /// The id of this account's group the desktop is in (desktop groups), or
+  /// null: in none, or a broker without groups.
+  final String? group;
 
   /// The broker reports favourites (the `favorite` field is present), so the
   /// star and the favourite menu item are offered.
@@ -46,12 +51,14 @@ class DesktopOrganize {
               : rawPool.trim())
         : null;
     final used = data['lastUsedAt'];
+    final group = data['group'];
     return DesktopOrganize(
       tags: List.unmodifiable(tags),
       pool: pool,
       favorite: data['favorite'] == true,
       lastUsedAt: used is String ? DateTime.tryParse(used)?.toUtc() : null,
       supported: data['favorite'] is bool,
+      group: group is String && DesktopGroup.validId(group) ? group : null,
     );
   }
 
@@ -61,7 +68,157 @@ class DesktopOrganize {
     favorite: value,
     lastUsedAt: lastUsedAt,
     supported: supported,
+    group: group,
   );
+
+  /// In the group [id] (null: in none).
+  DesktopOrganize withGroup(String? id) => DesktopOrganize(
+    tags: tags,
+    pool: pool,
+    favorite: favorite,
+    lastUsedAt: lastUsedAt,
+    supported: supported,
+    group: id,
+  );
+}
+
+/// One of this account's desktop groups, as the broker keeps them: GET
+/// /api/v1/desktops lists them in the account's order beside the desktops,
+/// each desktop names the one it is in. A broker before groups sends no
+/// `groups` key at all, and the launcher then offers nothing of them.
+class DesktopGroup {
+  const DesktopGroup({required this.id, required this.name});
+  final String id, name;
+
+  /// The broker's limits: at most 30 groups, names of 1 to 40 characters.
+  static const maxCount = 30, maxName = 40;
+
+  static bool validId(String id) =>
+      id.isNotEmpty && id.length <= 128 && !id.contains(RegExp(r'[\x00-\x1f]'));
+
+  /// A trimmed name the broker takes: 1 to [maxName] characters, no control
+  /// characters.
+  static bool validName(String name) {
+    final clean = name.trim();
+    return clean.isNotEmpty &&
+        clean.runes.length <= maxName &&
+        !clean.contains(RegExp('[\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]'));
+  }
+
+  /// Names are one per account, whatever their case.
+  static String nameKey(String name) => name.trim().toLowerCase();
+
+  /// The top-level `groups` of a list read: null when the broker sends none
+  /// (no group features). With [strict] (a saved list's answer) any entry
+  /// that is not a group makes the whole answer unusable (null); a list read
+  /// leaves such an entry out.
+  static List<DesktopGroup>? listFromJson(Object? raw, {bool strict = false}) {
+    if (raw is! List) return null;
+    final groups = <DesktopGroup>[];
+    final ids = <String>{};
+    for (final entry in raw) {
+      final id = entry is Map ? entry['id'] : null;
+      final name = entry is Map ? entry['name'] : null;
+      final valid =
+          id is String &&
+          validId(id) &&
+          name is String &&
+          validName(name) &&
+          !ids.contains(id);
+      if (!valid) {
+        if (strict) return null;
+        continue;
+      }
+      ids.add(id);
+      groups.add(DesktopGroup(id: id, name: name.trim()));
+      if (groups.length >= 64) break;
+    }
+    return List.unmodifiable(groups);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is DesktopGroup && other.id == id && other.name == name;
+  @override
+  int get hashCode => Object.hash(id, name);
+}
+
+/// One entry of the whole list the launcher saves (PUT
+/// /api/v1/desktop-groups): an existing group by its [id], a new one without.
+typedef DesktopGroupDraft = ({String? id, String name});
+
+/// [groups] as the list to save, unchanged.
+List<DesktopGroupDraft> groupDrafts(List<DesktopGroup> groups) => [
+  for (final group in groups) (id: group.id, name: group.name),
+];
+
+/// One section of the launcher's list in groups: a group (or 기타, the
+/// desktops in none, when [group] is null) with the cards it shows now.
+class DesktopSection {
+  const DesktopSection({
+    required this.group,
+    required this.machines,
+    required this.total,
+  });
+
+  /// Null: 기타.
+  final DesktopGroup? group;
+
+  /// The cards shown in it: the search, the filters and the sort applied.
+  final List<DesktopMachine> machines;
+
+  /// All of this account's desktops in it, whatever is shown.
+  final int total;
+
+  /// What its folded state is remembered by.
+  String get key => sectionKey(group);
+
+  static const otherKey = 'other';
+  static String sectionKey(DesktopGroup? group) =>
+      group == null ? otherKey : 'group:${group.id}';
+}
+
+/// The launcher's list in sections: one per group in the account's order,
+/// then 기타 for the desktops in no group (or in one the list no longer
+/// has). Null without any group (the list is shown as it always was).
+///
+/// [shown] is the list as filtered and sorted ([organizeDesktops]); [all]
+/// the assigned desktops the counts come from. 기타 is there only while it
+/// has a desktop, and while a search or a filter is active ([filtering]) a
+/// section without a shown card is left out.
+List<DesktopSection>? desktopSections(
+  List<DesktopMachine> shown,
+  List<DesktopMachine> all,
+  List<DesktopGroup>? groups, {
+  required bool filtering,
+}) {
+  if (groups == null || groups.isEmpty) return null;
+  final ids = {for (final group in groups) group.id};
+  String? groupOf(DesktopMachine machine) {
+    final group = machine.organize.group;
+    return group != null && ids.contains(group) ? group : null;
+  }
+
+  final sections = <DesktopSection>[];
+  for (final group in [...groups, null]) {
+    final members = [
+      for (final machine in shown)
+        if (groupOf(machine) == group?.id) machine,
+    ];
+    final total = all.where((machine) => groupOf(machine) == group?.id).length;
+    final hidden = filtering
+        ? members.isEmpty
+        : (group == null && total == 0);
+    if (hidden) continue;
+    sections.add(
+      DesktopSection(
+        group: group,
+        machines: List.unmodifiable(members),
+        total: total,
+      ),
+    );
+  }
+  return sections;
 }
 
 enum DesktopSort {

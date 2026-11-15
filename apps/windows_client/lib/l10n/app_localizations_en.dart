@@ -12111,4 +12111,101 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get otherAppUsingSound =>
       'Another app is using sound. It comes back when that app is done.';
+
+  @override
+  String get group => 'Group';
+
+  @override
+  String get removeFromGroup => 'Remove from group';
+
+  @override
+  String get newGroupEllipsis => 'New group…';
+
+  @override
+  String get newGroup => 'New group';
+
+  @override
+  String get groupName => 'Group name';
+
+  @override
+  String get create => 'Create';
+
+  @override
+  String get renameGroup => 'Rename group';
+
+  @override
+  String get rename => 'Rename';
+
+  @override
+  String get moveUp => 'Move up';
+
+  @override
+  String get moveDown => 'Move down';
+
+  @override
+  String get deleteGroup => 'Delete group';
+
+  @override
+  String deleteGroupTitle(Object name) {
+    return 'Delete the group \'$name\'?';
+  }
+
+  @override
+  String get deleteGroupMessage =>
+      'Its cards move to \'Other\'. The desktops stay as they are.';
+
+  @override
+  String get delete => 'Delete';
+
+  @override
+  String get otherGroup => 'Other';
+
+  @override
+  String groupOptions(Object name) {
+    return '\'$name\' group options';
+  }
+
+  @override
+  String groupSection(Object name, Object count) {
+    return '$name · $count desktops';
+  }
+
+  @override
+  String get expand => 'Expand';
+
+  @override
+  String get enterGroupName => 'Enter a group name.';
+
+  @override
+  String get groupNameRules => 'Use 1 to 40 characters for the group name.';
+
+  @override
+  String get groupNameTaken => 'A group with this name already exists.';
+
+  @override
+  String get tooManyGroups => 'You can have up to 30 groups.';
+
+  @override
+  String get groupNoLongerExists => 'That group no longer exists.';
+
+  @override
+  String get couldntChangeGroupsTryAgain =>
+      'Couldn\'t change groups. Try again in a moment.';
+
+  @override
+  String get smallCards => 'Small';
+
+  @override
+  String get smallCardsTapNormal => 'Small cards · tap for normal size';
+
+  @override
+  String get normalCardsTapSmall => 'Normal cards · tap for small';
+
+  @override
+  String get couldntSaveCardSize => 'Couldn\'t save the card size setting.';
+
+  @override
+  String currentGroup(Object name) {
+    return '$name, current group';
+  }
 }
