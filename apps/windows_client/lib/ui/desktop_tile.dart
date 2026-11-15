@@ -661,8 +661,8 @@ class DesktopNameRow extends StatelessWidget {
               final localPc = machine.kind == MachineKind.pc;
               final badgeStyle = uiText(
                 size: 12,
-                weight: FontWeight.w500,
-                color: p.muted,
+                weight: FontWeight.w600,
+                color: p.blue,
               );
               final nameStyle = TextStyle(
                 color: p.ink,
@@ -727,20 +727,36 @@ class DesktopNameRow extends StatelessWidget {
                   if (!osShown)
                     const SizedBox.shrink()
                   else if (localPc)
+                    // Owner (2026-11-15): "로컬 PC 는 뱃지 좀 더 잘보이게" —
+                    // the blue tint and an icon set it apart from the grey OS line.
                     Container(
                       key: Key('desktop-kind-${machine.id}'),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
+                        horizontal: 7,
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        border: Border.all(color: p.tileLine),
-                        borderRadius: BorderRadius.circular(4),
+                        color: p.blueSoft,
+                        border: Border.all(color: p.blueLine),
+                        borderRadius: BorderRadius.circular(5),
                       ),
-                      child: KeepAllText(
-                        l10n.localPc,
-                        maxLines: 1,
-                        style: badgeStyle,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.computer_rounded,
+                            size: 13,
+                            color: p.blue,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: KeepAllText(
+                              l10n.localPc,
+                              maxLines: 1,
+                              style: badgeStyle,
+                            ),
+                          ),
+                        ],
                       ),
                     )
                   else
