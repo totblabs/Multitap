@@ -272,6 +272,7 @@ request and the grant. Sections below give the details.
 | `text-input-v1` | `textInputProtocol` | `textInputProtocol` | [committed Unicode text](#text-input-text-input-v1) |
 | `touch-input-v1` | `touchInputProtocol` | `touchInputProtocol` | [Windows touch contacts](#touch-input-touch-input-v1) |
 | `caret-v1` | `caretProtocol` | `caretProtocol` | [text caret position](#caret-follow-caret-v1) |
+| `speaker-mute-v1` | `speakerMuteProtocol` | - (the broker adds `speakerMuteProtocol` to a physical PC's `session.start`) | [a physical PC's speakers are silent](#speaker-mute-speaker-mute-v1) while it is streamed |
 | `display-scale-v1`, `display-scale-outputs-v1` | `displayScaleProtocol`, `displayScaleOutputsProtocol` | `displayScaleProtocol`, `displayScale`, `displayScaleOutputsProtocol` | [Windows display scale](#display-scale-display-scale-v1) of the owned output |
 | `tiles-v1` | in band | `lt1-` ping nonces | [lossless tiles](#lossless-tiles-tiles-v1) |
 | `clipboard-v1`, `clipboard-sync-v1` | `clipboard`, `clipboardSync` | `clipboardProtocol` | [clipboard](#clipboard) channel and automatic sharing |
@@ -999,6 +1000,50 @@ process name is read or sent.
   key row, 24 dp at the sides) and moves the picture only when it leaves it. A
   move by hand suspends following until the caret jumps out of view or the
   picture is tapped.
+
+## Speaker mute (speaker-mute-v1)
+
+A physical PC's own speakers are silent while it is streamed; the sound plays
+only on the client. A VM is never muted. Clients take no part: they neither ask
+for it nor see it.
+
+- Host capability `speakerMuteProtocol:'speaker-mute-v1'` (the broker does not
+  show it to clients). The Host cannot tell a physical PC from a VM, so the
+  broker adds `speakerMuteProtocol:'speaker-mute-v1'` to the `session.start`
+  of a stream of a desktop of kind `pc` whose Host advertises it, single output
+  or independent outputs alike. Every other `session.start` is unchanged.
+- Capture: with the marker the worker captures the sound with WASAPI process
+  loopback (everything Windows plays except the worker's own process tree,
+  Windows 10 2004 and later) instead of the default endpoint's loopback, so the
+  capture does not depend on the endpoint being audible. That device delivers
+  packets also while nothing plays; silence leaves for 200 ms and then pauses,
+  so a silent PC sends no sound packets. Where process loopback does not open,
+  nothing is muted and the capture is the endpoint's loopback as without the
+  marker.
+- Mute: only while the session's running capture is the process-loopback one,
+  the worker sets the mute of the default render endpoint
+  (`IAudioEndpointVolume::SetMute`; the volume level is never changed). An
+  endpoint that is already muted is left alone. Every 500 ms the worker looks
+  again: an endpoint that was unmuted is muted again, and after a default
+  device change the previous endpoint is unmuted and the new one muted. A
+  stream that restarts inside its session (a resize) keeps the mute.
+- Record and restore: before an endpoint is muted its id is written to
+  `speaker-mute.state` in the signed-in user's local application data, with
+  the worker that holds it. The session's end unmutes what the session muted
+  before the worker reports its stop. A record whose worker is gone (crash,
+  kill, power loss, update) is settled by the next worker start of that user:
+  a stream, or the service's display probe after its start, a sign-in, an
+  unlock, a stream's end and about every minute at rest. An endpoint that is
+  not there then stays in the record until a worker start finds it.
+- Journal: hostAction 298, numbers only. `stage`: 1 muted, 2 restored, 3 a step
+  failed, 4 process loopback unavailable (nothing muted), 5 already muted and
+  left alone, 6 endpoints not there now (`items` of them stay in the record).
+  `cause`: 1 stream started, 2 unmuted during the stream, 3 default device
+  changed, 4 session ended, 5 the capture became the endpoint's loopback, 6
+  left by an earlier worker; for stage 3 the step (1 record unreadable, 2
+  record not written, 3 record full, 4 default endpoint, 5 mute state, 6 mute
+  refused, 7 unmute refused, 8 unexpected); for stage 4 the capture step of
+  hostAction 297. `error`: the HRESULT.
 
 ## Display scale (display-scale-v1)
 

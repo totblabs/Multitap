@@ -2,7 +2,17 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13 and 1.1.16 to 1.1.14; the server is unchanged in both and the apps stay at 1.1.13. 1.1.17 is the server; the Host stays at 1.1.14. 1.1.18 is the server with the Windows app and the Android app at 1.1.14; the Host stays at 1.1.14. 1.1.19 brings the Android app to 1.1.15; the server is unchanged, the Windows app and the Host stay at 1.1.14. 1.1.20 brings the Host to 1.1.17; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.21 brings the Host to 1.1.18; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.22 brings the Host to 1.1.20; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.23 brings the Host to 1.1.21; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.24 is the server, the Windows app 1.1.15 and the Android app 1.1.16; the Host stays at 1.1.21. 1.1.25 is the server only. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13 and 1.1.16 to 1.1.14; the server is unchanged in both and the apps stay at 1.1.13. 1.1.17 is the server; the Host stays at 1.1.14. 1.1.18 is the server with the Windows app and the Android app at 1.1.14; the Host stays at 1.1.14. 1.1.19 brings the Android app to 1.1.15; the server is unchanged, the Windows app and the Host stay at 1.1.14. 1.1.20 brings the Host to 1.1.17; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.21 brings the Host to 1.1.18; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.22 brings the Host to 1.1.20; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.23 brings the Host to 1.1.21; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.24 is the server, the Windows app 1.1.15 and the Android app 1.1.16; the Host stays at 1.1.21. 1.1.25 is the server only. 1.1.26 brings the Host to 1.1.22; the server is unchanged. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.26](https://github.com/totblabs/Multitap/releases/tag/v1.1.26)
+
+### Sound (Host)
+
+- **While a local PC (a PC with its own monitor and speakers) is streamed, its speakers are muted and the sound plays only in the app.** They come back when the connection ends, at the same volume; a PC that was already muted stays as it was. Unmuting at the PC during a connection is undone within a second. VMs are unchanged.
+
+### Server
+
+- No change; the number follows the Host.
 
 ## [1.1.25](https://github.com/totblabs/Multitap/releases/tag/v1.1.25)
 
