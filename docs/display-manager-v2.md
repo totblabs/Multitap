@@ -345,9 +345,11 @@ monitor or a VM's own display (console, vGPU head).
   another display is on in the console session. The at-rest readers (the
   service's probe, Host settings, `--diagnostics`) report it as `standby`
   (`nativeDisplayStatus(true)`, `nativeStandbyMonitors`). The outputs are the
-  lease sizes where a stream adds them: `0` right of the right-most other
-  display (top-aligned with it), `1` right of `0`; no device name, nothing
-  captures them.
+  lease sizes in the place a stream gives them (Start, Independent outputs):
+  `0` primary at the origin, `1` right of `0` (top-aligned); no device name,
+  nothing captures them. `0` must be primary: the server admits an initial
+  viewport on a PC (and on any Host without the console profile) only when the
+  advertised `0` is primary (`initialViewportSupported`).
 - **Ready to stream.** `DisplayState::streamable()` is ready (on) or standby.
   The Host offers streaming, the virtual display, viewport provisioning,
   monitor control and the profile and track capabilities from it. Admission
