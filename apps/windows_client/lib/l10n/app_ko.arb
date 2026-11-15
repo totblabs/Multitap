@@ -3814,6 +3814,12 @@
   },
   "selectAll2": "모두 선택",
   "@selectAll2": {},
+  "bulkHostIdleOnly": "접속 안 한 {count}대만",
+  "@bulkHostIdleOnly": {
+    "placeholders": {
+      "count": {}
+    }
+  },
   "currentVersionUnknown": "현재 버전 확인 필요",
   "@currentVersionUnknown": {},
   "windowsRestartNeeded": "Windows 다시 시작 필요",
@@ -8364,5 +8370,11 @@
     "placeholders": {
       "name": {}
     }
-  }
+  },
+  "samePcHeadline": "지금 쓰고 있는 PC예요",
+  "@samePcHeadline": {},
+  "samePcDetail": "여기서는 연결할 수 없어요. 다른 기기에서 연결하세요.",
+  "@samePcDetail": {},
+  "samePcMessage": "지금 Multitap 앱을 쓰고 있는 PC라 연결할 수 없어요. 다른 기기에서 연결하세요.",
+  "@samePcMessage": {}
 }

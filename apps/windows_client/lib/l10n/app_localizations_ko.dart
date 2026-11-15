@@ -5223,6 +5223,11 @@ class AppLocalizationsKo extends AppLocalizations {
   String get selectAll2 => '모두 선택';
 
   @override
+  String bulkHostIdleOnly(Object count) {
+    return '접속 안 한 $count대만';
+  }
+
+  @override
   String get currentVersionUnknown => '현재 버전 확인 필요';
 
   @override
@@ -11373,4 +11378,14 @@ class AppLocalizationsKo extends AppLocalizations {
   String currentGroup(Object name) {
     return '$name, 지금 그룹';
   }
+
+  @override
+  String get samePcHeadline => '지금 쓰고 있는 PC예요';
+
+  @override
+  String get samePcDetail => '여기서는 연결할 수 없어요. 다른 기기에서 연결하세요.';
+
+  @override
+  String get samePcMessage =>
+      '지금 Multitap 앱을 쓰고 있는 PC라 연결할 수 없어요. 다른 기기에서 연결하세요.';
 }

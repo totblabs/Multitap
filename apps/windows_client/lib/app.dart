@@ -368,6 +368,8 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     if (machine.kind == MachineKind.pc && !machine.localPcApproved) {
       throw const BrokerException('desktop_not_found', 404);
     }
+    _refuseSamePc(machine.id);
+    if (machine.samePc) throw const BrokerException('same_pc');
     return SessionWindows.open(
       SessionWindowLaunch(
         origin: origin,
@@ -1712,12 +1714,21 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     );
   }
 
+  /// The desktop's Host runs on the PC this app runs on (same_pc.dart): no
+  /// window, preparation or connection request starts for it.
+  void _refuseSamePc(String desktopId) {
+    if (_desktops.any((m) => m.id == desktopId && m.samePc)) {
+      throw const BrokerException('same_pc');
+    }
+  }
+
   Future<RemoteSession> _connect(
     String desktopId, {
     StreamOptions options = const StreamOptions(),
   }) async {
     final session = _session;
     if (session == null) throw const BrokerException('session_expired', 401);
+    _refuseSamePc(desktopId);
     if (_displayRequests.contains(desktopId) ||
         _desktops.any((m) => m.id == desktopId && m.display.busy)) {
       throw const BrokerException('display_busy');
@@ -1781,6 +1792,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     if (fresh.kind == MachineKind.pc && !fresh.localPcApproved) {
       throw const BrokerException('desktop_not_found', 404);
     }
+    if (fresh.samePc) throw const BrokerException('same_pc');
     return fresh;
   }
 
@@ -1796,6 +1808,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
         _authenticationRevision == revision &&
         _desktops.any((machine) => machine.id == desktopId);
     if (!current()) throw const BrokerException('operation_cancelled');
+    _refuseSamePc(desktopId);
     if (api is! StreamTakeoverPreflightBrokerApi) return;
     await (api as StreamTakeoverPreflightBrokerApi).checkStreamTakeover(
       session!.token,
@@ -1815,6 +1828,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     if (api is! TrackBrokerApi) {
       throw const BrokerException('track_streaming_unavailable');
     }
+    _refuseSamePc(desktopId);
     if (_displayRequests.contains(desktopId) ||
         _desktops.any((m) => m.id == desktopId && m.display.busy)) {
       throw const BrokerException('display_busy');
@@ -1855,6 +1869,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     if (api is! DisplayScaleBrokerApi) {
       throw const BrokerException('display_not_supported');
     }
+    _refuseSamePc(desktopId);
     if (_displayRequests.contains(desktopId) ||
         _desktops.any((m) => m.id == desktopId && m.display.busy)) {
       throw const BrokerException('display_busy');
@@ -1880,6 +1895,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
     if (api is! InitialViewportBrokerApi) {
       throw const BrokerException('initial_viewport_unavailable');
     }
+    _refuseSamePc(desktopId);
     if (_displayRequests.contains(desktopId) ||
         _desktops.any((m) => m.id == desktopId && m.display.busy)) {
       throw const BrokerException('display_busy');

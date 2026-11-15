@@ -5590,6 +5590,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get selectAll2 => 'Select all';
 
   @override
+  String bulkHostIdleOnly(Object count) {
+    return 'Only $count idle';
+  }
+
+  @override
   String get currentVersionUnknown => 'Current version unknown';
 
   @override
@@ -12219,4 +12224,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String currentGroup(Object name) {
     return '$name, current group';
   }
+
+  @override
+  String get samePcHeadline => 'This desktop is the PC you\'re using';
+
+  @override
+  String get samePcDetail =>
+      'You can\'t connect from here. Connect from another device.';
+
+  @override
+  String get samePcMessage =>
+      'This desktop is the PC you\'re using Multitap on, so you can\'t connect to it. Connect from another device.';
 }

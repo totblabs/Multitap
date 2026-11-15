@@ -21,6 +21,7 @@
 #include "window_geometry.hpp"
 #include "flutter/generated_plugin_registrant.h"
 #include "ui_language.h"
+#include "machine_uuid.h"
 
 namespace {
 
@@ -1195,6 +1196,12 @@ bool FlutterWindow::OnCreate() {
     }
     if (call.method_name() == "productVersion") {
       result->Success(flutter::EncodableValue(FLUTTER_VERSION)); return;
+    }
+    if (call.method_name() == "machineUuid") {
+      // The PC's SMBIOS UUID as the Host registers it (machine_uuid.h), or null when it cannot be read. The app
+      // compares a value derived from it with each listed desktop (same_pc.dart); it is never sent anywhere.
+      const auto uuid = multitap::MachineUuid();
+      result->Success(uuid ? flutter::EncodableValue(*uuid) : flutter::EncodableValue()); return;
     }
     if (call.method_name() == "openConsoleWebView") {
       using V=flutter::EncodableValue;

@@ -1,14 +1,19 @@
 # 할당된 VM의 Host 일괄 업데이트
 
-Windows 클라이언트에서 로그인한 계정에 할당된 VM(과 로컬 PC)의 Host를 이 서버의 최신 Host로 한꺼번에 업데이트한다. 관리자 역할은 필요 없다. 관리자 콘솔의 "모든 Host 업데이트"와 이전 버전 설치는 이 기능과 별개다.
+Windows 클라이언트와 Android 앱에서 로그인한 계정에 할당된 VM(과 로컬 PC)의 Host를 이 서버의 최신 Host로 한꺼번에 업데이트한다. 관리자 역할은 필요 없다. 관리자 콘솔의 "모든 Host 업데이트"와 이전 버전 설치는 이 기능과 별개다.
 
 ## 여는 곳
 
-헤더의 업데이트 확인 패널에서 **할당된 Host 일괄 업데이트**를 누른다(업데이트할 Host가 있으면 패널이 먼저 안내한다). 코드: `lib/ui/bulk_host_update_dialog.dart`(`showBulkHostUpdateDialog`), `lib/data/bulk_host_updates.dart`(`BulkHostUpdateController`).
+업데이트할 수 있는 Host가 한 대라도 있을 때만 여는 곳이 보인다.
+
+- Windows: 헤더의 파란 **Host 업데이트 N대** 버튼(`open-host-updates`, `lib/ui/workspace_header.dart`). 좁은 창에서는 아이콘만.
+- Android: 헤더의 업데이트 버튼(점 표시) → 업데이트 창의 **Host 업데이트 N대 가능** 아래 **Host 일괄 업데이트**(`open-bulk-host-update`, `lib/android/android_update_panel.dart`). 헤더에 버튼을 하나 더 둘 자리가 없어 Host 목록이 있는 창에 둔다. 연결은 `lib/android/android_app.dart`의 `_openHostBulk`.
+
+두 앱이 같은 대화상자와 컨트롤러를 쓴다. 코드: `lib/ui/bulk_host_update_dialog.dart`(`showBulkHostUpdateDialog`), `lib/data/bulk_host_updates.dart`(`BulkHostUpdateController`).
 
 ## 동작
 
-- 대화상자는 이 서버의 공개 카탈로그에서 최신 Host를 읽고, 현재 버전 → 설치할 버전, 변경 내역, 대상 목록을 보여 준다. 사용자가 대상을 고르고 확인해야 시작한다.
+- 대화상자는 이 서버의 공개 카탈로그에서 최신 Host를 읽고, 현재 버전 → 설치할 버전, 변경 내역, 대상 목록을 보여 준다. 사용자가 대상을 고르고 확인해야 시작한다. **모두 선택**은 업데이트할 수 있는 대상을 전부, **접속 안 한 N대만**은 그 가운데 아무도 연결하지 않은 대상만 고른다(사용 중인 대상과 아닌 대상이 함께 있을 때만 보인다).
 - 대상은 할당되어 있고, 서버가 업데이트를 제안하며, 제안 버전이 그 최신 버전이고 현재 버전보다 높은 Host뿐이다. 오프라인·미지원·업데이트 중인 Host는 고를 수 없다.
 - 한 번 시작한 묶음의 버전은 고정된다. 서버가 `host_release_unavailable`을 돌려주거나 카탈로그가 바뀌면 남은 요청을 멈추고 다시 확인하라고 안내한다. 새 버전으로 조용히 바꿔 요청하지 않는다.
 - 각 VM은 `POST /api/v1/desktops/:id/host-update` `{version, disconnectSessions}`로 요청한다. 클라이언트의 표시는 권한 근거가 아니다. 서버가 요청마다 로그인, 할당, 최신 릴리스(더 낮은 버전 불가), Host 상태를 다시 확인한다.
@@ -30,4 +35,4 @@ Windows 클라이언트에서 로그인한 계정에 할당된 VM(과 로컬 PC)
 
 ## 테스트
 
-`apps/windows_client/test/`의 `bulk_host_updates_test.dart`, `bulk_host_update_dialog_test.dart`, `host_update_test.dart`. 가짜 단조 시계로 많은 VM에서의 제한 준수, 429 재시도와 중지, 기본 거부, 최신 버전 고정, 중복·불확실한 응답, 늦은 응답과 완료 순서, 카탈로그 변경을 확인한다.
+`apps/windows_client/test/`의 `bulk_host_updates_test.dart`, `bulk_host_update_dialog_test.dart`, `bulk_host_update_wiring_test.dart`, `host_update_test.dart`, Android는 `test/android/android_bulk_host_update_test.dart`와 `android_ui_layout_test.dart`(화면 크기·글자 크기별 배치). 가짜 단조 시계로 많은 VM에서의 제한 준수, 429 재시도와 중지, 기본 거부, 최신 버전 고정, 중복·불확실한 응답, 늦은 응답과 완료 순서, 카탈로그 변경을 확인한다.

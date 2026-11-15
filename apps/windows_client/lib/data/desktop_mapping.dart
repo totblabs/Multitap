@@ -18,6 +18,7 @@ DesktopMachine machineFromBroker(
     id: desktop.id,
     name: desktop.name,
     consoleInUse: desktop.consoleInUse,
+    samePc: desktop.samePc,
     qemuAgentOff: desktop.kind == 'vm' && desktop.qemuAgentOff,
     description: desktop.description,
     kind: desktop.kind == 'pc' ? MachineKind.pc : MachineKind.vm,

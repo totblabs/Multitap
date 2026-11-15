@@ -1972,6 +1972,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
 
   bool _canOpen(DesktopMachine m) =>
       !widget.busy &&
+      !m.samePc &&
       (m.kind != MachineKind.pc || m.localPcApproved || widget.isDemo) &&
       (m.isReady || (widget.onPrepareConsole != null && m.canRecoverConsole)) &&
       (widget.isDemo ||
@@ -1986,6 +1987,22 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   );
 
   void _details(DesktopMachine machine) {
+    // The desktop is the PC this app runs on: one plain notice, in place of
+    // a checklist that has nothing to fix.
+    if (machine.samePc && !widget.isDemo) {
+      unawaited(
+        showAppNotice(
+          context,
+          title: l10n.samePcHeadline,
+          message: l10n.samePcDetail,
+          icon: Icons.desktop_access_disabled_outlined,
+          tone: AppTone.warn,
+          dialogKey: const Key('same-pc-notice'),
+          closeKey: const Key('same-pc-notice-close'),
+        ),
+      );
+      return;
+    }
     final readiness = _readiness(machine);
     if (readiness.cleanup && !widget.isDemo) {
       showDialog<void>(

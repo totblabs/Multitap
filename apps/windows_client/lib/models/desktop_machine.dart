@@ -32,6 +32,7 @@ class DesktopMachine {
     required this.accent,
     this.consoleInUse = false,
     this.qemuAgentOff = false,
+    this.samePc = false,
     this.consoleBrowserProtocol,
     this.vmAudio = false,
     this.audioState,
@@ -170,6 +171,7 @@ class DesktopMachine {
   /// Wake-on-LAN can do now. [PcPowerState.absent] for VMs.
   final PcPowerState pcPower;
   bool get canRecoverConsole =>
+      !samePc &&
       kind == MachineKind.vm &&
       sessionCleanup.allowsEmergencyControl &&
       hostOnline == true &&
@@ -287,6 +289,7 @@ class DesktopMachine {
     specification: specification,
     accent: accent,
     consoleInUse: consoleInUse,
+    samePc: samePc,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
     vmAudio: vmAudio,
@@ -341,6 +344,7 @@ class DesktopMachine {
     specification: specification,
     accent: accent,
     consoleInUse: consoleInUse,
+    samePc: samePc,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
     vmAudio: vmAudio,
@@ -395,6 +399,7 @@ class DesktopMachine {
     specification: specification,
     accent: accent,
     consoleInUse: consoleInUse,
+    samePc: samePc,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
     vmAudio: vmAudio,
@@ -449,6 +454,7 @@ class DesktopMachine {
     specification: specification,
     accent: accent,
     consoleInUse: consoleInUse,
+    samePc: samePc,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
     vmAudio: vmAudio,
@@ -503,6 +509,7 @@ class DesktopMachine {
     specification: specification,
     accent: accent,
     consoleInUse: consoleInUse,
+    samePc: samePc,
     qemuAgentOff: qemuAgentOff,
     consoleBrowserProtocol: consoleBrowserProtocol,
     vmAudio: vmAudio,
@@ -554,7 +561,13 @@ class DesktopMachine {
   /// The VM's Proxmox option for the QEMU guest agent is off (broker
   /// qemuAgentOff); the tile shows a badge on its picture.
   final bool qemuAgentOff;
+
+  /// This desktop's Host runs on the PC this app runs on (same_pc.dart).
+  /// A connection would move every window, the app included, onto the Host's
+  /// virtual display, so the desktop is never ready to connect from here.
+  final bool samePc;
   bool get isReady =>
+      !samePc &&
       status == MachineStatus.ready &&
       !powerBusy &&
       !display.busy &&
@@ -587,6 +600,7 @@ class DesktopMachine {
       : l10n.refreshCheckAgainIfKeeps;
 
   String get streamReadiness {
+    if (samePc) return l10n.samePcMessage;
     if (sessionCleanup.pending) {
       if (!cleanupStalled) return l10n.checkingPreviousConnectionEndedScreen;
       return l10n.connectingBlockedBecauseScreenRestore;

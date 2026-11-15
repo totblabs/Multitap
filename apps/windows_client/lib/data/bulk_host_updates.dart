@@ -63,6 +63,9 @@ class BulkHostUpdateRow {
       : null;
   bool get eligible => !attempted && _canRequest;
 
+  /// Somebody is connected to the desktop now (the server's view).
+  bool get inUse => machine.hostUpdate.sessionActive;
+
   /// VMs and approved local PCs alike; the broker authorizes
   /// each request by assignment.
   bool get _canRequest =>
@@ -281,6 +284,12 @@ class BulkHostUpdateController extends ChangeNotifier {
   bool _postPending = false;
   List<BulkHostUpdateRow> get rows => List.unmodifiable(_rows.values);
   int get selectedCount => rows.where((r) => r.selected && r.eligible).length;
+
+  /// Of the desktops that can be updated now: how many nobody is connected
+  /// to, and how many are in use (a request ends their connections).
+  int get idleEligibleCount =>
+      rows.where((r) => r.eligible && !r.inUse).length;
+  int get busyEligibleCount => rows.where((r) => r.eligible && r.inUse).length;
   int get requestedCount => rows.where((r) => r._posts > 0).length;
   int get pendingCount => rows
       .where(
@@ -414,6 +423,18 @@ class BulkHostUpdateController extends ChangeNotifier {
     }
     for (final row in rows) {
       if (row.eligible) row.selected = selected;
+    }
+    _notify();
+  }
+
+  /// "접속 안 한 N대만": chooses every desktop that can be updated and that
+  /// nobody is connected to, and leaves the ones in use out.
+  void selectIdle() {
+    if (_disposed || submitting || authorizationStopped || catalogChanged) {
+      return;
+    }
+    for (final row in rows) {
+      if (row.eligible) row.selected = !row.inUse;
     }
     _notify();
   }

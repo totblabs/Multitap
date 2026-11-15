@@ -13,6 +13,7 @@ import { clientDiagnosticEvidenceSql } from './client-diagnostics.mjs';
 import { sessionAccessSchema } from './session-access-store.mjs';
 import { installUsage, noteLoginEnd } from './usage.mjs';
 import { installNotices } from './notices.mjs';
+import { hostMachineTag } from './same-pc.mjs';
 import { readFileSync } from 'node:fs';
 
 // Registered is not the same as online. Keep approved offline VM records, but
@@ -66,6 +67,8 @@ const verifiedMachineUuid = value => typeof value === 'string' &&
   /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value) &&
   !/^0{8}(?:-0{4}){3}-0{12}$/.test(value) && !/^f{8}(?:-f{4}){3}-f{12}$/i.test(value)
   ? value.toLowerCase() : null;
+
+const sameMachineTag = (id, uuid) => { const tag = hostMachineTag(id, uuid); return tag ? { hostMachineTag: tag } : {}; };
 
 export class Store {
   constructor(path) {
@@ -896,8 +899,10 @@ export class Store {
     // Only a current approved Host is a client desktop (removing a Host also
     // removes its assignments). Offline registration remains valid authority.
     // group: the id of the account's own group holding the desktop, or null.
-    return this.db.prepare(`SELECT d.id,d.name,d.kind,d.description,d.os,d.pve_os_type,d.pve_os_family,d.pve_os_source,d.pve_tags,d.pve_pool,a.favorite,a.last_used_at,(SELECT g.id FROM desktop_groups g WHERE g.id=a.group_id AND g.user_id=a.user_id) AS group_id FROM desktops d JOIN assignments a ON a.desktop_id=d.id JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND u.disabled=0 AND ${availableDesktopSql} AND ${registeredDesktopSql} ORDER BY d.pve_vmid IS NULL,d.pve_vmid,d.name,d.id`).all(userId)
-      .map(({ pve_tags, pve_pool, favorite, last_used_at, group_id, ...row }) => ({ ...row, ...(row.kind === 'pc' ? { localPcApproved: true } : {}), tags: storedTags(pve_tags), pool: pve_pool ?? null, favorite: favorite === 1, lastUsedAt: Number.isFinite(last_used_at) ? new Date(last_used_at).toISOString() : null, group: group_id ?? null, status: 'host_not_registered', canConnect: false }));
+    // hostMachineTag (same-pc.mjs): derived from the current Host's machine UUID;
+    // the UUID itself is not part of the row.
+    return this.db.prepare(`SELECT d.id,d.name,d.kind,d.description,d.os,d.pve_os_type,d.pve_os_family,d.pve_os_source,d.pve_tags,d.pve_pool,a.favorite,a.last_used_at,(SELECT g.id FROM desktop_groups g WHERE g.id=a.group_id AND g.user_id=a.user_id) AS group_id,(SELECT ch.machine_uuid FROM hosts ch WHERE ch.desktop_id=d.id AND ch.revoked=0) AS host_machine_uuid FROM desktops d JOIN assignments a ON a.desktop_id=d.id JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND u.disabled=0 AND ${availableDesktopSql} AND ${registeredDesktopSql} ORDER BY d.pve_vmid IS NULL,d.pve_vmid,d.name,d.id`).all(userId)
+      .map(({ pve_tags, pve_pool, favorite, last_used_at, group_id, host_machine_uuid, ...row }) => ({ ...row, ...(row.kind === 'pc' ? { localPcApproved: true } : {}), ...sameMachineTag(row.id, host_machine_uuid), tags: storedTags(pve_tags), pool: pve_pool ?? null, favorite: favorite === 1, lastUsedAt: Number.isFinite(last_used_at) ? new Date(last_used_at).toISOString() : null, group: group_id ?? null, status: 'host_not_registered', canConnect: false }));
   }
   // The account's own desktop groups, [{id, name}] in its order.
   desktopGroups(userId) {

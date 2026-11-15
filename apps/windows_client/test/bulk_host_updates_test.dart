@@ -160,6 +160,47 @@ void main() {
   });
 
   test(
+    'Idle-only selection takes the desktops nobody is connected to and leaves the ones in use out',
+    () async {
+      final api = FakeBulkApi();
+      final c = bulkController(api, [
+        bulkMachine('pve-149'),
+        bulkMachine('pve-170', state: bulkState(sessionActive: true)),
+        bulkMachine('pc-gaming', kind: MachineKind.pc),
+        // Not a candidate at all: neither count has it and it is never chosen.
+        bulkMachine('pve-247', state: bulkState(connected: false)),
+      ]);
+      expect(c.idleEligibleCount, 2);
+      expect(c.busyEligibleCount, 1);
+      // From a selection that held the desktop in use: it is dropped.
+      c.selectAll(true);
+      expect(c.selectedCount, 3);
+      c.selectIdle();
+      expect(c.rows.map((r) => r.selected), [true, false, true, false]);
+      expect(c.selectedCount, 2);
+      // The list push keeps the counts current: the connection ended.
+      c.synchronize([
+        bulkMachine('pve-149'),
+        bulkMachine('pve-170'),
+        bulkMachine('pc-gaming', kind: MachineKind.pc),
+        bulkMachine('pve-247', state: bulkState(connected: false)),
+      ]);
+      expect(c.idleEligibleCount, 3);
+      expect(c.busyEligibleCount, 0);
+      await c.submitSelected();
+      expect(api.calls.map((r) => r.id), ['pve-149', 'pc-gaming']);
+      // Requested rows are no longer candidates; the choice has nothing left
+      // but the one that was left out.
+      expect(c.idleEligibleCount, 1);
+      c.selectIdle();
+      expect(c.rows.map((r) => r.selected), [true, true, true, false]);
+      expect(c.selectedCount, 1);
+      c.dispose();
+      c.selectIdle();
+    },
+  );
+
+  test(
     'Local PC Hosts are candidates like VMs and say what they are',
     () async {
       final api = FakeBulkApi();

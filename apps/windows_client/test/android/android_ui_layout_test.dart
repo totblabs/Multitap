@@ -19,6 +19,7 @@ import 'package:multitap_client/android/android_store.dart';
 import 'package:multitap_client/android/android_tv.dart';
 import 'package:multitap_client/android/android_updates.dart';
 import 'package:multitap_client/data/broker_api.dart';
+import 'package:multitap_client/data/product_updates.dart' show ProductRelease;
 import 'package:multitap_client/data/remote_session.dart';
 import 'package:multitap_client/l10n/l10n.dart';
 import 'package:multitap_client/models/stream_options.dart';
@@ -118,6 +119,43 @@ BrokerDesktop _pc() => BrokerDesktop(
     newer: true,
     available: true,
   ),
+);
+
+/// A running VM somebody is connected to, whose Host can be updated: with
+/// [_pc] the Host 일괄 업데이트 offers 접속 안 한 N대만.
+BrokerDesktop _busyVm() => BrokerDesktop(
+  id: 'pve-151',
+  name: 'DESIGN-VM',
+  kind: 'vm',
+  description: '',
+  os: 'Windows 11 · 4 vCPU',
+  status: 'online',
+  canConnect: true,
+  canStream: true,
+  hostConnected: true,
+  hostUpdate: const HostUpdateState(
+    present: true,
+    connected: true,
+    supported: true,
+    version: '0.2.130',
+    latestVersion: '0.2.140',
+    newer: true,
+    available: true,
+    sessionActive: true,
+  ),
+);
+
+/// The server's latest Host, as its public catalog lists it.
+final _hostRelease = ProductRelease(
+  product: 'host',
+  version: '0.2.140',
+  filename: 'Multitap-Host-0.2.140-windows-x64.exe',
+  size: 10,
+  sha256: 'a' * 64,
+  url: Uri.parse(
+    'https://vdi.example/downloads/Multitap-Host-0.2.140-windows-x64.exe',
+  ),
+  changelog: '- 원격 화면 터치 조작을 다듬었어요',
 );
 
 class _Broker extends FakeBroker implements HostUpdateBrokerApi {
@@ -223,6 +261,7 @@ Future<void> _app(
         ]),
       ),
       updatePlatform: FakePlatform(),
+      hostUpdateReleaseLoader: (_) async => _hostRelease,
     ),
   );
   await pumpWork(t);
@@ -422,6 +461,68 @@ void main() {
           await pumpWork(t);
           _expectClean(t, 'update panel Host entry · $at', scale);
           await _pop(t);
+          semantics.dispose();
+        });
+
+        // Host 일괄 업데이트: the update panel's button opens it in place of
+        // the panel; its list, 접속 안 한 N대만 and the buttons fit.
+        testWidgets('Host bulk update fits at $at', (t) async {
+          _language(english);
+          final semantics = t.ensureSemantics();
+          _size(t, screen, scale);
+          await _app(
+            t,
+            [_silent(), _pc(), _busyVm()],
+            tv: screen.tv,
+            latest: '0.1.0-preview.4',
+          );
+          final check = find.byKey(const Key('android-update-check'));
+          await t.ensureVisible(check);
+          await pumpWork(t);
+          await t.tap(check);
+          await t.pump();
+          await t.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 60)),
+          );
+          await pumpWork(t);
+          final bulk = find.byKey(const Key('open-bulk-host-update'));
+          expect(bulk, findsOneWidget);
+          await t.ensureVisible(bulk);
+          await pumpWork(t);
+          _expectClean(t, 'update panel Host bulk entry · $at', scale);
+          await t.tap(bulk);
+          await pumpWork(t);
+          expect(find.byKey(const Key('android-update-panel')), findsNothing);
+          expect(
+            find.byKey(const Key('bulk-host-update-dialog')),
+            findsOneWidget,
+          );
+          _expectClean(t, 'Host bulk update · $at', scale);
+          final idle = find.byKey(const Key('bulk-host-select-idle'));
+          expect(idle, findsOneWidget);
+          // The head of the list whole in view: 모두 선택, 접속 안 한 N대만
+          // (under it where the two do not fit one line) and 새로고침.
+          await t.ensureVisible(find.byKey(const Key('bulk-host-select-all')));
+          await pumpWork(t);
+          _expectClean(t, 'Host bulk update choices · $at', scale);
+          await t.tap(idle);
+          await pumpWork(t);
+          await t.ensureVisible(
+            find.byKey(const ValueKey('bulk-host-select-pve-151')),
+          );
+          await pumpWork(t);
+          _expectClean(t, 'Host bulk update rows · $at', scale);
+          final submit = find.byKey(const Key('bulk-host-submit'));
+          await t.ensureVisible(submit);
+          await pumpWork(t);
+          _expectClean(t, 'Host bulk update buttons · $at', scale);
+          expect(t.widget<FilledButton>(submit).onPressed, isNotNull);
+          final close = find.byKey(const Key('bulk-host-close'));
+          await t.ensureVisible(close);
+          await pumpWork(t);
+          await t.tap(close);
+          await pumpWork(t);
+          expect(find.byKey(const Key('bulk-host-update-dialog')), findsNothing);
           semantics.dispose();
         });
 

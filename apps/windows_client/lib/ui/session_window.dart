@@ -298,6 +298,9 @@ class _SessionWindowState extends State<SessionWindow> {
     if (fresh.kind == MachineKind.pc && !fresh.localPcApproved) {
       throw const BrokerException('desktop_not_found', 404);
     }
+    // The desktop's Host runs on the PC this window is on (same_pc.dart):
+    // the window shows why and never prepares or requests a connection.
+    if (fresh.samePc) throw const BrokerException('same_pc');
     // Retain the same fresh snapshot used by RemoteView for count prechecks.
     _machine = fresh;
     return fresh;

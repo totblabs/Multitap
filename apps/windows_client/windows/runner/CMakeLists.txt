@@ -389,6 +389,16 @@ target_compile_features(multitap_zone_identifier_test PRIVATE cxx_std_17)
 target_compile_options(multitap_zone_identifier_test PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 set_target_properties(multitap_zone_identifier_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/qa")
 
+# The SMBIOS system UUID reader (machine_uuid.h) against the Host's own reader on built tables and on this PC's
+# table. An argument (Win32_ComputerSystemProduct.UUID) is compared with the live read.
+add_executable(multitap_machine_uuid_test EXCLUDE_FROM_ALL "../../test/native/machine_uuid_test.cpp")
+target_include_directories(multitap_machine_uuid_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(multitap_machine_uuid_test PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
+target_compile_features(multitap_machine_uuid_test PRIVATE cxx_std_17)
+target_compile_options(multitap_machine_uuid_test PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+target_link_libraries(multitap_machine_uuid_test PRIVATE "ole32.lib")
+set_target_properties(multitap_machine_uuid_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/qa")
+
 # Where a paste on this PC goes: only a File Explorer window or the desktop, only the tab on screen, only names that
 # stay inside the folder (paste_target_policy.h). No window, COM or file system call.
 add_executable(multitap_paste_target_test EXCLUDE_FROM_ALL "../../test/native/paste_target_test.cpp")

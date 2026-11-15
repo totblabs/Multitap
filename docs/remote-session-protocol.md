@@ -115,6 +115,18 @@ plus the connect fields of the features the client wants.
   `details:{reason:'controller_in_use', takeover}`.
   `POST /api/v1/desktops/:id/takeover` lets an account the VM is assigned to
   end the other session.
+- Same PC (`same-pc-v1`): every desktop of `GET /api/v1/desktops` and
+  `GET /api/v1/desktops/:id` carries `hostMachineTag`, the lowercase hex
+  SHA-256 of `multitap-same-pc-v1
+<desktop id>
+<SMBIOS system UUID of its
+  Host, lowercase>`. The UUID itself is not listed. The Windows app derives
+  the same value from the SMBIOS UUID of the PC it runs on; where the two are
+  equal the desktop's Host runs on that PC, and the app shows that on the card
+  and sends no connect request (the Host would move every window, the app
+  included, onto its virtual display). An app that cannot read the UUID, a
+  list without the field and the Android app connect normally. The broker
+  itself refuses nothing here.
 - The response is `{sessionId, webSocketUrl, mode, transport, options,
   clipboardPolicy, sessionCancellationProtocol:'session-cancel-v1', ...}` plus
   the granted markers and channel URLs (`clipboardWebSocketUrl`,

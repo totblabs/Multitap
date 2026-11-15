@@ -3,6 +3,7 @@ import 'broker_transport.dart';
 import 'dart:async';
 
 import 'broker_probe.dart';
+import 'same_pc.dart';
 import 'mfa_auth.dart';
 export 'mfa_auth.dart';
 import 'mfa_account.dart';
@@ -196,6 +197,7 @@ class BrokerException implements Exception {
     'timeout' => l10n.serverDidntRespondTimeCheck,
     'connection_refused' => l10n.cantReachServerAddressPort,
     'host_offline' => l10n.desktopIsntRespondingConnectAgain,
+    'same_pc' => l10n.samePcMessage,
     'capabilities_pending' => l10n.hostStillGettingReadyConnect,
     'initial_viewport_unavailable' =>
       l10n.cantPrepareScreenFitsWindow,
@@ -567,6 +569,7 @@ class BrokerDesktop {
     required this.canConnect,
     this.consoleInUse = false,
     this.qemuAgentOff = false,
+    this.hostMachineTag,
     bool? canStream,
     this.consoleBrowserProtocol,
     this.consoleWebViewProtocol,
@@ -639,6 +642,14 @@ class BrokerDesktop {
   /// A console connection holds this VM.
   final bool consoleInUse;
   final bool qemuAgentOff;
+
+  /// same-pc-v1: the broker's tag of this desktop's Host machine; null from
+  /// a broker that lists none.
+  final String? hostMachineTag;
+
+  /// This desktop's Host runs on the PC this app runs on ([SamePc]): the app
+  /// never connects to it.
+  bool get samePc => SamePc.matches(id, hostMachineTag);
 
   /// An approved PC's power (pc-power-v1); [PcPowerState.absent] for a VM
   /// and from a broker before it.
@@ -817,6 +828,7 @@ class BrokerDesktop {
     canConnect: data['canConnect'] as bool,
     consoleInUse: data['consoleInUse'] == true,
     qemuAgentOff: data['qemuAgentOff'] == true,
+    hostMachineTag: SamePc.parseTag(data['hostMachineTag']),
     consoleBrowserProtocol:
         data['consoleBrowserProtocol'] == 'console-browser-v1'
         ? 'console-browser-v1'
@@ -2633,6 +2645,14 @@ class HttpBrokerApi
       _inventoryToken == token && _gamepadDesktops.contains(desktopId);
   // desktop-preview-v1: desktops whose current list entry offers a picture.
   Set<String> _previewDesktops = {};
+  // same-pc-v1: desktops of the current list whose Host runs on this PC.
+  // No connection request is ever sent for one, whoever asks.
+  Set<String> _samePcDesktops = {};
+  void _refuseSamePc(String desktopId) {
+    if (_samePcDesktops.contains(desktopId)) {
+      throw const BrokerException('same_pc');
+    }
+  }
 
   @override
   bool previewOffered(String token, String desktopId) =>
@@ -3209,6 +3229,7 @@ class HttpBrokerApi
     if (displayScale != null && !validDisplayScale(displayScale)) {
       throw ArgumentError('Invalid display scale.');
     }
+    _refuseSamePc(desktopId);
     // Independent outputs keep a fixed total rate (up to the host ceiling).
     var options = requested.negotiated(
       _bitrateCeiling(token, desktopId),
@@ -3326,6 +3347,7 @@ class HttpBrokerApi
     if (displayScale != null && !validDisplayScale(displayScale)) {
       throw ArgumentError('Invalid display scale.');
     }
+    _refuseSamePc(desktopId);
     var options = requested.negotiated(
       _bitrateCeiling(token, desktopId),
       independentOutputs: true,
@@ -3798,6 +3820,10 @@ class HttpBrokerApi
         .toList();
     if (sequence == _inventorySequence) {
       _inventoryToken = token;
+      _samePcDesktops = {
+        for (final desktop in desktops)
+          if (desktop.samePc) desktop.id,
+      };
       _bitrateCeilings = {
         for (final desktop in desktops)
           if (desktop.maxBitrate != null) desktop.id: desktop.maxBitrate!,
@@ -4015,6 +4041,7 @@ class HttpBrokerApi
       _backgroundVideoDesktops = {};
       _gamepadDesktops = {};
       _previewDesktops = {};
+      _samePcDesktops = {};
       _sessionResumeDesktops = {};
       _hostReadyDesktops = {};
     }
@@ -4058,6 +4085,7 @@ class HttpBrokerApi
                     initialViewport.fps))) {
       throw ArgumentError('Invalid connection mode.');
     }
+    _refuseSamePc(desktopId);
     // stream-size-v1: only with an initial viewport and separate-v1 encoder
     // ceilings, where the inventory advertises it. The box becomes two
     // per-side ceilings of 3840 and the decoder limits carry the real one; an
@@ -4422,6 +4450,7 @@ class HttpBrokerApi
 
   @override
   Future<void> checkStreamTakeover(String token, String desktopId) async {
+    _refuseSamePc(desktopId);
     if (!requestStreamTakeoverContext) {
       return;
     }
@@ -4499,6 +4528,7 @@ class HttpBrokerApi
     _backgroundVideoDesktops = {};
     _gamepadDesktops = {};
     _previewDesktops = {};
+    _samePcDesktops = {};
     _sessionResumeDesktops = {};
     _hostReadyDesktops = {};
     _streamSizeDesktops = {};

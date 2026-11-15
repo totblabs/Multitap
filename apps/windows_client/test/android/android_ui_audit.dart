@@ -145,16 +145,24 @@ List<UiFinding> auditTargets(WidgetTester t, {double minimum = 48}) {
     SemanticsNode? current = node;
     var clipped = false;
     while (current != null) {
+      // The target in [current]'s own coordinates, where [current.rect] is.
+      final inside = rect;
       final transform = current.transform;
       if (transform != null) rect = MatrixUtils.transformRect(transform, rect);
       // Inside a scrolling list it may be scrolled partly out of view (its
-      // rect is then cut at the list's edge).
+      // rect is then cut at the list's edge). A list that is itself placed
+      // somewhere (a dialog's scrolling body) is compared in its own
+      // coordinates.
       if (current.flagsCollection.hasImplicitScrolling) {
         final list = current.getSemanticsData();
         final across =
             list.hasAction(ui.SemanticsAction.scrollLeft) ||
             list.hasAction(ui.SemanticsAction.scrollRight);
-        if (_touches(rect, current.rect, across: across)) clipped = true;
+        if (_touches(rect, current.rect, across: across) ||
+            !identical(current, node) &&
+                _touches(inside, current.rect, across: across)) {
+          clipped = true;
+        }
       }
       // A sideways row scrolled so that a segment is only partly in view
       // (cut under the row's own inset, not at the list's edge): narrow but

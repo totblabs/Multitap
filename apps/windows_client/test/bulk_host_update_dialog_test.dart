@@ -598,6 +598,109 @@ void main() {
     },
   );
 
+  testWidgets(
+    'Idle-only choice shows while some desktops are in use and some are not, and selects the idle ones',
+    (tester) async {
+      final api = FakeBulkApi();
+      final machines = ValueNotifier([
+        bulkMachine('pve-149'),
+        bulkMachine('pve-170', state: bulkState(sessionActive: true)),
+        bulkMachine('pve-171'),
+        bulkMachine('pve-247', state: HostUpdateState.absent),
+      ]);
+      addTearDown(machines.dispose);
+      await openBulk(tester, api, machines);
+      final idle = find.byKey(const Key('bulk-host-select-idle'));
+      expect(
+        find.descendant(of: idle, matching: find.text('접속 안 한 2대만')),
+        findsOneWidget,
+      );
+      bool chosen(String id) => tester
+          .widget<Checkbox>(find.byKey(ValueKey('bulk-host-select-$id')))
+          .value!;
+      // The whole list first, then the choice: the desktop in use is left
+      // out again and nothing is requested by choosing.
+      await tester.tap(find.byKey(const Key('bulk-host-select-all')));
+      await tester.pump();
+      expect(find.text('선택한 3대 업데이트'), findsOneWidget);
+      await tester.tap(idle);
+      await tester.pump();
+      expect(chosen('pve-149'), isTrue);
+      expect(chosen('pve-170'), isFalse);
+      expect(chosen('pve-171'), isTrue);
+      expect(chosen('pve-247'), isFalse);
+      expect(find.text('선택한 2대 업데이트'), findsOneWidget);
+      expect(api.calls, isEmpty);
+
+      // Nobody connected any more: there is nothing to leave out.
+      machines.value = [
+        bulkMachine('pve-149'),
+        bulkMachine('pve-170'),
+        bulkMachine('pve-171'),
+        bulkMachine('pve-247', state: HostUpdateState.absent),
+      ];
+      await tester.pump();
+      expect(idle, findsNothing);
+      // Every candidate in use: nothing would be left.
+      machines.value = [
+        bulkMachine('pve-149', state: bulkState(sessionActive: true)),
+        bulkMachine('pve-170', state: bulkState(sessionActive: true)),
+        bulkMachine('pve-171', state: bulkState(sessionActive: true)),
+        bulkMachine('pve-247', state: HostUpdateState.absent),
+      ];
+      await tester.pump();
+      expect(idle, findsNothing);
+
+      machines.value = [
+        bulkMachine('pve-149'),
+        bulkMachine('pve-170', state: bulkState(sessionActive: true)),
+        bulkMachine('pve-171'),
+        bulkMachine('pve-247', state: HostUpdateState.absent),
+      ];
+      await tester.pump();
+      await tester.tap(idle);
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('bulk-host-submit')));
+      await tester.tap(find.byKey(const Key('bulk-host-submit')));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(api.calls.map((call) => call.id), ['pve-149', 'pve-171']);
+      // One desktop is left and it is in use: no idle one to choose.
+      expect(idle, findsNothing);
+      await tester.tap(find.byKey(const Key('bulk-host-close')));
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets('Idle-only choice waits while requests are being sent', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    final api = FakeBulkApi()
+      ..handler = (_, _) async {
+        await gate.future;
+        return bulkState(operation: bulkOperation('accepted'));
+      };
+    final machines = ValueNotifier([
+      bulkMachine('pve-149'),
+      bulkMachine('pve-170', state: bulkState(sessionActive: true)),
+      bulkMachine('pve-171'),
+    ]);
+    addTearDown(machines.dispose);
+    await openBulk(tester, api, machines);
+    await tester.tap(find.byKey(const ValueKey('bulk-host-select-pve-149')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('bulk-host-submit')));
+    await tester.pump();
+    final idle = find.byKey(const Key('bulk-host-select-idle'));
+    expect(tester.widget<OutlinedButton>(idle).onPressed, isNull);
+    gate.complete();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.widget<OutlinedButton>(idle).onPressed, isNotNull);
+    expect(api.calls.single.id, 'pve-149');
+    await tester.tap(find.byKey(const Key('bulk-host-close')));
+    await tester.pumpAndSettle();
+  });
+
   for (final size in [
     const Size(1920, 1080),
     const Size(1366, 768),

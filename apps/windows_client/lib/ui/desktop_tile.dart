@@ -1316,7 +1316,21 @@ class _ActionRow extends StatelessWidget {
     // The button's icon gives way to a moving mark while the state it names
     // is work under way, or while this client opens what it was pressed for.
     var moving = false;
-    if (attention) {
+    if (attention && r.samePc) {
+      // Nothing to fix: the button keeps its connection wording and a press
+      // says why no connection starts from this PC.
+      keyName = 'same-pc-';
+      label = compact
+          ? l10n.connect2
+          : switch (mode) {
+              null || SessionDisplayMode.windowed => l10n.streamingConnection,
+              SessionDisplayMode.fullscreen => l10n.streamingFullScreen,
+              SessionDisplayMode.allMonitors => l10n.streamingAllMonitors,
+            };
+      icon = Icons.play_arrow_rounded;
+      onPressed = actions.details;
+      tooltip = r.headline;
+    } else if (attention) {
       keyName = 'attention-';
       label = footerActionLabel(fix);
       icon = footerActionIcon(fix);

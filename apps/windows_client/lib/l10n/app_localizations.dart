@@ -8952,6 +8952,12 @@ abstract class AppLocalizations {
   /// **'모두 선택'**
   String get selectAll2;
 
+  /// No description provided for @bulkHostIdleOnly.
+  ///
+  /// In ko, this message translates to:
+  /// **'접속 안 한 {count}대만'**
+  String bulkHostIdleOnly(Object count);
+
   /// No description provided for @currentVersionUnknown.
   ///
   /// In ko, this message translates to:
@@ -19622,6 +19628,24 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'{name}, 지금 그룹'**
   String currentGroup(Object name);
+
+  /// No description provided for @samePcHeadline.
+  ///
+  /// In ko, this message translates to:
+  /// **'지금 쓰고 있는 PC예요'**
+  String get samePcHeadline;
+
+  /// No description provided for @samePcDetail.
+  ///
+  /// In ko, this message translates to:
+  /// **'여기서는 연결할 수 없어요. 다른 기기에서 연결하세요.'**
+  String get samePcDetail;
+
+  /// No description provided for @samePcMessage.
+  ///
+  /// In ko, this message translates to:
+  /// **'지금 Multitap 앱을 쓰고 있는 PC라 연결할 수 없어요. 다른 기기에서 연결하세요.'**
+  String get samePcMessage;
 }
 
 class _AppLocalizationsDelegate

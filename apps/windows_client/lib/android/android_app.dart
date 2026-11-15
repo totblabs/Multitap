@@ -19,7 +19,8 @@ import '../data/desktop_mapping.dart';
 import '../data/desktop_previews.dart';
 import '../data/desktop_watch.dart';
 import '../models/vm_resources.dart';
-import '../data/product_updates.dart' show UpdateFailure, ProductRelease;
+import '../data/product_updates.dart'
+    show UpdateFailure, ProductRelease, ProductUpdates;
 import '../data/session_renewal.dart';
 import '../data/launcher_memory.dart' show OrganizePreference;
 import '../models/desktop_machine.dart';
@@ -29,6 +30,7 @@ import '../models/stream_options.dart';
 import '../ui/app_dialog.dart';
 import '../ui/app_form.dart';
 import '../ui/app_theme.dart';
+import '../ui/bulk_host_update_dialog.dart';
 import '../ui/console_resume_dialog.dart';
 import '../ui/components.dart';
 import '../ui/desktop_menu.dart'
@@ -87,6 +89,7 @@ class AndroidVdiApp extends StatefulWidget {
     this.apiFactory,
     this.updatesFactory,
     this.updatePlatform,
+    this.hostUpdateReleaseLoader,
     this.television,
     this.hardwareKeyboard,
     this.desktopWatchFactory,
@@ -95,6 +98,10 @@ class AndroidVdiApp extends StatefulWidget {
     this.clock = DateTime.now,
   });
   final AndroidStore? store;
+
+  /// Tests substitute the server's latest Host release (Host 일괄 업데이트).
+  final Future<ProductRelease?> Function(String server)?
+  hostUpdateReleaseLoader;
 
   /// Tests can supply device capability without a native Activity.
   final bool? television;
@@ -340,6 +347,7 @@ class _AndroidVdiAppState extends State<AndroidVdiApp>
           apiFactory: widget.apiFactory,
           updatesFactory: widget.updatesFactory,
           updatePlatform: widget.updatePlatform,
+          hostUpdateReleaseLoader: widget.hostUpdateReleaseLoader,
           desktopWatchFactory: widget.desktopWatchFactory,
           sessionRetryDelay: widget.sessionRetryDelay,
           sessionRenewalLead: widget.sessionRenewalLead,
@@ -398,6 +406,29 @@ class _StartFlow {
   bool settle = false;
 }
 
+/// Host 일괄 업데이트's requests: none once the sign-in that opened the
+/// dialog is no longer the current one. The broker authorizes each request.
+class _OwnedHostUpdateApi implements HostUpdateBrokerApi {
+  _OwnedHostUpdateApi(this.api, this.owner);
+  final HostUpdateBrokerApi api;
+  final bool Function() owner;
+  @override
+  Future<HostUpdateState> requestHostUpdate(
+    String token,
+    String desktopId,
+    String version, {
+    bool disconnectSessions = false,
+  }) async {
+    if (!owner()) throw const BrokerException('session_expired', 401);
+    return api.requestHostUpdate(
+      token,
+      desktopId,
+      version,
+      disconnectSessions: disconnectSessions,
+    );
+  }
+}
+
 class AndroidHome extends StatefulWidget {
   const AndroidHome({
     super.key,
@@ -405,6 +436,7 @@ class AndroidHome extends StatefulWidget {
     this.apiFactory,
     this.updatesFactory,
     this.updatePlatform,
+    this.hostUpdateReleaseLoader,
     this.desktopWatchFactory,
     this.sessionRetryDelay = const Duration(seconds: 15),
     this.sessionRenewalLead = const Duration(minutes: 5),
@@ -413,6 +445,8 @@ class AndroidHome extends StatefulWidget {
     this.mfaHost,
     this.noticeHost,
   });
+  final Future<ProductRelease?> Function(String server)?
+  hostUpdateReleaseLoader;
 
   /// 공지 (android_notices.dart): where this home publishes its sign-in's
   /// notices. Null: nothing shows them (tests of other things).
@@ -2224,8 +2258,94 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
           final desktop = _find(id);
           if (desktop != null) unawaited(_hostUpdate(desktop));
         },
+        onHostBulkUpdate: () => unawaited(_openHostBulk()),
       ),
     );
+  }
+
+  bool _hostBulkOpen = false;
+
+  /// Host 일괄 업데이트 for the desktops assigned to this account: the
+  /// Windows client's dialog and controller (bulk_host_update_dialog.dart,
+  /// bulk_host_updates.dart). The broker authorizes every request by
+  /// assignment; here a request only stops once this sign-in is no longer
+  /// the current one. Closing the dialog cancels nothing already accepted.
+  Future<void> _openHostBulk() async {
+    final api = _api, session = _session, origin = _origin;
+    final server = _serverRevision;
+    if (_hostBulkOpen ||
+        api == null ||
+        api is! HostUpdateBrokerApi ||
+        session == null ||
+        origin == null) {
+      return;
+    }
+    bool owner() =>
+        mounted &&
+        _api == api &&
+        _session == session &&
+        _origin == origin &&
+        server == _serverRevision;
+    List<DesktopMachine> assigned() =>
+        List.unmodifiable(_desktops.map(_machine));
+    final machines = ValueNotifier<List<DesktopMachine>>(assigned());
+    // Every list read (the live channel's push too) reaches the dialog; a
+    // failed read publishes nothing, so the dialog can say it failed.
+    void publish() {
+      if (owner() && !_refreshFailed) machines.value = assigned();
+    }
+
+    Future<ProductRelease?> latest() async {
+      if (!owner()) throw const BrokerException('session_expired', 401);
+      ProductUpdates? catalog;
+      try {
+        final release = widget.hostUpdateReleaseLoader != null
+            ? await widget.hostUpdateReleaseLoader!(origin.toString())
+            : await (catalog = ProductUpdates(
+                origin.toString(),
+              )).check('host', '0.0.0');
+        if (!owner()) throw const BrokerException('session_expired', 401);
+        if (release != null &&
+            (release.product != 'host' ||
+                release.url.origin != origin.origin)) {
+          throw const UpdateFailure('invalid_catalog');
+        }
+        return release;
+      } finally {
+        catalog?.close();
+      }
+    }
+
+    _hostBulkOpen = true;
+    _revision.addListener(publish);
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => BulkHostUpdateDialog(
+          api: _OwnedHostUpdateApi(api as HostUpdateBrokerApi, owner),
+          token: session.token,
+          server: origin.toString(),
+          assignedMachines: machines.value,
+          liveMachines: machines,
+          // The launcher's own read: one reader, so results keep their order.
+          refreshAssigned: () async {
+            if (!owner()) throw const BrokerException('session_expired', 401);
+            await _refresh(quiet: true);
+            if (!owner()) throw const BrokerException('session_expired', 401);
+            if (_refreshFailed) throw const BrokerException('network_error');
+            return machines.value;
+          },
+          loadRelease: latest,
+          administrator: session.isAdministrator,
+        ),
+      );
+    } finally {
+      _hostBulkOpen = false;
+      _revision.removeListener(publish);
+      machines.dispose();
+      if (owner()) unawaited(_refresh(quiet: true));
+    }
   }
 
   /// Assigned desktops whose Host can be updated now (the ⋯ entry's rule).

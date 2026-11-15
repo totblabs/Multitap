@@ -192,6 +192,15 @@ class _BulkHostUpdateDialogState extends State<BulkHostUpdateDialog> {
     final visibleRows =
         controller?.rows.where((row) => row.assigned).toList() ??
         const <BulkHostUpdateRow>[];
+    // By finger on a short screen (a phone on its side, very large text)
+    // the title, the note and the buttons leave the list no room: the whole
+    // dialog scrolls there, as the Android update panel does.
+    final media = MediaQuery.of(context);
+    final touch = switch (Theme.of(context).platform) {
+      TargetPlatform.android || TargetPlatform.iOS => true,
+      _ => false,
+    };
+    final short = media.size.height / media.textScaler.scale(1) < 540;
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, _) {
@@ -205,6 +214,7 @@ class _BulkHostUpdateDialogState extends State<BulkHostUpdateDialog> {
             : l10n.assignedDesktopsLatest(visibleRows.length, controller.release.version),
         icon: Icons.system_update_alt_rounded,
         maxWidth: 720,
+        scrollAll: touch && short,
         body: [
           if (_loading) ...[
             const LinearProgressIndicator(),
@@ -269,7 +279,21 @@ class _BulkHostUpdateDialogState extends State<BulkHostUpdateDialog> {
             // can be updated, or clears the selection.
             Row(
               children: [
-                Expanded(child: _selectAll(p, controller)),
+                Expanded(
+                  // "접속 안 한 N대만" beside it only while some of the
+                  // desktops are in use and some are not; under it where
+                  // the two do not fit one line.
+                  child: Wrap(
+                    spacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _selectAll(p, controller),
+                      if (controller.busyEligibleCount > 0 &&
+                          controller.idleEligibleCount > 0)
+                        _selectIdle(p, controller),
+                    ],
+                  ),
+                ),
                 if (widget.refreshAssigned != null)
                   IconButton(
                     key: const Key('bulk-host-refresh'),
@@ -391,46 +415,75 @@ class _BulkHostUpdateDialogState extends State<BulkHostUpdateDialog> {
         !controller.catalogChanged &&
         !controller.authorizationStopped;
     void toggle() => controller.selectAll(!all);
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: MergeSemantics(
-        child: InkWell(
-          key: const Key('bulk-host-select-all'),
-          onTap: enabled ? toggle : null,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // The row is the control; the box only shows the state.
-                ExcludeFocus(
-                  child: IgnorePointer(
-                    child: Checkbox(
-                      tristate: true,
-                      value: all
-                          ? true
-                          : chosen > 0
-                          ? null
-                          : false,
-                      onChanged: enabled ? (_) => toggle() : null,
-                    ),
+    return MergeSemantics(
+      child: InkWell(
+        key: const Key('bulk-host-select-all'),
+        onTap: enabled ? toggle : null,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.only(right: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // The row is the control; the box only shows the state.
+              ExcludeFocus(
+                child: IgnorePointer(
+                  child: Checkbox(
+                    tristate: true,
+                    value: all
+                        ? true
+                        : chosen > 0
+                        ? null
+                        : false,
+                    onChanged: enabled ? (_) => toggle() : null,
                   ),
                 ),
-                Flexible(
-                  child: KeepAllText(
-                    l10n.selectAll2,
-                    style: uiText(
-                      size: 13,
-                      weight: FontWeight.w600,
-                      color: enabled ? p.ink : p.disabled,
-                    ),
+              ),
+              Flexible(
+                child: KeepAllText(
+                  l10n.selectAll2,
+                  style: uiText(
+                    size: 13,
+                    weight: FontWeight.w600,
+                    color: enabled ? p.ink : p.disabled,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// "접속 안 한 N대만" (the admin console's choice): one press chooses the
+  /// desktops nobody is connected to and leaves the ones in use out. Each
+  /// row still says whether it is in use when its request goes.
+  Widget _selectIdle(AppPalette p, BulkHostUpdateController controller) {
+    final enabled =
+        !controller.submitting &&
+        !controller.catalogChanged &&
+        !controller.authorizationStopped;
+    // An outlined pill a little lower than the dialog's buttons: a choice
+    // about the list, not one of the dialog's actions.
+    return OutlinedButton(
+      key: const Key('bulk-host-select-idle'),
+      onPressed: enabled ? controller.selectIdle : null,
+      style: AppButtons.outlined(p).copyWith(
+        minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        ),
+        textStyle: WidgetStatePropertyAll(
+          uiText(size: 13, weight: FontWeight.w600),
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      ),
+      child: KeepAllText(
+        l10n.bulkHostIdleOnly(controller.idleEligibleCount),
+        maxLines: 1,
       ),
     );
   }

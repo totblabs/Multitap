@@ -39,9 +39,15 @@ class DesktopReadiness {
     this.progressLabel,
     this.hostUpdating = false,
     this.hostMissing = false,
+    this.samePc = false,
   });
 
   final TilePhase phase;
+
+  /// This desktop's Host runs on the PC this app runs on
+  /// ([DesktopMachine.samePc]): no connection starts from here, and the main
+  /// button says why instead of offering a fix.
+  final bool samePc;
 
   /// The Host went away with its last update and stayed away (broker
   /// hostMissingAfterUpdate): the [detail] is the next step, in place of the
@@ -381,7 +387,13 @@ class DesktopReadiness {
       );
     }
 
-    ReadinessCheck relay() => ready && !console
+    ReadinessCheck relay() => m.samePc && !preview
+        ? ReadinessCheck(
+            l10n.connectionPath,
+            CheckState.warn,
+            l10n.samePcHeadline,
+          )
+        : ready && !console
         ? ReadinessCheck(
             l10n.connectionPath,
             CheckState.ok,
@@ -404,6 +416,7 @@ class DesktopReadiness {
       String? progressLabel,
       bool hostUpdating = false,
       bool hostMissing = false,
+      bool samePc = false,
     }) => DesktopReadiness._(
       phase: phase,
       chip: chip,
@@ -418,6 +431,7 @@ class DesktopReadiness {
       progressLabel: progressLabel,
       hostUpdating: hostUpdating,
       hostMissing: hostMissing,
+      samePc: samePc,
     );
 
     if (preview && ready) {
@@ -445,6 +459,18 @@ class DesktopReadiness {
         m.powerAction == 'shutdown' && m.canStop
             ? l10n.ifWindowsDoesNotRespond
             : l10n.statusCheckedAgainWhenFinishes,
+      );
+    }
+    // The Host of this desktop runs on the PC this app runs on. Connecting
+    // would move every window, this app included, onto the Host's virtual
+    // display, so whatever else its state is, it is not offered from here.
+    if (m.samePc && !preview) {
+      return make(
+        TilePhase.attention,
+        l10n.running,
+        l10n.samePcHeadline,
+        l10n.samePcDetail,
+        samePc: true,
       );
     }
     if (ready) {

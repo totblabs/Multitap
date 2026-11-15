@@ -31,16 +31,22 @@ class AndroidUpdatePanel extends StatefulWidget {
     this.hostUpdates,
     this.hostUpdatesChanged,
     this.onHostUpdate,
+    this.onHostBulkUpdate,
   });
   final String server;
 
   /// Assigned desktops whose Host can be updated now (the header badge leads
   /// here), read again whenever [hostUpdatesChanged] fires. Each
   /// row closes the panel and opens that desktop's own Host update
-  /// ([onHostUpdate] with its id): Android has no bulk Host update.
+  /// ([onHostUpdate] with its id).
   final List<DesktopMachine> Function()? hostUpdates;
   final Listenable? hostUpdatesChanged;
   final ValueChanged<String>? onHostUpdate;
+
+  /// Host 일괄 업데이트 (the Windows client's, bulk_host_update_dialog.dart):
+  /// its button heads the Host list, closes the panel and opens it. Null:
+  /// the rows alone.
+  final VoidCallback? onHostBulkUpdate;
 
   /// The running build, from the installed package.
   final String? current;
@@ -272,12 +278,14 @@ class _AndroidUpdatePanelState extends State<AndroidUpdatePanel> {
     );
   }
 
-  /// The assigned Hosts with an installable update, each with its own
-  /// 업데이트 that leads to that desktop's Host update question.
+  /// The assigned Hosts with an installable update: Host 일괄 업데이트 for
+  /// all of them at once, then each with its own 업데이트 that leads to that
+  /// desktop's Host update question.
   Widget _hostOffer(
     AppPalette p,
     List<DesktopMachine> hosts,
     ValueChanged<String> open,
+    VoidCallback? bulk,
   ) => Container(
     key: const Key('host-update-offer'),
     padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
@@ -307,6 +315,20 @@ class _AndroidUpdatePanelState extends State<AndroidUpdatePanel> {
             ),
           ],
         ),
+        if (bulk != null) ...[
+          const SizedBox(height: 10),
+          // Blue as the Host's own colour; the rows keep the amber 업데이트.
+          FilledButton.icon(
+            key: const Key('open-bulk-host-update'),
+            onPressed: () {
+              Navigator.pop(context);
+              bulk();
+            },
+            style: AppButtons.filled(p, tone: AppTone.info),
+            icon: const Icon(Icons.system_update_alt_rounded, size: 18),
+            label: KeepAllText(l10n.hostBulkUpdate),
+          ),
+        ],
         for (final machine in hosts) ...[
           const SizedBox(height: 10),
           Row(
@@ -429,7 +451,12 @@ class _AndroidUpdatePanelState extends State<AndroidUpdatePanel> {
                 ? const SizedBox.shrink()
                 : Padding(
                     padding: const EdgeInsets.only(top: 16),
-                    child: _hostOffer(p, hosts, open),
+                    child: _hostOffer(
+                      p,
+                      hosts,
+                      open,
+                      widget.onHostBulkUpdate,
+                    ),
                   );
           },
         ),

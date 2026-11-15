@@ -1472,6 +1472,7 @@
   "stopRemainingRequests": "Stop remaining requests",
   "updateSelected": "Update {selectedCount} selected",
   "selectAll2": "Select all",
+  "bulkHostIdleOnly": "Only {count} idle",
   "currentVersionUnknown": "Current version unknown",
   "windowsRestartNeeded": "Windows restart needed",
   "enterCurrentPasswordChooseNew": "Enter your current password and choose a new password of 10–256 characters.",
@@ -3247,5 +3248,8 @@
   "smallCardsTapNormal": "Small cards · tap for normal size",
   "normalCardsTapSmall": "Normal cards · tap for small",
   "couldntSaveCardSize": "Couldn't save the card size setting.",
-  "currentGroup": "{name}, current group"
+  "currentGroup": "{name}, current group",
+  "samePcHeadline": "This desktop is the PC you're using",
+  "samePcDetail": "You can't connect from here. Connect from another device.",
+  "samePcMessage": "This desktop is the PC you're using Multitap on, so you can't connect to it. Connect from another device."
 }

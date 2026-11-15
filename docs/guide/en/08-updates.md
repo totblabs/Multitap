@@ -227,16 +227,23 @@ If someone is connected, you get two choices.
 Regular users can end only their own connection.
 If another user is connected, choose **Update when done** or ask an administrator.
 
-## Host — from the Windows client, several at once
+## Host — from the Windows client and Android, several at once
 
-1. Click **Check for updates** above the list.
-2. Click **Update Hosts**.
-3. Choose the desktops to update.
+The way in appears while at least one desktop assigned to you has a Host that can be updated.
+
+| App | Where |
+| --- | --- |
+| Windows client | The blue **Host updates: N** button at the top of the window. A narrow window shows only its server icon. |
+| Android | The update button at the top (it carries a dot) → **Host bulk update** under **N Host updates available** |
+
+1. Use the button in the table to open **Host bulk update**.
+2. Choose the desktops to update. **Select all** chooses every desktop that can be updated.
+3. To leave out the desktops in use, press **Only N idle**. It appears while some desktops are in use and some are not.
 4. Read the notice about ending connections.
 5. Click **Update N selected**.
 6. Check the progress and the install result for each one.
 
-Your own connections are ended and the update starts at once.
+Your own connections to the chosen desktops are ended and the update starts at once.
 If another user is connected to a desktop assigned to a regular user, it waits until that connection ends.
 A request from an admin account can end every connection to the desktop.
 
@@ -251,7 +258,7 @@ Updates already accepted continue.
 | Admin console **Desktops → the desktop**, **Update Host** | **Update**, or **Update when connections end** | The **Update now (disconnects)** button is also available. |
 | Admin console **Updates**, **Update all N** (or the **Update** mark under **Desktops**) | **Disconnect and update N** after checking who is connected | Choosing **Only the N not in use** disconnects no one. |
 
-Android has no update for several Hosts at once.
+The Android update window also lists each desktop with its own **Update**, for one at a time.
 For desktops not assigned to you, use the admin console.
 
 ### Reconnecting after a Host update

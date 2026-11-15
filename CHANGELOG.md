@@ -2,7 +2,22 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13 and 1.1.16 to 1.1.14; the server is unchanged in both and the apps stay at 1.1.13. 1.1.17 is the server; the Host stays at 1.1.14. 1.1.18 is the server with the Windows app and the Android app at 1.1.14; the Host stays at 1.1.14. 1.1.19 brings the Android app to 1.1.15; the server is unchanged, the Windows app and the Host stay at 1.1.14. 1.1.20 brings the Host to 1.1.17; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.21 brings the Host to 1.1.18; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.22 brings the Host to 1.1.20; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.23 brings the Host to 1.1.21; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13 and 1.1.16 to 1.1.14; the server is unchanged in both and the apps stay at 1.1.13. 1.1.17 is the server; the Host stays at 1.1.14. 1.1.18 is the server with the Windows app and the Android app at 1.1.14; the Host stays at 1.1.14. 1.1.19 brings the Android app to 1.1.15; the server is unchanged, the Windows app and the Host stay at 1.1.14. 1.1.20 brings the Host to 1.1.17; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.21 brings the Host to 1.1.18; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.22 brings the Host to 1.1.20; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.23 brings the Host to 1.1.21; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.24 is the server, the Windows app 1.1.15 and the Android app 1.1.16; the Host stays at 1.1.21. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.24](https://github.com/totblabs/Multitap/releases/tag/v1.1.24)
+
+### Connecting (Windows app, server)
+
+- **The Windows app no longer connects to the desktop whose Host runs on the same PC.** That connection switched the PC's own monitor off, moved every window (the app included) onto the invisible virtual screen and could repeat keystrokes endlessly. The card now reads "This desktop is the PC you're using" and the app refuses to connect; connect to it from another device. The server tells the app which desktop that is without sending the PC's identifier.
+
+### Host bulk update (Android app, Windows app)
+
+- The Android app can update every Host at once too: the update button at the top → **Host bulk update**.
+- In both apps the bulk update offers "Only N idle" to pick the desktops nobody is connected to. Connected desktops can be chosen as well; their connection ends with "Disconnected for a Host update" and the app waits for the update.
+
+### USB (Windows app)
+
+- **Fixed: a shared USB drive always read "USB drive · no drive letter" with a Disk Management warning.** While a drive is shared, the PC no longer sees its volumes; the panel now keeps the name and details the PC showed before sharing.
 
 ## [1.1.23](https://github.com/totblabs/Multitap/releases/tag/v1.1.23)
 

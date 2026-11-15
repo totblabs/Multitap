@@ -17,6 +17,7 @@ import 'data/product_log.dart';
 import 'data/product_updates.dart' show newerProductVersion;
 import 'data/client_build_version.dart';
 import 'data/session_windows.dart';
+import 'data/same_pc.dart';
 import 'data/update_handoff.dart';
 import 'data/window_close_guard.dart';
 import 'ui/session_status_panel.dart';
@@ -46,6 +47,9 @@ Future<void> main(List<String> arguments) async {
     }
   }
   runningClientBuild = await ClientBuildVersion.load();
+  // same-pc-v1: this PC's SMBIOS UUID, read before any desktop list is, in
+  // the launcher and in each session window (Host settings lists no desktop).
+  if (Platform.isWindows && !hostMode) await SamePc.load();
   if (Platform.isWindows) {
     try {
       await DecodeSettings.init(DecodeSettings.windows());
