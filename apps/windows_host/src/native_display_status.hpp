@@ -109,11 +109,15 @@ inline DisplayState nativeDisplayStatus(bool standbyAllowed=false){
       });
     }catch(const std::exception& error){
       if(!standbyAllowed||std::string(error.what())!="native_display_topology_mismatch")throw;
+      // Not standby: why (nativeStandbyMiss) and how many paths, for the field record.
       UINT32 allPaths=0,allModes=0;const UINT32 allFlags=QDC_ALL_PATHS|QDC_VIRTUAL_MODE_AWARE;
-      if(GetDisplayConfigBufferSizes(allFlags,&allPaths,&allModes)!=ERROR_SUCCESS||allPaths>256||allModes>512)throw;
+      if(GetDisplayConfigBufferSizes(allFlags,&allPaths,&allModes)!=ERROR_SUCCESS){state.standbyMiss=nativeStandbyMiss::query;throw;}
+      state.standbyPaths=allPaths;
+      if(allPaths>nativeStandbyPathLimit||allModes>4*nativeStandbyPathLimit){state.standbyMiss=nativeStandbyMiss::tooMany;throw;}
       std::vector<DISPLAYCONFIG_PATH_INFO> every(allPaths);std::vector<DISPLAYCONFIG_MODE_INFO> everyMode(allModes);
-      if(QueryDisplayConfig(allFlags,&allPaths,every.data(),&allModes,everyMode.data(),nullptr)!=ERROR_SUCCESS)throw;every.resize(allPaths);everyMode.resize(allModes);
-      auto standby=nativeStandbyMonitors(targets,every,everyMode);if(!standby)throw;
+      if(QueryDisplayConfig(allFlags,&allPaths,every.data(),&allModes,everyMode.data(),nullptr)!=ERROR_SUCCESS){state.standbyMiss=nativeStandbyMiss::query;throw;}every.resize(allPaths);
+      uint32_t miss=nativeStandbyMiss::none;
+      auto standby=nativeStandbyMonitors(targets,every,paths,&miss);if(!standby){state.standbyMiss=miss;throw;}
       state.standby=true;state.monitors=std::move(*standby);
       const auto& first=state.monitors.front();state.left=first.left;state.top=first.top;LONG right=first.left+LONG(first.width),bottom=first.top+LONG(first.height);
       for(const auto& monitor:state.monitors){right=std::max(right,monitor.left+LONG(monitor.width));bottom=std::max(bottom,monitor.top+LONG(monitor.height));}
@@ -125,6 +129,31 @@ inline DisplayState nativeDisplayStatus(bool standbyAllowed=false){
     state.width=DWORD(right-state.left);state.height=DWORD(bottom-state.top);state.active=true;pending();state.viewportProvisioning=nativeViewportTrialReady(state,config,true);state.monitorControlSupported=state.ready()&&!state.remoteSession&&snapshot.get("countControlAvailable").boolean();return state;
   }catch(const std::exception& error){const std::string reason=error.what();if(reason=="native_display_snapshot_invalid"||reason=="native_display_configuration_untrusted"||reason=="native_display_topology_mismatch")state.error=reason;return state;}
   catch(...){return state;}
+#endif
+}
+// Would the owned outputs be standby once off? The same check
+// (nativeStandbyMonitors) on the current CCD with the owned paths taken off. The
+// at-rest probe puts outputs off only then: Host 1.1.20 put them off where
+// standby was not recognised (TOTB-SS, TOTB-WORK, 2026-11-15) and nothing
+// switched them on again, so those desktops could not be connected to.
+inline bool nativeStandbyPossible(std::span<const NativeDisplayTarget> targets){
+#ifndef MULTITAP_NATIVE_DISPLAY
+  (void)targets;return false;
+#else
+  try{
+    const auto query=[](UINT32 flags)->std::optional<std::vector<DISPLAYCONFIG_PATH_INFO>>{
+      UINT32 pathCount=0,modeCount=0;if(GetDisplayConfigBufferSizes(flags,&pathCount,&modeCount)!=ERROR_SUCCESS||pathCount>nativeStandbyPathLimit||modeCount>4*nativeStandbyPathLimit)return std::nullopt;
+      std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+      if(QueryDisplayConfig(flags,&pathCount,paths.data(),&modeCount,modes.data(),nullptr)!=ERROR_SUCCESS)return std::nullopt;
+      paths.resize(pathCount);return paths;
+    };
+    auto all=query(QDC_ALL_PATHS|QDC_VIRTUAL_MODE_AWARE),active=query(QDC_ONLY_ACTIVE_PATHS|QDC_VIRTUAL_MODE_AWARE);
+    if(!all||!active)return false;
+    const auto owned=[&](const DISPLAYCONFIG_PATH_INFO& path){return std::any_of(targets.begin(),targets.end(),[&](const auto& target){return path.targetInfo.id==target.target&&path.targetInfo.adapterId.LowPart==target.adapter.LowPart&&path.targetInfo.adapterId.HighPart==target.adapter.HighPart;});};
+    for(auto& path:*all)if(owned(path))path.flags&=~DISPLAYCONFIG_PATH_ACTIVE;
+    std::erase_if(*active,owned);
+    return nativeStandbyMonitors(targets,*all,*active).has_value();
+  }catch(...){return false;}
 #endif
 }
 }

@@ -137,45 +137,51 @@ inline std::vector<VirtualMonitor> nativeDisplayMonitors(
   return verified;
 }
 // Display manager v2 standby: every owned target is present and available but
-// off while another display is on in this session ([paths]/[modes]: all paths,
-// QDC_ALL_PATHS). A stream switches the owned outputs on (DisplaySessionV2), so
-// at rest a PC's monitor or a VM's own display is not extended by an invisible
-// screen. The monitors are the lease sizes in the place a stream gives them
-// (display-manager-v2.md, Start and Independent outputs): "0" primary at the
-// origin with every other display off, "1" right of "0" (top-aligned). The
-// server admits an initial viewport only on a primary "0" (initial-viewport.mjs,
-// relay.mjs), so beside a PC's monitor an at-rest "0" that is not primary
-// would refuse every connection. They have no device name: nothing captures
-// them before the stream.
+// off ([all]: QDC_ALL_PATHS, paths only) while another display is on in this
+// session ([active]: QDC_ONLY_ACTIVE_PATHS). A stream switches the owned
+// outputs on (DisplaySessionV2), so at rest a PC's monitor or a VM's own
+// display is not extended by an invisible screen. The monitors are the lease
+// sizes in the place a stream gives them (display-manager-v2.md, Start and
+// Independent outputs): "0" primary at the origin with every other display
+// off, "1" right of "0" (top-aligned). The server admits an initial viewport
+// only on a primary "0" (initial-viewport.mjs, relay.mjs), so beside a PC's
+// monitor an at-rest "0" that is not primary would refuse every connection.
+// They have no device name: nothing captures them before the stream.
+// No mode record is read: QDC_ALL_PATHS may omit the active ones
+// (native_activation_ccd.hpp) and the places above do not depend on the other
+// displays. [all] is bounded like every CCD query (nativeCcdQueryPathLimit,
+// 4096): it lists sources x targets of every adapter, hundreds with a few
+// display adapters, and the 256 bound of Host 1.1.17-1.1.20 refused standby
+// there (TOTB-SS: Intel graphics and three other display adapters, 2026-11-15).
+// [miss]: why not (NativeStandbyMiss), for the field record.
+namespace nativeStandbyMiss {
+inline constexpr uint32_t none=0,targets=1,tooMany=2,ownedOn=3,ownedUnavailable=4,nothingElse=5,query=6;
+}
+inline constexpr size_t nativeStandbyPathLimit=4096;
 inline std::optional<std::vector<VirtualMonitor>> nativeStandbyMonitors(
-    std::span<const NativeDisplayTarget> targets,std::span<const DISPLAYCONFIG_PATH_INFO> paths,
-    std::span<const DISPLAYCONFIG_MODE_INFO> modes){
-  if(targets.empty()||targets.size()>2||paths.size()>256||modes.size()>512)return {};
-  std::vector<DISPLAYCONFIG_PATH_INFO> normalized(paths.begin(),paths.end());
-  normalizeNativeCcdModeReferences(normalized,modes);
+    std::span<const NativeDisplayTarget> targets,std::span<const DISPLAYCONFIG_PATH_INFO> all,
+    std::span<const DISPLAYCONFIG_PATH_INFO> active,uint32_t* miss=nullptr){
+  const auto no=[&](uint32_t why)->std::optional<std::vector<VirtualMonitor>>{if(miss)*miss=why;return std::nullopt;};
+  if(miss)*miss=nativeStandbyMiss::none;
+  if(targets.empty()||targets.size()>2)return no(nativeStandbyMiss::targets);
+  if(all.size()>nativeStandbyPathLimit||active.size()>nativeStandbyPathLimit)return no(nativeStandbyMiss::tooMany);
   const auto ownedPath=[&](const DISPLAYCONFIG_PATH_INFO& path,const NativeDisplayTarget& target){return path.targetInfo.id==target.target&&path.targetInfo.adapterId.LowPart==target.adapter.LowPart&&path.targetInfo.adapterId.HighPart==target.adapter.HighPart;};
   for(const auto& target:targets){
-    if(!ownedOutputSize(target.width,target.height))return {};
+    if(!ownedOutputSize(target.width,target.height))return no(nativeStandbyMiss::targets);
     bool available=false;
-    for(const auto& path:normalized)if(ownedPath(path,target)){if(path.flags&DISPLAYCONFIG_PATH_ACTIVE)return {};if(path.targetInfo.targetAvailable)available=true;}
-    if(!available)return {};
+    for(const auto& path:all)if(ownedPath(path,target)){if(path.flags&DISPLAYCONFIG_PATH_ACTIVE)return no(nativeStandbyMiss::ownedOn);if(path.targetInfo.targetAvailable)available=true;}
+    for(const auto& path:active)if(ownedPath(path,target)&&(path.flags&DISPLAYCONFIG_PATH_ACTIVE))return no(nativeStandbyMiss::ownedOn);
+    if(!available)return no(nativeStandbyMiss::ownedUnavailable);
   }
-  bool other=false;
-  for(const auto& path:normalized){
-    if(!(path.flags&DISPLAYCONFIG_PATH_ACTIVE)||std::any_of(targets.begin(),targets.end(),[&](const auto& target){return ownedPath(path,target);}))continue;
-    const auto index=(path.flags&DISPLAYCONFIG_PATH_SUPPORT_VIRTUAL_MODE)?path.sourceInfo.sourceModeInfoIdx:path.sourceInfo.modeInfoIdx;
-    if(index>=modes.size())return {};const auto& mode=modes[index];
-    if(mode.infoType!=DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE||mode.id!=path.sourceInfo.id||mode.adapterId.LowPart!=path.sourceInfo.adapterId.LowPart||mode.adapterId.HighPart!=path.sourceInfo.adapterId.HighPart||!mode.sourceMode.width||!mode.sourceMode.height)return {};
-    const auto& source=mode.sourceMode;if(!displayRectangleFits(source.position.x,source.position.y,source.width,source.height))return {};
-    other=true;
-  }
-  if(!other)return {};
+  const bool other=std::any_of(active.begin(),active.end(),[&](const auto& path){
+    return (path.flags&DISPLAYCONFIG_PATH_ACTIVE)&&std::none_of(targets.begin(),targets.end(),[&](const auto& target){return ownedPath(path,target);});});
+  if(!other)return no(nativeStandbyMiss::nothingElse);
   std::vector<VirtualMonitor> monitors;int64_t right=0;
   for(const auto* id:{"0","1"})for(const auto& target:targets)if(target.id==id){
-    if(!displayRectangleFits(right,0,target.width,target.height))return {};
+    if(!displayRectangleFits(right,0,target.width,target.height))return no(nativeStandbyMiss::targets);
     monitors.push_back({target.id,{},LONG(right),0,target.width,target.height,target.id=="0"});right+=target.width;
   }
-  if(monitors.size()!=targets.size())return {};
+  if(monitors.size()!=targets.size())return no(nativeStandbyMiss::targets);
   return monitors;
 }
 }

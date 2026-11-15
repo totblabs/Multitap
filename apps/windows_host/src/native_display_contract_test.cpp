@@ -59,14 +59,27 @@ int main(){try{
       DISPLAYCONFIG_MODE_INFO mode{};mode.infoType=DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;mode.id=id;mode.adapterId={low,0};mode.sourceMode.width=w;mode.sourceMode.height=h;mode.sourceMode.position={x,y};data.push_back(mode);all.push_back(path);};
     other(77,9,0,0,1280,800);other(78,4,1280,100,2560,1600);
     for(const auto& target:targets){DISPLAYCONFIG_PATH_INFO path{};path.targetInfo.targetAvailable=TRUE;path.targetInfo.adapterId=target.adapter;path.targetInfo.id=target.target;path.sourceInfo.adapterId=target.adapter;path.sourceInfo.modeInfoIdx=DISPLAYCONFIG_PATH_MODE_IDX_INVALID;path.targetInfo.modeInfoIdx=DISPLAYCONFIG_PATH_MODE_IDX_INVALID;all.push_back(path);}
-    const auto standby=nativeStandbyMonitors(targets,all,data);
+    // [active]: what QDC_ONLY_ACTIVE_PATHS lists (the other displays here).
+    const auto activeOf=[](const std::vector<DISPLAYCONFIG_PATH_INFO>& list){std::vector<DISPLAYCONFIG_PATH_INFO> out;for(const auto& path:list)if(path.flags&DISPLAYCONFIG_PATH_ACTIVE)out.push_back(path);return out;};
+    const auto check=[&](const std::vector<DISPLAYCONFIG_PATH_INFO>& list,uint32_t* miss=nullptr){return nativeStandbyMonitors(targets,list,activeOf(list),miss);};
+    const auto standby=check(all);
     require(standby&&standby->size()==2&&(*standby)[0].id=="0"&&(*standby)[0].left==0&&(*standby)[0].top==0&&(*standby)[0].primary&&(*standby)[0].width==targets[0].width&&(*standby)[0].height==targets[0].height&&
       (*standby)[1].id=="1"&&(*standby)[1].left==LONG(targets[0].width)&&(*standby)[1].top==0&&!(*standby)[1].primary&&(*standby)[0].name.empty()&&(*standby)[1].name.empty(),"Standby outputs were not offered where a stream puts them");++passed;
     // Not standby: an owned output on, one unavailable or missing, nothing else on.
-    {auto on=all;on[2].flags|=DISPLAYCONFIG_PATH_ACTIVE;require(!nativeStandbyMonitors(targets,on,data),"An owned output on was standby");++passed;}
-    {auto gone=all;gone[3].targetInfo.targetAvailable=FALSE;require(!nativeStandbyMonitors(targets,gone,data),"An unavailable owned target was standby");++passed;}
-    {auto missing=all;missing.pop_back();require(!nativeStandbyMonitors(targets,missing,data),"A missing owned target was standby");++passed;}
-    {auto alone=all;alone[0].flags&=~DISPLAYCONFIG_PATH_ACTIVE;alone[1].flags&=~DISPLAYCONFIG_PATH_ACTIVE;require(!nativeStandbyMonitors(targets,alone,data),"Owned outputs with nothing else on were standby");++passed;}
+    {uint32_t miss=0;auto on=all;on[2].flags|=DISPLAYCONFIG_PATH_ACTIVE;require(!check(on,&miss)&&miss==nativeStandbyMiss::ownedOn,"An owned output on was standby");++passed;}
+    {uint32_t miss=0;auto gone=all;gone[3].targetInfo.targetAvailable=FALSE;require(!check(gone,&miss)&&miss==nativeStandbyMiss::ownedUnavailable,"An unavailable owned target was standby");++passed;}
+    {uint32_t miss=0;auto missing=all;missing.pop_back();require(!check(missing,&miss)&&miss==nativeStandbyMiss::ownedUnavailable,"A missing owned target was standby");++passed;}
+    {uint32_t miss=0;auto alone=all;alone[0].flags&=~DISPLAYCONFIG_PATH_ACTIVE;alone[1].flags&=~DISPLAYCONFIG_PATH_ACTIVE;require(!check(alone,&miss)&&miss==nativeStandbyMiss::nothingElse,"Owned outputs with nothing else on were standby");++passed;}
+    // Field (TOTB-SS, Intel graphics and three other display adapters): QDC_ALL_PATHS lists
+    // hundreds of inactive paths (sources x targets per adapter) and may omit the active mode
+    // records. Neither keeps standby away; the bound is the CCD query's (4096).
+    {auto many=all;for(UINT32 n=0;n<600;++n){DISPLAYCONFIG_PATH_INFO path{};path.targetInfo.targetAvailable=n%3!=0;path.targetInfo.adapterId={900+n/40,0};path.targetInfo.id=n%40;path.sourceInfo.adapterId=path.targetInfo.adapterId;path.sourceInfo.id=n%8;many.push_back(path);}
+      require(check(many).has_value(),"Hundreds of inactive paths kept standby away");++passed;
+      auto noModes=all;for(auto& path:noModes)path.sourceInfo.modeInfoIdx=DISPLAYCONFIG_PATH_MODE_IDX_INVALID;require(check(noModes).has_value(),"Missing mode records kept standby away");++passed;
+      uint32_t miss=0;std::vector<DISPLAYCONFIG_PATH_INFO> huge(nativeStandbyPathLimit+1);require(!nativeStandbyMonitors(targets,huge,activeOf(all),&miss)&&miss==nativeStandbyMiss::tooMany,"An unbounded path list was read");++passed;}
+    // The reason reaches the service through the worker reply.
+    {DisplayState missed;missed.standbyMiss=nativeStandbyMiss::ownedUnavailable;missed.standbyPaths=612;const auto back=parseDisplayState(JsonParser::parse(workerDisplayJson(missed)));
+      require(back.standbyMiss==nativeStandbyMiss::ownedUnavailable&&back.standbyPaths==612,"The standby reason was lost in the worker reply");++passed;}
     // Standby is streamable, never ready (capture needs the outputs on).
     DisplayState state;state.installed=state.deviceReady=state.owned=true;state.foreign=0;state.standby=true;state.monitors=*standby;
     require(state.standbyReady()&&state.streamable()&&!state.ready(),"Standby was not streamable only");++passed;

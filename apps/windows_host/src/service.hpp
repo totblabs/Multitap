@@ -197,7 +197,7 @@ inline std::string viewportFailureReason(const DisplayState& display,bool intera
 inline std::string workerDisplayJson(const DisplayState& display) {
   std::string monitors = "[";
   for (const auto& monitor : display.monitors) { if (monitors.size() > 1) monitors += ','; monitors += "{\"id\":" + jsonQuote(monitor.id) + ",\"displayDeviceName\":" + jsonQuote(utf8(monitor.name)) + ",\"left\":" + std::to_string(monitor.left) + ",\"top\":" + std::to_string(monitor.top) + ",\"width\":" + std::to_string(monitor.width) + ",\"height\":" + std::to_string(monitor.height) + ",\"primary\":" + (monitor.primary ? "true" : "false") + ",\"virtual\":true}"; }
-  return "{\"installed\":" + std::string(display.installed ? "true" : "false") + ",\"deviceReady\":" + (display.deviceReady ? "true" : "false") + ",\"activeDisplay\":" + (display.active ? "true" : "false") + ",\"owned\":" + (display.owned ? "true" : "false") + ",\"foreignDeviceCount\":" + std::to_string(display.foreign) + ",\"width\":" + std::to_string(display.width) + ",\"height\":" + std::to_string(display.height) + ",\"left\":" + std::to_string(display.left) + ",\"top\":" + std::to_string(display.top) + ",\"displayDeviceName\":" + jsonQuote(utf8(display.name)) + ",\"remoteSession\":" + (display.remoteSession ? "true" : "false") + ",\"configurationPending\":" + (display.configurationPending ? "true" : "false") + ",\"rebootRequired\":" + (display.rebootRequired ? "true" : "false") + ",\"clipboardSupported\":" + (display.clipboardSupported ? "true" : "false") + ",\"recoveryRequired\":" + (display.recoveryRequired ? "true" : "false") + ",\"viewportProvisioning\":" + (display.viewportProvisioning ? "true" : "false") + ",\"error\":"+jsonQuote(safeViewportFailure(display.error))+",\"monitorControlSupported\":" + (display.monitorControlSupported ? "true" : "false") + ",\"standby\":" + (display.standby ? "true" : "false") + ",\"displays\":" + monitors + "]}";
+  return "{\"installed\":" + std::string(display.installed ? "true" : "false") + ",\"deviceReady\":" + (display.deviceReady ? "true" : "false") + ",\"activeDisplay\":" + (display.active ? "true" : "false") + ",\"owned\":" + (display.owned ? "true" : "false") + ",\"foreignDeviceCount\":" + std::to_string(display.foreign) + ",\"width\":" + std::to_string(display.width) + ",\"height\":" + std::to_string(display.height) + ",\"left\":" + std::to_string(display.left) + ",\"top\":" + std::to_string(display.top) + ",\"displayDeviceName\":" + jsonQuote(utf8(display.name)) + ",\"remoteSession\":" + (display.remoteSession ? "true" : "false") + ",\"configurationPending\":" + (display.configurationPending ? "true" : "false") + ",\"rebootRequired\":" + (display.rebootRequired ? "true" : "false") + ",\"clipboardSupported\":" + (display.clipboardSupported ? "true" : "false") + ",\"recoveryRequired\":" + (display.recoveryRequired ? "true" : "false") + ",\"viewportProvisioning\":" + (display.viewportProvisioning ? "true" : "false") + ",\"error\":"+jsonQuote(safeViewportFailure(display.error))+",\"monitorControlSupported\":" + (display.monitorControlSupported ? "true" : "false") + ",\"standby\":" + (display.standby ? "true" : "false") + ",\"standbyMiss\":" + std::to_string(display.standbyMiss) + ",\"standbyPaths\":" + std::to_string(display.standbyPaths) + ",\"displays\":" + monitors + "]}";
 }
 // A read-only worker can run topology and viewport helpers sequentially.
 // Keep their explicit budgets and the whole-message IPC deadline together.
@@ -329,6 +329,8 @@ inline NativeBootstrapAccess nativeWorkerBootstrapAccess(){
     // activation above (nullopt).
     [eligible](std::span<const NativeDisplayTarget> targets,const std::string& key)->std::optional<NativeTopologyResult>{
       if(!displayManagerV2Selected())return std::nullopt;
+      // Only where standby will be recognised; elsewhere the activation as before.
+      if(!nativeStandbyPossible(targets))return std::nullopt;
       try{
         const auto current=[eligible,key]{try{const auto state=nativeDisplayLeaseSnapshot();return eligible()&&!state.get("configurationPending").boolean()&&nativeDisplayLeaseKey(state)==key;}catch(...){return false;}};
         DisplayV2Retired retired;if(nativeDisplayConfirmed())retired=legacyRetiredResolver(nativeConsoleAdapterIdentity,legacyOwnerInstanceFromRegistry);
@@ -348,16 +350,27 @@ inline NativeBootstrapAccess nativeWorkerBootstrapAccess(){
 // refused every connection until the Host restarted. Under display manager v2
 // owned outputs seen on beside another display are put off again by the same
 // rest step; a VM without a display of its own keeps them on.
+// Only where standby will be recognised once they are off (nativeStandbyPossible);
+// elsewhere they stay on, as before. Owned outputs found off without standby
+// (Host 1.1.20 put them off where standby was not recognised: TOTB-SS,
+// TOTB-WORK) are switched on again as the activation does, so a desktop is
+// never left without a streamable display.
 inline DisplayState workerDisplayProbeAtRest(){
   const bool v2=displayManagerV2Selected();auto display=workerDisplayProbe(v2);
-  // On, or partly on / cloned (the owned outputs then do not match the lease).
-  const bool on=display.active||display.error=="native_display_topology_mismatch";
-  if(!v2||!on||display.remoteSession||display.configurationPending||display.recoveryRequired)return display;
+  // On, or off / partly on / cloned without standby (the owned outputs do not match the lease).
+  const bool on=display.active,unmatched=!display.active&&!display.standby&&display.error=="native_display_topology_mismatch";
+  if(!v2||!(on||unmatched)||display.remoteSession||display.configurationPending||display.recoveryRequired)return display;
   try{
     const auto snapshot=nativeDisplayLeaseSnapshot();if(snapshot.get("configurationPending").boolean())return display;
-    const auto access=nativeWorkerBootstrapAccess();if(!access.eligible()||!access.rest)return display;
-    const auto rested=access.rest(nativeDisplayTargets(snapshot),nativeDisplayLeaseKey(snapshot));
-    if(rested&&rested->ok&&rested->applyAttempted)return workerDisplayProbe(true);
+    const auto access=nativeWorkerBootstrapAccess();if(!access.eligible()||!access.rest||!access.activate)return display;
+    const auto targets=nativeDisplayTargets(snapshot);const auto key=nativeDisplayLeaseKey(snapshot);
+    if(nativeStandbyPossible(targets)){
+      const auto rested=access.rest(targets,key);
+      if(rested&&rested->ok){const auto after=workerDisplayProbe(true);if(after.streamable())return after;}
+    }else if(on)return display;
+    const auto now=workerDisplayProbe(true);
+    if(now.streamable()||now.active)return now;
+    (void)access.activate(targets,key);return workerDisplayProbe(true);
   }catch(...){ }
   return display;
 }
@@ -698,7 +711,9 @@ class ServiceBridge final : public AgentBridge {
     const bool maintenance=privateDiagnosticBusy()||recovering||(maintenance_&&maintenance_->busy());
     // An invalidated cache (every stream start/stop) is "not yet observed", not
     // a device teardown; recording its defaults showed false installed:false.
-    if(sampled)recordHostEvent("displayObserved",{{"installed",display.installed},{"started",display.deviceReady},{"active",display.active},{"owned",display.owned},{"pending",display.configurationPending},{"recovery",display.recoveryRequired},{"reboot",display.rebootRequired},{"remote",display.remoteSession},{"monitors",int64_t(display.monitors.size())},{"ok",display.streamable()},{"running",1}},true);
+    if(sampled)recordHostEvent("displayObserved",{{"installed",display.installed},{"started",display.deviceReady},{"active",display.active},{"owned",display.owned},{"pending",display.configurationPending},{"recovery",display.recoveryRequired},{"reboot",display.rebootRequired},{"remote",display.remoteSession},{"monitors",int64_t(display.monitors.size())},{"ok",display.streamable()},{"running",1},
+      // Not standby beside another display: why (nativeStandbyMiss) and how many CCD paths.
+      {"cause",int64_t(display.standbyMiss)},{"items",int64_t(display.standbyPaths)}},true);
     const bool console=capabilityConsole(view);const bool viewport=!viewportDegraded&&!maintenance&&interactive&&captureAvailable&&console&&display.streamable()&&display.viewportProvisioning;
     bool profileViewport=false,profileTracks=false;
 #ifdef MULTITAP_NATIVE_DISPLAY
