@@ -4,7 +4,9 @@
 // 1-2-1-2 packets per 15.6 ms timer tick) and the PTS of each packet from the
 // capture's own position. Synthetic times only; then, where this PC has a
 // render endpoint, the real Loopback for a moment (read only: nothing is
-// played, no setting changes) to see it start, record and stop.
+// played, no setting changes) to see it start, record and stop: once the
+// endpoint's loopback, once the process-loopback capture a streamed physical
+// PC uses, with the rule for when an open asks for it.
 #include "support.hpp"
 #include "audio_capture_control.hpp"
 #include "stream_prepare_diagnostics.hpp"
@@ -199,11 +201,98 @@ void live() {
             << ",\"records\":" << seen.size() << ",\"packets\":" << packets << ",\"stopMs\":" << stopMs << "}\n";
   ++checks;
 }
+
+// Process loopback (a streamed physical PC's capture): when an open asks for it and which packet times it trusts.
+void processRules() {
+  require(!audioProcessCaptureAsked(false, false, false) && !audioProcessCaptureAsked(false, true, true), "a stream without the hooks never asks");
+  require(audioProcessCaptureAsked(true, false, false), "the first open asks");
+  require(!audioProcessCaptureAsked(true, true, false), "a capture that never got it stops asking (an older Windows)");
+  require(audioProcessCaptureAsked(true, true, true) && audioProcessCaptureAsked(true, false, true), "a capture that had it asks again at every open");
+  // Its activation and the endpoint open that follows a refusal fit in the 3 s the stream's start waits.
+  require(audioProcessActivationWait > 0ms && audioProcessActivationWait <= 2000ms, "activation wait");
+  ++checks;
+  require(audioProcessCaptureLatencyUs(-1) == -1 && audioProcessCaptureLatencyUs(0) == 0 && audioProcessCaptureLatencyUs(12000) == 12000 &&
+          audioProcessCaptureLatencyUs(audioProcessLatencyLimitUs) == audioProcessLatencyLimitUs && audioProcessCaptureLatencyUs(audioProcessLatencyLimitUs + 1) == -1 &&
+          audioProcessCaptureLatencyUs(int64_t(3600) * 1000000) == -1, "a packet time the device cannot explain is not trusted");
+  // Such a packet is stamped from its read time, like one without a time: the stamps stay one packet apart.
+  AudioPtsClock clock; int64_t previous = -1;
+  for (int k = 0; k < 500; ++k) {
+    const int64_t nowUs = 50000 + int64_t(k) * 10000, bogus = int64_t(7) * 1000000;  // a time 7 s back on every packet
+    const int64_t latency = audioProcessCaptureLatencyUs(bogus);
+    const int64_t pts = clock.stamp(latency >= 0 ? nowUs - latency : nowUs - 10000, false); clock.advance(480);
+    if (previous >= 0) require(pts - previous == 10000, "read-time stamps");
+    previous = pts;
+  }
+  require(clock.restarts() == 1 && previous >= 0 && std::llabs(previous - (50000 + 499 * 10000 - 10000)) <= 1, "the stamps stay on the stream clock");
+  ++checks;
+  // The device hands on a packet every 10 ms also while nothing plays. Silence leaves for 200 ms, then the
+  // packets are skipped until one has sound; that one starts the stamps over.
+  using P = AudioSilenceGate::Packet; AudioSilenceGate gate;
+  require(gate.packet(true, 10000) == P::send, "sound");
+  for (int i = 0; i < 20; ++i) require(gate.packet(false, 10000) == P::send, "silence within the hold");
+  require(gate.packet(false, 10000) == P::pause && gate.paused(), "the pause begins once");
+  for (int i = 0; i < 100000; ++i) require(gate.packet(false, 10000) == P::skip, "a silent PC sends nothing");
+  require(gate.packet(true, 10000) == P::resume && !gate.paused() && gate.packet(true, 10000) == P::send, "sound resumes");
+  // A gap inside something that plays (shorter than the hold) leaves exactly as it was.
+  for (int round = 0; round < 50; ++round) {
+    for (int i = 0; i < 19; ++i) require(gate.packet(false, 10000) == P::send, "a short gap");
+    require(gate.packet(true, 10000) == P::send, "no pause after a short gap");
+  }
+  // A PC that is silent when the stream starts: 200 ms, then nothing. Each capture start begins again.
+  AudioSilenceGate quiet; int sent = 0;
+  for (int i = 0; i < 500; ++i) if (quiet.packet(false, 10000) == P::send) ++sent;
+  require(sent == 20 && quiet.paused(), "a silent start: " + std::to_string(sent));
+  quiet.reset();
+  require(!quiet.paused() && quiet.packet(false, 10000) == P::send, "reset");
+  // Packets of another length count by their length.
+  AudioSilenceGate odd; sent = 0;
+  for (int i = 0; i < 100; ++i) if (odd.packet(false, 21333) == P::send) ++sent;
+  require(sent == 9, "by duration: " + std::to_string(sent));
+  ++checks;
+}
+
+// The real process-loopback capture of this PC for a moment (read only: nothing is played, muted or changed;
+// the hooks only note what the capture said). Windows before 10 2004 has no such device: the capture then says
+// why and is the endpoint's loopback, exactly as for a stream without the hooks.
+void liveProcess() {
+  const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  struct Uninit { HRESULT com; ~Uninit() { if (SUCCEEDED(com)) CoUninitialize(); } } uninit{com};
+  std::mutex mutex; std::vector<int> starts; std::vector<std::pair<AudioCaptureStep, int32_t>> refusals;
+  AudioProcessCapture hooks;
+  hooks.started = [&](bool process) { std::lock_guard lock(mutex); starts.push_back(process ? 1 : 0); };
+  hooks.unavailable = [&](AudioCaptureStep step, int32_t hresult) { std::lock_guard lock(mutex); refusals.emplace_back(step, hresult); };
+  Loopback loopback(&hooks);
+  if (!loopback.available()) {
+    const auto row = audioCaptureJournal(loopback.failureRecord());
+    std::cout << "{\"kind\":\"audio-process-live\",\"available\":false,\"refusals\":" << refusals.size() << ",\"step\":" << row.cause << ",\"error\":" << row.error << "}\n";
+    return;
+  }
+  const bool process = loopback.processCapture();
+  require(process == refusals.empty(), "an open that is not process loopback said why");
+  std::atomic<bool> stop{false}; std::vector<uint32_t> seen; size_t packets = 0;
+  std::thread runner([&] {
+    loopback.run(stop, Clock::now(), [&](std::vector<uint8_t> bytes) { std::lock_guard lock(mutex); require(bytes.size() > 12 && bytes[0] == 2, "a kind-2 packet"); ++packets; },
+                 nullptr, nullptr, [&](uint32_t value) { std::lock_guard lock(mutex); seen.push_back(value); });
+  });
+  std::this_thread::sleep_for(400ms);
+  const auto stopped = Clock::now(); stop = true; runner.join();
+  const auto stopMs = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - stopped).count();
+  require(!seen.empty() && audioCaptureJournal(seen.front()).stage == 1, "the capture recorded its start");
+  require(!starts.empty() && starts.front() == (process ? 1 : 0), "the hooks heard which capture started");
+  require(stopMs < 200, "the capture stops promptly: " + std::to_string(stopMs) + " ms");
+  const auto started = audioCaptureJournal(seen.front());
+  if (process) require(started.expected == 48000 && started.items == 2 && started.format == uint32_t(AudioCaptureSample::float32) && started.active, "process loopback is 48 kHz stereo float, event-driven");
+  std::cout << "{\"kind\":\"audio-process-live\",\"available\":true,\"process\":" << (process ? "true" : "false") << ",\"rate\":" << started.expected << ",\"channels\":" << started.items
+            << ",\"records\":" << seen.size() << ",\"packets\":" << packets << ",\"stopMs\":" << stopMs;
+  if (!refusals.empty()) std::cout << ",\"refusedStep\":" << uint32_t(refusals.front().first) << ",\"refusedError\":" << uint32_t(refusals.front().second);
+  std::cout << "}\n";
+  ++checks;
+}
 }
 
 int main() {
   try {
-    records(); restart(); cadence(); ptsClock(); live();
+    records(); restart(); cadence(); ptsClock(); processRules(); live(); liveProcess();
     std::cout << "{\"kind\":\"audio-capture-control\",\"passed\":" << checks << "}\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << "audio capture control check failed: " << error.what() << "\n"; return 1; }

@@ -17,10 +17,24 @@
 //  - Journal: the worker sends each event as stage 47 of its fixed record
 //    (worker.stream.failure); the service writes it as hostAction 297
 //    (audioCaptureJournal below). Fixed numbers only: no device name or id.
+//  - Process loopback: a capture that is given AudioProcessCapture hooks (a
+//    streamed physical PC whose own speakers are muted, speaker_mute.hpp) opens
+//    the process-loopback device first: everything Windows plays except the
+//    worker's own process tree, whatever the default endpoint is and whether it
+//    is muted (Windows 10 2004 and later). Restart, cadence, PTS and journal are
+//    the ones above. Where it does not open, the hooks hear why and that open
+//    goes on with the default endpoint's loopback as before; a capture that
+//    never got it stops asking, one that had it asks again at every open.
+//    That device hands on a packet every 10 ms also while nothing plays (seen
+//    on Windows 11 26100), where the endpoint's loopback sends nothing. So
+//    AudioSilenceGate lets its silence through for a moment and then pauses:
+//    a silent PC sends no sound packets, as on the endpoint path, and the
+//    first packet with sound after a pause starts the stamps over.
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <optional>
 
 namespace host {
@@ -83,6 +97,50 @@ inline AudioCaptureJournal audioCaptureJournal(uint32_t value) {
 }
 // A stage 47 record is a failure only when it says so; the rest are observations.
 inline bool audioCaptureRecordOk(uint32_t value) { return (value & 7u) != uint32_t(AudioCaptureEvent::failed); }
+
+// What a capture that prefers process loopback tells its owner. The audio thread calls them; each is optional.
+//  started(process):            a capture started; `process` says it is the process-loopback one (false: the
+//                               default endpoint's loopback, which needs that endpoint audible).
+//  unavailable(step, hresult):  process loopback did not open at `step`; this open goes on with the endpoint.
+struct AudioProcessCapture {
+  std::function<void(bool process)> started;
+  std::function<void(AudioCaptureStep step, int32_t hresult)> unavailable;
+};
+// Whether an open asks for the process-loopback device: wanted, and it either has not failed yet or once ran.
+inline bool audioProcessCaptureAsked(bool wanted, bool failedBefore, bool ranBefore) { return wanted && (!failedBefore || ranBefore); }
+// How long its activation may take. The stream's start waits 3 s for the capture as a whole, and an open that
+// gives up here still has to open the endpoint.
+inline constexpr std::chrono::milliseconds audioProcessActivationWait{1500};
+// A process-loopback packet's age from the QPC time WASAPI gave it (µs, -1 none). The device is not a
+// hardware endpoint: a time further back than its own 100 ms buffer and a late read can explain is not
+// trusted, and the packet is stamped from its read time like one without a QPC time.
+inline constexpr int64_t audioProcessLatencyLimitUs = 250000;
+inline int64_t audioProcessCaptureLatencyUs(int64_t latencyUs) { return latencyUs < 0 || latencyUs > audioProcessLatencyLimitUs ? -1 : latencyUs; }
+// Which process-loopback packets leave the Host. `sound`: the packet has a sample that is not zero. Silence
+// goes on for `holdUs` (a gap inside something that plays stays exactly as long as it was), then the packets
+// are skipped until one has sound again. Not thread-safe (the audio thread); reset at each capture start.
+class AudioSilenceGate {
+ public:
+  static constexpr int64_t holdUs = 200000;
+  enum class Packet {
+    send,       // goes on as it is
+    resume,     // goes on; its samples do not follow the last ones sent (a pause was in between)
+    pause,      // not sent, and what the encoder still holds leaves now: the pause begins
+    skip,       // not sent: the pause goes on
+  };
+  Packet packet(bool sound, int64_t durationUs) {
+    if (sound) { const bool paused = paused_; paused_ = false; silentUs_ = 0; return paused ? Packet::resume : Packet::send; }
+    if (paused_) return Packet::skip;
+    silentUs_ += std::max<int64_t>(0, durationUs);
+    if (silentUs_ <= holdUs) return Packet::send;
+    paused_ = true; return Packet::pause;
+  }
+  bool paused() const { return paused_; }
+  void reset() { paused_ = false; silentUs_ = 0; }
+ private:
+  bool paused_ = false;
+  int64_t silentUs_ = 0;
+};
 
 // When to open the capture again. Not thread-safe (the audio thread).
 class AudioCaptureRestart {

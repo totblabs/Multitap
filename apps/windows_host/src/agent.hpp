@@ -27,6 +27,7 @@
 #include "caret_follow.hpp"
 #include "frame_pacer.hpp"
 #include "audio_capture_control.hpp"
+#include "speaker_mute_native.hpp"
 #include "capture_topology_watch.hpp"
 #include "capture_follow.hpp"
 #include "stream_priority.hpp"
@@ -339,7 +340,12 @@ class Agent {
   bool cursorTestResend()const{return cursorResend_;}
   bool cursorTestSeparated()const{return cursorSeparated_;}
 #endif
-  ~Agent() { stop(); }
+  ~Agent() { stop(); speakerMute_.end(); }
+  // speaker-mute-v1 (speaker_mute.hpp), the session worker only. What the worker's start restored (an
+  // earlier worker's leftovers) is journalled with this session's first stream; the session's end gives
+  // back whatever this worker muted, before the worker reports its stop.
+  void speakerMuteRecovered(std::vector<uint32_t> values) { std::lock_guard lock(speakerRecoveredMutex_); speakerRecovered_ = std::move(values); }
+  void speakerMuteEnd() noexcept { speakerMute_.end(); }
   // Set before starting this agent; called only on a failed capture path.
   void captureDiagnostic(std::function<void(uint32_t,uint32_t)> sink){captureDiagnostic_=std::move(sink);}
   void start(Credentials credentials) { stop(true); credentials_ = std::move(credentials); updater_.reset(); if (hostUpdateEnvironment_) updater_ = std::make_unique<HostUpdater>(hostUpdateEnvironment_(credentials_.origin), [this](const std::string& message) { text(message); }); power_.reset(); if (hostPowerEnvironment_) power_ = std::make_unique<HostPower>(hostPowerEnvironment_(), [this](const std::string& message) { text(message); }); stopped_ = false; worker_ = std::thread([this] { run(); }); }
@@ -403,8 +409,11 @@ class Agent {
     const bool sizesV2=streamSizeV2(command);
     // cursor-tracks-v1: only a session.start carrying both granted markers.
     const bool cursorSeparated=cursor::trackSessionRequested(command);
-    capture_=std::thread([this,plan=std::move(plan),input,sizesV2,cursorSeparated]{
+    // speaker-mute-v1 (speaker_mute.hpp): only a command carrying the broker's marker (a physical PC).
+    const bool speakerMute=speakerMuteSessionRequested(command);
+    capture_=std::thread([this,plan=std::move(plan),input,sizesV2,cursorSeparated,speakerMute]{
       std::thread audio;std::atomic<bool> audioGo{false},audioEnabled{false};std::shared_ptr<TrackSourcePipeline> pipeline;
+      speakerMuteFlush();
       try{
         StreamPowerActivity power;StreamPriority priority;Runtime runtime;
         struct CaptureCleanup{
@@ -418,9 +427,12 @@ class Agent {
         std::optional<OpusAudioEncoder> opusEncoder;if(plan.audio&&plan.audioOpus)opusEncoder=OpusAudioEncoder::create();
         auto sent=plan;sent.audioOpus=opusEncoder.has_value();
         std::promise<bool> audioReady;auto ready=audioReady.get_future();
-        if(plan.audio)audio=std::thread([this,beginning,&audioGo,&audioEnabled,&pipeline,promise=std::move(audioReady),opus=std::move(opusEncoder)]()mutable{
+        if(plan.audio)audio=std::thread([this,beginning,&audioGo,&audioEnabled,&pipeline,promise=std::move(audioReady),opus=std::move(opusEncoder),speakerMute]()mutable{
           const auto com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);bool announced=false;
-          try{check(com,"Track audio COM");Loopback loopback;const bool available=loopback.available();promise.set_value(available);announced=true;
+          // speaker_mute.hpp: with the marker the capture is process loopback where Windows has it, and
+          // only that capture lets this worker's session mute the PC's default endpoint.
+          const AudioProcessCapture speaker=speakerMute_.hooks();
+          try{check(com,"Track audio COM");Loopback loopback(speakerMute?&speaker:nullptr);const bool available=loopback.available();promise.set_value(available);announced=true;
             if(!available){audioCaptureRecord(loopback.failureRecord());}
             if(available){while(!audioGo&&!streamStop_)std::this_thread::sleep_for(std::chrono::milliseconds(2));
               if(!streamStop_&&audioEnabled)loopback.run(streamStop_,beginning,[this,&pipeline](std::vector<uint8_t> bytes){if(auto packet=pipeline->audio(bytes))enqueue({false,std::move(*packet)});},nullptr,opus?&*opus:nullptr,[this](uint32_t value){audioCaptureRecord(value);});
@@ -630,6 +642,12 @@ class Agent {
   std::function<void(uint32_t,uint32_t)> captureDiagnostic_;
   // audio_capture_control.hpp: one sound capture record (stage 47 of the worker's fixed record; 0 is none).
   void audioCaptureRecord(uint32_t value) noexcept { if(value&&captureDiagnostic_)try{captureDiagnostic_(audioCaptureRecordStage,value);}catch(...){ } }
+  // speaker_mute.hpp: one speaker mute record (stage 49 of the worker's fixed record). The session object
+  // does nothing (no thread, no audio object) until a stream's process-loopback capture starts.
+  void speakerMuteRecord(uint32_t value) noexcept { if(value&&captureDiagnostic_)try{captureDiagnostic_(speakerMuteRecordStage,value);}catch(...){ } }
+  SpeakerMuteSession speakerMute_{nativeSpeakerMuteAccess,[this](uint32_t value){speakerMuteRecord(value);},speakerMuteLock};
+  std::mutex speakerRecoveredMutex_; std::vector<uint32_t> speakerRecovered_;
+  void speakerMuteFlush() noexcept { try{std::vector<uint32_t> values;{std::lock_guard lock(speakerRecoveredMutex_);values.swap(speakerRecovered_);}for(const auto value:values)speakerMuteRecord(value);}catch(...){ } }
   std::atomic<HINTERNET> socket_{nullptr}; std::thread worker_, capture_;
   // queueMutex_ guards the queue, queueClosed_ and sending_ (the sender has
   // taken a packet and is writing it).
@@ -971,11 +989,14 @@ class Agent {
     const LONG sourceLeft=LONG(sourceNumber("captureLeft",INT32_MIN,INT32_MAX)),sourceTop=LONG(sourceNumber("captureTop",INT32_MIN,INT32_MAX));const int sourceWidth=sourceNumber("captureWidth",16,INT32_MAX),sourceHeight=sourceNumber("captureHeight",16,INT32_MAX);
     if(!checkedFrameLayout(uint64_t(sourceWidth),uint64_t(sourceHeight),false)||!displayRectangleFits(sourceLeft,sourceTop,uint64_t(sourceWidth),uint64_t(sourceHeight)))throw std::runtime_error("Validated virtual display geometry required");
     const RECT source{sourceLeft,sourceTop,sourceLeft+sourceWidth,sourceTop+sourceHeight};const auto selectedCapture=parseCaptureSelection(control,source);validateCaptureSelection(selectedCapture,currentCaptureMonitors());input_.area(source);systemInputSeen_=false;systemButtons_.clear();systemInputArea(control.get("sessionId").string(),source);const std::wstring device=wide(control.get("displayDeviceName").string());const bool audioRequested=control.get("audio").boolean(true),audioOpusRequested=opusAudioRequested(control);
+    // speaker-mute-v1 (speaker_mute.hpp): only the session worker's stream of a command carrying the broker's marker (a physical PC).
+    const bool speakerMute=local_&&speakerMuteSessionRequested(control);
     // cursor-v1: only a session.start carrying the granted marker separates it.
     configureCursor(control,source);textInput_=textInputSessionRequested(control);touchInput_=touchInputSessionRequested(control);relativeMouse_=relativeMouseSessionRequested(control);configureCaret(control,source);configureCursorEcho(control);configureBackground(control);const bool cursorSeparated=cursorSeparated_,cursorEchoAllowed=cursorSeparated&&cursorEchoGranted_;
     streamStop_ = false; active_ = true; if (local_) stopped_ = false;
-    capture_ = std::thread([this, maximumWidth, maximumHeight, fps, bitrate,source,sourceWidth,sourceHeight,device,audioRequested,audioOpusRequested,selectedCapture,epochFields,resized,session=sessionId_,rate,resumeBitrate,cursorSeparated,cursorEchoAllowed,viewportLimits,sizesV2,pixelBudget,sizeLimits,pixelCap,resizeStages,startBegan] {
+    capture_ = std::thread([this, maximumWidth, maximumHeight, fps, bitrate,source,sourceWidth,sourceHeight,device,audioRequested,audioOpusRequested,selectedCapture,epochFields,resized,session=sessionId_,rate,resumeBitrate,cursorSeparated,cursorEchoAllowed,viewportLimits,sizesV2,pixelBudget,sizeLimits,pixelCap,resizeStages,startBegan,speakerMute] {
       std::thread audio; std::atomic<bool> audioGo{false};
+      speakerMuteFlush();
       const char* failureReason="encoder_failed";uint32_t captureStage=1;
       // The first stream.info completes a resize restart (the service then
       // clears it): a later failure ends the stream, it is no resize failure.
@@ -1033,11 +1054,14 @@ class Agent {
         // the encoder starts; stream.info states the format either way.
         std::optional<OpusAudioEncoder> opusEncoder; if (audioRequested && audioOpusRequested) opusEncoder = OpusAudioEncoder::create();
         const bool audioOpus = opusEncoder.has_value();
-        if(audioRequested)audio = std::thread([this, beginning, &audioGo, promise = std::move(audioReady), opus = std::move(opusEncoder)]() mutable {
+        if(audioRequested)audio = std::thread([this, beginning, &audioGo, promise = std::move(audioReady), opus = std::move(opusEncoder), speakerMute]() mutable {
           const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED); bool announced = false;
           // audio_capture_control.hpp: the capture opens again after any error or default device change until the
           // stream stops; each start, failure, restart and change is a fixed record (hostAction 297 in the service).
-          try { check(com, "Audio COM startup"); Loopback loopback; const bool available = loopback.available(); promise.set_value(available); announced = true; if (!available) audioCaptureRecord(loopback.failureRecord()); if (available) { while (!audioGo && !streamStop_) std::this_thread::sleep_for(std::chrono::milliseconds(2)); if (!streamStop_) loopback.run(streamStop_, beginning, [this](std::vector<uint8_t> bytes) { enqueue({false, std::move(bytes)}); }, &audioCapture_, opus ? &*opus : nullptr, [this](uint32_t value) { audioCaptureRecord(value); }); } }
+          // speaker_mute.hpp: with the marker the capture is process loopback where Windows has it, and only that
+          // capture lets this worker's session mute the PC's default endpoint (hostAction 298).
+          const AudioProcessCapture speaker = speakerMute_.hooks();
+          try { check(com, "Audio COM startup"); Loopback loopback(speakerMute ? &speaker : nullptr); const bool available = loopback.available(); promise.set_value(available); announced = true; if (!available) audioCaptureRecord(loopback.failureRecord()); if (available) { while (!audioGo && !streamStop_) std::this_thread::sleep_for(std::chrono::milliseconds(2)); if (!streamStop_) loopback.run(streamStop_, beginning, [this](std::vector<uint8_t> bytes) { enqueue({false, std::move(bytes)}); }, &audioCapture_, opus ? &*opus : nullptr, [this](uint32_t value) { audioCaptureRecord(value); }); } }
           catch (...) { if (!announced) promise.set_value(false); report(L"소리 캡처를 사용할 수 없습니다. 화면 연결은 유지합니다."); }
           if (SUCCEEDED(com)) CoUninitialize();
         });

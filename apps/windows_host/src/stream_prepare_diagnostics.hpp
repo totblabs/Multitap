@@ -2,6 +2,7 @@
 #include <string_view>
 #include "support.hpp"
 #include "audio_capture_control.hpp"
+#include "speaker_mute.hpp"
 namespace host {
 struct StreamViewportDiagnostic {uint32_t nativeStage=0,nativeError=0,profileStage=0,nativeReason=0;bool consoleReturned=false;};
 inline std::optional<StreamViewportDiagnostic> streamViewportDiagnostic(const Json& value){
@@ -45,6 +46,10 @@ inline bool streamObservationOk(uint32_t stage,uint32_t error)noexcept{
   // 48: why a separated session's pointer was shown or hidden over a capture epoch (cursor_channel.hpp
   // CursorDiagnosis): counts only, all observations.
   if(stage==48)return true;
+  // 49: a physical PC's speakers while it is streamed (speaker_mute.hpp): muted, restored, left alone and endpoints
+  // that are not there are observations; a failed step and process loopback that did not open are failures, and
+  // the stream goes on either way.
+  if(stage==speakerMuteRecordStage)return speakerMuteRecordOk(error);
   return false;
 }
 // Stage 43 with reason 2 (gpu_capture.hpp gpuPathNoHardwareCapture): the capture ran on WARP or GDI, so the

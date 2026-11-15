@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.21 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.22 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -69,7 +69,7 @@ target_compile_options(MultitapHostCaptureFollowTest PRIVATE /W4 /WX /permissive
 add_executable(MultitapHostStreamGpuPriorityTest EXCLUDE_FROM_ALL src/stream_gpu_priority_test.cpp)
 target_link_libraries(MultitapHostStreamGpuPriorityTest PRIVATE advapi32 gdi32)
 target_compile_options(MultitapHostStreamGpuPriorityTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-add_library(host_engine STATIC src/media.cpp src/gpu_capture.cpp src/gpu_h264.cpp src/gpu_h264_nvenc.cpp src/gpu_h264_amf.cpp src/gpu_h264_qsv_mft.cpp src/drive_winfsp_helper_main.cpp)
+add_library(host_engine STATIC src/media.cpp src/gpu_capture.cpp src/gpu_h264.cpp src/gpu_h264_nvenc.cpp src/gpu_h264_amf.cpp src/gpu_h264_qsv_mft.cpp src/drive_winfsp_helper_main.cpp src/speaker_mute_native.cpp)
 # Distinct Winlogon path. The ordinary worker's role/desktop admission remains
 # unchanged. Entry is dormant until the service explicitly authorizes this role.
 target_sources(host_engine PRIVATE src/signin_worker_native.cpp src/signin_capture_dxgi.cpp
@@ -146,7 +146,7 @@ target_compile_options(host_clipboard PRIVATE /W4 /permissive- /EHsc /utf-8)
 target_link_libraries(host_clipboard PUBLIC bcrypt advapi32 shell32 user32)
 target_compile_definitions(host_engine PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
 target_compile_options(host_engine PRIVATE /W4 /permissive- /EHsc /utf-8)
-target_link_libraries(host_engine PUBLIC mfplat mf mfuuid wmcodecdspuuid ole32 oleaut32 gdi32 user32 uuid d3d11 dxgi windowsapp cfgmgr32 secur32 netapi32 normaliz)
+target_link_libraries(host_engine PUBLIC mfplat mf mfuuid wmcodecdspuuid ole32 oleaut32 gdi32 user32 uuid d3d11 dxgi windowsapp cfgmgr32 secur32 netapi32 normaliz mmdevapi)
 # libopus (BSD 3-clause; native/third_party/opus) encodes the stream's audio
 # where the broker granted audio-opus-v1 (src/opus_audio.hpp).
 include(../../native/third_party/opus/opus.cmake)
@@ -670,10 +670,19 @@ add_executable(MultitapHostOpusAudioTest EXCLUDE_FROM_ALL src/opus_audio_test.cp
 target_link_libraries(MultitapHostOpusAudioTest PRIVATE host_engine winhttp crypt32)
 target_compile_options(MultitapHostOpusAudioTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # The stream's sound capture (audio_capture_control.hpp): its journal record, the restart backoff, the wake
-# cadence and the PTS from the capture's position; then this PC's real loopback for a moment, where it has one.
+# cadence and the PTS from the capture's position; then this PC's real loopback for a moment, where it has one
+# (the endpoint's, and the process-loopback capture of a streamed physical PC; read only).
 add_executable(MultitapHostAudioCaptureControlTest EXCLUDE_FROM_ALL src/audio_capture_control_test.cpp)
 target_link_libraries(MultitapHostAudioCaptureControlTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
 target_compile_options(MultitapHostAudioCaptureControlTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# speaker-mute-v1 (speaker_mute.hpp): a physical PC's speakers while it is streamed. The grant, the journal
+# record, the record text and the rules with substituted endpoints, record and processes, then the session
+# thread with the same substitutes, the worker's call sites, and one read of the default endpoint's mute.
+# No endpoint of the machine is muted or changed.
+add_executable(MultitapHostSpeakerMuteTest EXCLUDE_FROM_ALL src/speaker_mute_test.cpp)
+target_link_libraries(MultitapHostSpeakerMuteTest PRIVATE host_engine winhttp crypt32 advapi32 shell32 wtsapi32 userenv bcrypt ws2_32 iphlpapi)
+target_compile_definitions(MultitapHostSpeakerMuteTest PRIVATE "MULTITAP_AGENT_SOURCE=\"${CMAKE_CURRENT_SOURCE_DIR}/src/agent.hpp\"" "MULTITAP_SERVICE_SOURCE=\"${CMAKE_CURRENT_SOURCE_DIR}/src/service.hpp\"" "MULTITAP_MEDIA_SOURCE=\"${CMAKE_CURRENT_SOURCE_DIR}/src/media.cpp\"" "MULTITAP_SPEAKER_NATIVE_SOURCE=\"${CMAKE_CURRENT_SOURCE_DIR}/src/speaker_mute_native.cpp\"")
+target_compile_options(MultitapHostSpeakerMuteTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostQemuConsoleTest EXCLUDE_FROM_ALL src/qemu_console_test.cpp)
 # ime-state-v1: the console session's 한/영 mode for the browser Console (memory only).
 add_executable(MultitapHostImeStateTest EXCLUDE_FROM_ALL src/ime_state_test.cpp)

@@ -460,11 +460,16 @@ void bgraToNv12(const uint8_t* source, uint8_t* target, int width, int height);
 std::vector<uint8_t> mediaPacket(uint8_t kind, uint64_t ptsUs, const std::vector<uint8_t>& payload, bool key = false, bool recovery = false);
 class AudioCaptureWindow;
 class OpusAudioEncoder;
+struct AudioProcessCapture;
 class Loopback {
  public:
-  Loopback();
+  // `process` (optional, outlives the Loopback): the capture is the process-loopback device where it opens
+  // (audio_capture_control.hpp); without it, or where it does not open, the default render endpoint's loopback.
+  explicit Loopback(const AudioProcessCapture* process = nullptr);
   ~Loopback();
   bool available() const;
+  // Whether the open capture is the process-loopback one.
+  bool processCapture() const;
   // Why the endpoint did not open (an audio_capture_control.hpp failed record), 0 when it did.
   uint32_t failureRecord() const;
   // Until `stop`: a capture that fails or whose default render endpoint changes is opened again

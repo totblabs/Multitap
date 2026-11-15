@@ -63,6 +63,9 @@ if (-not $SkipTests) {
     # The stream's sound capture: opened again after any error or default device change, its journal record,
     # an even 10 ms cadence and PTS from the capture's position (then this PC's loopback for a moment, read only).
     'MultitapHostAudioCaptureControlTest',
+    # A physical PC's speakers while it is streamed: muted only after the record, the user's own mute left alone,
+    # restored at the session's end and after a crashed worker (substituted endpoints; none is read or changed).
+    'MultitapHostSpeakerMuteTest',
     # Korean and English: every text of the installers, tray and service in both languages (docs/i18n.md).
     'MultitapHostUiTextTest',
     # A registration copied with the disk (full clone) is not used on another machine (host-machine-v1).

@@ -205,11 +205,20 @@ inline constexpr DWORD workerDisplayHelperTimeoutMs = 5000;
 inline constexpr DWORD workerDisplayProbeIpcMarginMs = 5000;
 inline constexpr DWORD workerDisplayProbeReplyTimeoutMs =
     workerDisplayHelperTimeoutMs * 2 + workerDisplayProbeIpcMarginMs;
+// speaker_mute.hpp: one stage 49 value as hostAction 298. stage = muted 1 / restored 2 / failed 3 / process loopback
+// unavailable 4 / already muted, left alone 5 / endpoints not there now 6; cause = why (or the failed step); error =
+// its HRESULT; items = endpoints kept in the record. No device name or id.
+inline void recordSpeakerMuteEvent(uint32_t value) noexcept {
+  const auto row=speakerMuteJournal(value);if(!row.valid)return;
+  recordHostEvent("hostAction",{{"action",int64_t(speakerMuteAction)},{"ok",row.ok},{"stage",row.stage},{"cause",row.cause},{"error",row.error},{"items",row.items}});
+}
 struct WorkerDisplayProbeResult {
   DisplayState display;
   bool desktopAvailable = false, privileged = false, cancelled = false;
   bool nativeActivationAcknowledged=false,nativeActivationAttempted=false;
   std::optional<NativeActivationDiagnostic> nativeActivationDiagnostic;
+  // speaker_mute.hpp: what this worker's start gave back of an earlier worker's mute (stage 49 values).
+  std::vector<uint32_t> speakerMute;
 };
 inline WorkerDisplayProbeResult readWorkerDisplayProbe(
     HANDLE pipe, const std::atomic<bool>& stopped,
@@ -253,6 +262,7 @@ inline WorkerDisplayProbeResult readWorkerDisplayProbe(
     result.nativeActivationAttempted=value.get("nativeActivationAttempted").boolean();
     if(!std::holds_alternative<std::nullptr_t>(value.get("nativeActivation").value))result.nativeActivationDiagnostic=parseNativeActivationDiagnostic(value.get("nativeActivation"));
     result.display.error = safeViewportFailure(result.display.error);
+    result.speakerMute = speakerMuteProbeRecords(value);
   } catch (...) {}
   return result;
 }
@@ -383,8 +393,8 @@ inline NativeWorkerTrackAccess nativeWorkerTrackAccess(HANDLE pipe,const NativeT
     return nativeWorkerTrackViewportRpc(request,phase,key,verified,phaseBudget,std::move(io),baseline);
   };return access;
 }
-inline std::string workerProbeReply(const DisplayState& display,bool desktop,bool privileged,std::optional<bool> activation={},const std::optional<NativeActivationDiagnostic>& diagnostic={}){
-  return "{\"type\":\"worker.display\",\"desktopAvailable\":"+std::string(desktop?"true":"false")+",\"privileged\":"+(privileged?"true":"false")+(activation?",\"nativeActivationAttempted\":"+std::string(*activation?"true":"false"):"")+(activation&&diagnostic?",\"nativeActivation\":"+nativeActivationDiagnosticJson(*diagnostic):"")+",\"display\":"+workerDisplayJson(display)+'}';
+inline std::string workerProbeReply(const DisplayState& display,bool desktop,bool privileged,std::optional<bool> activation={},const std::optional<NativeActivationDiagnostic>& diagnostic={},const std::vector<uint32_t>& speakerMute={}){
+  return "{\"type\":\"worker.display\",\"desktopAvailable\":"+std::string(desktop?"true":"false")+",\"privileged\":"+(privileged?"true":"false")+(activation?",\"nativeActivationAttempted\":"+std::string(*activation?"true":"false"):"")+(activation&&diagnostic?",\"nativeActivation\":"+nativeActivationDiagnosticJson(*diagnostic):"")+speakerMuteProbeField(speakerMute)+",\"display\":"+workerDisplayJson(display)+'}';
 }
 inline bool catalogReadyResult(const DisplayHelperOutput& result) {
   const auto& value=result.value;const auto display=parseDisplayState(value.get("state"));
@@ -739,7 +749,7 @@ class ServiceBridge final : public AgentBridge {
     // rdpSupported and rdpEnabled are always false: the Host has no RDP, and the
     // broker requires both booleans in every capability report.
     // keyframe-v1: stream.keyframe reaches the worker as an IDR request (keyFrame()).
-    const auto original="{\"observabilityProtocol\":\"stream-observability-v1\",\"streamSizeProtocol\":\"stream-size-v1\",\"streamSizeProtocols\":[\"stream-size-v1\",\"stream-size-v2\"],\"sessionStopProtocol\":\"stop-v1\",\"keyFrameProtocol\":\"" + std::string(keyFrameProtocol) + "\",\"hostResumeProtocol\":\"" + std::string(hostResumeProtocol) + "\",\"hostChannelResumeProtocol\":\"" + std::string(channelResumeProtocol) + "\",\"udpMediaProtocol\":\"" + std::string(udpMediaProtocol) + "\",\"udpDirectHostProtocol\":\"udp-direct-v1\",\"udpTracksHostProtocol\":\"udp-tracks-v1\",\"audioCodecProtocol\":\"" + std::string(audioOpusProtocol) + "\",\"audioCodecTracksProtocol\":\"" + std::string(audioOpusTracksProtocol) + "\",\"trackResumeProtocol\":\"" + std::string(trackResumeProtocol) + "\",\"bitrateProtocol\":\"" + std::string(bitrateAdaptiveProtocol) + "\",\"maxBitrate\":" + std::to_string(adaptiveMaximumBitrate) + ",\"inputLatencyProtocol\":\"" + std::string(inputLatencyProtocol) + "\",\"cursorProtocol\":\"" + std::string(cursor::protocol) + "\",\"cursorTracksProtocol\":\"" + std::string(cursor::tracksProtocol) + "\",\"cursorEchoProtocol\":\"" + std::string(cursor::echoProtocol) + "\",\"cursorComposeProtocol\":\"" + std::string(cursor::composeProtocol) + "\",\"backgroundVideoProtocol\":\"" + std::string(backgroundVideoProtocol) + "\",\"textInputProtocol\":\"" + std::string(textInputProtocol) + "\",\"displayScaleProtocol\":\"" + std::string(displayScaleProtocolName) + "\",\"displayScaleOutputsProtocol\":\"" + std::string(displayScaleOutputsProtocolName) + "\",\"touchInputProtocol\":\"" + std::string(touchInputProtocol) + "\",\"relativeMouseProtocol\":\"" + std::string(relativeMouseProtocol) + "\",\"relativeMouseTracksProtocol\":\"" + std::string(relativeMouseTracksProtocol) + "\",\"caretProtocol\":\"" + std::string(caretProtocol) + "\"" + printCapabilityFields() + usbCapabilityFields() + gamepadCapabilityFields() + (interactive && driveCapable() ? ",\"driveProtocol\":\"" + std::string(drive::protocol) + "\"" + (driveFsCapable() ? ",\"driveFs\":true" : "") : std::string()) + (interactive && !driveCapable() ? ",\"driveUnavailableReason\":\"drive_webclient_unavailable\"" : std::string()) + ",\"diagnosticsSupported\":true,\"imeStateProtocol\":\"" + std::string(ime::protocol) + "\",\"service\":true,\"interactiveSession\":" + std::string(interactive ? "true" : "false") + ",\"streaming\":" + (!maintenance&&interactive && display.streamable() && captureAvailable ? "true" : "false") + ",\"rdpSupported\":false,\"rdpEnabled\":false,\"virtualDisplayReady\":" + (!maintenance&&display.streamable() ? "true" : "false") + ",\"clipboard\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"clipboardSync\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"virtualMonitorControl\":" + (!maintenance&&interactive && captureAvailable && console && display.streamable() && display.monitorControlSupported ? "true" : "false") + ",\"dynamicResolution\":"+(viewport?"true":"false")+",\"viewportProvisioning\":"+(viewport?"true":"false")+",\"viewportFailureReason\":"+jsonQuote(viewportReason)+(viewport?",\"resizeProtocol\":\"epoch-v1\"":"")+consoleFields+thumbnailFields+",\"monitors\":"+monitors+'}';
+    const auto original="{\"observabilityProtocol\":\"stream-observability-v1\",\"streamSizeProtocol\":\"stream-size-v1\",\"streamSizeProtocols\":[\"stream-size-v1\",\"stream-size-v2\"],\"sessionStopProtocol\":\"stop-v1\",\"keyFrameProtocol\":\"" + std::string(keyFrameProtocol) + "\",\"hostResumeProtocol\":\"" + std::string(hostResumeProtocol) + "\",\"hostChannelResumeProtocol\":\"" + std::string(channelResumeProtocol) + "\",\"udpMediaProtocol\":\"" + std::string(udpMediaProtocol) + "\",\"udpDirectHostProtocol\":\"udp-direct-v1\",\"udpTracksHostProtocol\":\"udp-tracks-v1\",\"audioCodecProtocol\":\"" + std::string(audioOpusProtocol) + "\",\"audioCodecTracksProtocol\":\"" + std::string(audioOpusTracksProtocol) + "\",\"trackResumeProtocol\":\"" + std::string(trackResumeProtocol) + "\",\"bitrateProtocol\":\"" + std::string(bitrateAdaptiveProtocol) + "\",\"maxBitrate\":" + std::to_string(adaptiveMaximumBitrate) + ",\"inputLatencyProtocol\":\"" + std::string(inputLatencyProtocol) + "\",\"cursorProtocol\":\"" + std::string(cursor::protocol) + "\",\"cursorTracksProtocol\":\"" + std::string(cursor::tracksProtocol) + "\",\"cursorEchoProtocol\":\"" + std::string(cursor::echoProtocol) + "\",\"cursorComposeProtocol\":\"" + std::string(cursor::composeProtocol) + "\",\"backgroundVideoProtocol\":\"" + std::string(backgroundVideoProtocol) + "\",\"textInputProtocol\":\"" + std::string(textInputProtocol) + "\",\"displayScaleProtocol\":\"" + std::string(displayScaleProtocolName) + "\",\"displayScaleOutputsProtocol\":\"" + std::string(displayScaleOutputsProtocolName) + "\",\"touchInputProtocol\":\"" + std::string(touchInputProtocol) + "\",\"relativeMouseProtocol\":\"" + std::string(relativeMouseProtocol) + "\",\"relativeMouseTracksProtocol\":\"" + std::string(relativeMouseTracksProtocol) + "\",\"caretProtocol\":\"" + std::string(caretProtocol) + "\",\"speakerMuteProtocol\":\"" + std::string(speakerMuteProtocol) + "\"" + printCapabilityFields() + usbCapabilityFields() + gamepadCapabilityFields() + (interactive && driveCapable() ? ",\"driveProtocol\":\"" + std::string(drive::protocol) + "\"" + (driveFsCapable() ? ",\"driveFs\":true" : "") : std::string()) + (interactive && !driveCapable() ? ",\"driveUnavailableReason\":\"drive_webclient_unavailable\"" : std::string()) + ",\"diagnosticsSupported\":true,\"imeStateProtocol\":\"" + std::string(ime::protocol) + "\",\"service\":true,\"interactiveSession\":" + std::string(interactive ? "true" : "false") + ",\"streaming\":" + (!maintenance&&interactive && display.streamable() && captureAvailable ? "true" : "false") + ",\"rdpSupported\":false,\"rdpEnabled\":false,\"virtualDisplayReady\":" + (!maintenance&&display.streamable() ? "true" : "false") + ",\"clipboard\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"clipboardSync\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"virtualMonitorControl\":" + (!maintenance&&interactive && captureAvailable && console && display.streamable() && display.monitorControlSupported ? "true" : "false") + ",\"dynamicResolution\":"+(viewport?"true":"false")+",\"viewportProvisioning\":"+(viewport?"true":"false")+",\"viewportFailureReason\":"+jsonQuote(viewportReason)+(viewport?",\"resizeProtocol\":\"epoch-v1\"":"")+consoleFields+thumbnailFields+",\"monitors\":"+monitors+'}';
     return original;
   }
   // thumbnail-capture-v1 (thumbnail_capture.hpp). The privacy ticket is taken
@@ -1209,7 +1219,9 @@ class ServiceBridge final : public AgentBridge {
       // with its fields unpacked: stage = started 1 / failed 2 / restarting 3 / default device changed 4, cause = the
       // failed step, error = its HRESULT, format/items/expected = sample type, channels and rate (or the restart number),
       // active = event-driven (or a capture was running when the device changed). No device name or id.
+      // Its stage 49 (a physical PC's speakers while it is streamed, speaker_mute.hpp) is written as hostAction 298.
       const auto preparationLog=[](bool ok,uint32_t stage,uint32_t error=0){
+        if(stage==200+speakerMuteRecordStage){recordSpeakerMuteEvent(error);return;}
         if(stage==200+audioCaptureRecordStage){const auto row=audioCaptureJournal(error);if(!row.valid)return;
           recordHostEvent("hostAction",{{"action",int64_t(audioCaptureAction)},{"ok",row.ok},{"stage",row.stage},{"cause",row.cause},{"error",row.error},{"format",row.format},{"items",row.items},{"expected",row.expected},{"active",row.active}});return;}
         recordHostEvent("hostAction",{{"action",uint32_t(200)},{"ok",ok},{"stage",stage},{"error",error}});};
@@ -2377,6 +2389,8 @@ class ServiceBridge final : public AgentBridge {
         commandBegan=true;
         if(pipePacket(child.pipe.value,true,{request.begin(),request.end()},probeStopped_,write)){
           result=readWorkerDisplayProbe(child.pipe.value,probeStopped_);
+          // speaker_mute.hpp: this worker's start gave an earlier worker's leftover mute back (a crash, a power loss).
+          for(const auto value:result.speakerMute)recordSpeakerMuteEvent(value);
           if(result.desktopAvailable)bootTimeline().mark(BootStage::worker);
         }
       } catch(const WindowsOperationError& error){
@@ -2578,14 +2592,21 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
   WinHandle boundService=acceptWorkerServiceBinding(JsonParser::parse(std::string(bindingBytes.begin(),bindingBytes.end())),peer,bindingNonce);
   const auto bindingAck=workerServiceBindingAck(nativeStreamProcessIdentity(boundService.value),bindingNonce);
   if(!pipePacket(pipe.value,true,{bindingAck.begin(),bindingAck.end()},stopped,writeMutex))throw std::runtime_error("Worker service binding reply failed");
+  // The flag that abandons a diagnostic write: this worker's stop, except for the session's last records (the tail
+  // below). Declared before `worker`, whose own end may still write one.
+  std::atomic<std::atomic<bool>*> diagnosticStop{&stopped};
   Agent worker([](const auto&) {}, nullptr, [&](bool text, std::vector<uint8_t> data) { if (!pipePacket(pipe.value, text, std::move(data), stopped, writeMutex)) stopped = true; });
   std::unique_ptr<ClipboardWorker> clipboard;std::string clipboardSession,logicalMonitor;Json streamCommand;
   std::unique_ptr<NativeStreamProfileWorker> streamProfile;std::string streamSession,initialSession;std::optional<Json> initialPrepared;bool initialAttempted=false,initialGroupPrepared=false,profileRequired=false,cleanupHandled=false,cleanupResult=false;
   [[maybe_unused]] int64_t profileCancelDeadline=0;
   struct ProfileCancelDeadlineReset{int64_t& value;~ProfileCancelDeadlineReset(){value=0;}};
   const auto diagnosticSession=std::make_shared<std::string>();
-  const auto preparationFailure=[&,diagnosticSession](uint32_t stage,uint32_t error){try{const auto packet=streamPreparationPacket(*diagnosticSession,stage,error);(void)pipePacket(pipe.value,true,{packet.begin(),packet.end()},stopped,writeMutex);}catch(...){ }};
+  const auto preparationFailure=[&,diagnosticSession](uint32_t stage,uint32_t error){try{const auto packet=streamPreparationPacket(*diagnosticSession,stage,error);(void)pipePacket(pipe.value,true,{packet.begin(),packet.end()},*diagnosticStop.load(),writeMutex);}catch(...){ }};
   worker.captureDiagnostic(preparationFailure);
+  // speaker-mute-v1 (speaker_mute.hpp): endpoints an earlier worker of this user left muted (it crashed, was ended, the
+  // PC lost power) get their sound back at every worker start, a stream's or a probe's. Without a record nothing is
+  // touched. What was restored is journalled with the probe's reply, or with this worker's stream.
+  std::vector<uint32_t> speakerRecovered=speakerMuteRecover();
   // x264 -> MFT fallback (media.hpp EncoderFallback code) as stage 40 of the same fixed record; cleared before `worker` stops its encoders.
   struct EncoderFallbackDiagnostics{explicit EncoderFallbackDiagnostics(std::function<void(uint32_t)> sink){setEncoderFallbackObserver(std::move(sink));}~EncoderFallbackDiagnostics(){setEncoderFallbackObserver({});}}encoderFallbackDiagnostics{[preparationFailure](uint32_t code){preparationFailure(40,code);}};
   // Display manager v2 (worker side): one session object and its protected
@@ -3110,7 +3131,7 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
       const bool activation=command.get("type").string()=="worker.native.activate";
       const auto result=activation?bootstrapNativeDisplays(nativeWorkerBootstrapAccess()):NativeBootstrapResult{workerDisplayProbeAtRest()};
       // `privileged` tells the service whether this worker may act on the display it reports (workerDisplayAuthority).
-      const auto response=workerProbeReply(result.display,interactiveDesktopAvailable(),workerDisplayAuthority(),activation?std::optional<bool>(result.applyAttempted):std::nullopt,result.diagnostic);
+      const auto response=workerProbeReply(result.display,interactiveDesktopAvailable(),workerDisplayAuthority(),activation?std::optional<bool>(result.applyAttempted):std::nullopt,result.diagnostic,std::exchange(speakerRecovered,{}));
       if(!pipePacket(pipe.value,true,{response.begin(),response.end()},stopped,writeMutex))break;continue;
     }
     if(command.get("type").string()=="session.start"){
@@ -3121,7 +3142,7 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
       if(displayV2){if(!v2Prepared||!initialViewportJsonEqual(*v2Prepared,command)||(command.get("mediaProtocol").string()=="tracks-v1")!=displayV2Tracks){preparationFailure(13,0);break;}v2Prepared.reset();}
       else if(initialAttempted){if(!initialPrepared||!(initialGroupPrepared?initialProfileTrackPhase2Matches(*initialPrepared,command):initialViewportPhase2Matches(*initialPrepared,command))){preparationFailure(13,0);break;}initialPrepared.reset();}
       else if(hasInitialViewport(command)||hasInitialProfileTracks(command)||(command.get("resizeProtocol").string()=="epoch-v1"&&command.get("epoch").number()==1))break;
-      streamSession=command.get("sessionId").string();*diagnosticSession=streamSession;profileRequired=!std::holds_alternative<std::nullptr_t>(command.get("consoleProfile").value);
+      streamSession=command.get("sessionId").string();*diagnosticSession=streamSession;worker.speakerMuteRecovered(std::exchange(speakerRecovered,{}));profileRequired=!std::holds_alternative<std::nullptr_t>(command.get("consoleProfile").value);
       const auto unavailable=[&]{const std::string error="{\"type\":\"stream.unavailable\",\"sessionId\":"+jsonQuote(streamSession)+",\"reason\":\"virtual_display_required\"}";pipePacket(pipe.value,true,{error.begin(),error.end()},stopped,writeMutex);};
       if(profileRequired&&!displayV2){
 #ifdef MULTITAP_NATIVE_DISPLAY
@@ -3267,7 +3288,9 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
     if(command.get("type").string()=="session.start")applyScale(streamCommand);
   }
   }catch(...){ }
-  clipboard.reset();worker.suspendStreaming();try{(void)displayScale.restore();}catch(...){ }try{(void)trackScale.restore();}catch(...){ }bool restored=cleanupHandled?cleanupResult:(streamProfile?streamProfile->finish():!profileRequired);
+  // speaker_mute.hpp: the session is over, so the PC's speakers get their sound back before the stop is reported.
+  // Its records go out like the stop packet below, also when a stop seen during an RPC already set `stopped`.
+  clipboard.reset();worker.suspendStreaming();{std::atomic<bool> speakerStopped{false};diagnosticStop=&speakerStopped;worker.speakerMuteEnd();diagnosticStop=&stopped;}try{(void)displayScale.restore();}catch(...){ }try{(void)trackScale.restore();}catch(...){ }bool restored=cleanupHandled?cleanupResult:(streamProfile?streamProfile->finish():!profileRequired);
   // v2 stop/failure: restore the saved configuration (idempotent; no state
   // file means nothing to do). A failure leaves the file for the service's
   // automatic recovery; it never blocks a later stream.

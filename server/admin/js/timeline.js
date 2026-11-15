@@ -3,7 +3,7 @@
 // diagnostics events. Each entry keeps its source; times are as reported by
 // that source (client/Host PCs use their own clocks).
 import { el, button, stateDot, facts, board, detailWindow, clock, day, date, emptyState, fixed, integer, ms } from './dom.js';
-import { own, clientEvents, clientCodes, hostEvents, hostActions, hostClipboardWin32Text, hostUpdateEventStates, hostUpdateEventCodes, hostUpdateStateText, valueNames, eventLabel, auditFailures, hostUpdateCodeText, hostMediaDropText, hostPrintText, hostPrintDefaultReasonText, hostDriveText, hostDriveErrorText, hostChannelCloseCodes, hostChannelCloseText, hostUsbText, usbControllerCodes, usbControllerText, hostDisplayInventoryText, hostUsbReasons, usbRequestClassText, usbErrnoLabel, clientUsbText, clientUsbBack, hostClipboardStageText, hostClipboardFormatText, hostClipboardNoteText, hostClipboardFormatBits, hostClipboardReasons, hostClipboardCauses, hostClipboardCauseText, hostConsoleParkText, hostConsoleParkRefusalText, hostConsoleParkCauseText, hostInputKindText, hostInputLevelText, hostInputInjectorReasonText, hostFinishStepText, hostFinishDisplayCodes, hostFinishWinfspCodes, hostFinishCodeText, hostRemovalReasons, hostRemovalReasonText, hostRemovalCertificates, hostRemovalCertificateText, hostUdpProbeText, hostUdpPathText, hostUdpPathReasonText, hostThumbnailText, hostBootStages, failureAdvice, consoleProofCodeText } from './labels.js';
+import { own, clientEvents, clientCodes, hostEvents, hostActions, hostClipboardWin32Text, hostUpdateEventStates, hostUpdateEventCodes, hostUpdateStateText, valueNames, eventLabel, auditFailures, hostUpdateCodeText, hostMediaDropText, hostPrintText, hostPrintDefaultReasonText, hostDriveText, hostDriveErrorText, hostChannelCloseCodes, hostChannelCloseText, hostUsbText, usbControllerCodes, usbControllerText, hostDisplayInventoryText, hostUsbReasons, usbRequestClassText, usbErrnoLabel, clientUsbText, clientUsbBack, hostClipboardStageText, hostClipboardFormatText, hostClipboardNoteText, hostClipboardFormatBits, hostClipboardReasons, hostClipboardCauses, hostClipboardCauseText, hostConsoleParkText, hostConsoleParkRefusalText, hostConsoleParkCauseText, hostInputKindText, hostInputLevelText, hostInputInjectorReasonText, hostFinishStepText, hostFinishDisplayCodes, hostFinishWinfspCodes, hostFinishCodeText, hostRemovalReasons, hostRemovalReasonText, hostRemovalCertificates, hostRemovalCertificateText, hostUdpProbeText, hostUdpPathText, hostUdpPathReasonText, hostSpeakerMuteText, hostSpeakerMuteCauseText, hostSpeakerMuteStepText, hostThumbnailText, hostBootStages, failureAdvice, consoleProofCodeText } from './labels.js';
 import { t } from './i18n.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -280,6 +280,15 @@ export function renderRearmDetail(v) {
   if (v.stage === 3) return [t('timeline.172'), renderRearmSkips[v.error] ?? valueText('error', v.error)];
   return [t('timeline.20', { stage: v.stage })];
 }
+// A local PC's own speakers while it is streamed (hostAction 298, labels.js hostSpeakerMuteText): what happened and why.
+// A failed step names the step and Windows' answer; process loopback that did not open names the capture step.
+export function speakerMuteDetail(v) {
+  const what = hostSpeakerMuteText[v.stage] ?? t('timeline.20', { stage: v.stage });
+  const error = v.error ? valueText('error', '0x' + (v.error >>> 0).toString(16)) : null;
+  if (v.stage === 3) return [what, hostSpeakerMuteStepText[v.cause] ?? (v.cause ? valueText('cause', v.cause) : null), error];
+  if (v.stage === 4) return [what, v.cause ? valueText('cause', v.cause) : null, error];
+  return [what, hostSpeakerMuteCauseText[v.cause] ?? (v.cause ? valueText('cause', v.cause) : null), v.stage === 6 && v.items ? valueText('items', v.items) : null];
+}
 // A Console park (hostAction 215, labels.js hostConsoleParkText): the Host stopped its own virtual outputs so that the
 // Proxmox console shows Windows, and why no worker could do it instead.
 export function consoleParkDetail(v) {
@@ -345,6 +354,7 @@ export function hostEntries(hostList) {
       : v.action === 285 ? removalDetail(v)
       : v.action === 282 ? renderRearmDetail(v)
       : v.action === 291 ? [v.active ? t('timeline.201') : t('timeline.202')]
+      : v.action === 298 ? speakerMuteDetail(v)
       : v.action === 273 ? displayInventoryDetail(v)
       : v.action === 274 ? bootReadyDetail(v)
       : v.action === 247 ? [hostDriveText[v.stage] ?? t('timeline.20', { stage: v.stage }), v.error ? hostDriveErrorText[v.error] ?? valueText('error', v.error) : null, v.expected ? valueText('expected', v.expected) : null, v.missing ? valueText('missing', v.missing) : null, v.cause ? t('timeline.200', { cause: v.cause }) : null]
