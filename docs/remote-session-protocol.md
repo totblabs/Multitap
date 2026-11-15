@@ -272,6 +272,7 @@ request and the grant. Sections below give the details.
 | `text-input-v1` | `textInputProtocol` | `textInputProtocol` | [committed Unicode text](#text-input-text-input-v1) |
 | `touch-input-v1` | `touchInputProtocol` | `touchInputProtocol` | [Windows touch contacts](#touch-input-touch-input-v1) |
 | `caret-v1` | `caretProtocol` | `caretProtocol` | [text caret position](#caret-follow-caret-v1) |
+| `start-primary-v1` | `startPrimaryProtocol` | - (broker admission only) | a physical PC's [initial viewport](#initial-viewport-epoch-v1) with `'0'` not primary at rest |
 | `speaker-mute-v1` | `speakerMuteProtocol` | - (the broker adds `speakerMuteProtocol` to a physical PC's `session.start`) | [a physical PC's speakers are silent](#speaker-mute-speaker-mute-v1) while it is streamed |
 | `display-scale-v1`, `display-scale-outputs-v1` | `displayScaleProtocol`, `displayScaleOutputsProtocol` | `displayScaleProtocol`, `displayScale`, `displayScaleOutputsProtocol` | [Windows display scale](#display-scale-display-scale-v1) of the owned output |
 | `tiles-v1` | in band | `lt1-` ping nonces | [lossless tiles](#lossless-tiles-tiles-v1) |
@@ -325,7 +326,13 @@ the output at the window's size before the encoder starts. It needs
 not combined with tracks (otherwise 400 `invalid_initial_viewport`). The Host
 must advertise `initialViewportProtocol:'epoch-v1'` with viewport
 provisioning, virtual monitor control and the single owned output `'0'`
-(otherwise 409 `initial_viewport_unavailable`). The response and
+(otherwise 409 `initial_viewport_unavailable`). For a physical PC (desktop
+kind `pc`, which never uses the console profile) `'0'` must also be the
+Windows primary at rest, unless the Host advertises
+`startPrimaryProtocol:'start-primary-v1'`: its stream start makes `'0'`
+primary itself ([display-manager-v2.md](display-manager-v2.md)), so the layout
+at rest does not matter. The broker does not show that capability to clients.
+The response and
 `session.start` carry the prepared `initialViewport` (with its own request and
 resize IDs and epoch 1); the first `stream.info` must echo them. Input waits
 for that picture.

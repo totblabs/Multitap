@@ -6,6 +6,10 @@ export const initialViewportProtocol = 'epoch-v1';
 export const streamProfileViewportProtocol = 'epoch-v1';
 export const viewportEncoderLimitsProtocol = 'separate-v1';
 export const initialViewportPrepareMs = 90000;
+// start-primary-v1: the Host's stream start itself makes owned "0" the primary
+// display at the origin (display manager v2, every native stream), so how a
+// physical PC's displays stand at rest does not decide its admission.
+export const startPrimaryProtocol = 'start-primary-v1';
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 
@@ -22,7 +26,8 @@ export function requestedInitialViewport(mode, protocol, value, options, resizeP
   return Object.freeze({ monitor:'0', width:value.width, height:value.height, fps:value.fps });
 }
 
-export function initialViewportSupported(host, now, heartbeatMs) {
+// localPc: a desktop of kind 'pc' (its capabilities without the console profile).
+export function initialViewportSupported(host, now, heartbeatMs, localPc = false) {
   const caps = host?.capabilities;
   return !!(host && !host.capabilitiesPending && Number.isFinite(host.capabilitiesAt) &&
     now >= host.capabilitiesAt && now - host.capabilitiesAt <= heartbeatMs * 3 &&
@@ -31,7 +36,7 @@ export function initialViewportSupported(host, now, heartbeatMs) {
     caps.service === true && caps.interactiveSession === true && caps.streaming === true && caps.virtualDisplayReady === true &&
     caps.monitors?.length === 1 && caps.monitors[0].id === '0' &&
     (caps.streamProfileProtocol === undefined
-      ? caps.streamProfileViewportProtocol === undefined && caps.monitors[0].primary === true
+      ? caps.streamProfileViewportProtocol === undefined && (caps.monitors[0].primary === true || (localPc && caps.startPrimaryProtocol === startPrimaryProtocol))
       : caps.streamProfileProtocol === 'console-profile-v1' && caps.streamProfileViewportProtocol === streamProfileViewportProtocol));
 }
 
@@ -48,7 +53,7 @@ export function profileViewportSupported(host, now, heartbeatMs, entry = false) 
 export function initialViewportSessionSupported(session, now, heartbeatMs) {
   if (session.localPc) {
     const { streamProfileProtocol: _console, streamProfileTracksProtocol: _tracks, streamProfileViewportProtocol: _viewport, ...capabilities } = session.host.capabilities;
-    return initialViewportSupported({ ...session.host, capabilities }, now, heartbeatMs) && (!session.viewportEncoderLimits || capabilities.viewportEncoderLimitsProtocol === viewportEncoderLimitsProtocol);
+    return initialViewportSupported({ ...session.host, capabilities }, now, heartbeatMs, true) && (!session.viewportEncoderLimits || capabilities.viewportEncoderLimitsProtocol === viewportEncoderLimitsProtocol);
   }
   return initialViewportSupported(session.host,now,heartbeatMs) && (!session.viewportEncoderLimits || session.host.capabilities.viewportEncoderLimitsProtocol === viewportEncoderLimitsProtocol) && (session.profileViewport
     ? profileViewportSupported(session.host,now,heartbeatMs,true)

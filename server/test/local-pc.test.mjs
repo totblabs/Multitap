@@ -8,7 +8,8 @@ import { HostRequests } from '../src/host-requests.mjs';
 import { newToken, tokenHash } from '../src/security.mjs';
 import { buildServer } from '../src/http.mjs';
 import { Relay } from '../src/relay.mjs';
-import { initialViewportSessionSupported } from '../src/initial-viewport.mjs';
+import { initialViewportSessionSupported, initialViewportSupported } from '../src/initial-viewport.mjs';
+import { localPcCapabilities } from '../src/local-pc.mjs';
 
 const pcUuid = 'a1234567-89ab-cdef-8123-0123456789ab';
 const vmUuid = 'b1234567-89ab-cdef-8123-0123456789ab';
@@ -119,6 +120,27 @@ test('Physical PC capabilities hide Proxmox profile negotiation without mutating
   assert.equal(initialViewportSessionSupported({ localPc: true, host }, 100, 1000), true);
   host.capabilities.monitors[0].primary = false;
   assert.equal(initialViewportSessionSupported({ localPc: true, host }, 100, 1000), false);
+});
+
+test('start-primary-v1 admits a physical PC whose "0" is on beside its monitor, not primary; never a VM, never shown to clients', () => {
+  const caps = { service: true, initialViewportProtocol: 'epoch-v1', resizeProtocol: 'epoch-v1', dynamicResolution: true, viewportProvisioning: true, virtualMonitorControl: true, interactiveSession: true, streaming: true, virtualDisplayReady: true,
+    streamProfileProtocol: 'console-profile-v1', streamProfileViewportProtocol: 'epoch-v1', startPrimaryProtocol: 'start-primary-v1', monitors: [{ id: '0', primary: false }] };
+  const host = { capabilitiesPending: false, capabilitiesAt: 100, capabilities: caps };
+  assert.equal(initialViewportSessionSupported({ localPc: true, host }, 100, 1000), true);
+  // The connect-time check (relay: the local PC's view of the same capabilities).
+  assert.equal(initialViewportSupported({ ...host, capabilities: localPcCapabilities(caps) }, 100, 1000, true), true);
+  // Another marker value, or none: "0" must be primary as before.
+  for (const startPrimaryProtocol of ['start-primary-v2', undefined]) {
+    const other = { ...host, capabilities: { ...caps, startPrimaryProtocol } };
+    assert.equal(initialViewportSessionSupported({ localPc: true, host: other }, 100, 1000), false);
+  }
+  // A VM without the console profile is not admitted by the marker.
+  const { streamProfileProtocol: _p, streamProfileViewportProtocol: _v, ...plain } = caps;
+  assert.equal(initialViewportSupported({ ...host, capabilities: plain }, 100, 1000), false);
+  assert.equal(initialViewportSupported({ ...host, capabilities: plain }, 100, 1000, true), true);
+  // Clients never see it.
+  const relay = { store: { devicePolicy: () => ({}) } };
+  for (const pc of [true, false]) assert.equal(Object.hasOwn(Relay.prototype.visibleCapabilities.call(relay, caps, undefined, 'fixture', pc), 'startPrimaryProtocol'), false);
 });
 
 test('Physical PC approval is cookie-admin, CSRF and same-origin protected; assignment list reaches only its authorized account', async t => {

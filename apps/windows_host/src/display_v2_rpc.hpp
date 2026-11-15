@@ -25,6 +25,13 @@ inline bool displayManagerV2Selected(){
   try{native=nativeDisplayConfig();}catch(...){ }
   return displayManagerV2FromConfig(settings,native);
 }
+// start-primary-v1 (broker capability): the stream start puts owned "0" at
+// the origin, so primary, with every other display off (DisplaySessionV2
+// start/startGroup), whatever the layout at rest. Declared only where that
+// start runs: display manager v2 with the native display selected. The broker
+// then admits a physical PC whose "0" is on beside its monitor, not primary.
+inline constexpr const char* startPrimaryProtocol="start-primary-v1";
+inline std::string startPrimaryCapabilityFields(bool v2Start){return v2Start?std::string(",\"startPrimaryProtocol\":\"")+startPrimaryProtocol+"\"":std::string();}
 inline std::filesystem::path displayV2StatePath(){return machineDirectory()/L"private"/L"display-v2.state";}
 inline bool displayV2StatePresent(const std::filesystem::path& path=displayV2StatePath()){return GetFileAttributesW(path.c_str())!=INVALID_FILE_ATTRIBUTES;}
 

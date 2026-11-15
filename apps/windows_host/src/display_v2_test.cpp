@@ -1319,6 +1319,17 @@ int configCases(){
   require(displayManagerV2FromConfig(parse(R"({"displayManager":"v2"})"),parse(R"({"displayManager":"v1"})")),"settings did not take precedence");++passed;
   require(!displayManagerV2FromConfig(parse(R"({"desktopId":"d"})"),parse(R"({"displayManager":"v1"})")),"native-display.json v1 ignored");++passed;
   require(!displayManagerV2FromConfig(parse(R"({"displayManager":"v3"})"),parse(R"({"displayManager":"v1"})"))&&displayManagerV2FromConfig(parse(R"({"displayManager":7})"),{}),"Unknown values were not skipped");++passed;
+  // start-primary-v1: declared only where the v2 start runs, and that start
+  // makes "0" primary from a PC's layout at rest ("0" on beside its monitor,
+  // not primary), with no console proof and every other display hidden as the
+  // service's access does (service.hpp: access.hidden), the monitor off for the stream.
+  require(startPrimaryCapabilityFields(true)==R"(,"startPrimaryProtocol":"start-primary-v1")"&&startPrimaryCapabilityFields(false).empty(),"start-primary-v1 is not declared exactly for the v2 start");++passed;
+  {World w;Memory m;require(w.console().active&&w.console().x==0&&w.console().y==0&&w.owned().active&&w.owned().x!=0,"Fixture: \"0\" is not on beside a primary monitor");
+    auto pc=access(w,m,false);pc.hidden=[](LUID){return true;};DisplaySessionV2 session(pc);
+    require(session.start("start-primary",1600,900,false,deadline(w)).ok,"A PC start with \"0\" on beside its primary monitor failed");
+    requireStreaming(w,1600,900,true,"A PC start did not make \"0\" primary with the monitor off");
+    require(session.restore().ok(),"Stop after a PC start from \"0\" not primary failed");
+    requireOriginal(w,false,"Stop did not give the monitor back as primary");++passed;}
   return passed;
 }
 int fileCases(){

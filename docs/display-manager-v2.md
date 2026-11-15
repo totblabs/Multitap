@@ -207,6 +207,13 @@ never left without a usable display.
 
 Any failure restores the saved state.
 
+The start does not depend on how the displays stand at rest: output `0` may be
+off (standby), or on beside a PC's monitor and not primary. The Host advertises
+`startPrimaryProtocol:'start-primary-v1'` wherever this start runs (display
+manager v2 with the native display selected), and the broker then admits a
+physical PC's initial viewport without requiring `0` to be primary at rest
+([remote-session-protocol.md](remote-session-protocol.md#initial-viewport-epoch-v1)).
+
 ## Resize
 
 The client debounces window changes (650 ms) and sends one at a time. A resize
