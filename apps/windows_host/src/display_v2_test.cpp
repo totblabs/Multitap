@@ -546,13 +546,23 @@ int planCases(){
     const auto plan=planDisplayV2Streaming(w.query(),w.query(),w.target(),std::vector<NativeDisplayTarget>{w.target()},console,&removed);
     require(removed&&plan.paths.size()==1&&same(plan.paths[0].targetInfo.adapterId,ownedAdapter),"Streaming plan kept the identified console");++passed;
   }
-  // An owned output added after the snapshot (count change) is kept active.
+  // An owned output added after the snapshot (count change) goes back to off
+  // with the rest of the original configuration.
   {World w;const DisplayV2State saved{"s",displayV2ActiveCcd(w.query()),{w.target()},std::nullopt};
     w.displays.push_back({ownedAdapter,1,50,true,false,0,0,1280,720,60,1,DISPLAYCONFIG_ROTATION_IDENTITY,1280,720});
     const std::vector<NativeDisplayTarget> current{w.target(),{"1",ownedAdapter,50,1280,720}};std::vector<DisplayV2Expected> expected;
     const auto plan=planDisplayV2Restore(saved,w.query(),current,&expected);bool second=false;
-    for(const auto& p:plan.paths)if(same(p.targetInfo.adapterId,ownedAdapter)&&p.targetInfo.id==50){const auto& s=nativeCcdSource(plan,p);second=s.position.x==1024+1920&&s.width==1280;}
-    require(second&&expected.size()==3,"Restore dropped an owned output added after the snapshot");++passed;
+    for(const auto& p:plan.paths)if(same(p.targetInfo.adapterId,ownedAdapter)&&p.targetInfo.id==50)second=true;
+    require(!second&&expected.size()==2,"Restore kept an owned output added after the snapshot");++passed;
+  }
+  // A PC's monitor (or a VM's own display) was the only display before the
+  // stream and the owned output was created for it: the restore leaves the
+  // monitor alone, with no invisible screen extending the desktop.
+  {World w;w.displays[1].active=false;const DisplayV2State saved{"s",displayV2ActiveCcd(w.query()),{},std::nullopt};
+    w.displays[1].active=true;std::vector<DisplayV2Expected> expected;
+    const auto plan=planDisplayV2Restore(saved,w.query(),std::vector<NativeDisplayTarget>{w.target()},&expected);bool owned=false,console=false;
+    for(const auto& p:plan.paths){if(same(p.targetInfo.adapterId,ownedAdapter))owned=true;if(same(p.targetInfo.adapterId,consoleAdapter))console=true;}
+    require(console&&!owned&&plan.paths.size()==1&&expected.size()==1,"Restore left the stream's owned output extending the monitor");++passed;
   }
   // A retired Multitap legacy output is neither saved, restored nor "foreign".
   {const LUID legacy{61,0};const DisplayV2Retired retired=[legacy](LUID value){return same(value,legacy);};

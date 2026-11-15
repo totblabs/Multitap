@@ -2,7 +2,17 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13; the server is unchanged and the apps stay at 1.1.13. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13 and 1.1.16 to 1.1.14; the server is unchanged in both and the apps stay at 1.1.13. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.16](https://github.com/totblabs/Multitap/releases/tag/v1.1.16)
+
+### Display (Host)
+
+- **Fixed: after a connection ended, a PC with a monitor kept an invisible second screen.** The virtual screen made for the connection stayed on beside the monitor, extending the desktop. It now goes off when the connection ends and the original configuration comes back; it stays on only for a VM without a display of its own.
+
+### Server
+
+- No change; the number follows the Host.
 
 ## [1.1.15](https://github.com/totblabs/Multitap/releases/tag/v1.1.15)
 

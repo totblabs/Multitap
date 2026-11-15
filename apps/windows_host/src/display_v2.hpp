@@ -506,10 +506,14 @@ inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const Nati
     displayV2AddOwned(plan,fresh.paths[*chosen],item.width,item.height,item.left,item.top,false);taken.insert(nativeSourceKey(fresh.paths[*chosen]));
     if(expected)expected->push_back({item.target.adapter,item.target.target,true,item.width,item.height,item.left,item.top});
   }
-  // An owned output that did not exist at snapshot time (count changed) is
-  // never silently dropped: it stays active, appended to the right.
+  // An owned output that did not exist at snapshot time (created for the
+  // stream, or by a count change) goes back to off with the rest of the
+  // original configuration: a PC's monitor or a VM's own display keeps the
+  // desktop, with no invisible screen extending it. Only when nothing else
+  // would be active (a VM without a display of its own) does it stay on,
+  // appended to the right, so Windows keeps a desktop.
   LONG right=0;for(const auto& path:plan.paths)right=std::max(right,displayV2Rect(nativeCcdSource(plan,path)).right);
-  for(const auto& target:current){
+  if(plan.paths.empty())for(const auto& target:current){
     if(std::any_of(saved.owned.begin(),saved.owned.end(),[&](const auto& old){return old.id==target.id;}))continue;
     const auto chosen=displayV2OwnedPath(fresh,target,taken);if(!chosen)continue;
     const LONG left=right;

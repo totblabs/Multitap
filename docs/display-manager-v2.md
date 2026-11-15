@@ -280,7 +280,11 @@ background recovery. With no state file there is nothing to do.
 2. Apply the saved active paths with their saved modes. Owned outputs are
    mapped by public id to the current SDK targets (target ids change when the
    SDK recreates them) at their saved positions. An owned output that did not
-   exist at snapshot time stays active, appended to the right.
+   exist at snapshot time (made for the stream, or by a count change) goes back
+   to off with the rest of the original configuration, so a PC's monitor or a
+   VM's own display is not extended by an invisible screen. Only when nothing
+   else would be active (a VM without a display of its own) does it stay
+   active, appended to the right.
 3. Verify that every expected target is active, owned outputs have their saved
    sizes and positions (including which owned output was primary), other
    displays have their saved modes, and the console is active if

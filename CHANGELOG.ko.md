@@ -2,7 +2,17 @@
 
 [English](CHANGELOG.md)
 
-Multitap을 설치하고 쓰는 사람에게 달라지는 것을 적습니다. 릴리스 번호는 서버 버전을 따르고, 1.1.1부터 1.1.11까지는 Windows 앱, Android 앱, Host도 같은 번호입니다. 1.1.12는 서버와 두 앱이고, Host는 1.1.11 그대로입니다. 1.1.13은 서버만이고, 앱은 1.1.12, Host는 1.1.11 그대로입니다. 1.1.14는 서버 1.1.14와 Windows 앱·Android 앱 1.1.13이고, Host는 1.1.11 그대로입니다. 1.1.15는 Host 1.1.13이고, 서버는 바뀐 것이 없으며 앱은 1.1.13 그대로입니다. 설치 파일은 [Releases](https://github.com/totblabs/Multitap/releases)에 있습니다.
+Multitap을 설치하고 쓰는 사람에게 달라지는 것을 적습니다. 릴리스 번호는 서버 버전을 따르고, 1.1.1부터 1.1.11까지는 Windows 앱, Android 앱, Host도 같은 번호입니다. 1.1.12는 서버와 두 앱이고, Host는 1.1.11 그대로입니다. 1.1.13은 서버만이고, 앱은 1.1.12, Host는 1.1.11 그대로입니다. 1.1.14는 서버 1.1.14와 Windows 앱·Android 앱 1.1.13이고, Host는 1.1.11 그대로입니다. 1.1.15는 Host 1.1.13, 1.1.16은 Host 1.1.14이고, 둘 다 서버는 바뀐 것이 없으며 앱은 1.1.13 그대로입니다. 설치 파일은 [Releases](https://github.com/totblabs/Multitap/releases)에 있습니다.
+
+## [1.1.16](https://github.com/totblabs/Multitap/releases/tag/v1.1.16)
+
+### 화면 (Host)
+
+- **고침: 연결이 끝난 뒤 모니터가 있는 PC에 보이지 않는 두 번째 화면이 남던 문제.** 연결 때문에 생긴 가상 화면이 모니터 옆에 켜진 채 남아 바탕 화면이 넓어져 있었습니다. 이제 연결이 끝나면 꺼지고 원래 화면 구성으로 돌아갑니다. 자기 화면이 없는 VM에서만 켜 둡니다.
+
+### 서버
+
+- 바뀐 것은 없고 Host에 맞춰 번호를 올렸습니다.
 
 ## [1.1.15](https://github.com/totblabs/Multitap/releases/tag/v1.1.15)
 
