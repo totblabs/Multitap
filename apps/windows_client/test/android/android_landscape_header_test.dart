@@ -137,9 +137,9 @@ void main() {
         } else {
           expect(connect.top, lessThan(size.height - 24));
         }
-        // Both cards keep one height.
+        // Both cards keep one height (as drawn: the card is drawn scaled).
         expect(
-          t.getSize(find.byKey(const Key('card-pve-150'))).height,
+          t.getRect(find.byKey(const Key('card-pve-150'))).height,
           closeTo(card.height, .1),
         );
         // The commands still work from there.

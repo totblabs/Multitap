@@ -167,7 +167,8 @@ List<String> _sections(WidgetTester t) {
   for (final element
       in find
           .byWidgetPredicate(
-            (w) => w.key is ValueKey<String> &&
+            (w) =>
+                w.key is ValueKey<String> &&
                 (w.key as ValueKey<String>).value.startsWith('section-header-'),
           )
           .evaluate()) {
@@ -246,22 +247,18 @@ void main() {
       final all = _fleet();
       expect(desktopSections(all, all, null, filtering: false), isNull);
       expect(desktopSections(all, all, const [], filtering: false), isNull);
-      final sections = desktopSections(
-        all,
-        all,
-        const [_a, _b],
-        filtering: false,
-      )!;
-      expect([for (final s in sections) s.key], [
-        'group:g1',
-        'group:g2',
-        'other',
-      ]);
-      expect([for (final s in sections) s.machines.map((m) => m.id).join()], [
-        'pve-2pve-4',
-        'pve-1',
-        'pve-3',
-      ]);
+      final sections = desktopSections(all, all, const [
+        _a,
+        _b,
+      ], filtering: false)!;
+      expect(
+        [for (final s in sections) s.key],
+        ['group:g1', 'group:g2', 'other'],
+      );
+      expect(
+        [for (final s in sections) s.machines.map((m) => m.id).join()],
+        ['pve-2pve-4', 'pve-1', 'pve-3'],
+      );
       // A desktop in a group the list no longer has is in 기타.
       final stale = [_vm('pve-9', 'Old', group: 'gone'), ...all];
       expect(
@@ -272,27 +269,24 @@ void main() {
       final grouped = [_vm('pve-1', 'A', group: 'g1')];
       expect(
         [
-          for (final s in desktopSections(
-            grouped,
-            grouped,
-            const [_a, _b],
-            filtering: false,
-          )!)
+          for (final s in desktopSections(grouped, grouped, const [
+            _a,
+            _b,
+          ], filtering: false)!)
             (s.key, s.total),
         ],
         [('group:g1', 1), ('group:g2', 0)],
       );
       // Filtering: only the sections with a shown card, counted against all.
       final shown = [all[1]];
-      final filtered = desktopSections(
-        shown,
-        all,
-        const [_a, _b],
-        filtering: true,
-      )!;
-      expect([for (final s in filtered) (s.key, s.machines.length, s.total)], [
-        ('group:g1', 1, 2),
-      ]);
+      final filtered = desktopSections(shown, all, const [
+        _a,
+        _b,
+      ], filtering: true)!;
+      expect(
+        [for (final s in filtered) (s.key, s.machines.length, s.total)],
+        [('group:g1', 1, 2)],
+      );
     });
   });
 
@@ -379,68 +373,71 @@ void main() {
       ]);
     });
 
-    test('the whole list is one PUT in its order; new entries have no id', () async {
-      final client = _ApiClient()
-        ..responses.add((
-          200,
-          {
-            'groups': [
-              {'id': 'g2', 'name': '영업'},
-              {'id': 'g9', 'name': '새 그룹'},
-            ],
-          },
-        ))
-        ..responses.add((
-          400,
-          {
-            'error': {'code': 'duplicate_group_name', 'message': 'x'},
-          },
-        ))
-        ..responses.add((200, {'groups': 'nope'}));
-      final api = HttpBrokerApi(
-        origin: Uri.parse('https://cloud.example.com'),
-        client: client,
-      );
-      final saved = await api.saveDesktopGroups('qa-token', [
-        (id: 'g2', name: '영업'),
-        (id: null, name: ' 새 그룹 '),
-      ]);
-      expect(saved, [_b, const DesktopGroup(id: 'g9', name: '새 그룹')]);
-      final request = client.requests.single;
-      expect(request.method, 'PUT');
-      expect(request.uri.path, '/api/v1/desktop-groups');
-      expect(jsonDecode(request.body.toString()), {
-        'groups': [
-          {'id': 'g2', 'name': '영업'},
-          {'name': '새 그룹'},
-        ],
-      });
-      expect(
-        request.headers.values[HttpHeaders.authorizationHeader],
-        'Bearer qa-token',
-      );
-      await expectLater(
-        api.saveDesktopGroups('qa-token', [(id: null, name: '영업')]),
-        throwsA(
-          isA<BrokerException>()
-              .having((e) => e.code, 'code', 'duplicate_group_name')
-              .having((e) => e.status, 'status', 400),
-        ),
-      );
-      // A malformed answer is not taken as saved.
-      await expectLater(
-        api.saveDesktopGroups('qa-token', const []),
-        throwsA(isA<BrokerException>()),
-      );
-      // More than 30 is refused before sending.
-      await expectLater(
-        api.saveDesktopGroups('qa-token', [
-          for (var i = 0; i < 31; i++) (id: null, name: 'g$i'),
-        ]),
-        throwsA(isA<BrokerException>()),
-      );
-      expect(client.requests.length, 3);
-    });
+    test(
+      'the whole list is one PUT in its order; new entries have no id',
+      () async {
+        final client = _ApiClient()
+          ..responses.add((
+            200,
+            {
+              'groups': [
+                {'id': 'g2', 'name': '영업'},
+                {'id': 'g9', 'name': '새 그룹'},
+              ],
+            },
+          ))
+          ..responses.add((
+            400,
+            {
+              'error': {'code': 'duplicate_group_name', 'message': 'x'},
+            },
+          ))
+          ..responses.add((200, {'groups': 'nope'}));
+        final api = HttpBrokerApi(
+          origin: Uri.parse('https://cloud.example.com'),
+          client: client,
+        );
+        final saved = await api.saveDesktopGroups('qa-token', [
+          (id: 'g2', name: '영업'),
+          (id: null, name: ' 새 그룹 '),
+        ]);
+        expect(saved, [_b, const DesktopGroup(id: 'g9', name: '새 그룹')]);
+        final request = client.requests.single;
+        expect(request.method, 'PUT');
+        expect(request.uri.path, '/api/v1/desktop-groups');
+        expect(jsonDecode(request.body.toString()), {
+          'groups': [
+            {'id': 'g2', 'name': '영업'},
+            {'name': '새 그룹'},
+          ],
+        });
+        expect(
+          request.headers.values[HttpHeaders.authorizationHeader],
+          'Bearer qa-token',
+        );
+        await expectLater(
+          api.saveDesktopGroups('qa-token', [(id: null, name: '영업')]),
+          throwsA(
+            isA<BrokerException>()
+                .having((e) => e.code, 'code', 'duplicate_group_name')
+                .having((e) => e.status, 'status', 400),
+          ),
+        );
+        // A malformed answer is not taken as saved.
+        await expectLater(
+          api.saveDesktopGroups('qa-token', const []),
+          throwsA(isA<BrokerException>()),
+        );
+        // More than 30 is refused before sending.
+        await expectLater(
+          api.saveDesktopGroups('qa-token', [
+            for (var i = 0; i < 31; i++) (id: null, name: 'g$i'),
+          ]),
+          throwsA(isA<BrokerException>()),
+        );
+        expect(client.requests.length, 3);
+      },
+    );
 
     test('one desktop\'s group is a PUT of the id or null', () async {
       final client = _ApiClient()
@@ -491,10 +488,14 @@ void main() {
       expect(_count(t, 'other'), '1');
       // Each header sits above its own cards.
       final header = t.getRect(find.byKey(const Key('section-group:g2')));
-      expect(t.getRect(find.byKey(const Key('tile-pve-1'))).top,
-          greaterThan(header.bottom));
-      expect(t.getRect(find.byKey(const Key('tile-pve-4'))).bottom,
-          lessThan(header.top));
+      expect(
+        t.getRect(find.byKey(const Key('tile-pve-1'))).top,
+        greaterThan(header.bottom),
+      );
+      expect(
+        t.getRect(find.byKey(const Key('tile-pve-4'))).bottom,
+        lessThan(header.top),
+      );
       // 기타 has nothing to rename or delete.
       expect(find.byKey(const Key('section-more-other')), findsNothing);
       expect(find.byKey(const Key('section-more-group:g1')), findsOneWidget);
@@ -504,10 +505,7 @@ void main() {
     testWidgets('기타 only while it has a card; an empty group is shown', (
       t,
     ) async {
-      await _show(
-        t,
-        machines: [_vm('pve-1', 'Alpha', group: 'g1')],
-      );
+      await _show(t, machines: [_vm('pve-1', 'Alpha', group: 'g1')]);
       expect(_sections(t), ['group:g1', 'group:g2']);
       expect(_count(t, 'group:g2'), '0');
       expect(find.text('기타'), findsNothing);
@@ -567,10 +565,9 @@ void main() {
           isExpanded: false,
         ),
       );
-      expect(
-        (await memory.load(_origin)).organizeFor('tester').folded,
-        ['group:g1'],
-      );
+      expect((await memory.load(_origin)).organizeFor('tester').folded, [
+        'group:g1',
+      ]);
       // A new launcher with the same memory keeps it folded.
       await t.pumpWidget(const SizedBox());
       await _show(t, memory: memory);
@@ -578,7 +575,10 @@ void main() {
       await t.tap(header);
       await t.pumpAndSettle();
       expect(_order(t), ['pve-2', 'pve-4', 'pve-1', 'pve-3']);
-      expect((await memory.load(_origin)).organizeFor('tester').folded, isEmpty);
+      expect(
+        (await memory.load(_origin)).organizeFor('tester').folded,
+        isEmpty,
+      );
       handle.dispose();
     });
   });
@@ -601,7 +601,8 @@ void main() {
       );
       handle.dispose();
       expect(
-        t.widget<MenuItemButton>(find.byKey(const Key('group-g1-pve-1')))
+        t
+            .widget<MenuItemButton>(find.byKey(const Key('group-g1-pve-1')))
             .trailingIcon,
         isNull,
       );
@@ -692,7 +693,8 @@ void main() {
       );
       await _openGroups(t, 'pve-3');
       expect(
-        t.widget<MenuItemButton>(find.byKey(const Key('group-new-pve-3')))
+        t
+            .widget<MenuItemButton>(find.byKey(const Key('group-new-pve-3')))
             .onPressed,
         isNull,
       );
@@ -706,13 +708,19 @@ void main() {
       // The first cannot move up, the last not down.
       await _tap(t, 'section-more-group:g1');
       expect(
-        t.widget<MenuItemButton>(find.byKey(const Key('section-up-group:g1')))
+        t
+            .widget<MenuItemButton>(
+              find.byKey(const Key('section-up-group:g1')),
+            )
             .onPressed,
         isNull,
       );
       await _tap(t, 'section-rename-group:g1');
       expect(
-        t.widget<TextField>(find.byKey(const Key('group-name-input'))).controller!.text,
+        t
+            .widget<TextField>(find.byKey(const Key('group-name-input')))
+            .controller!
+            .text,
         '개발',
       );
       await t.enterText(find.byKey(const Key('group-name-input')), '개발팀');
@@ -725,7 +733,10 @@ void main() {
 
       await _tap(t, 'section-more-group:g2');
       expect(
-        t.widget<MenuItemButton>(find.byKey(const Key('section-down-group:g2')))
+        t
+            .widget<MenuItemButton>(
+              find.byKey(const Key('section-down-group:g2')),
+            )
             .onPressed,
         isNull,
       );
@@ -745,10 +756,7 @@ void main() {
       await _tap(t, 'section-more-group:g1');
       await _tap(t, 'section-delete-group:g1');
       expect(find.text("'개발팀' 그룹을 삭제할까요?"), findsOneWidget);
-      expect(
-        find.text("이 그룹의 카드는 '기타'로 옮겨져요. 데스크톱은 그대로예요."),
-        findsOneWidget,
-      );
+      expect(find.text("이 그룹의 카드는 '기타'로 옮겨져요. 데스크톱은 그대로예요."), findsOneWidget);
       final before = host.saved.length;
       await _tap(t, 'cancel-group-delete');
       expect(host.saved.length, before);
@@ -769,10 +777,7 @@ void main() {
       await _tap(t, 'section-more-group:g2');
       await _tap(t, 'section-up-group:g2');
       expect(host.saved, hasLength(1));
-      expect(
-        find.text('그룹을 바꾸지 못했어요. 잠시 후 다시 시도하세요.'),
-        findsOneWidget,
-      );
+      expect(find.text('그룹을 바꾸지 못했어요. 잠시 후 다시 시도하세요.'), findsOneWidget);
       expect(_sections(t), ['group:g1', 'group:g2', 'other']);
     });
   });
@@ -840,8 +845,7 @@ void main() {
       final smallRow = _order(t)
           .where(
             (id) =>
-                (t.getRect(find.byKey(Key('card-$id'))).top - small.top)
-                    .abs() <
+                (t.getRect(find.byKey(Key('card-$id'))).top - small.top).abs() <
                 2,
           )
           .length;
@@ -873,31 +877,78 @@ void main() {
       expect(t.takeException(), isNull);
     });
 
-    test('the small grid is the normal rule on a wider page, drawn smaller', () {
-      const viewport = Size(1440, 900);
-      final normal = desktopTileGrid(
-        1240,
-        TextScaler.noScaling,
-        viewport: viewport,
+    test(
+      'the small grid is the normal rule on a wider page, drawn smaller',
+      () {
+        const viewport = Size(1440, 900);
+        final normal = desktopTileGrid(
+          1240,
+          TextScaler.noScaling,
+          viewport: viewport,
+        );
+        final small = desktopTileGrid(
+          1240,
+          TextScaler.noScaling,
+          viewport: viewport,
+          small: true,
+        );
+        expect(normal.columns, 3);
+        expect(normal.scale, 1);
+        expect(normal.extent, normal.height);
+        expect(small.columns, greaterThan(normal.columns));
+        expect(small.scale, desktopSmallTileScale);
+        expect(small.extent, closeTo(small.height * small.scale, .001));
+        expect(small.gap, desktopTileGap * desktopSmallTileScale);
+        // On screen the columns and gaps fill the same width.
+        expect(
+          small.width * small.scale * small.columns +
+              small.gap * (small.columns - 1),
+          closeTo(1240, .5),
+        );
+      },
+    );
+
+    test('Android: 보통 is the Windows 작게, and 작게 puts two cards side by '
+        'side on a phone', () {
+      const viewport = Size(392, 850);
+      for (final width in [328.0, 360.0, 380.0]) {
+        DesktopTileGrid grid(bool small) => desktopTileGrid(
+          width,
+          TextScaler.noScaling,
+          viewport: viewport,
+          touch: true,
+          scale: androidTileScaleFor(width, TextScaler.noScaling, small: small),
+        );
+        final normal = grid(false), small = grid(true);
+        expect(normal.scale, desktopSmallTileScale);
+        expect(normal.columns, 1, reason: '$width');
+        expect(small.columns, 2, reason: '$width');
+        expect(small.scale, lessThanOrEqualTo(androidSmallTileScale));
+        expect(small.scale, greaterThanOrEqualTo(.5));
+        expect(small.extent, lessThan(normal.extent));
+        // Two cards and the gap fill the row.
+        expect(
+          small.width * small.scale * 2 + small.gap,
+          closeTo(width, .5),
+          reason: '$width',
+        );
+      }
+      // A tablet: more columns at 작게 than at 보통.
+      final tablet = [false, true].map(
+        (small) => desktopTileGrid(
+          1000,
+          TextScaler.noScaling,
+          viewport: const Size(1024, 768),
+          touch: true,
+          scale: androidTileScaleFor(1000, TextScaler.noScaling, small: small),
+        ),
       );
-      final small = desktopTileGrid(
-        1240,
-        TextScaler.noScaling,
-        viewport: viewport,
-        small: true,
-      );
-      expect(normal.columns, 3);
-      expect(normal.scale, 1);
-      expect(normal.extent, normal.height);
-      expect(small.columns, greaterThan(normal.columns));
-      expect(small.scale, desktopSmallTileScale);
-      expect(small.extent, closeTo(small.height * small.scale, .001));
-      expect(small.gap, desktopTileGap * desktopSmallTileScale);
-      // On screen the columns and gaps fill the same width.
+      expect(tablet.last.scale, androidSmallTileScale);
+      expect(tablet.last.columns, greaterThan(tablet.first.columns));
+      // Too narrow for two even at half size: one card at 작게's scale.
       expect(
-        small.width * small.scale * small.columns +
-            small.gap * (small.columns - 1),
-        closeTo(1240, .5),
+        androidTileScaleFor(280, TextScaler.noScaling, small: true),
+        androidSmallTileScale,
       );
     });
   });
@@ -1076,9 +1127,9 @@ class _Response extends Fake implements HttpClientResponse {
   Stream<List<int>> timeout(
     Duration timeLimit, {
     void Function(EventSink<List<int>>)? onTimeout,
-  }) => Stream<List<int>>.value(
-    utf8.encode(jsonEncode(value)),
-  ).timeout(timeLimit, onTimeout: onTimeout);
+  }) =>
+      Stream<List<int>>.value(utf8.encode(jsonEncode(value)))
+          .timeout(timeLimit, onTimeout: onTimeout);
   @override
   StreamSubscription<List<int>> listen(
     void Function(List<int>)? onData, {

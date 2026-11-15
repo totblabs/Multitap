@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:multitap_client/ui/desktop_tile.dart' show DesktopTileScale;
 
 /// Widgets whose text is a control's label: it must stay on one line.
 bool _control(Widget widget) {
@@ -93,9 +94,19 @@ List<UiFinding> auditLabels(
 }
 
 /// Tappable semantics nodes under 48×48 dp, partly off screen, or under the
-/// system bars / cutout ([t.view.padding]).
+/// system bars / cutout ([t.view.padding]). In a desktop card drawn smaller
+/// ([DesktopTileScale]: Android's 보통 and 작게, the owner's sizes,
+/// docs/user-decisions.md 2026-11-15) a target is 48 dp at the card's own
+/// size, so drawn at its scale.
 List<UiFinding> auditTargets(WidgetTester t, {double minimum = 48}) {
   final out = <UiFinding>[];
+  final cards = [
+    for (final element in find.byType(DesktopTileScale).evaluate())
+      if ((element.widget as DesktopTileScale).grid.scale case final scale
+          when scale < 1)
+        if (element.renderObject case final RenderBox box when box.hasSize)
+          (rect: box.localToGlobal(Offset.zero) & box.size, scale: scale),
+  ];
   final ratio = t.view.devicePixelRatio;
   final view = t.view.physicalSize / ratio;
   final screen = Offset.zero & view;
@@ -174,8 +185,10 @@ List<UiFinding> auditTargets(WidgetTester t, {double minimum = 48}) {
     final whole =
         rect.width >= view.width - 1 && rect.height >= view.height - 1;
     if (whole) return; // a barrier or the picture
-    if (!clipped &&
-        (rect.width < minimum - .01 || rect.height < minimum - .01)) {
+    final least = cards
+        .where((card) => _inside(rect, card.rect))
+        .fold(minimum, (least, card) => math.min(least, minimum * card.scale));
+    if (!clipped && (rect.width < least - .01 || rect.height < least - .01)) {
       out.add(
         UiFinding(
           'small',

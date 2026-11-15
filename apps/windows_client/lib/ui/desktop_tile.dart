@@ -25,7 +25,11 @@ class StartProgress {
   final int stage;
   final Duration elapsed;
 
-  static List<String> get stages => [l10n.power2, l10n.preparing4, l10n.connect2];
+  static List<String> get stages => [
+    l10n.power2,
+    l10n.preparing4,
+    l10n.connect2,
+  ];
 
   String get clock {
     final seconds = elapsed.inSeconds;
@@ -99,16 +103,20 @@ DesktopTileGrid desktopTileGrid(
   bool previews = true,
   bool touch = false,
   bool small = false,
+  double? scale,
 }) {
   const gap = desktopTileGap;
-  final scale = small ? desktopSmallTileScale : 1.0;
+  // [scale] overrides 보통/작게 (Android draws its 보통 already smaller).
+  scale ??= small ? desktopSmallTileScale : 1.0;
+  final scaled = scale < 1;
   final page = width / scale;
-  final minimum = 288.0 * scaler.scale(1).clamp(1.0, 1.6);
-  final columns = ((page + gap) / (minimum + gap)).floor().clamp(
+  final minimum = _minimumTile(scaler);
+  // The tiny term keeps a page laid out for exactly n cards at n columns.
+  final columns = ((page + gap) / (minimum + gap) + 1e-9).floor().clamp(
     1,
-    small ? 6 : 3,
+    scaled ? 6 : 3,
   );
-  final tile = small && columns == 1
+  final tile = scaled && columns == 1
       ? math.min(page, width)
       : (page - (columns - 1) * gap) / columns;
   // At most 40 % of the window's height (without the limit, one column at
@@ -149,6 +157,28 @@ const desktopTileGap = 24.0;
 /// How large a 작게 card is drawn: the same card at four fifths.
 const desktopSmallTileScale = .8;
 
+/// A card's narrowest width: 288, growing with the text up to 160 %.
+double _minimumTile(TextScaler scaler) =>
+    288.0 * scaler.scale(1).clamp(1.0, 1.6);
+
+/// Android's two card sizes (owner, 2026-11-15: the Windows 작게 is a phone's
+/// normal card, and 작게 goes smaller still).
+const androidTileScale = desktopSmallTileScale, androidSmallTileScale = .6;
+
+/// The scale Android draws its cards at in [width]: 보통 [androidTileScale];
+/// 작게 [androidSmallTileScale], or on a phone too narrow for two cards side
+/// by side at that, the scale that puts two there, down to half size (below
+/// that one card stays alone, at [androidSmallTileScale]).
+double androidTileScaleFor(
+  double width,
+  TextScaler scaler, {
+  required bool small,
+}) {
+  if (!small) return androidTileScale;
+  final two = width / (2 * _minimumTile(scaler) + desktopTileGap);
+  return two < androidSmallTileScale && two >= .5 ? two : androidSmallTileScale;
+}
+
 /// A card in the 작게 grid: laid out at its own size ([grid]'s width and
 /// height) and drawn [DesktopTileGrid.scale] times as large, so its picture,
 /// name, status and buttons keep their proportions; at the top of its slot,
@@ -170,11 +200,7 @@ class DesktopTileScale extends StatelessWidget {
         child: FittedBox(
           fit: BoxFit.fill,
           alignment: Alignment.topLeft,
-          child: SizedBox(
-            width: grid.width,
-            height: grid.height,
-            child: child,
-          ),
+          child: SizedBox(width: grid.width, height: grid.height, child: child),
         ),
       ),
     );
@@ -751,7 +777,9 @@ class DesktopNameRow extends StatelessWidget {
               key: Key('desktop-more-${machine.id}'),
               tooltip: machine.kind == MachineKind.pc
                   ? (update ? l10n.manageLocalPcHostUpdate : l10n.manageLocalPc)
-                  : (update ? l10n.manageDesktopHostUpdateAvailable : l10n.manageDesktop),
+                  : (update
+                        ? l10n.manageDesktopHostUpdateAvailable
+                        : l10n.manageDesktop),
               onPressed: () => onMenu(anchor),
               style: iconStyle,
               icon: Badge(
@@ -901,8 +929,10 @@ class DesktopStatusArea extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 13),
       );
-      detail =
-          l10n.step3ElapsedDesktopStays(progress.stage + 1, progress.clock);
+      detail = l10n.step3ElapsedDesktopStays(
+        progress.stage + 1,
+        progress.clock,
+      );
       lead = Icon(Icons.bolt_rounded, size: 15, color: p.amber);
     } else {
       headline = KeepAllText(
@@ -1301,7 +1331,8 @@ class _ActionRow extends StatelessWidget {
     } else if (blocked) {
       keyName = 'open-';
       label =
-          r.progressLabel ?? (r.phase == TilePhase.power ? l10n.working : l10n.preparing5);
+          r.progressLabel ??
+          (r.phase == TilePhase.power ? l10n.working : l10n.preparing5);
       icon = Icons.more_horiz_rounded;
       moving = true;
       onPressed = actions.primary;
@@ -1340,12 +1371,18 @@ class _ActionRow extends StatelessWidget {
         ? _powerElapsed(
             machine,
             actions.powerSince,
-            uiText(size: 12.5, weight: FontWeight.w500, color: p.muted).copyWith(
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
+            uiText(
+              size: 12.5,
+              weight: FontWeight.w500,
+              color: p.muted,
+            ).copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
           )
         : null;
-    final words = KeepAllText(label, maxLines: 1, overflow: TextOverflow.ellipsis);
+    final words = KeepAllText(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
     final more =
         actions.menu &&
         !off &&
@@ -1373,7 +1410,10 @@ class _ActionRow extends StatelessWidget {
               ? words
               : Row(
                   mainAxisSize: MainAxisSize.min,
-                  children: [Flexible(child: words), elapsed],
+                  children: [
+                    Flexible(child: words),
+                    elapsed,
+                  ],
                 ),
         ),
       ),
@@ -1414,7 +1454,9 @@ class _ActionRow extends StatelessWidget {
                 // Android has no other way to connect: its ▾ holds 화질
                 // 옵션 and 긴급 콘솔.
                 child: Tooltip(
-                  message: mode == null ? l10n.connectionOptions : l10n.otherWaysConnect,
+                  message: mode == null
+                      ? l10n.connectionOptions
+                      : l10n.otherWaysConnect,
                   child: const Icon(
                     Icons.keyboard_arrow_down_rounded,
                     size: 20,
@@ -1617,8 +1659,17 @@ class DesktopThumbnailView extends StatelessWidget {
               alignment: Alignment.bottomLeft,
               child: Tooltip(
                 message: picture.remote && !snapshot
-                    ? l10n.screenFromMayDifferNow(screenAge(picture.modified, now), machine.kind == MachineKind.pc ? l10n.localPcInSentence : l10n.desktopInSentence)
-                    : l10n.lastSavedScreenScreenMay(machine.kind == MachineKind.pc ? l10n.localPcInSentence : l10n.desktopInSentence),
+                    ? l10n.screenFromMayDifferNow(
+                        screenAge(picture.modified, now),
+                        machine.kind == MachineKind.pc
+                            ? l10n.localPcInSentence
+                            : l10n.desktopInSentence,
+                      )
+                    : l10n.lastSavedScreenScreenMay(
+                        machine.kind == MachineKind.pc
+                            ? l10n.localPcInSentence
+                            : l10n.desktopInSentence,
+                      ),
                 child: _ImageChip(
                   key: Key('thumbnail-caption-${machine.id}'),
                   icon: snapshot ? Icons.photo_outlined : Icons.history_rounded,

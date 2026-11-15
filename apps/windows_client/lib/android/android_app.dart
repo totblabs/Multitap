@@ -41,7 +41,12 @@ import '../ui/pc_power_help.dart';
 import '../ui/desktop_readiness.dart';
 import '../ui/desktop_groups.dart';
 import '../ui/desktop_tile.dart'
-    show DesktopTile, DesktopTileScale, StartProgress, desktopTileGrid;
+    show
+        DesktopTile,
+        DesktopTileScale,
+        StartProgress,
+        androidTileScaleFor,
+        desktopTileGrid;
 import '../ui/launcher_view_menu.dart' show LauncherCardSizeButton;
 import '../ui/korean_text.dart';
 import '../ui/mfa_login_dialog.dart';
@@ -112,7 +117,8 @@ class AndroidVdiApp extends StatefulWidget {
   State<AndroidVdiApp> createState() => _AndroidVdiAppState();
 }
 
-class _AndroidVdiAppState extends State<AndroidVdiApp> with WidgetsBindingObserver {
+class _AndroidVdiAppState extends State<AndroidVdiApp>
+    with WidgetsBindingObserver {
   late final _mfa = MfaAccountHost(clock: widget.clock);
   late final _sessionAccess = SessionActivity(clock: widget.clock);
   late final _sessionRoutes = SessionAccessRoutes(_sessionAccess);
@@ -144,11 +150,19 @@ class _AndroidVdiAppState extends State<AndroidVdiApp> with WidgetsBindingObserv
       if (!mounted) return;
       if (call.method == 'authenticationEvent') {
         final value = call.arguments;
-        if (value is Map && value['kind'] == 'terminal' && validAuthenticationOwner(value['owner']) &&
-            const {'pc_login_replaced', 'session_idle_timeout'}.contains(value['reason'])) {
+        if (value is Map &&
+            value['kind'] == 'terminal' &&
+            validAuthenticationOwner(value['owner']) &&
+            const {
+              'pc_login_replaced',
+              'session_idle_timeout',
+            }.contains(value['reason'])) {
           // The normal auth controller may already have cleared its owner after
           // generic401. The completed presentation still fences this exact actor.
-          _mfa.authenticationRetired(value['owner'] as String, value['reason'] as String);
+          _mfa.authenticationRetired(
+            value['owner'] as String,
+            value['reason'] as String,
+          );
         }
         if (value is Map &&
             value['owner'] == _sessionAccess.owner &&
@@ -257,7 +271,9 @@ class _AndroidVdiAppState extends State<AndroidVdiApp> with WidgetsBindingObserv
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) { _mfa.checkPrivacyIdle(); }
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _mfa.checkPrivacyIdle();
+  }
 
   /// 공지 (android_notices.dart): the signed-in home tells it this sign-in's
   /// notices; the layer above the pages shows them in the launcher and over a
@@ -285,22 +301,25 @@ class _AndroidVdiAppState extends State<AndroidVdiApp> with WidgetsBindingObserv
       // No tooltip bubbles on a touch screen: a long press (sticky keys,
       // the toolbar) keeps popping them up. The labels
       // stay for screen readers.
-      builder: (context, child) => MfaCompletionOverlay(host: _mfa, child: SessionAccessBoundary(
-        controller: _sessionAccess,
-        child: AndroidTvNavigation(
-          television: _television,
-          hardwareKeyboard: _hardwareKeyboard,
-          child: TooltipVisibility(
-            visible: false,
-            child: AndroidNoticeLayer(
-              host: _noticeHost,
-              child: appearance == null
-                  ? child!
-                  : AppearanceScope(controller: appearance, child: child!),
+      builder: (context, child) => MfaCompletionOverlay(
+        host: _mfa,
+        child: SessionAccessBoundary(
+          controller: _sessionAccess,
+          child: AndroidTvNavigation(
+            television: _television,
+            hardwareKeyboard: _hardwareKeyboard,
+            child: TooltipVisibility(
+              visible: false,
+              child: AndroidNoticeLayer(
+                host: _noticeHost,
+                child: appearance == null
+                    ? child!
+                    : AppearanceScope(controller: appearance, child: child!),
+              ),
             ),
           ),
         ),
-      )),
+      ),
       home: home,
     );
     if (appearance == null) {
@@ -468,6 +487,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       _activity = null;
     }
   }
+
   bool _refreshing = false, _streaming = false, _foreground = true;
   bool _refreshFailed = false;
   String? _error, _listError, _openingDesktop, _version;
@@ -538,6 +558,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       host.streaming = _streaming;
     });
   }
+
   StreamSubscription<String>? _terminalAuthFeed;
   StreamSubscription<List<LiveResourceSample>>? _resourceFeed;
   Timer? _sampleClock;
@@ -666,7 +687,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   DateTime? _groupsSavedAt;
 
   List<DesktopGroup>? get _shownGroups =>
-      _groupsOf != null && _groupsOf == _session && _api is DesktopGroupBrokerApi
+      _groupsOf != null &&
+          _groupsOf == _session &&
+          _api is DesktopGroupBrokerApi
       ? _groups
       : null;
 
@@ -950,7 +973,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       if (code == androidUpdateConfirmOpened) return;
       if (mounted) {
         _notice(
-          code == 'installed' ? l10n.updateInstalled : androidUpdateMessage(code),
+          code == 'installed'
+              ? l10n.updateInstalled
+              : androidUpdateMessage(code),
         );
       }
     });
@@ -1539,7 +1564,8 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       setState(() {
         _desktops = desktops;
         // A group list saved after this read began stays what is shown.
-        if (_groupsOf != session || !(_groupsSavedAt?.isAfter(started) ?? false)) {
+        if (_groupsOf != session ||
+            !(_groupsSavedAt?.isAfter(started) ?? false)) {
           _groups = list.groups;
           _groupsOf = session;
         }
@@ -1824,7 +1850,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   }
 
   Future<_Silent> _silentLogin(BrokerSession session) async {
-    if (_mfa.blocked) { return _Silent.noPassword; }
+    if (_mfa.blocked) {
+      return _Silent.noPassword;
+    }
     final api = _api, origin = _origin;
     if (api == null || origin == null) return _Silent.noPassword;
     final memory = _memoryRevision, request = _loginRequestRevision;
@@ -1852,7 +1880,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     if (!current()) return _Silent.noPassword;
     final BrokerSession next;
     try {
-      if (_mfa.blocked) { return _Silent.noPassword; }
+      if (_mfa.blocked) {
+        return _Silent.noPassword;
+      }
       _mfa.retire();
       next = await api.login(saved.username, password);
     } on MfaRequiredException catch (required) {
@@ -2397,7 +2427,8 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
 
   String? _consoleUnavailable(DesktopMachine machine) {
     if (_openingDesktop != null) return l10n.anotherConnectionOpening;
-    if (machine.powerBusy || machine.display.busy) return l10n.desktopTaskProgress;
+    if (machine.powerBusy || machine.display.busy)
+      return l10n.desktopTaskProgress;
     if (machine.powerState == 'stopped') return l10n.startDesktopThenConnect;
     if (machine.use.active) return l10n.endCurrentConnectionThenConnect;
     return null;
@@ -2459,7 +2490,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: KeepAllText(
-              error is BrokerException ? error.message : l10n.couldntEndConsoleConnection,
+              error is BrokerException
+                  ? error.message
+                  : l10n.couldntEndConsoleConnection,
             ),
           ),
         );
@@ -2501,8 +2534,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         dialogKey: const Key('console-connect-confirm-dialog'),
         icon: Icons.settings_remote_outlined,
         title: l10n.openConsole,
-        message:
-            l10n.opensDesktopsProxmoxConsoleApp(desktop.name),
+        message: l10n.opensDesktopsProxmoxConsoleApp(desktop.name),
         confirmLabel: l10n.openConsole2,
         confirmKey: Key('confirm-console-${desktop.id}'),
         cancelKey: const Key('cancel-console-connect'),
@@ -3006,10 +3038,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       // What the tile says once the list was read again: a desktop that
       // cannot be connected after its stream ended shows here.
       final after = mounted ? _find(desktop.id) : null;
-      step(
-        26,
-        ok: after != null && _readiness(_machine(after)).canStream,
-      );
+      step(26, ok: after != null && _readiness(_machine(after)).canStream);
     }
   }
 
@@ -3177,10 +3206,11 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
           ? switch (error.code) {
               'session_cleanup_pending' =>
                 l10n.waitingPreviousConnectionCleanUp(label),
-              'display_in_progress' || 'display_busy' =>
-                l10n.numberMonitorsChangingSoRequest(label),
-              'host_update_in_progress' =>
-                l10n.hostUpdateInstallingSoRequest(label),
+              'display_in_progress' ||
+              'display_busy' => l10n.numberMonitorsChangingSoRequest(label),
+              'host_update_in_progress' => l10n.hostUpdateInstallingSoRequest(
+                label,
+              ),
               _ => error.message,
             }
           : l10n.couldntProcessRequestTryAgain(label);
@@ -3327,12 +3357,13 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
                     : null,
               ReadinessAction.refresh => () => unawaited(_refresh()),
               ReadinessAction.console =>
-                  machine.kind == MachineKind.vm &&
-                      _consoleUnavailable(machine) == null
-                  ? () => unawaited(_openBrowserConsole(desktop))
-                  : null,
-              ReadinessAction.releaseConsole => () =>
-                  unawaited(_endConsolesAndConnect(desktop)),
+                machine.kind == MachineKind.vm &&
+                        _consoleUnavailable(machine) == null
+                    ? () => unawaited(_openBrowserConsole(desktop))
+                    : null,
+              ReadinessAction.releaseConsole => () => unawaited(
+                _endConsolesAndConnect(desktop),
+              ),
             },
           );
         },
@@ -3430,25 +3461,67 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   /// A finished step on the sign-in card, shown as done (not as a failure).
   static String get _passwordChanged => l10n.passwordChangedSignNewPassword;
 
-  bool get _canManageMfa => _api is MfaAccountBrokerApi && _origin?.scheme == 'https' &&
+  bool get _canManageMfa =>
+      _api is MfaAccountBrokerApi &&
+      _origin?.scheme == 'https' &&
       (_api as MfaAccountBrokerApi).origin == _origin &&
-      _session?.accountId != null && RegExp(r'^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$').hasMatch(_session!.accountId!) &&
+      _session?.accountId != null &&
+      RegExp(r'^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$')
+          .hasMatch(_session!.accountId!) &&
       validAuthenticationOwner(_authenticationOwner);
   Future<void> _manageMfa() async {
-    final api = _api, session = _session, origin = _origin, actor = _authenticationOwner;
-    if (!_canManageMfa || api is! MfaAccountBrokerApi || session == null || origin == null || actor == null) { return; }
+    final api = _api,
+        session = _session,
+        origin = _origin,
+        actor = _authenticationOwner;
+    if (!_canManageMfa ||
+        api is! MfaAccountBrokerApi ||
+        session == null ||
+        origin == null ||
+        actor == null) {
+      return;
+    }
     final managementApi = api as MfaAccountBrokerApi;
-    bool held() => mounted && _api == api && _origin == origin && _session == session && _authenticationOwner == actor;
-    final controller = _mfa.begin(api: managementApi, token: session.token, accountId: session.accountId!, username: session.username, actor: actor,
+    bool held() =>
+        mounted &&
+        _api == api &&
+        _origin == origin &&
+        _session == session &&
+        _authenticationOwner == actor;
+    final controller = _mfa.begin(
+      api: managementApi,
+      token: session.token,
+      accountId: session.accountId!,
+      username: session.username,
+      actor: actor,
       currentPresentation: () => mounted && _api == api && _origin == origin,
       currentAuthentication: () => held() && _sessionAccess.check(),
-      onCommitted: (_) { if (held()) { _retireAuthentication(session, 'session_reauthentication_required'); } },
-      onAuthenticationRejected: (reason) { if (held()) { _retireAuthentication(session, reason); } });
-    if (controller == null) { return; }
+      onCommitted: (_) {
+        if (held()) {
+          _retireAuthentication(session, 'session_reauthentication_required');
+        }
+      },
+      onAuthenticationRejected: (reason) {
+        if (held()) {
+          _retireAuthentication(session, reason);
+        }
+      },
+    );
+    if (controller == null) {
+      return;
+    }
     try {
-      await showDialog<void>(context: context, barrierDismissible: false,
-        builder: (routeContext) => MfaAccountDialog(controller: controller, onClose: () => Navigator.of(routeContext).pop()));
-    } finally { _mfa.finished(controller); }
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (routeContext) => MfaAccountDialog(
+          controller: controller,
+          onClose: () => Navigator.of(routeContext).pop(),
+        ),
+      );
+    } finally {
+      _mfa.finished(controller);
+    }
   }
 
   Future<void> _changePassword() async {
@@ -3599,8 +3672,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
           ? null
           : (group) => unawaited(_setGroup(m, group)),
       newGroup:
-          _groupsSaving ||
-              (_shownGroups?.length ?? 0) >= DesktopGroup.maxCount
+          _groupsSaving || (_shownGroups?.length ?? 0) >= DesktopGroup.maxCount
           ? null
           : () => unawaited(_newGroup(m)),
       newGroupReason: (_shownGroups?.length ?? 0) >= DesktopGroup.maxCount
@@ -3611,7 +3683,11 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    if (widget.mfaHost == null) { _mfa.dispose(); } else { _mfa.retire(); }
+    if (widget.mfaHost == null) {
+      _mfa.dispose();
+    } else {
+      _mfa.retire();
+    }
     if (widget.sessionAccess == null) _sessionAccess.dispose();
     WidgetsBinding.instance.removeObserver(this);
     final closingApi = _api;
@@ -3654,8 +3730,11 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     _syncNotices();
     final child = _buildHome(context);
-    return widget.mfaHost == null ? MfaCompletionOverlay(host: _mfa, child: child) : child;
+    return widget.mfaHost == null
+        ? MfaCompletionOverlay(host: _mfa, child: child)
+        : child;
   }
+
   Widget _buildHome(BuildContext context) {
     final p = AppPalette.of(context);
     if (_loading) {
@@ -3747,7 +3826,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
         viewport: screen,
         previews: _showPreviews,
         touch: true,
-        small: _smallCards,
+        scale: androidTileScaleFor(bounds.maxWidth, scaler, small: _smallCards),
       );
       Widget rows(List<DesktopMachine> machines) {
         final tiles = [
@@ -3929,7 +4008,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       key: const Key('desktop-previews'),
       icon: _showPreviews ? Icons.image_outlined : Icons.hide_image_outlined,
       label: compactViewOptions ? null : l10n.previews,
-      tooltip: _showPreviews ? l10n.screenPreviewsTapTurnOff : l10n.screenPreviewsOffTapTurn,
+      tooltip: _showPreviews
+          ? l10n.screenPreviewsTapTurnOff
+          : l10n.screenPreviewsOffTapTurn,
       selected: _showPreviews,
       height: barHeight,
       compactChrome: true,
@@ -4585,8 +4666,10 @@ class _AndroidServerDialogState extends State<AndroidServerDialog> {
           _scheme = origin.scheme;
           _httpApproval = result.httpApproval;
           _ok = true;
-          _message =
-              l10n.connectionOkMultitapMs(result.version, result.elapsedMs);
+          _message = l10n.connectionOkMultitapMs(
+            result.version,
+            result.elapsedMs,
+          );
         });
       } else {
         result.httpApproval?.release();
@@ -4681,7 +4764,9 @@ class _AndroidServerDialogState extends State<AndroidServerDialog> {
         // PC's words.
         subtitle: AndroidTvScope.of(context)
             ? null
-            : (_scheme == 'https' ? l10n.httpsSecureConnection : l10n.httpNotEncrypted),
+            : (_scheme == 'https'
+                  ? l10n.httpsSecureConnection
+                  : l10n.httpNotEncrypted),
         body: [
           AppDialog.message(context, l10n.youCanSaveAddressAfter),
           const SizedBox(height: 14),
@@ -4722,7 +4807,9 @@ class _AndroidServerDialogState extends State<AndroidServerDialog> {
               onSubmitted: (_) => unawaited(_test()),
               decoration: InputDecoration(
                 labelText: l10n.serverAddress,
-                hintText: _scheme == 'http' ? 'IP:18480' : l10n.httpsServerAddress,
+                hintText: _scheme == 'http'
+                    ? 'IP:18480'
+                    : l10n.httpsServerAddress,
                 prefixIcon: Icon(Icons.link_rounded, size: 19),
               ),
               onChanged: (_) => _addressChanged(),
@@ -4967,7 +5054,10 @@ class _AndroidStreamDialogState extends State<AndroidStreamDialog> {
           label: l10n.advancedSettings,
           maintainState: true,
           children: [
-            Align(alignment: Alignment.centerLeft, child: _label(p, l10n.targetFrameRate)),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _label(p, l10n.targetFrameRate),
+            ),
             Align(
               alignment: Alignment.centerLeft,
               child: _choice<int>(
@@ -5001,10 +5091,7 @@ class _AndroidStreamDialogState extends State<AndroidStreamDialog> {
           ],
         ),
         const SizedBox(height: 6),
-        AppDialog.message(
-          context,
-          l10n.fitsOneVirtualDisplayDevices,
-        ),
+        AppDialog.message(context, l10n.fitsOneVirtualDisplayDevices),
       ],
       actions: [
         TextButton(
@@ -5023,10 +5110,7 @@ class _AndroidStreamDialogState extends State<AndroidStreamDialog> {
         FilledButton(
           onPressed: () => Navigator.pop(
             context,
-            AndroidStreamQuality(
-              fps: _fps,
-              bitrate: _bitrate,
-            ).options,
+            AndroidStreamQuality(fps: _fps, bitrate: _bitrate).options,
           ),
           style: AndroidTvFocus.style(
             context,

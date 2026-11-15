@@ -60,20 +60,31 @@ void _expectTiles(
     expect(find.byKey(Key(_main[id]!)), findsOneWidget, reason: _main[id]);
   }
   final cards = [for (final id in _ids) t.getRect(find.byKey(Key('card-$id')))];
-  // The first row is full (three tiles, at most three columns): its span
-  // is the grid's width.
-  final columns = cards.where((r) => (r.top - cards.first.top).abs() < .5);
-  final width = columns.last.right - cards.first.left;
+  final slots = [
+    for (final id in _ids) t.getRect(find.byKey(ValueKey('slot-$id'))),
+  ];
+  // The first row is full (three tiles, at most three columns): its slots
+  // span the grid's width.
+  final columns = slots.where((r) => (r.top - slots.first.top).abs() < .5);
+  final width = columns.last.right - slots.first.left;
+  final scaler = TextScaler.linear(textScale);
   final grid = desktopTileGrid(
     width,
-    TextScaler.linear(textScale),
+    scaler,
     viewport: viewport,
     touch: touch,
+    // Android's 보통 is the Windows 작게.
+    scale: touch ? androidTileScaleFor(width, scaler, small: false) : null,
   );
+  expect(grid.scale, touch ? desktopSmallTileScale : 1);
   expect(columns.length, grid.columns, reason: 'columns at $width');
   for (final (index, card) in cards.indexed) {
-    expect(card.width, closeTo(grid.width, .5), reason: _ids[index]);
-    expect(card.height, closeTo(grid.height, .5), reason: _ids[index]);
+    expect(
+      card.width,
+      closeTo(grid.width * grid.scale, .5),
+      reason: _ids[index],
+    );
+    expect(card.height, closeTo(grid.extent, .5), reason: _ids[index]);
     final button = t.getRect(find.byKey(Key(_main[_ids[index]]!)));
     expect(
       button.top - card.top,
@@ -120,7 +131,9 @@ void main() {
           // One full screen: no window modes on the button or in ▾.
           expect(tile.mode, isNull);
         }
-        // 48 dp targets.
+        // 48 dp targets in the card's own size, drawn at its scale (the
+        // owner's phone card is the Windows 작게, buttons included).
+        const target = 48 * desktopSmallTileScale - .01;
         for (final key in [
           'desktop-power-pve-101',
           'desktop-more-pve-101',
@@ -128,9 +141,9 @@ void main() {
           'stream-modes-pve-101',
         ]) {
           final rect = t.getRect(find.byKey(Key(key)));
-          expect(rect.height, greaterThanOrEqualTo(47.99), reason: key);
+          expect(rect.height, greaterThanOrEqualTo(target), reason: key);
           if (key != 'open-pve-101') {
-            expect(rect.width, greaterThanOrEqualTo(47.99), reason: key);
+            expect(rect.width, greaterThanOrEqualTo(target), reason: key);
           }
         }
         // No hover by finger: the ▶ is there to tap.

@@ -16,7 +16,7 @@ object AndroidPreferencePolicyCheck {
         check(AndroidPreferencePolicy.allows("organize.https://vdi.example|" + supplementary.repeat(64)))
         check(!AndroidPreferencePolicy.allows("organize.https://vdi.example|" + supplementary))
         check(!AndroidPreferencePolicy.allows("organize.https://vdi.example|" + supplementary.repeat(65)))
-        for (key in listOf(first, account, server, ipv6, "appearance.theme", "session.input", "launcher.view", "launcher.previews", "session.screen.television")) {
+        for (key in listOf(first, account, server, ipv6, "appearance.theme", "session.input", "launcher.view", "launcher.previews", "launcher.cards", "session.toolbar.edge", "session.screen.television")) {
             check(AndroidPreferencePolicy.allows(key)) { key }
         }
         for (key in listOf("password:https://vdi.example", "id:https://vdi.example",

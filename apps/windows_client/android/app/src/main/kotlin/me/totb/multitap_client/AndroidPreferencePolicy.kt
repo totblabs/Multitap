@@ -4,8 +4,8 @@ package me.totb.multitap_client
 internal object AndroidPreferencePolicy {
     fun accountLengthAllowed(account: String): Boolean =
         account.codePointCount(0, account.length) in 2..64
-    private val fixed = setOf("appearance.theme", "appearance.scene", "appearance.language", "launcher.view", "launcher.previews", "stream.quality",
-        "session.input", "session.pointer", "session.toolbar", "session.help",
+    private val fixed = setOf("appearance.theme", "appearance.scene", "appearance.language", "launcher.view", "launcher.previews", "launcher.cards", "stream.quality",
+        "session.input", "session.pointer", "session.toolbar", "session.toolbar.edge", "session.help",
         "session.screen.phone", "session.screen.fold", "session.screen.tablet", "session.screen.television")
 
     fun allows(key: String, values: Map<String, *> = emptyMap<String, Any>()): Boolean {

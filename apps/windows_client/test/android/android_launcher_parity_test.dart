@@ -3,6 +3,7 @@
 // 시작" but offer 스트리밍 연결 through the hand-over).
 import '../helpers/stream_connect_consent.dart'
     show acceptStreamConnect, expectAndroidHandOverQuestion;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -441,15 +442,21 @@ void main() {
         tester.getSize(find.byKey(Key('card-$id'))),
     };
     // The Windows tile's footer: one height and place in every state (the
-    // main button is narrower where ▾ rides beside it).
+    // main button is narrower where ▾ rides beside it). Rounded: the card is
+    // drawn scaled, and each column's offset adds its own float error.
+    double round(double value) => (value * 100).roundToDouble() / 100;
     final buttons = {
       for (final id in ['a', 'b', 'c', 'd'])
         (
-          tester.getRect(mainButton(id)).top -
-              tester.getRect(find.byKey(Key('card-$id'))).top,
-          tester.getRect(mainButton(id)).left -
-              tester.getRect(find.byKey(Key('card-$id'))).left,
-          tester.getRect(mainButton(id)).height,
+          round(
+            tester.getRect(mainButton(id)).top -
+                tester.getRect(find.byKey(Key('card-$id'))).top,
+          ),
+          round(
+            tester.getRect(mainButton(id)).left -
+                tester.getRect(find.byKey(Key('card-$id'))).left,
+          ),
+          round(tester.getRect(mainButton(id)).height),
         ),
     };
     expect(cards.length, 1);
@@ -507,10 +514,11 @@ void main() {
   ) async {
     await expectTiles(tester, const Size(360, 800), 1);
   });
-  testWidgets('foldable width fits the fixed cards into two columns', (
+  // Android's 보통 is the Windows 작게 grid (the owner, 2026-11-15).
+  testWidgets('foldable width fits the fixed cards into three columns', (
     tester,
   ) async {
-    await expectTiles(tester, const Size(932, 704), 2);
+    await expectTiles(tester, const Size(932, 704), 3);
   });
   testWidgets('tablet width fits the same fixed cards into three columns', (
     tester,

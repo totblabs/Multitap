@@ -2,7 +2,19 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13 and 1.1.16 to 1.1.14; the server is unchanged in both and the apps stay at 1.1.13. 1.1.17 is the server; the Host stays at 1.1.14. 1.1.18 is the server with the Windows app and the Android app at 1.1.14; the Host stays at 1.1.14. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13 and 1.1.16 to 1.1.14; the server is unchanged in both and the apps stay at 1.1.13. 1.1.17 is the server; the Host stays at 1.1.14. 1.1.18 is the server with the Windows app and the Android app at 1.1.14; the Host stays at 1.1.14. 1.1.19 brings the Android app to 1.1.15; the server is unchanged, the Windows app and the Host stay at 1.1.14. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.19](https://github.com/totblabs/Multitap/releases/tag/v1.1.19)
+
+### Android app
+
+- **Fixed: "Small" said it couldn't save the card size setting.** The size you choose is remembered now.
+- **Card size.** The default card is the earlier "Small" size, and "Small" makes it smaller still: two per row on a phone, more on a tablet. The buttons on a card get smaller with it.
+- **Fixed: the screen scale, resolution and orientation chosen in a remote session, and the side the tool button rests on, were not remembered** for the next connection.
+
+### Server
+
+- No change; the number follows the Android app.
 
 ## [1.1.18](https://github.com/totblabs/Multitap/releases/tag/v1.1.18)
 
