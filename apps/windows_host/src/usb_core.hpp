@@ -747,6 +747,8 @@ class UsbSessionCore {
         const auto bytes = usb::encodeRetUnlink(pending->unlinkKernelSeq, devid, -104);
         after.push_back([send = device.toKernel, bytes] { if (send) send(bytes); });
       } else {
+        // Microsoft OS 2.0 and other platform capabilities never reach the VM (usb_policy.hpp).
+        if (input && status == 0 && (pending->endpoint & 15) == 0 && usb::bosDescriptorRequest(pending->setup)) usb::blankPlatformCapabilities(pending->in.data(), pending->in.size());
         const auto bytes = usb::encodeRetSubmit(pending->kernelSeq, devid, pending->direction, pending->endpoint, status, input ? pending->in.data() : nullptr, input ? pending->in.size() : pending->moved);
         after.push_back([send = device.toKernel, bytes] { if (send) send(bytes); });
       }

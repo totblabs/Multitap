@@ -532,23 +532,46 @@ usb::Urb urbControl(uint32_t seq, std::array<uint8_t, 8> setup) {
 int32_t kernelStatus(Harness& h, size_t index) { return int32_t(usb::get32(&h.kernel(index)[20])); }
 uint32_t kernelLength(Harness& h, size_t index) { return usb::get32(&h.kernel(index)[24]); }
 
-// The Microsoft OS string (0xEE) and the BOS descriptor are refused for the VM
-// (a STALL, never forwarded), so an allowed device cannot ask the VM's Windows for another driver by compatible ID.
+// The Microsoft OS string (0xEE) is refused for the VM (a STALL, never forwarded) and the BOS answer reaches it
+// with every platform capability (Microsoft OS 2.0 ...) blanked, so an allowed device cannot ask the VM's Windows
+// for another driver by compatible ID. The BOS itself must reach the device: a USB 3 stick (SanDisk Ultra USB 3.0,
+// 0781:5591) did not start in the VM (Code 10, no serial number) while it was refused.
 void descriptorRequestsRefused() {
-  require(usb::refusedDescriptorRequest(std::array<uint8_t, 8>{0x80, 6, 0xee, 3, 0, 0, 255, 0}.data()) &&
-          usb::refusedDescriptorRequest(std::array<uint8_t, 8>{0x80, 6, 0, 0x0f, 0, 0, 5, 0}.data()), "An MS OS string or BOS request was let through");
+  require(usb::refusedDescriptorRequest(std::array<uint8_t, 8>{0x80, 6, 0xee, 3, 0, 0, 255, 0}.data()), "An MS OS string request was let through");
+  require(!usb::refusedDescriptorRequest(std::array<uint8_t, 8>{0x80, 6, 0, 0x0f, 0, 0, 5, 0}.data()) &&
+          usb::bosDescriptorRequest(std::array<uint8_t, 8>{0x80, 6, 0, 0x0f, 0, 0, 5, 0}.data()), "The BOS request was refused or not recognised");
   require(!usb::refusedDescriptorRequest(std::array<uint8_t, 8>{0x80, 6, 1, 3, 9, 4, 255, 0}.data()) &&
           !usb::refusedDescriptorRequest(std::array<uint8_t, 8>{0x80, 6, 0, 1, 0, 0, 18, 0}.data()) &&
           !usb::refusedDescriptorRequest(std::array<uint8_t, 8>{0xc0, 6, 0xee, 3, 0, 0, 255, 0}.data()) &&
-          !usb::refusedDescriptorRequest(std::array<uint8_t, 8>{0x00, 7, 0, 0x0f, 0, 0, 0, 0}.data()), "An ordinary request was refused");
+          !usb::refusedDescriptorRequest(std::array<uint8_t, 8>{0x00, 7, 0, 0x0f, 0, 0, 0, 0}.data()) &&
+          !usb::bosDescriptorRequest(std::array<uint8_t, 8>{0xc0, 6, 0, 0x0f, 0, 0, 5, 0}.data()), "An ordinary request was refused or taken for the BOS");
+  // A USB 3 BOS: USB 2.0 extension, SuperSpeed, then a Microsoft OS 2.0 platform capability (UUID
+  // D8DD60DF-4589-4CC7-9CD2-659D9E648A9F, descriptor set length, vendor code 0x01).
+  const usb::Bytes bos{5, 0x0f, 50, 0, 3,
+    7, 0x10, 2, 0x1e, 0xf4, 0, 0,
+    10, 0x10, 3, 0, 0x0e, 0, 1, 0x0a, 0xff, 0x07,
+    28, 0x10, 5, 0, 0xdf, 0x60, 0xdd, 0xd8, 0x89, 0x45, 0xc7, 0x4c, 0x9c, 0xd2, 0x65, 0x9d, 0x9e, 0x64, 0x8a, 0x9f, 0, 0, 0x03, 0x06, 0xb2, 0, 1, 0};
+  {auto blanked = bos; usb::blankPlatformCapabilities(blanked.data(), blanked.size());
+    require(std::equal(blanked.begin(), blanked.begin() + 26, bos.begin()) && std::all_of(blanked.begin() + 26, blanked.begin() + 42, [](uint8_t b) { return b == 0; }) &&
+            std::equal(blanked.begin() + 42, blanked.end(), bos.begin() + 42), "The OS 2.0 UUID was not blanked, or something else changed");
+    auto header = usb::Bytes(bos.begin(), bos.begin() + 5); usb::blankPlatformCapabilities(header.data(), header.size());
+    require(header == usb::Bytes(bos.begin(), bos.begin() + 5), "The BOS header read changed");
+    auto partial = usb::Bytes(bos.begin(), bos.begin() + 34); usb::blankPlatformCapabilities(partial.data(), partial.size());
+    require(std::all_of(partial.begin() + 26, partial.end(), [](uint8_t b) { return b == 0; }), "A cut-off OS 2.0 UUID was not blanked");
+    auto broken = bos; broken[5] = 0; const auto before = broken; usb::blankPlatformCapabilities(broken.data(), broken.size());
+    require(broken == before, "A malformed BOS was changed");}
   const auto stick = vector("mass storage stick");
   Harness h; h.attached(1, stick);
   const size_t frames = h.frameCount(), answers = h.kernelCount();
-  require(h.core->submit(1, urbControl(1, {0x80, 6, 0xee, 3, 0, 0, 255, 0}), {}) && h.core->submit(1, urbControl(2, {0x80, 6, 0, 0x0f, 0, 0, 5, 0}), {}),
-          "A refused descriptor request ended the connection");
-  require(h.frameCount() == frames && h.kernelCount() == answers + 2 && kernelStatus(h, answers) == -32 && kernelStatus(h, answers + 1) == -32,
-          "An MS OS string or BOS request reached the device or was not stalled");
-  require(h.core->submit(1, urbControl(3, {0x80, 6, 1, 3, 9, 4, 255, 0}), {}) && h.frameCount() == frames + 1, "An ordinary string request did not reach the device");
+  require(h.core->submit(1, urbControl(1, {0x80, 6, 0xee, 3, 0, 0, 255, 0}), {}), "A refused descriptor request ended the connection");
+  require(h.frameCount() == frames && h.kernelCount() == answers + 1 && kernelStatus(h, answers) == -32, "An MS OS string request reached the device or was not stalled");
+  require(h.core->submit(1, urbControl(2, {0x80, 6, 0, 0x0f, 0, 0, 50, 0}), {}) && h.frameCount() == frames + 1, "The BOS request did not reach the device");
+  const auto sent = h.frame(frames);
+  require(h.returnFrame(sent, 0, bos, UINT32_MAX) && h.kernelCount() == answers + 2 && kernelStatus(h, answers + 1) == 0, "The BOS answer did not reach the VM");
+  const auto raw = h.kernel(answers + 1); const usb::Bytes answer(raw.begin() + 48, raw.end());
+  require(answer.size() == bos.size() && std::all_of(answer.begin() + 26, answer.begin() + 42, [](uint8_t b) { return b == 0; }) && std::equal(answer.begin(), answer.begin() + 26, bos.begin()),
+          "The VM got the device's OS 2.0 platform capability");
+  require(h.core->submit(1, urbControl(3, {0x80, 6, 1, 3, 9, 4, 255, 0}), {}) && h.frameCount() == frames + 2, "An ordinary string request did not reach the device");
 }
 
 void storageStart() {

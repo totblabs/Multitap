@@ -55,6 +55,12 @@ unsigned wireCases(){
   }
   {unsigned queries=0;std::vector<NativeCcdData> sent;auto configure=nativeCcdWireConfigure([&]{++queries;return raw;},[&](const NativeCcdData& wire,UINT32){sent.push_back(wire);return LONG(ERROR_SUCCESS);});
     require(configure(canonical,SDC_VALIDATE|options)==0&&configure(canonical,SDC_APPLY|options)==0&&queries==2&&sent.size()==2&&sameBytes(sent[0],sent[1])&&sent[0].paths[0].sourceInfo.modeInfoIdx==0xffff,"VALIDATE/APPLY did not use identical observed wire bytes");++passed;}
+  // Display manager v2 validates without SDC_SAVE_TO_DATABASE and saves on the
+  // apply only; the save must reach SetDisplayConfig (1.1.16-1.1.18 refused it
+  // with ERROR_RETRY, so no layout was ever saved). Any other flag still differs.
+  {std::vector<UINT32> flags;auto configure=nativeCcdWireConfigure([&]{return raw;},[&](const NativeCcdData&,UINT32 value){flags.push_back(value);return LONG(ERROR_SUCCESS);});
+    require(configure(canonical,SDC_VALIDATE|options)==0&&configure(canonical,SDC_APPLY|options|SDC_SAVE_TO_DATABASE)==0&&flags.size()==2&&(flags[1]&SDC_SAVE_TO_DATABASE)&&!(flags[0]&SDC_SAVE_TO_DATABASE),"A saving APPLY after its VALIDATE did not reach Windows");++passed;
+    flags.clear();require(configure(canonical,SDC_VALIDATE|options)==0&&configure(canonical,SDC_APPLY|options|SDC_ALLOW_CHANGES)==ERROR_RETRY&&flags.size()==1,"An APPLY with other flags than its VALIDATE reached Windows");++passed;}
   {unsigned queries=0,calls=0;auto configure=nativeCcdWireConfigure([&]{auto value=raw;if(queries++){normalizeNativeCcdModeReferences(value);}return value;},[&](const NativeCcdData&,UINT32){++calls;return LONG(ERROR_SUCCESS);});
     require(configure(canonical,SDC_VALIDATE|options)==0&&configure(canonical,SDC_APPLY|options)==ERROR_RETRY&&calls==1,"Changed fresh wire evidence reached APPLY");++passed;}
   {unsigned calls=0;auto configure=nativeCcdWireConfigure([&]{return raw;},[&](const NativeCcdData&,UINT32){++calls;return LONG(ERROR_INVALID_PARAMETER);});

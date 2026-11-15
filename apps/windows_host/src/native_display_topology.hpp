@@ -485,7 +485,10 @@ inline std::function<LONG(const NativeCcdData&,UINT32)> nativeCcdWireConfigure(
         }catch(...){ }
         encodeNativeCcdWireReferences(wire,proven);
       }
-      const auto commonFlags=flags&~(SDC_VALIDATE|SDC_APPLY);
+      // SDC_SAVE_TO_DATABASE belongs to the apply only (display manager v2
+      // validates without it). Counting it here refused every saving apply
+      // with ERROR_RETRY, so no layout was ever saved (Host 1.1.16-1.1.18).
+      const auto commonFlags=flags&~(SDC_VALIDATE|SDC_APPLY|SDC_SAVE_TO_DATABASE);
       if(checking){
         validated.reset();const auto result=configure(wire,flags);
         if(result==ERROR_SUCCESS)validated=Validated{plan,std::move(wire),commonFlags};

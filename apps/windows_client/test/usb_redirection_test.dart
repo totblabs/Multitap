@@ -1944,4 +1944,44 @@ void main() {
       expect(usbMessage(code), isNot(usbMessage('unknown')), reason: code);
     }
   });
+
+  test(
+    'A shared drive keeps the description the PC showed before sharing',
+    () async {
+      // While this client holds the stick, this PC lists none of its volumes:
+      // the fresh listing says no drive letter and no readable drive.
+      UsbLocalDevice listed({required String name, required String subtitle, required bool unreadableDrive}) => UsbLocalDevice(
+        id: 'stick',
+        name: name,
+        subtitle: subtitle,
+        descriptors: vector('mass storage stick'),
+        speed: 'super',
+        noReadableDrive: unreadableDrive,
+      );
+      final before = listed(name: 'Ventoy (D:, E:)', subtitle: 'SanDisk Ultra · 30.7GB · exFAT', unreadableDrive: false);
+      final held = listed(name: 'USB 드라이브 · 드라이브 문자 없음', subtitle: 'SanDisk', unreadableDrive: true);
+      final (session, socket, backend) = await started(devices: [before]);
+      final entry = session.entries.single;
+      session.share(entry);
+      final attach = await socket.text('usb.attach');
+      socket.emit({'type': 'usb.attached', 'device': attach['device']});
+      await settle();
+      expect(entry.state, UsbEntryState.shared);
+      backend.devices = [held];
+      await session.refresh();
+      final shared = session.entries.single.device;
+      expect(shared.name, 'Ventoy (D:, E:)');
+      expect(shared.subtitle, 'SanDisk Ultra · 30.7GB · exFAT');
+      expect(shared.noReadableDrive, isFalse);
+      await session.close();
+    },
+  );
+  test('A drive this client does not hold takes its fresh description', () async {
+    final (session, _, backend) = await started(devices: [stick()]);
+    backend.devices = [stick(noReadableDrive: true)];
+    await session.refresh();
+    expect(session.entries.single.state, UsbEntryState.available);
+    expect(session.entries.single.device.noReadableDrive, isTrue);
+    await session.close();
+  });
 }

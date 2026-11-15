@@ -114,7 +114,10 @@ int countCases(){
     const auto diagnostic=displayV2CountDiagnostic(failed);
     require(!diagnostic.ok&&diagnostic.stage==displayV2Stage::foreign&&diagnostic.error==foreignCodes[size_t(scenario)]&&diagnostic.restored&&!diagnostic.stateKept&&diagnostic.foreignCount==2,"Count diagnostic lost the stage-8 code");
     w.afterCount=nullptr;w.afterApply=nullptr;
-    require(session.count("c",2,true,deadline(w)).ok&&extraOriginal(w),"Count after a persistent foreign failure latched");requireCount(w,2,"Count after a failure is wrong");++passed;
+    // The restore left the owned output off beside the console (at rest), so
+    // the next count changes the count only (countAtRest).
+    require(session.count("c",2,true,deadline(w)).ok&&extraOriginal(w),"Count after a persistent foreign failure latched");
+    require(w.hasSecond()&&!w.owned().active&&!w.second().active&&w.console().active&&w.console().x==0&&w.console().y==0&&!overlapping(w),"Count at rest after a failure is wrong");++passed;
   }
   // 2->1 failing persistently restores both outputs, the second at its saved size.
   {World w(true);Memory m;DisplaySessionV2 session(access(w,m));
@@ -138,7 +141,9 @@ int countCases(){
       require(!result.ok&&result.stage==displayV2Stage::sdk&&result.restore&&result.restore->ok()&&!m.bytes&&!session.active()&&!w.hasSecond(),"SDK count refusal left a state file, a session or an output");
       requireOriginal(w,false,"SDK count refusal changed the displays");
     }
-    w.failCount=false;DisplaySessionV2 session(access(w,m));require(session.count("c",2,true,deadline(w)).ok,"Count after SDK refusals latched");requireCount(w,2,"Count after SDK refusals is wrong");++passed;}
+    w.failCount=false;DisplaySessionV2 session(access(w,m));require(session.count("c",2,true,deadline(w)).ok,"Count after SDK refusals latched");
+    // At rest after the restores: the count only (countAtRest).
+    require(w.hasSecond()&&!w.owned().active&&!w.second().active&&w.console().active&&!w.console().x&&!w.console().y,"Count after SDK refusals is wrong");++passed;}
   // Locked session before the change: refused without any change.
   {World w;Memory m;w.eligible=false;DisplaySessionV2 session(access(w,m));const auto result=session.count("c",2,true,deadline(w));
     require(!result.ok&&result.stage==displayV2Stage::ineligible&&!m.bytes&&w.applies==0&&w.counts==0&&!result.countAttempted,"Locked count changed something");
@@ -187,7 +192,8 @@ int countCases(){
 // Beside the console no owned output stays on after a restore; the SDK keeps
     // the committed count, both outputs off.
     require(w.console().active&&w.console().x==0&&!w.owned().active&&w.hasSecond()&&!w.second().active&&!overlapping(w),"Recovery after an interrupted count change lost a display or the committed count");
-    DisplaySessionV2 next(access(w,m));require(next.count("c",1,true,deadline(w)).ok&&!m.bytes,"Count after recovery latched");requireCount(w,1,"Count after recovery is wrong");++passed;}
+    DisplaySessionV2 next(access(w,m));require(next.count("c",1,true,deadline(w)).ok&&!m.bytes,"Count after recovery latched");
+    require(!w.hasSecond()&&!w.owned().active&&w.console().active&&!w.console().x&&!w.console().y,"Count after recovery is wrong (at rest: the count only)");++passed;}
   // Invalid count requests change nothing.
   for(const size_t invalid:{size_t(0),size_t(3)}){World w;Memory m;DisplaySessionV2 session(access(w,m));const auto result=session.count("c",invalid,true,deadline(w));
     require(!result.ok&&w.counts==0&&w.applies==0&&!m.bytes,"Invalid count request changed something");++passed;}
@@ -215,7 +221,10 @@ int groupAfterCountCases(){
     if(inactive)requireCount(w,2,"Dual stream stop did not return to the post-count topology");
     else require(!w.owned().active&&w.hasSecond()&&!w.second().active&&w.console().x==0&&!overlapping(w),"Dual stream stop left an owned output extending the console");
     require(w.console().active==!inactive&&(inactive||w.console().width==1024),"Dual stream stop lost or invented the console");
-    w.afterResize=nullptr;require(count.count("count",1,true,deadline(w)).ok&&!m.bytes,"Count 1 after a dual stream failed");requireCount(w,1,"Count 1 after a dual stream is wrong");++passed;
+    w.afterResize=nullptr;require(count.count("count",1,true,deadline(w)).ok&&!m.bytes,"Count 1 after a dual stream failed");
+    // Beside the console the outputs are off (at rest: the count only).
+    if(inactive)requireCount(w,1,"Count 1 after a dual stream is wrong");
+    else require(!w.hasSecond()&&!w.owned().active&&w.console().active&&!w.console().x&&!w.console().y&&!overlapping(w),"Count 1 at rest after a dual stream is wrong");++passed;
   }
   // An older unrestored original (a single-output stream whose restore failed,
   // from before the count) stays the original through count 2 and a dual
@@ -308,10 +317,51 @@ int countRpcCases(){
   return passed;
 }
 }
+// At rest (standby): the owned outputs off beside the user's displays. A count
+// change changes the SDK count only; the outputs stay off and every other
+// display keeps its mode and place, the primary included (Host 1.1.19). The
+// layouts: the console primary at the origin with another display LEFT of it,
+// so a re-laid group would have made that one primary once the rest put the
+// owned outputs off. Windows may switch a new output on by itself
+// (autoActivate) or move a display after the arrival; both are undone.
+int restCountCases(){
+  int passed=0;
+  const auto rest=[](World& w){w.owned().active=false;auto& e=w.extra();e.active=true;e.x=-800;e.y=0;};
+  const auto unchanged=[](World& w,const char* reason){
+    const auto& c=w.console();const auto& e=w.extra();
+    require(c.active&&c.x==0&&c.y==0&&c.width==1024&&c.height==768&&e.active&&e.x==-800&&e.y==0&&e.width==800&&e.height==600&&!w.owned().active&&(!w.hasSecond()||!w.second().active)&&!overlapping(w),reason);
+  };
+  for(int windows=0;windows<3;++windows){
+    World w(true);Memory m;rest(w);
+    if(windows==1)w.autoActivate=true;
+    if(windows==2)w.afterCount=[](World& world){auto& c=world.console();c.x=800;auto& e=world.extra();e.x=0;};
+    DisplaySessionV2 session(access(w,m));
+    const auto up=session.count("rest-up",2,true,deadline(w));
+    require(up.ok&&up.countAttempted&&!up.stateKept&&!m.bytes&&!session.active()&&w.counts==1&&up.owned.size()==2&&w.hasSecond(),"1->2 at rest failed or left a session");
+    unchanged(w,"1->2 at rest switched an owned output on or moved a display (the primary)");
+    require(w.remembered<=1&&(windows==0||w.remembered==1),"1->2 at rest did not save the layout it applied");
+    const auto down=session.count("rest-down",1,true,deadline(w));
+    require(down.ok&&!down.stateKept&&!m.bytes&&w.counts==2&&down.owned.size()==1&&!w.hasSecond(),"2->1 at rest failed");
+    unchanged(w,"2->1 at rest switched the owned output on or moved a display");
+    passed+=2;
+  }
+  // The usual count (an owned output on) still re-lays: output 0 primary.
+  {World w(true);Memory m;auto& e=w.extra();e.active=true;e.x=-800;DisplaySessionV2 session(access(w,m));
+    const auto up=session.count("on-up",2,true,deadline(w));require(up.ok&&w.owned().active&&w.owned().x==0&&w.second().active,"A count with the outputs on did not switch them on as before");++passed;}
+  // Not at rest without another display: the outputs come on (a VM without a
+  // display of its own keeps them on).
+  {World w;Memory m;w.console().active=false;w.owned().x=0;DisplaySessionV2 session(access(w,m));
+    const auto up=session.count("alone-up",2,true,deadline(w));require(up.ok&&w.owned().active&&w.second().active,"Owned outputs alone did not stay on after a count");++passed;}
+  // A refused apply puts the previous count back.
+  {World w(true);Memory m;rest(w);w.autoActivate=true;w.reject=[](const NativeCcdData&,UINT32){return LONG(ERROR_INVALID_PARAMETER);};DisplaySessionV2 session(access(w,m));
+    const auto up=session.count("rest-refused",2,true,deadline(w));require(!up.ok&&!w.hasSecond()&&w.counts==2,"A failed count at rest kept the new count");++passed;}
+  return passed;
+}
 int main(){
   try{
     int passed=0;
     passed+=countCases();
+    passed+=restCountCases();
     passed+=groupAfterCountCases();
     passed+=countPlanCases();
     passed+=countRpcCases();

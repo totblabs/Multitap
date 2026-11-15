@@ -245,6 +245,12 @@ stream. It is a persistent user choice, not a temporary stream layout:
    current count changes nothing.
 2. Ask the service for the new count. Output `1` is added at output `0`'s size
    or removed; output `0` is never touched.
+   At rest (no owned output on, another display on) the rest of the change is
+   `countAtRest`: the plan is the configuration before the change with the
+   owned outputs off, applied with `SDC_SAVE_TO_DATABASE` (without it if
+   refused); settled means every owned target present and off and every other
+   display at its previous mode and place; capture is not involved. Steps 3
+   and 4 below are for owned outputs that were on.
 3. Plan: output `0` at the origin, output `1` directly to its right. Every
    display that was active before the change, the console included, is
    supplied again with its previous modes and placed to the right of the owned
@@ -295,7 +301,10 @@ background recovery. With no state file there is nothing to do.
    remembers that layout like the user's '1에만 표시'; otherwise it extends
    onto an owned output again the next time one is plugged (the SDK size here,
    a restart; seen on a VM 2026-11-15). If Windows refuses the save, the same
-   layout is applied without it.
+   layout is applied without it. The CCD wrapper (`nativeCcdWireConfigure`)
+   compares the validation's flags with the apply's without
+   `SDC_SAVE_TO_DATABASE`; counting it refused every saving apply before Host
+   1.1.19, so no layout was saved until then.
 3. Verify that every expected target is active, owned outputs that came back
    have their saved sizes and positions (including which owned output was
    primary), other displays have their saved modes, and the console is active
@@ -366,8 +375,21 @@ monitor or a VM's own display (console, vGPU head).
   shows standby counts; anything else, and a VM without a display of its own,
   falls back to switching the outputs on as before. Standby verifies the lease
   generation like an activation (`activationVerified`).
-- A count change switches the outputs on (output `0` primary) as before; the
-  probe on its new lease puts them back to standby.
+- **A count change at rest** (Output count; `countAtRest`) changes the SDK
+  count only: the outputs stay off, every other display keeps its mode and
+  place (the primary included) and the layout is saved. The worker's prepare
+  probe knows standby (`workerDisplayProbe(true)` under v2); a strict probe
+  refused every count at rest with `display_control_unavailable`, so a client
+  connecting with another count than the Host's (a fresh Host has 2) could not
+  connect (Host 1.1.17-1.1.18). The result is standby with the new count.
+- **Owned outputs on again at rest** (a monitor waking or plugged back, a dock,
+  Win+P, the activation fallback) with the same lease: every read-only probe
+  (`worker.probe`, `workerDisplayProbeAtRest`) that finds an owned output on,
+  or the owned outputs not matching the lease (clone, one of two on), beside
+  another display runs the same rest step. The service never probes during a
+  stream or a display operation. Before Host 1.1.19 only a new lease did, so an
+  output Windows switched on stayed on with `0` not primary and a PC refused
+  every connection (`initial_viewport_unavailable`) until the Host restarted.
 
 ## Private call robustness
 

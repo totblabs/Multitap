@@ -174,15 +174,37 @@ inline std::optional<std::vector<uint8_t>> localDescriptor(const Device& device,
   return out;
 }
 
-// Requests from the VM that are refused (STALL) instead of reaching the device:
-// the Microsoft OS string descriptor (string 0xEE)
-// and the BOS descriptor (type 15, which carries Microsoft OS 2.0 descriptors).
-// Through them a device the policy allowed (vendor class 0xFF, say) could ask
-// Windows in the VM for another driver by compatible ID (RNDIS, WinUSB), which
-// the class checks above never see.
+// Microsoft OS descriptors let a device the policy allowed (vendor class 0xFF,
+// say) ask Windows in the VM for another driver by compatible ID (RNDIS,
+// WinUSB), which the class checks above never see. Two places carry them:
+// - the Microsoft OS string descriptor (string 0xEE): refused (STALL) here;
+// - the BOS descriptor (type 15): its platform capabilities (Microsoft OS 2.0,
+//   with the vendor request that returns the descriptor set) are blanked in the
+//   answer (blankPlatformCapabilities). The BOS itself reaches the device: a
+//   USB 3 device needs it for Windows to start it (a SanDisk Ultra USB 3.0 ended
+//   in Code 10, without its serial number, while the BOS was refused; Host
+//   1.0.x-1.1.18 since 2026-11-12).
 inline bool refusedDescriptorRequest(const uint8_t* setup) {
   if ((setup[0] & 0x80) == 0 || ((setup[0] >> 5) & 3) != 0 || setup[1] != 6) return false;   // standard GET_DESCRIPTOR only
   const unsigned type = setup[3], index = setup[2];
-  return type == 0x0f || (type == 3 && index == 0xee);
+  return type == 3 && index == 0xee;
+}
+// A standard GET_DESCRIPTOR(BOS) from the VM.
+inline bool bosDescriptorRequest(const uint8_t* setup) {
+  return (setup[0] & 0x80) != 0 && ((setup[0] >> 5) & 3) == 0 && (setup[0] & 31) == 0 && setup[1] == 6 && setup[3] == 0x0f;
+}
+// In a BOS answer (whole or the first wLength bytes), every platform capability
+// (bDevCapabilityType 5: Microsoft OS 2.0, WebUSB, ...) gets an all-zero UUID,
+// so Windows in the VM matches none and never asks for an OS 2.0 descriptor
+// set. Lengths and the other capabilities (USB 2.0 extension, SuperSpeed) are
+// unchanged; a malformed answer is left as it is (Windows rejects it itself).
+inline void blankPlatformCapabilities(uint8_t* bos, size_t size) {
+  if (!bos || size < 5 || bos[0] != 5 || bos[1] != 0x0f) return;
+  for (size_t at = 5; at + 3 <= size;) {
+    const size_t length = bos[at];
+    if (length < 3) return;
+    if (bos[at + 1] == 0x10 && bos[at + 2] == 5) for (size_t i = at + 4; i < std::min(size, at + std::min<size_t>(length, 20)); ++i) bos[i] = 0;
+    at += length;
+  }
 }
 }  // namespace host::usb

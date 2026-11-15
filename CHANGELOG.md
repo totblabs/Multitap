@@ -2,7 +2,23 @@
 
 [한국어](CHANGELOG.ko.md)
 
-What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13 and 1.1.16 to 1.1.14; the server is unchanged in both and the apps stay at 1.1.13. 1.1.17 is the server; the Host stays at 1.1.14. 1.1.18 is the server with the Windows app and the Android app at 1.1.14; the Host stays at 1.1.14. 1.1.19 brings the Android app to 1.1.15; the server is unchanged, the Windows app and the Host stay at 1.1.14. 1.1.20 brings the Host to 1.1.17; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.21 brings the Host to 1.1.18; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+What changed for the people who install and use Multitap. A release is numbered after the server; 1.1.1 to 1.1.11 carry the Windows app, the Android app and the Host at the same number. 1.1.12 is the server and the two apps; the Host stays at 1.1.11. 1.1.13 is the server only; the apps stay at 1.1.12 and the Host at 1.1.11. 1.1.14 is the server at 1.1.14 with the Windows app and the Android app at 1.1.13; the Host stays at 1.1.11. 1.1.15 brings the Host to 1.1.13 and 1.1.16 to 1.1.14; the server is unchanged in both and the apps stay at 1.1.13. 1.1.17 is the server; the Host stays at 1.1.14. 1.1.18 is the server with the Windows app and the Android app at 1.1.14; the Host stays at 1.1.14. 1.1.19 brings the Android app to 1.1.15; the server is unchanged, the Windows app and the Host stay at 1.1.14. 1.1.20 brings the Host to 1.1.17; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.21 brings the Host to 1.1.18; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. 1.1.22 brings the Host to 1.1.20; the server is unchanged, the Windows app stays at 1.1.14 and the Android app at 1.1.15. Installers are on the [Releases](https://github.com/totblabs/Multitap/releases) page.
+
+## [1.1.22](https://github.com/totblabs/Multitap/releases/tag/v1.1.22)
+
+### USB (Host)
+
+- **Fixed: a USB 3.0 device (a SanDisk Ultra USB 3.0, say) connected to the desktop did not start, so its drive never appeared.** The USB hardening of 2026-11-12 also blocked a request USB 3.0 devices need (the BOS descriptor). It now reaches the device; the parts of the answer that could ask the desktop for another driver (Microsoft OS 2.0) are still removed.
+
+### Display (Host)
+
+- **Fixed: a PC or VM with a display of its own could not change its number of virtual monitors while nobody was connected, so connecting with a different number failed** ("Can't prepare a screen of this size right now", or "The virtual display isn't ready"). A new Host starts with two virtual monitors, so the Android app and single-screen connections to it failed. Changing the number at rest now keeps the virtual screens off and leaves your own monitors exactly as they were, including which one is the main monitor.
+- **Fixed: when Windows switched the Multitap virtual screen on again while nobody was connected** (a monitor waking from sleep or plugged back in, a dock, Win+P), the PC could not be connected to until the Host restarted. The Host now switches it off again within seconds.
+- Windows now really remembers the layout without the Multitap virtual screen (it never did before), so it stops extending onto it by itself.
+
+### Server
+
+- No change; the number follows the Host.
 
 ## [1.1.21](https://github.com/totblabs/Multitap/releases/tag/v1.1.21)
 

@@ -388,6 +388,30 @@ class UsbLocalDevice {
   /// UsbDk listed it but would not give its configuration descriptor (only the
   /// 18-byte device descriptor is here): it cannot be offered.
   final bool unreadable;
+
+  /// This listing with the name, second line and readable-drive state of
+  /// [before]. While this client holds a storage device for the desktop this PC
+  /// lists none of its volumes, so a fresh description always read
+  /// "USB 드라이브 · 드라이브 문자 없음" with the Disk Management warning, even for
+  /// a stick the desktop mounted (2026-11-15).
+  UsbLocalDevice describedAs(UsbLocalDevice before) => UsbLocalDevice(
+    id: id,
+    name: before.name,
+    descriptors: descriptors,
+    speed: speed,
+    busy: busy,
+    subtitle: before.subtitle,
+    vidPid: vidPid,
+    kind: kind,
+    neededByPc: neededByPc,
+    chips: chips,
+    arrivalMs: arrivalMs,
+    memoryKey: memoryKey,
+    busyElsewhere: busyElsewhere,
+    noReadableDrive: before.noReadableDrive,
+    otherWindow: otherWindow,
+    unreadable: unreadable,
+  );
 }
 
 enum UsbKind {
@@ -1000,16 +1024,24 @@ class UsbSession extends ChangeNotifier {
         }
         final existing = entries.where((item) => item.device.id == device.id);
         if (existing.isNotEmpty) {
+          // Held for the desktop (sharing, shared, coming back): the PC's own
+          // description from before stays (describedAs).
+          final held = const {
+            UsbEntryState.connecting,
+            UsbEntryState.shared,
+            UsbEntryState.returning,
+          }.contains(existing.first.state);
+          final listed = held ? device.describedAs(existing.first.device) : device;
           if (existing.first.device.arrivalMs != device.arrivalMs) {
             existing.first.notReturned = false; // plugged in again
             if (existing.first.returnUncertain) {
               // A new arrival is a reason to recheck, not proof of readiness.
               // Update the stamp before the read-only check binds it.
-              existing.first.device = device;
+              existing.first.device = listed;
               unawaited(recheckReturn(existing.first));
             }
           }
-          existing.first.device = device;
+          existing.first.device = listed;
           next.add(existing.first);
         } else {
           next.add(UsbEntry(device, decision));

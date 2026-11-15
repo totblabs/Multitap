@@ -274,6 +274,18 @@ inline bool displayV2SameForeign(const std::vector<DisplayV2Mode>& before,const 
   for(size_t i=0;i<before.size();++i)if(!displayV2SameMode(before[i],after[i]))return false;
   return true;
 }
+// Every display other than the owned ones that is active in `before` is active
+// in `after` at the same place (so the primary, the one at the origin, too).
+inline bool displayV2SamePlaces(const NativeCcdData& before,const NativeCcdData& after,std::span<const NativeDisplayTarget> owned){
+  for(const auto& path:before.paths){
+    if(!displayV2Active(path)||nativeOwnedPath(path,owned))continue;
+    const auto found=std::find_if(after.paths.begin(),after.paths.end(),[&](const auto& value){return displayV2Active(value)&&nativeSameLuid(value.targetInfo.adapterId,path.targetInfo.adapterId)&&value.targetInfo.id==path.targetInfo.id;});
+    if(found==after.paths.end())return false;
+    const auto& was=nativeCcdSource(before,path).position;const auto& now=nativeCcdSource(after,*found).position;
+    if(was.x!=now.x||was.y!=now.y)return false;
+  }
+  return true;
+}
 // Fixed diagnostic code for the first difference (0 = same).
 namespace displayV2ForeignCode {
 inline constexpr uint32_t count=1,identity=2,size=3,refresh=4,rotation=5,format=6;
@@ -1304,6 +1316,10 @@ class DisplaySessionV2 {
   }
   void changeCount(DisplayV2Result& result,const NativeCcdData& before,size_t wanted,uint64_t deadline){
     const auto previous=owned_;
+    // At rest beside another display (standby: no owned output on, another
+    // display on) only the count changes; see countAtRest.
+    const bool atRest=!displayV2Foreign(before,previous,std::nullopt).empty()&&
+      std::none_of(before.paths.begin(),before.paths.end(),[&](const auto& path){return displayV2Active(path)&&nativeOwnedPath(path,previous);});
     std::optional<std::vector<NativeDisplayTarget>> changed;
     // From here on the service may have changed the SDK count even when its
     // reply is lost; a failure therefore always asks for the previous count.
@@ -1316,6 +1332,7 @@ class DisplaySessionV2 {
     // Old and new owned targets are ours, never "foreign".
     std::vector<NativeDisplayTarget> ours=previous;ours.insert(ours.end(),owned_.begin(),owned_.end());
     if(!waitUntil(std::min(deadline,access_.now()+5000),[&](const NativeCcdData& ccd){return std::all_of(owned_.begin(),owned_.end(),[&](const auto& t){return displayV2OwnedPath(ccd,t,{}).has_value();});})){fail(result,displayV2Stage::target,"display_v2_owned_target_unavailable");return;}
+    if(atRest){countAtRest(result,before,previous,ours,deadline);return;}
     // Every other display, the console included, must be back exactly as it
     // was before the change (active state, mode size, refresh, rotation,
     // format); positions are re-laid (always applied once, so the owned group
@@ -1355,6 +1372,44 @@ class DisplaySessionV2 {
     if(const auto difference=displayV2ForeignDifference(expected,displayV2Foreign(*verified,ours,std::nullopt))){result.foreignDifference=difference;fail(result,displayV2Stage::foreign,"display_v2_foreign_changed");return;}
     // Windows' CCD is settled; the change is kept only when GDI/capture also
     // lists exactly the owned outputs (never a console or foreign display).
+    if(access_.usable){bool usable=false;try{usable=access_.usable(owned_);}catch(...){usable=false;}if(!usable){fail(result,displayV2Stage::verify,"display_v2_capture_unavailable");return;}}
+    result.ok=true;result.stage=0;result.error=0;result.reason.clear();
+  }
+  // The count at rest beside another display (standby, "At rest" in
+  // docs/display-manager-v2.md): the SDK count changes and nothing else. The
+  // owned outputs stay off, every other display keeps its mode and its place,
+  // the primary included, and the layout is saved (without the save if
+  // Windows refuses it). Switching the outputs on here put "0" at the origin
+  // and the user's displays right of it, so the rest that followed made the
+  // left-most display primary. The stream switches the outputs on and binds
+  // capture; `usable` here sees the new outputs in standby.
+  void countAtRest(DisplayV2Result& result,const NativeCcdData& before,std::span<const NativeDisplayTarget> previous,std::span<const NativeDisplayTarget> ours,uint64_t deadline){
+    const auto expected=displayV2Foreign(before,ours,std::nullopt);
+    result.foreignBefore=uint32_t(expected.size());
+    DisplayV2State saved;saved.ccd=before;saved.owned.assign(previous.begin(),previous.end());
+    const auto settled=[&](const NativeCcdData& ccd){
+      for(const auto& target:owned_){
+        bool available=false;
+        for(const auto& path:ccd.paths)if(nativeSameTarget(path,target)){if(displayV2Active(path))return false;if(path.targetInfo.targetAvailable)available=true;}
+        if(!available)return false;
+      }
+      return displayV2SameForeign(expected,displayV2Foreign(ccd,ours,std::nullopt))&&displayV2SamePlaces(before,ccd,ours);
+    };
+    LONG lastError=ERROR_SUCCESS;bool verified=false;
+    for(int attempt=0;attempt<3&&!verified;++attempt){
+      if(!eligible()){fail(result,displayV2Stage::ineligible,"display_v2_ineligible");return;}
+      if(access_.now()>=deadline)break;
+      NativeCcdData fresh;
+      try{fresh=access_.query();}catch(const NativeTopologyWindowsError& error){lastError=LONG(error.code);continue;}
+      if(settled(fresh)){verified=true;break;}
+      NativeCcdData plan;
+      try{plan=planDisplayV2Restore(saved,fresh,owned_,nullptr,access_.retired);}catch(...){access_.pause();continue;}
+      LONG code=apply(plan,displayV2Supplied,true);if(code!=ERROR_SUCCESS)code=apply(plan,displayV2Supplied|SDC_ALLOW_CHANGES,true);
+      if(code!=ERROR_SUCCESS){code=apply(plan,displayV2Supplied);if(code!=ERROR_SUCCESS)code=apply(plan,displayV2Supplied|SDC_ALLOW_CHANGES);}
+      if(code!=ERROR_SUCCESS){lastError=code;access_.pause();continue;}
+      verified=waitUntil(std::min(deadline,access_.now()+2000),settled);
+    }
+    if(!verified){result.error=DWORD(lastError);fail(result,lastError!=ERROR_SUCCESS?displayV2Stage::apply:displayV2Stage::verify,lastError!=ERROR_SUCCESS?"display_v2_apply_failed":"display_v2_verify_failed");return;}
     if(access_.usable){bool usable=false;try{usable=access_.usable(owned_);}catch(...){usable=false;}if(!usable){fail(result,displayV2Stage::verify,"display_v2_capture_unavailable");return;}}
     result.ok=true;result.stage=0;result.error=0;result.reason.clear();
   }

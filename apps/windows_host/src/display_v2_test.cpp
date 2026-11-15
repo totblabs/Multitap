@@ -1213,10 +1213,12 @@ int rapidChangeCases(){
       {DisplaySessionV2 count(worldAccess(w,m));require(count.count("count",1,true,deadline(w)).ok,"Count 1 in a mode switch failed");++changes;}
       while(backlog.next()){}
     }
-    // A count change is persistent (owned "0" primary, the others right of it).
+    // Each stream's stop leaves the owned outputs off beside the console, so
+    // every count runs at rest: the outputs stay off, the console keeps its
+    // place (the primary) and mode.
     require(changes>=200&&!m.bytes&&!w.hasSecond(),"Mode-switch stress was too short or left a state file / a second output");
     const auto& o=w.owned();const auto& c=w.console();
-    require(o.active&&!o.x&&!o.y&&o.width==1920&&o.height==1080&&c.active&&c.width==1024&&c.height==768&&extraOriginal(w)&&!overlapping(w),"Mode switches did not end in the post-count configuration");++passed;}
+    require(!o.active&&w.ownedWidth==1920&&w.ownedHeight==1080&&c.active&&!c.x&&!c.y&&c.width==1024&&c.height==768&&extraOriginal(w)&&!overlapping(w),"Mode switches did not end at rest with the console primary");++passed;}
   return passed;
 }
 int interleaveCases(){

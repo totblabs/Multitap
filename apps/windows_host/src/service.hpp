@@ -340,6 +340,27 @@ inline NativeBootstrapAccess nativeWorkerBootstrapAccess(){
       }catch(...){return std::nullopt;}
     }};
 }
+// The read-only probe at rest (worker.probe; the service never probes during a
+// stream or a display operation). Windows can switch an owned output on again
+// beside another display without a new lease: a monitor waking from sleep or
+// plugged back, a dock, Win+P. The activation probe runs only on a new lease,
+// so the output stayed on as an invisible screen with "0" not primary and a PC
+// refused every connection until the Host restarted. Under display manager v2
+// owned outputs seen on beside another display are put off again by the same
+// rest step; a VM without a display of its own keeps them on.
+inline DisplayState workerDisplayProbeAtRest(){
+  const bool v2=displayManagerV2Selected();auto display=workerDisplayProbe(v2);
+  // On, or partly on / cloned (the owned outputs then do not match the lease).
+  const bool on=display.active||display.error=="native_display_topology_mismatch";
+  if(!v2||!on||display.remoteSession||display.configurationPending||display.recoveryRequired)return display;
+  try{
+    const auto snapshot=nativeDisplayLeaseSnapshot();if(snapshot.get("configurationPending").boolean())return display;
+    const auto access=nativeWorkerBootstrapAccess();if(!access.eligible()||!access.rest)return display;
+    const auto rested=access.rest(nativeDisplayTargets(snapshot),nativeDisplayLeaseKey(snapshot));
+    if(rested&&rested->ok&&rested->applyAttempted)return workerDisplayProbe(true);
+  }catch(...){ }
+  return display;
+}
 inline NativeWorkerTrackAccess nativeWorkerTrackAccess(HANDLE pipe,const NativeTrackResize& request,std::atomic<bool>& stopped,std::mutex& writing,const StreamResizeBudget& budget,std::function<bool(const Json&)> interleave={}){
   DWORD session=0xffffffff;ProcessIdToSessionId(GetCurrentProcessId(),&session);
   const auto eligible=[session,&stopped]{return !stopped&&sameInteractiveConsole(session)&&sessionUnlocked(session)&&interactiveDesktopAvailable()&&elevated();};
@@ -809,7 +830,7 @@ class ServiceBridge final : public AgentBridge {
               }
             }
             display = parseDisplayState(response.get("display")); desktop = response.get("desktopAvailable").boolean();
-            ok = response.get("ok").boolean() && display.ready() && display.monitors.size() == size_t(operation->count);
+            ok = response.get("ok").boolean() && display.streamable() && display.monitors.size() == size_t(operation->count);
             reason = ok ? "" : safeDisplayReason(response.get("reason").string());
           }
         }
@@ -818,7 +839,7 @@ class ServiceBridge final : public AgentBridge {
       if (!sameInteractiveConsole(operation->session) || !sessionUnlocked(operation->session)) { ok = false; reason = "no_interactive_session"; display = {}; desktop = false; }
       if(nativeCount){
         bool safe=false;
-        if(desktop&&display.ready()&&(!operation->cancelled||!ok))try{safe=nativeDisplay_->acknowledgeCountOperation({operation->key,operation->count},ok);}catch(...){ }
+        if(desktop&&display.streamable()&&(!operation->cancelled||!ok))try{safe=nativeDisplay_->acknowledgeCountOperation({operation->key,operation->count},ok);}catch(...){ }
         if(!safe){
           if(!nativeStage)nativeStage=8;
           nativeDisplay_->cancelCountOperation(operation->key);ok=false;
@@ -2387,7 +2408,12 @@ inline WorkerDisplayAccess nativeWorkerDisplayAccess() {
   DWORD session = 0xffffffff; ProcessIdToSessionId(GetCurrentProcessId(), &session);
   // `privileged`: a count change under display manager v2 needs no more than a
   // stream does (workerDisplayAuthority); v1 and the older helper keep elevated().
-  return {[] { return workerDisplayProbe(); }, [session] { return sameInteractiveConsole(session) && sessionUnlocked(session) && interactiveDesktopAvailable(); }, [] { return workerDisplayAuthority(); },
+  // `probe` knows standby under v2 (owned outputs off at rest beside another
+  // display, monitor control offered from it): the strict probe refused every
+  // count change at rest with display_control_unavailable, and a client
+  // connecting with another output count (a fresh Host has 2) could never
+  // connect. Every check after the change still needs ready() (outputs on).
+  return {[] { return workerDisplayProbe(displayManagerV2Selected()); },[session] { return sameInteractiveConsole(session) && sessionUnlocked(session) && interactiveDesktopAvailable(); }, [] { return workerDisplayAuthority(); },
     [](int count) { return displayHelper(count == 1 ? L"topology 1" : L"topology 2", 20000); },nativeDisplaySelected};
 }
 // Display manager v2 count change in the interactive worker: real CCD, the
@@ -2420,6 +2446,11 @@ inline std::optional<DisplayState> displayV2CountCapture(std::span<const NativeD
   for(;;){
     try{
       const auto display=probe();
+      // A count at rest (DisplaySessionV2::countAtRest) leaves the outputs off:
+      // standby with exactly the new outputs at their sizes; nothing to capture.
+      if(display.standby&&!display.active&&display.monitors.size()==targets.size()&&std::all_of(targets.begin(),targets.end(),[&](const auto& target){
+           const auto monitor=std::find_if(display.monitors.begin(),display.monitors.end(),[&](const auto& m){return m.id==target.id;});
+           return monitor!=display.monitors.end()&&monitor->width==target.width&&monitor->height==target.height;}))return display;
       if(display.ready()&&display.monitors.size()==targets.size()){
         const auto observed=currentCaptureMonitors();bool all=true;
         for(const auto& target:targets){
@@ -2494,7 +2525,7 @@ inline void configureWorkerDisplays(HANDLE pipe, const Json& request, std::atomi
   } else if (commit.get("type").string() != "worker.display.cancel") return;
   if(!nativeApplied)display = access.probe();
   if (!access.interactive()) { ok = false; reason = "no_interactive_session"; }
-  else if (ok && (!display.ready() || display.monitors.size() != size_t(count))) { ok = false; reason = "display_count_mismatch"; }
+  else if (ok && (!display.streamable() || display.monitors.size() != size_t(count))) { ok = false; reason = "display_count_mismatch"; }
   reply("worker.display.result", ok, reason);
 }
 struct WorkerCatalogAccess {
@@ -3062,7 +3093,7 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
     if(command.get("type").string()=="worker.catalog.prepare") {configureWorkerCatalog(pipe.value,command,stopped,writeMutex);break;}
     if(command.get("type").string()=="worker.probe"||command.get("type").string()=="worker.native.activate"){
       const bool activation=command.get("type").string()=="worker.native.activate";
-      const auto result=activation?bootstrapNativeDisplays(nativeWorkerBootstrapAccess()):NativeBootstrapResult{workerDisplayProbe(displayManagerV2Selected())};
+      const auto result=activation?bootstrapNativeDisplays(nativeWorkerBootstrapAccess()):NativeBootstrapResult{workerDisplayProbeAtRest()};
       // `privileged` tells the service whether this worker may act on the display it reports (workerDisplayAuthority).
       const auto response=workerProbeReply(result.display,interactiveDesktopAvailable(),workerDisplayAuthority(),activation?std::optional<bool>(result.applyAttempted):std::nullopt,result.diagnostic);
       if(!pipePacket(pipe.value,true,{response.begin(),response.end()},stopped,writeMutex))break;continue;
