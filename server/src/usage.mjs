@@ -363,6 +363,10 @@ export async function usageSummary(store, relay, { from, to }, now = Date.now(),
   const names = new Map(db.prepare('SELECT id,username FROM users').all().map(row => [row.id, row.username]));
   const blank = () => ({ logins: 0, connections: 0, connectedMs: 0, firstAt: null, lastAt: null, daily: new Array(days.length).fill(0), dailyConnections: new Array(days.length).fill(0) });
   const users = new Map(), desktops = new Map(), totals = blank();
+  // 데스크톱별 counts a desktop's connections since its current Host was registered. Records are kept by desktop id
+  // (a VM's number), so without this a VM added again under a number used before, or a deleted desktop, would carry
+  // the earlier one's connections. The 사용자별 view and the totals keep every connection; 로그인·연결 내역 lists them all.
+  const registeredSince = new Map(db.prepare('SELECT desktop_id,created_at FROM hosts WHERE revoked=0').all().map(row => [row.desktop_id, row.created_at]));
   const entry = (map, key, extra) => { let value = map.get(key); if (!value) map.set(key, value = { ...extra(), ...blank() }); return value; };
   let read = 0, truncated = false;
   const columns = 'id,session_id,user_id,desktop_id,desktop_name,started_at,ended_at,last_seen_at', reach = span.start - 31 * 86400000;
@@ -371,10 +375,13 @@ export async function usageSummary(store, relay, { from, to }, now = Date.now(),
     const begin = Math.max(row.started_at, span.start), until = Math.min(end, span.end);
     const started = row.started_at >= span.start && row.started_at < span.end;
     if (!(until > begin) && !started) return;
-    const user = entry(users, row.user_id, () => ({ account: names.get(row.user_id) ?? null })), desktop = entry(desktops, row.desktop_id, () => ({ desktopId: row.desktop_id, desktopName: row.desktop_name, users: new Map() }));
-    desktop.desktopName = row.desktop_name;
-    const share = entry(desktop.users, row.user_id, () => ({ account: names.get(row.user_id) ?? null }));
-    const targets = [user, desktop, share, totals];
+    const user = entry(users, row.user_id, () => ({ account: names.get(row.user_id) ?? null })), targets = [user, totals];
+    const since = registeredSince.get(row.desktop_id);
+    if (since !== undefined && row.started_at >= since) {
+      const desktop = entry(desktops, row.desktop_id, () => ({ desktopId: row.desktop_id, desktopName: row.desktop_name, users: new Map() }));
+      desktop.desktopName = row.desktop_name;
+      targets.push(desktop, entry(desktop.users, row.user_id, () => ({ account: names.get(row.user_id) ?? null })));
+    }
     // The first day this connection touches, then day by day.
     let index = Math.max(0, Math.min(days.length - 1, Math.floor((begin - span.start) / 86400000)));
     while (index > 0 && days[index].start > begin) index--;

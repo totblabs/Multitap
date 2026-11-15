@@ -160,12 +160,12 @@ test('사용자별: people ranked by connected time with the exact hours as text
   assert.deepEqual(f.writes, []);
 });
 
-test('데스크톱별: each desktop\'s connected time and who used it; one no longer in the inventory keeps its recorded name', async t => {
+test('데스크톱별: each desktop\'s connected time and who used it; one no longer in the inventory is not listed', async t => {
   const w = world(), f = await loadAdmin(t, 'usage-desktops', w.user, w.inventory, { monitor: w.monitor, hash: '#/monitoring/desktops' });
   const { content } = f, rows = () => [...content.querySelectorAll('.usage-ranking .rank-bars > li > button.rank-row')];
-  assert.equal(content.querySelector('.usage-ranking h2').textContent, '데스크톱별 연결 시간2');
+  assert.equal(content.querySelector('.usage-ranking h2').textContent, '데스크톱별 연결 시간1');
   assert.deepEqual(rows().map(row => [row.querySelector('.rank-name').textContent, row.querySelector('.rank-value strong').textContent, row.querySelector('.rank-value small').textContent]),
-    [['디자인 1', '15시간', '연결 5회 · 2명'], ['지워진 데스크톱', '5시간 30분', '연결 2회 · 1명']], 'a desktop in the inventory shows its current name');
+    [['디자인 1', '15시간', '연결 5회 · 2명']], 'a desktop in the inventory shows its current name; a deleted one is not listed');
   rows()[0].dispatchEvent(new f.window.Event('click')); await f.settle();
   assert.ok(w.paths.includes('/usage/events/2026-11-04/2026-11-10/desktop/pve-101'));
   const detail = content.querySelector('.usage-detail');
@@ -174,8 +174,6 @@ test('데스크톱별: each desktop\'s connected time and who used it; one no lo
   assert.deepEqual([...detail.querySelectorAll('.usage-shares .rank-row')].map(row => [row.tagName, row.querySelector('.rank-name').textContent, row.querySelector('.rank-value').textContent]), [['DIV', '김민지', '12시간 30분연결 4회'], ['DIV', 'lee.junho', '2시간 30분연결 1회']]);
   assert.deepEqual(texts(detail, 'table.usage-events th'), ['시각', '종류', '사용자', '클라이언트 · 주소', '연결 시간', '끝']);
   assert.deepEqual([...detail.querySelectorAll('table.usage-events tbody tr')].map(row => row.querySelectorAll('td')[1].textContent), ['연결', '연결'], 'a desktop lists connections only');
-  rows()[1].dispatchEvent(new f.window.Event('click')); await f.settle();
-  assert.equal(content.querySelector('.usage-detail h2').textContent, '지워진 데스크톱'); assert.equal(content.querySelector('.usage-detail a.button'), null, 'nothing to open for a desktop that is gone');
 });
 
 test('기록: one day with per-person counts, a search over name, address and desktop, a date stepper and more pages', async t => {

@@ -30,8 +30,11 @@ function fixture() {
   for (const [name, role] of [['admin', 'admin'], ['alice', 'user'], ['bob', 'user']]) store.addUser({ name, passwordHash: 'fixture', role });
   store.syncProxmox([{ vmid: 149, node: 'n', name: '디자인 1', status: 'running' }, { vmid: 150, node: 'n', name: '개발 1', status: 'running' }], 'fixture');
   store.assign('alice', 'pve-149'); store.assign('bob', 'pve-150'); store.assign('alice', 'pve-150');
+  // Both VMs have had their Host since long before the connections below (데스크톱별 counts from the registration).
+  const host = (desktopId, createdAt) => { store.db.prepare('DELETE FROM hosts WHERE desktop_id=?').run(desktopId); store.db.prepare('INSERT INTO hosts(id,desktop_id,token_hash,hostname,machine_uuid,version,created_at) VALUES(?,?,?,?,?,?,?)').run('host-' + desktopId, desktopId, 'token-' + desktopId, desktopId, '00000000-0000-4000-8000-' + desktopId.slice(-3).padStart(12, '0'), '1.1.14', createdAt); };
+  host('pve-149', Date.UTC(2026, 0, 1)); host('pve-150', Date.UTC(2026, 0, 1));
   const id = name => store.findUser(name).id;
-  return { store, id };
+  return { store, id, host };
 }
 // A relay as the recorder and the reads see it: the session map only.
 const fakeRelay = () => ({ sessions: new Map() });
@@ -411,4 +414,19 @@ test('the sign-out trigger of an earlier broker is replaced by the rounding one 
   assert.match(sql(), /round\(unixepoch\('subsec'\)\*1000\)/);
   installUsage(store);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='trigger' AND name LIKE 'usage_login_%'").get().n, 3);
+});
+// Records are kept by desktop id (a VM's number) for two years. A VM whose Host was deleted and added again (or a
+// new VM under a number used before) starts its 데스크톱별 count at the new registration; a desktop with no Host is
+// not listed. 사용자별 and the totals keep every connection.
+test('summary: 데스크톱별 counts a desktop from its current Host registration; a desktop without a Host is not listed', async () => {
+  const f = fixture(), { store } = f, alice = f.id('alice'), bob = f.id('bob'), relay = fakeRelay();
+  connection(store, 1, alice, 'pve-149', at('2026-11-08', '09:00'), at('2026-11-08', '10:00'), { name: '옛 VM' });
+  connection(store, 2, bob, 'pve-149', at('2026-11-09', '11:00'), at('2026-11-09', '11:30'), { name: '새 VM' });
+  connection(store, 3, bob, 'pve-150', at('2026-11-09', '12:00'), at('2026-11-09', '12:15'));
+  f.host('pve-149', at('2026-11-09', '10:00'));
+  store.db.prepare('DELETE FROM hosts WHERE desktop_id=?').run('pve-150');
+  const summary = await usageSummary(store, relay, { from: '2026-11-08', to: '2026-11-10' }, at('2026-11-10', '09:00'));
+  assert.deepEqual(summary.desktops.map(d => [d.desktopId, d.desktopName, d.connections, d.connectedMs / MIN]), [['pve-149', '새 VM', 1, 30]]);
+  assert.deepEqual([summary.totals.connections, summary.totals.connectedMs / MIN], [3, 105], 'every connection still counts in the totals');
+  assert.deepEqual(summary.users.map(u => [u.account, u.connectedMs / MIN]), [['alice', 60], ['bob', 45]]);
 });

@@ -147,7 +147,11 @@ function ranking(ctx, route, kind) {
   const state = waiting(ctx, name, t('usage.58')), data = ctx.value(name);
   const title = people ? t('usage.59') : t('usage.60');
   if (state) return [rangeControls(ctx, route), panel({ title, className: 'usage-ranking' }, state)];
-  const items = (people ? data.users : data.desktops).map(item => ({ ...item, key: people ? item.account : item.desktopId, name: people ? item.account ?? t('common.71') : ctx.desktopById(item.desktopId)?.name ?? item.desktopName }));
+  // 데스크톱별 shows only desktops that still exist: a deleted one's connections stay in 로그인·연결 내역 (kept two
+  // years) but not here, and the totals above the bars count only what is listed (the owner: 없으면 없애야지).
+  const rows = people ? data.users : data.desktops.filter(item => ctx.desktopById(item.desktopId));
+  const items = rows.map(item => ({ ...item, key: people ? item.account : item.desktopId, name: people ? item.account ?? t('common.71') : ctx.desktopById(item.desktopId)?.name ?? item.desktopName }));
+  const totals = people ? data.totals : { ...data.totals, connectedMs: rows.reduce((sum, item) => sum + (item.connectedMs ?? 0), 0), connections: rows.reduce((sum, item) => sum + (item.connections ?? 0), 0) };
   const chosenKey = people ? ui.user : ui.desktop, chosen = items.find(item => item.key === chosenKey) ?? null;
   const choose = key => { ui[people ? 'user' : 'desktop'] = chosenKey === key ? null : key; ui.pages = 1; apply(ctx, route, `usage-${kind}-${key}`); };
   const note = item => [t('usage.61', { connections: item.connections }), people ? t('usage.62', { logins: item.logins }) : t('usage.63', { usersCount: item.users.length })].join(' · ');
@@ -159,7 +163,7 @@ function ranking(ctx, route, kind) {
     : shown.length ? [rankBars({ label: title, rows: shown.map(item => ({ key: item.key, name: item.name, value: item.connectedMs, note: note(item) })), format: connectedText, selected: chosenKey, onSelect: choose, focusKey: 'usage-' + kind }),
       items.length > shown.length ? el('p', { class: 'field-hint' }, t('usage.68', { shownCount: shown.length, value: people ? t('common.105') : t('common.93') })) : null]
       : emptyState(t('common.40'), t('usage.71', { value: people ? t('usage.69') : t('usage.70') }), { compact: true, iconName: 'activity' });
-  const head = panel({ title, count: items.length, description: t('usage.73', { connectedText: connectedText(data.totals.connectedMs), connections: data.totals.connections, value: people ? t('usage.72', { logins: data.totals.logins }) : '' }),
+  const head = panel({ title, count: items.length, description: t('usage.73', { connectedText: connectedText(totals.connectedMs), connections: totals.connections, value: people ? t('usage.72', { logins: totals.logins }) : '' }),
     actions: [segmented(t('common.129'), [['chart', t('usage.74')], ['table', t('usage.75')]], ui.table ? 'table' : 'chart', value => { ui.table = value === 'table'; ctx.render({ refocus: { key: 'segment-' + value } }); })], className: 'usage-ranking' },
     view,
     data.truncated ? el('p', { class: 'is-error' }, t('usage.76')) : null,

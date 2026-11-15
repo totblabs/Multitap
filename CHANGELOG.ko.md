@@ -2,7 +2,13 @@
 
 [English](CHANGELOG.md)
 
-Multitap을 설치하고 쓰는 사람에게 달라지는 것을 적습니다. 릴리스 번호는 서버 버전을 따르고, 1.1.1부터 1.1.11까지는 Windows 앱, Android 앱, Host도 같은 번호입니다. 1.1.12는 서버와 두 앱이고, Host는 1.1.11 그대로입니다. 1.1.13은 서버만이고, 앱은 1.1.12, Host는 1.1.11 그대로입니다. 1.1.14는 서버 1.1.14와 Windows 앱·Android 앱 1.1.13이고, Host는 1.1.11 그대로입니다. 1.1.15는 Host 1.1.13, 1.1.16은 Host 1.1.14이고, 둘 다 서버는 바뀐 것이 없으며 앱은 1.1.13 그대로입니다. 설치 파일은 [Releases](https://github.com/totblabs/Multitap/releases)에 있습니다.
+Multitap을 설치하고 쓰는 사람에게 달라지는 것을 적습니다. 릴리스 번호는 서버 버전을 따르고, 1.1.1부터 1.1.11까지는 Windows 앱, Android 앱, Host도 같은 번호입니다. 1.1.12는 서버와 두 앱이고, Host는 1.1.11 그대로입니다. 1.1.13은 서버만이고, 앱은 1.1.12, Host는 1.1.11 그대로입니다. 1.1.14는 서버 1.1.14와 Windows 앱·Android 앱 1.1.13이고, Host는 1.1.11 그대로입니다. 1.1.15는 Host 1.1.13, 1.1.16은 Host 1.1.14이고, 둘 다 서버는 바뀐 것이 없으며 앱은 1.1.13 그대로입니다. 1.1.17은 서버이고 Host는 1.1.14 그대로입니다. 설치 파일은 [Releases](https://github.com/totblabs/Multitap/releases)에 있습니다.
+
+## [1.1.17](https://github.com/totblabs/Multitap/releases/tag/v1.1.17)
+
+### 모니터링 (서버)
+
+- **고침: 지운 데스크톱이 '데스크톱별 연결 시간'에 남고, 같은 번호로 다시 추가한 VM에 예전 연결이 섞이던 문제.** 이제 지금 있는 데스크톱만, 지금 Host가 등록된 뒤의 연결만 셉니다. 기록은 지금처럼 2년 보관하고, 사용자별 그래프·합계·로그인·연결 내역에는 모든 연결이 남습니다.
 
 ## [1.1.16](https://github.com/totblabs/Multitap/releases/tag/v1.1.16)
 
