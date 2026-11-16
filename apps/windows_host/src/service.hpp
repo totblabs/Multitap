@@ -362,8 +362,8 @@ inline NativeBootstrapAccess nativeWorkerBootstrapAccess(){
 // rest step; a VM without a display of its own keeps them on.
 // Only where standby will be recognised once they are off (nativeStandbyPossible);
 // elsewhere they stay on, as before. Owned outputs found off without standby
-// (Host 1.1.20 put them off where standby was not recognised: TOTB-SS,
-// TOTB-WORK) are switched on again as the activation does, so a desktop is
+// (Host 1.1.20 put them off where standby was not recognised on two field
+// PCs) are switched on again as the activation does, so a desktop is
 // never left without a streamable display.
 inline DisplayState workerDisplayProbeAtRest(){
   const bool v2=displayManagerV2Selected();auto display=workerDisplayProbe(v2);

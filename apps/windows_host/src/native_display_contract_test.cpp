@@ -70,7 +70,7 @@ int main(){try{
     {uint32_t miss=0;auto gone=all;gone[3].targetInfo.targetAvailable=FALSE;require(!check(gone,&miss)&&miss==nativeStandbyMiss::ownedUnavailable,"An unavailable owned target was standby");++passed;}
     {uint32_t miss=0;auto missing=all;missing.pop_back();require(!check(missing,&miss)&&miss==nativeStandbyMiss::ownedUnavailable,"A missing owned target was standby");++passed;}
     {uint32_t miss=0;auto alone=all;alone[0].flags&=~DISPLAYCONFIG_PATH_ACTIVE;alone[1].flags&=~DISPLAYCONFIG_PATH_ACTIVE;require(!check(alone,&miss)&&miss==nativeStandbyMiss::nothingElse,"Owned outputs with nothing else on were standby");++passed;}
-    // Field (TOTB-SS, Intel graphics and three other display adapters): QDC_ALL_PATHS lists
+    // Field (a PC with Intel graphics and three other display adapters): QDC_ALL_PATHS lists
     // hundreds of inactive paths (sources x targets per adapter) and may omit the active mode
     // records. Neither keeps standby away; the bound is the CCD query's (4096).
     {auto many=all;for(UINT32 n=0;n<600;++n){DISPLAYCONFIG_PATH_INFO path{};path.targetInfo.targetAvailable=n%3!=0;path.targetInfo.adapterId={900+n/40,0};path.targetInfo.id=n%40;path.sourceInfo.adapterId=path.targetInfo.adapterId;path.sourceInfo.id=n%8;many.push_back(path);}

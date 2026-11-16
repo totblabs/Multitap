@@ -261,6 +261,8 @@ Future<void> _app(
         ]),
       ),
       updatePlatform: FakePlatform(),
+      // Layout cases: the sign-in update panel is its own test.
+      offerUpdates: false,
       hostUpdateReleaseLoader: (_) async => _hostRelease,
     ),
   );

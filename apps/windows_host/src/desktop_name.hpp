@@ -1,6 +1,6 @@
 #pragma once
 // The VM's name as the broker knows it (the Proxmox / administrator name the
-// clients show, e.g. "Code-agent"). The broker sends it in
+// clients show, e.g. "Design-01"). The broker sends it in
 // host.capabilities.ack as desktopName; the service keeps it here so Host
 // settings can title the overview with it instead of the desktop id.
 // A missing or unreadable file means "unknown": the settings

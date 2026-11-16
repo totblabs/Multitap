@@ -38,11 +38,11 @@ Map<String, dynamic> _autologon(String state, {String account = 'ToTB'}) => {
   'loggedIn': true,
 };
 
-// The desktop of the mockup: the VM "Code-agent" (pve-173) on vdi.example.com,
+// The desktop of the mockup: the VM "Design-01" (pve-173) on vdi.example.com,
 // signed in as ToTB with automatic login, its virtual screen ready.
 Map<String, dynamic> _desktop() => {
   'version': '1.0.51',
-  'desktopName': 'Code-agent',
+  'desktopName': 'Design-01',
   'desktopId': 'pve-173',
   'serverOrigin': 'https://vdi.example.com',
   'broker': _online,
@@ -120,13 +120,13 @@ void main() {
   ) async {
     final api = _ready();
     await show(t, api);
-    expect(text(t, 'host-connection-heading'), 'Code-agent');
+    expect(text(t, 'host-connection-heading'), 'Design-01');
     expect(pill(t).label, '스트리밍할 수 있어요');
     expect(pill(t).state, _ok);
     expect(text(t, 'host-machine-line'), 'Proxmox VM · pve-173');
     // Three points, two legs, all carrying; no "정상" on the rows.
     expect(states(t), [_ok, _ok, _ok, _ok, _ok]);
-    expect(route(t).points.map((p) => p.name), ['Code-agent', '서버', '클라이언트']);
+    expect(route(t).points.map((p) => p.name), ['Design-01', '서버', '클라이언트']);
     expect(route(t).points.map((p) => p.detail), [
       'ToTB · 자동 로그인',
       'vdi.example.com · 방금 확인',
@@ -310,9 +310,9 @@ void main() {
     t,
   ) async {
     const id = 'pc-0a1b2c3d-1111-4222-8333-444455556666';
-    final api = _ready({'desktopName': 'TOTB-GAMING', 'desktopId': id});
+    final api = _ready({'desktopName': 'Studio-PC', 'desktopId': id});
     await show(t, api);
-    expect(text(t, 'host-connection-heading'), 'TOTB-GAMING');
+    expect(text(t, 'host-connection-heading'), 'Studio-PC');
     expect(text(t, 'host-machine-line'), '로컬 PC');
     expect(pill(t).label, '스트리밍할 수 있어요');
     expect(find.textContaining('VM'), findsNothing);
@@ -323,7 +323,7 @@ void main() {
     await show(
       t,
       _ready({
-        'desktopName': 'TOTB-GAMING',
+        'desktopName': 'Studio-PC',
         'desktopId': id,
         'interactiveSession': false,
       }),
@@ -361,7 +361,7 @@ void main() {
 
     const id = 'pc-0a1b2c3d-1111-4222-8333-444455556666';
     final api =
-        _ready({'desktopName': 'TOTB-GAMING', 'desktopId': id})
+        _ready({'desktopName': 'Studio-PC', 'desktopId': id})
           ..recoveryRequired = true
           ..devices = {
             'schema': 1,

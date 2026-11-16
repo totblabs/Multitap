@@ -117,6 +117,7 @@ class WorkspaceShell extends StatefulWidget {
     this.onHostBatchUpdate,
     this.loadHostRelease,
     this.checkClientUpdate,
+    this.offerClientUpdate = false,
     this.onFavorite,
     this.groups,
     this.onSaveGroups,
@@ -158,6 +159,11 @@ class WorkspaceShell extends StatefulWidget {
   /// while signed in; it never downloads. A read that failed throws: the
   /// badge keeps what it showed.
   final Future<String?> Function()? checkClientUpdate;
+
+  /// 로그인 때 앱 업데이트 알림 (2026-11-16): the first newer client version
+  /// this sign-in finds opens the update panel once, over the desktop list
+  /// only. 나중에 leaves the header's 새 버전 badge for the rest of it.
+  final bool offerClientUpdate;
 
   /// The offered Host release with its changelog; defaults to this server's
   /// public download catalog.
@@ -313,6 +319,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   AppLifecycleListener? _previewLifecycle;
   String? _clientUpdate;
   bool _updatePanelOpen = false;
+  // The update panel was offered once in this sign-in (offerClientUpdate).
+  bool _clientUpdateOffered = false;
   bool _clientInfoOpen = false;
   Timer? _updateClock;
   StreamSubscription<void>? _catalogPush;
@@ -778,6 +786,41 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
     if (mounted && version != _clientUpdate) {
       setState(() => _clientUpdate = version);
+    }
+    if (mounted) _offerClientUpdate();
+  }
+
+  /// Once per sign-in, when a newer version is known and nothing else is open
+  /// over the list (a dialog or another route waits for the next check).
+  void _offerClientUpdate() {
+    if (!widget.offerClientUpdate ||
+        widget.isDemo ||
+        _clientUpdateOffered ||
+        _clientUpdate == null ||
+        _updatePanelOpen) {
+      return;
+    }
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    _clientUpdateOffered = true;
+    unawaited(_openClientUpdates());
+  }
+
+  /// The app's update panel (Host updates have their own header button). Its
+  /// own check is current; the badge is read again afterwards.
+  Future<void> _openClientUpdates() async {
+    if (_updatePanelOpen) return;
+    _updatePanelOpen = true;
+    try {
+      await showProductUpdates(
+        context,
+        server: widget.serverOrigin,
+        product: 'client',
+        currentVersion: clientProductVersion,
+      );
+    } finally {
+      _updatePanelOpen = false;
+      if (mounted) unawaited(_checkClientUpdate());
     }
   }
 
@@ -2267,23 +2310,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         ? runningClientBuild.label
         : 'v${runningClientBuild.version}';
     final hostUpdates = _hostUpdates;
-    // The panel's own check is current; read the badge again afterwards.
-    Future<void> updates() async {
-      if (_updatePanelOpen) return;
-      _updatePanelOpen = true;
-      try {
-        // The app only: Host updates have their own header button.
-        await showProductUpdates(
-          context,
-          server: widget.serverOrigin,
-          product: 'client',
-          currentVersion: clientProductVersion,
-        );
-      } finally {
-        _updatePanelOpen = false;
-        if (mounted) unawaited(_checkClientUpdate());
-      }
-    }
+    Future<void> updates() => _openClientUpdates();
 
     return WorkspaceHeader(
       sessionAccess: widget.sessionAccess,

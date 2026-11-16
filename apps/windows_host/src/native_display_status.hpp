@@ -134,7 +134,7 @@ inline DisplayState nativeDisplayStatus(bool standbyAllowed=false){
 // Would the owned outputs be standby once off? The same check
 // (nativeStandbyMonitors) on the current CCD with the owned paths taken off. The
 // at-rest probe puts outputs off only then: Host 1.1.20 put them off where
-// standby was not recognised (TOTB-SS, TOTB-WORK, 2026-11-15) and nothing
+// standby was not recognised (two field PCs, 2026-11-15) and nothing
 // switched them on again, so those desktops could not be connected to.
 inline bool nativeStandbyPossible(std::span<const NativeDisplayTarget> targets){
 #ifndef MULTITAP_NATIVE_DISPLAY

@@ -2672,6 +2672,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
                 _previewOpen || _origin == null || widget.updateCheck == null
                 ? null
                 : () => widget.updateCheck!(_origin.toString()),
+            offerClientUpdate: !_previewOpen,
           )
         : Builder(
             builder: (loginContext) => SignInScreen(

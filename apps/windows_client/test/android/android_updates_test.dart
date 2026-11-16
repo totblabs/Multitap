@@ -848,23 +848,35 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('login-submit')));
     await tester.pumpAndSettle();
-    // The fake catalog body is delivered outside the test's fake clock.
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 100)),
-    );
+    // The fake catalog body is delivered outside the test's fake clock. A
+    // newer release opens the update panel, whose own read is delivered the
+    // same way before the screen can settle.
+    for (var round = 0; round < 3; round++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+    }
     await tester.pumpAndSettle();
     return transport;
   }
 
   testWidgets(
-    'after sign-in a newer APK badges the header and opens the panel',
+    'after sign-in a newer APK opens the panel once, badges the header and opens the panel again on request',
     (tester) async {
       final transport = await signedIn(tester, [
         apk('0.1.0-preview.5', 'arm64-v8a', changelog: '새 기능'),
       ]);
+      // 로그인 때 앱 업데이트 알림 (2026-11-16): the sign-in opens the panel by itself.
+      expect(find.byKey(const Key('android-update-panel')), findsOneWidget);
+      expect(find.text('새 기능'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('android-update-panel-close')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('android-update-panel')), findsNothing);
       expect(find.byKey(const Key('client-update-badge')), findsOneWidget);
       expect(find.text('새 버전 0.1.0-preview.5'), findsNothing); // compact bar
-      expect(transport.requested.map((u) => u.path), ['/api/v1/downloads']);
+      expect(transport.requested.map((u) => u.path).toSet(), {'/api/v1/downloads'});
+      // Asked for again from the header, it opens as before.
       await tester.tap(find.byKey(const Key('android-update-check')));
       await tester.pump(const Duration(milliseconds: 300));
       await tester.runAsync(

@@ -12,6 +12,7 @@ import 'package:multitap_client/ui/app_dialog.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 import 'package:multitap_client/ui/components.dart';
 import 'package:multitap_client/ui/korean_text.dart';
+import 'package:multitap_client/ui/product_update_dialog.dart';
 import 'package:multitap_client/ui/workspace_shell.dart';
 
 const _origin = 'https://private-broker.example.com';
@@ -37,6 +38,7 @@ Future<void> _show(
   double scale = 1,
   GlobalKey? boundary,
   Future<String?> Function()? checkClientUpdate,
+  bool offerClientUpdate = false,
   AppAppearance? appearance,
   bool remoteWindows = false,
 }) async {
@@ -75,6 +77,7 @@ Future<void> _show(
                 throw StateError('UI fixture does not connect'),
             onPower: (_, _) async {},
             checkClientUpdate: checkClientUpdate,
+            offerClientUpdate: offerClientUpdate,
             onOpenWindow: remoteWindows ? (_, _, _) async => null : null,
           ),
         ),
@@ -198,6 +201,48 @@ void main() {
       );
       expect(badge, findsOneWidget);
       expect(find.byTooltip('앱 새 버전 v0.4.99'), findsOneWidget);
+      expect(t.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A sign-in that finds a newer client opens the update panel once; 나중에 keeps the badge',
+    (t) async {
+      // 로그인 때 앱 업데이트 알림 (2026-11-16).
+      var checks = 0;
+      await _show(
+        t,
+        onSignOut: () {},
+        offerClientUpdate: true,
+        checkClientUpdate: () async {
+          checks++;
+          return '0.4.99';
+        },
+      );
+      expect(find.byType(ProductUpdateDialog), findsOneWidget);
+      await t.tap(find.byKey(const Key('close-product-update')));
+      await t.pumpAndSettle();
+      expect(find.byType(ProductUpdateDialog), findsNothing);
+      expect(find.byKey(const Key('client-update-badge')), findsOneWidget);
+      // Later checks of the same sign-in do not open it again.
+      final before = checks;
+      await t.pump(const Duration(minutes: 10));
+      await t.pumpAndSettle();
+      expect(checks, greaterThan(before));
+      expect(find.byType(ProductUpdateDialog), findsNothing);
+      // The header still opens it on request.
+      await t.tap(find.byKey(const Key('check-client-updates')));
+      await t.pumpAndSettle();
+      expect(find.byType(ProductUpdateDialog), findsOneWidget);
+      await t.tap(find.byKey(const Key('close-product-update')));
+      await t.pumpAndSettle();
+      await t.pumpWidget(const SizedBox.shrink());
+      // Nothing newer: nothing opens. Not asked for: nothing opens either.
+      await _show(t, onSignOut: () {}, offerClientUpdate: true, checkClientUpdate: () async => null);
+      expect(find.byType(ProductUpdateDialog), findsNothing);
+      await t.pumpWidget(const SizedBox.shrink());
+      await _show(t, onSignOut: () {}, checkClientUpdate: () async => '0.4.99');
+      expect(find.byType(ProductUpdateDialog), findsNothing);
       expect(t.takeException(), isNull);
     },
   );

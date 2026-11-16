@@ -4,6 +4,7 @@
 
 The server, the Host and the clients are updated separately.
 A badge only tells you a new version exists; the install starts when you choose it.
+When you sign in and a newer app exists, the app opens the update window once. Closing it keeps only the badge for the rest of that sign-in.
 
 ## What do you update?
 
@@ -272,7 +273,7 @@ If the time ran out, or you clicked **Stop waiting**, click **Reconnect** after 
 
 ## Windows client
 
-1. Click the **New version** mark above the list, or the check for updates button.
+1. Continue in the update window that opened at sign-in, or click the **New version** mark above the list or the check for updates button.
 2. Read the changes.
 3. Click **Get update**.
 4. When the file check is done, click **Restart to update**.
@@ -284,7 +285,7 @@ When the app opens again after the update, check the new version.
 
 ## Android client
 
-1. Tap **Check for updates** above the list.
+1. Continue in the update window that opened at sign-in, or tap **Check for updates** above the list.
 2. Read the changes and tap **Update**.
 3. Tap **Download and install**.
 4. If you see a notice about allowing installs, tap **Open settings**.

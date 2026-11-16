@@ -73,6 +73,8 @@ void main() {
             ? null
             : (o) => AndroidUpdates(o, transport: transport),
         updatePlatform: FakePlatform(),
+        // The header badge and catalog reads; the sign-in panel is its own test.
+        offerUpdates: false,
       ),
     );
     await tester.pumpAndSettle();

@@ -16,7 +16,7 @@ import 'helpers/stream_connect_consent.dart' show acceptStreamConnect;
 import 'session_recovery_test.dart' show mockPresentation;
 
 DesktopMachine _machine({bool pending = false, bool off = false}) => DesktopMachine(
-  id: 'qa', name: 'ToTBCode', description: '', kind: MachineKind.vm,
+  id: 'qa', name: 'Dev-VM', description: '', kind: MachineKind.vm,
   status: off ? MachineStatus.poweredOff : MachineStatus.ready,
   specification: 'Windows', accent: Colors.blue, hostOnline: !off,
   interactiveSession: !off, virtualDisplayReady: !off,
@@ -92,7 +92,7 @@ void main() {
         await f.enter(t, entry);
         final dialog = find.byKey(const Key('connect-confirm-dialog'));
         expect(dialog, findsOneWidget, reason: 'Idle and occupied fresh stream intents both require the first question');
-        expect(find.text('ToTBCode에 연결할까요?'), findsOneWidget);
+        expect(find.text('Dev-VM에 연결할까요?'), findsOneWidget);
         expect((f.opens, f.connects), (0, 0));
         expect(find.byKey(const Key('cancel-start-qa')), findsNothing);
         await t.tap(find.byKey(const Key('cancel-connect-qa')));

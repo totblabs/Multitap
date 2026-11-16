@@ -90,6 +90,7 @@ class AndroidVdiApp extends StatefulWidget {
     this.apiFactory,
     this.updatesFactory,
     this.updatePlatform,
+    this.offerUpdates = true,
     this.hostUpdateReleaseLoader,
     this.television,
     this.hardwareKeyboard,
@@ -121,6 +122,10 @@ class AndroidVdiApp extends StatefulWidget {
   /// Tests substitute the catalog/download and the native installer side.
   final AndroidUpdates Function(Uri origin)? updatesFactory;
   final AndroidUpdatePlatform? updatePlatform;
+
+  /// 로그인 때 앱 업데이트 알림 (2026-11-16): a sign-in that finds a newer app
+  /// opens the update panel once. Off only in tests of other things.
+  final bool offerUpdates;
   @override
   State<AndroidVdiApp> createState() => _AndroidVdiAppState();
 }
@@ -348,6 +353,7 @@ class _AndroidVdiAppState extends State<AndroidVdiApp>
           apiFactory: widget.apiFactory,
           updatesFactory: widget.updatesFactory,
           updatePlatform: widget.updatePlatform,
+          offerUpdates: widget.offerUpdates,
           hostUpdateReleaseLoader: widget.hostUpdateReleaseLoader,
           desktopWatchFactory: widget.desktopWatchFactory,
           sessionRetryDelay: widget.sessionRetryDelay,
@@ -437,6 +443,7 @@ class AndroidHome extends StatefulWidget {
     this.apiFactory,
     this.updatesFactory,
     this.updatePlatform,
+    this.offerUpdates = true,
     this.hostUpdateReleaseLoader,
     this.desktopWatchFactory,
     this.sessionRetryDelay = const Duration(seconds: 15),
@@ -466,6 +473,10 @@ class AndroidHome extends StatefulWidget {
   final BrokerApi Function(Uri origin)? apiFactory;
   final AndroidUpdates Function(Uri origin)? updatesFactory;
   final AndroidUpdatePlatform? updatePlatform;
+
+  /// 로그인 때 앱 업데이트 알림 (2026-11-16): a sign-in that finds a newer app
+  /// opens the update panel once. Off only in tests of other things.
+  final bool offerUpdates;
   @override
   State<AndroidHome> createState() => _AndroidHomeState();
 }
@@ -610,6 +621,9 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
   StreamSubscription<String>? _installStatus;
   AndroidRelease? _update;
   bool _updateChecking = false;
+  // 로그인 때 앱 업데이트 알림 (2026-11-16): the update panel was offered once
+  // in this sign-in.
+  bool _updateOffered = false;
   String? _abi;
 
   // --- search, 분류 and sort (as on Windows) ---------------------------------
@@ -2188,6 +2202,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
 
   /// The account's feeds stop; its pushed samples and pictures leave memory.
   void _stopUpdateChecks() {
+    _updateOffered = false;
     _pushed.clear();
     _previews.stop();
     _updateTimer?.cancel();
@@ -2217,6 +2232,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       final release = await updates.check(version, abi);
       if (!mounted || _origin != origin || scope != _serverRevision) return;
       setState(() => _update = release);
+      _offerUpdate();
     } catch (_) {
       // A failed background check keeps the last answer; the panel's own
       // check says why when the user opens it.
@@ -2264,6 +2280,24 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       if (version == null) _update = null;
     });
     return version;
+  }
+
+  /// 로그인 때 앱 업데이트 알림 (2026-11-16): the first newer app version a
+  /// sign-in finds opens the update panel once, over the desktop list only
+  /// (a connection or another window waits for the next check). 나중에
+  /// leaves the header's badge for the rest of the sign-in.
+  void _offerUpdate() {
+    if (!widget.offerUpdates ||
+        _updateOffered ||
+        _update == null ||
+        _session == null ||
+        !_foreground) {
+      return;
+    }
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    _updateOffered = true;
+    unawaited(_openUpdate());
   }
 
   /// The update panel: running and newest version, the notes and the whole

@@ -6,7 +6,7 @@ import 'package:multitap_client/ui/desktop_tile.dart';
 Map<String, dynamic> vm(String os) => {
   'id': 'pve-170',
   'kind': 'vm',
-  'name': 'ToTBCode',
+  'name': 'Dev-VM',
   'description': '',
   'os': os,
   'status': 'online',

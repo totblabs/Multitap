@@ -16,7 +16,7 @@ import '../helpers/stream_connect_consent.dart' show acceptStreamConnect;
 import 'android_launcher_test.dart' show FakeBroker, MemoryStore, mainButton;
 
 BrokerDesktop _desktop({bool pending = false, bool off = false}) => BrokerDesktop(
-  id: 'pve-149', name: 'ToTBCode', kind: 'vm', description: '', os: 'Windows',
+  id: 'pve-149', name: 'Dev-VM', kind: 'vm', description: '', os: 'Windows',
   status: off ? 'powered_off' : 'online', canConnect: !off, canStream: !pending && !off,
   hostConnected: !off, interactiveSession: !off, virtualDisplayReady: !off,
   power: BrokerPowerSnapshot(state: off ? 'stopped' : 'running', stale: false),
@@ -106,7 +106,7 @@ void main() {
         await f.enter(t, entry);
         final dialog = find.byKey(const Key('connect-confirm-dialog'));
         expect(dialog, findsOneWidget, reason: 'Idle and occupied fresh stream intents both require the first question');
-        expect(find.text('ToTBCode에 연결할까요?'), findsOneWidget);
+        expect(find.text('Dev-VM에 연결할까요?'), findsOneWidget);
         expect(f.connects, 0);
         expect(find.byType(AndroidRemoteView), findsNothing);
         expect(find.byKey(const Key('cancel-start-pve-149')), findsNothing);

@@ -152,7 +152,7 @@ inline std::vector<VirtualMonitor> nativeDisplayMonitors(
 // displays. [all] is bounded like every CCD query (nativeCcdQueryPathLimit,
 // 4096): it lists sources x targets of every adapter, hundreds with a few
 // display adapters, and the 256 bound of Host 1.1.17-1.1.20 refused standby
-// there (TOTB-SS: Intel graphics and three other display adapters, 2026-11-15).
+// there (a field PC with Intel graphics and three other display adapters, 2026-11-15).
 // [miss]: why not (NativeStandbyMiss), for the field record.
 namespace nativeStandbyMiss {
 inline constexpr uint32_t none=0,targets=1,tooMany=2,ownedOn=3,ownedUnavailable=4,nothingElse=5,query=6;
