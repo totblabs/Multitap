@@ -440,6 +440,35 @@ test('Revoking usbDevices closes the channel but not the stream; revoking a clas
   assert.equal(controller.readyState, WebSocket.OPEN, 'the stream stays');
 });
 
+test('Granting usbDevices during a stream is counted for the administrator as reaching it with the next connection', async t => {
+  const f = await fixture(t, {}); const host = await f.host(usbHost);
+  const { sessionId, controller } = await f.stream(host, { usbProtocol: 'usb-v1' });
+  assert.equal(f.relay().sessions.get(sessionId).usb, false, 'no grant at connect: no USB address');
+  const aliceId = f.store.findUser('alice').id;
+  // Nothing newly allowed: nothing to tell.
+  assert.equal(f.relay().devicePolicyChanged(aliceId), 0);
+  // The grant arrives through the administrator's desktop sharing route: its answer says one stream needs a reconnect.
+  const granted = await f.call('/admin/desktops/pve-183/permissions', { ...f.admin, method: 'PUT', data: { permissions: [{ username: 'alice', expectedAccountId: aliceId, devicePolicy: { ...deny, usbDevices: true } }] } });
+  assert.equal(granted.status, 200, JSON.stringify(granted.body));
+  assert.equal(granted.body.devicesAfterReconnect, 1);
+  assert.equal(f.relay().sessions.get(sessionId).usb, false, 'the running stream still has no USB channel');
+  assert.equal(controller.readyState, WebSocket.OPEN, 'the stream stays');
+  // Taking it back again: nothing to tell, and the answer keeps its earlier shape.
+  const revoked = await f.call('/admin/desktops/pve-183/permissions', { ...f.admin, method: 'PUT', data: { permissions: [{ username: 'alice', expectedAccountId: aliceId, devicePolicy: { ...deny } }] } });
+  assert.equal(revoked.status, 200, JSON.stringify(revoked.body));
+  assert.equal(revoked.body.devicesAfterReconnect, undefined);
+});
+
+test('A stream that did not ask for USB, or already has it, is not counted when usbDevices is granted', async t => {
+  const f = await fixture(t, {}); const host = await f.host(usbHost);
+  await f.stream(host, {});
+  f.setPolicy({ usbDevices: true });
+  assert.equal(f.relay().devicePolicyChanged(f.store.findUser('alice').id), 0, 'the client never asked for USB');
+  const g = await fixture(t, { usbDevices: true }); const other = await g.host(usbHost);
+  await g.stream(other, { usbProtocol: 'usb-v1' });
+  assert.equal(g.relay().devicePolicyChanged(g.store.findUser('alice').id), 0, 'the stream has its USB channel already');
+});
+
 test('A second channel generation is refused after close, and ending the session ends the channel', async t => {
   const f = await fixture(t); const host = await f.host(usbHost);
   const { sessionId, controller } = await f.stream(host, { usbProtocol: 'usb-v1' });

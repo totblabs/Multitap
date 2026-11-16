@@ -107,10 +107,11 @@ function saveSharing(ctx, entries, request, text) {
     for (const entry of entries) requireAccountOwner(ctx, entry.owner);
     ctx.state.assignmentSaving = true; ctx.render();
     try {
-      await request(entries); action.check();
+      const reply = await request(entries); action.check();
       await ctx.refresh(); action.check();
       markSaved(ctx, entries.map(entry => `${entry.owner.id}:${entry.desktop.id}`));
-      ctx.notice(t('permissions.27') + text(entries));
+      // A device channel newly allowed reaches a stream that is already connected with its next connection.
+      ctx.notice(t('permissions.27') + text(entries) + (reply?.devicesAfterReconnect > 0 ? '\n' + t('permissions.52') : ''));
     } finally { if (action.current()) { ctx.state.assignmentSaving = false; if (ctx.state.user) ctx.render(); } }
   };
   const losing = entries.map(entry => ({ ...entry, off: turnedOff(entry.before, entry.after) })).filter(entry => entry.off.clipboard || entry.off.devices.length);

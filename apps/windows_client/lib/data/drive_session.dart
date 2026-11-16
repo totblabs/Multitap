@@ -140,6 +140,12 @@ class DriveSession extends ChangeNotifier {
   bool _adding = false;
   int requests = 0, failedRequests = 0, active = 0;
 
+  /// File calls running per folder, and the calls waiting for one of its
+  /// [drivePerFolderRunning] turns (completed with true to run, false when
+  /// the session ends first).
+  final _running = <String, int>{};
+  final _waiting = <String, List<Completer<bool>>>{};
+
   /// One terminal reply per admitted action, retained until both the actual
   /// action and its deadline observer finish. Admission bounds this map too.
   final _replyOwners = <int, _ReplyOwner>{};
@@ -756,10 +762,31 @@ class DriveSession extends ChangeNotifier {
     active++;
     final owner = _ReplyOwner();
     _replyOwners[id] = owner;
+    // One folder takes at most drivePerFolderRunning native workers while
+    // other folders are shared; the rest of its calls wait for a turn. A
+    // call whose deadline passed while it waited was already answered as a
+    // failure and never runs (a write must not land after "failed").
+    var answered = false;
+    Future<void> turn() async {
+      if (_shares.length > 1 &&
+          (_running[share] ?? 0) >= drivePerFolderRunning) {
+        final wait = Completer<bool>();
+        (_waiting[share] ??= []).add(wait);
+        if (!await wait.future) return;
+      } else {
+        _running[share] = (_running[share] ?? 0) + 1;
+      }
+      try {
+        if (!answered) await action();
+      } finally {
+        _leave(share);
+      }
+    }
+
     // A deadline ends the wire waiter, while native I/O can still be running.
     // Keep its admission slot until that original action actually settles,
     // including a late failure or a session that has already been closed.
-    final operation = Future<void>.sync(action).whenComplete(() {
+    final operation = Future<void>.sync(turn).whenComplete(() {
       active--;
       owner.actualDone = true;
       _forgetReplyOwner(id, owner);
@@ -770,6 +797,7 @@ class DriveSession extends ChangeNotifier {
         if (item.id == share) item.stalls = 0;
       }
     } on TimeoutException {
+      answered = true;
       // The folder hangs (a network share that stopped answering). Answered
       // now so the relay never reaches its own 60 s limit and ends every
       // drive; after two in a row the folder counts as offline until it
@@ -788,6 +816,24 @@ class DriveSession extends ChangeNotifier {
     } finally {
       owner.observerDone = true;
       _forgetReplyOwner(id, owner);
+    }
+  }
+
+  /// A file call of [share] ended: its turn passes to the oldest waiting
+  /// call of that folder, or the folder runs one call fewer.
+  void _leave(String share) {
+    final queue = _waiting[share];
+    if (queue != null && queue.isNotEmpty) {
+      final next = queue.removeAt(0);
+      if (queue.isEmpty) _waiting.remove(share);
+      next.complete(true);
+      return;
+    }
+    final left = (_running[share] ?? 1) - 1;
+    if (left > 0) {
+      _running[share] = left;
+    } else {
+      _running.remove(share);
     }
   }
 
@@ -1265,6 +1311,12 @@ class DriveSession extends ChangeNotifier {
     _readyTimer?.cancel();
     _folderTimer?.cancel();
     _snapshots.clear();
+    // Calls still waiting for a folder's turn never run on a closed session.
+    final waiting = [for (final queue in _waiting.values) ...queue];
+    _waiting.clear();
+    for (final wait in waiting) {
+      wait.complete(false);
+    }
     unawaited(_subscription?.cancel());
     final socket = _socket;
     _socket = null;

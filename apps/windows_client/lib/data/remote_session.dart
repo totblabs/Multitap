@@ -1337,8 +1337,13 @@ class RemoteSession extends ChangeNotifier {
 
   void _sendPing(int now) {
     final tiles = _losslessTilesSession;
-    _ping =
-        '${tiles ? (_losslessPaused ? losslessTilesPausePrefix : losslessTilesPingPrefix) : ''}${++_nonce}';
+    // An engine that stopped compositing after the opt-in (Android: a later
+    // start whose video is downscaled) pauses the tiles as 마우스 잠금 does;
+    // the Host keeps the opt-in for the whole session otherwise.
+    final prefix = tiles
+        ? (_losslessPaused ? losslessTilesPausePrefix : losslessTilesPingPrefix)
+        : (_losslessOffered ? losslessTilesPausePrefix : '');
+    _ping = '$prefix${++_nonce}';
     _pingUs = now;
     _send({'type': 'ping', 'id': _ping!});
   }

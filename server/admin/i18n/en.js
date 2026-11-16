@@ -2235,6 +2235,7 @@ export default {
   "permissions.49": "Allow files {direction}",
   "permissions.50": "Rarely used (smart cards · COM ports)",
   "permissions.51": "Turning on copy and paste applies at once, also during a connection (apps 1.1.13 and later); anything else you turn on applies from the next connection.\nTurning off copy and paste ends active connections and transfers on that desktop.\nTurning off printers, shared folders or USB keeps the connection and removes only that device. Files already received are not deleted.",
+  "permissions.52": "Anyone connected now gets the newly allowed USB, shared folders or printers after reconnecting.",
   "resources.1": "{days}d {value}h",
   "resources.2": "{hours}h {value}m",
   "common.145": "Under 1 min",

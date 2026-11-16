@@ -104,11 +104,20 @@ class AndroidRemoteMedia extends NativeRemoteMedia
     if (stats['audioOpusUnusable'] == true) opusDecodable = false;
   }
 
+  /// ToTBSeamless lossless tiles: true while the engine of the current start
+  /// draws tiles over its video (stats `losslessComposite`: GL on this device
+  /// and the video at its source size). The session opts in only then, and
+  /// asks the Host to stop sending them (lt0-) when a later start cannot.
+  @override
+  bool get losslessTiles => _losslessComposite;
+  bool _losslessComposite = false;
+
   @override
   Future<Map<String, dynamic>> stats() async {
     final result = await super.stats();
     diagnostics = result;
     observeAudio(result);
+    _losslessComposite = result['losslessComposite'] == true;
     return result;
   }
 
@@ -182,6 +191,7 @@ class AndroidRemoteMedia extends NativeRemoteMedia
   @override
   Future<void> stop() {
     cursorState.reset();
+    _losslessComposite = false;
     return super.stop();
   }
 

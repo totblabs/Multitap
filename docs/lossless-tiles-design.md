@@ -162,6 +162,34 @@ client, C++17).
   Flutter scale whatever texture size it gets, so no Dart change is needed.
   Tracks are never scaled (the compositor refuses a different size there).
 
+## Android client
+
+- MediaCodec decodes into a Surface, so there is no CPU frame to write tiles
+  into. `AndroidTileRenderer` sits between the decoder and the Flutter
+  texture: the decoder renders into the renderer's own SurfaceTexture, and
+  each latched frame is drawn into the texture's Surface by one GLES 2 pass
+  (video, or the tile's exact pixels where the tile mask says present). Tile
+  pixels and the mask go to the GPU only when tiles arrive or change.
+- `LosslessTiles.kt` is a line-for-line Kotlin port of the TQ1 decoder and
+  the compositor's state (no RGBA layer: the GPU texture is the layer). No
+  NDK in the APK. `LosslessTilesTest` decodes payloads made by the C++
+  `PayloadBuilder` and compares present tiles and composed pixels with the
+  C++ `Compositor` (`apps/windows_client/test/native/lossless_tiles_vectors.cpp`
+  writes the fixture).
+- Drops apply by the latched frame's pts: since Android 6 a rendered output
+  buffer carries its presentation time as the SurfaceTexture timestamp.
+  `LosslessFrameOrder` checks it against the frames the pacer rendered; any
+  other value poisons the tiles (plain video).
+- Republish: adds with no video frame behind them (none received and not yet
+  latched within 16 ms, three checks) redraw the latched picture with them,
+  only when the pacer lets one more frame go to Flutter.
+- Each start (and each output of tracks-v1) has its own renderer and
+  compositor. Only a start whose video is the source size composites; a
+  downscaled start, or a device without a usable GL context, renders
+  directly as before. Stats `losslessComposite` says which: the session opts
+  in (`lt1-`) only while it is true and pauses (`lt0-`) after an opt-in when
+  it turns false.
+
 ## Scaled video
 
 The Host encodes a viewport at its own size unless it exceeds the negotiated

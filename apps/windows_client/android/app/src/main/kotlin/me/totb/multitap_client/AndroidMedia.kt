@@ -80,6 +80,15 @@ import kotlin.math.roundToInt
  * stream.keyframe), but no frame is rendered to the texture: the newest one
  * is held and rendered when the app is visible again (AndroidFramePacer).
  * Audio plays on as before, at the volume its audio focus allows (AndroidAudioFocus: muted during a call).
+ *
+ * tiles-v1 (docs/lossless-tiles-design.md): a start at the video's own size
+ * puts AndroidTileRenderer between the decoder and the texture. The decoder
+ * renders into the renderer's surface; each latched frame gets its due drops
+ * (by its pts) and every present lossless tile, drawn on the GPU into the
+ * texture. Tile packets never reach the decoder. Adds with no video frame
+ * behind them are republished: the shown picture drawn again with them, when
+ * the pacer lets one more frame go to Flutter. Stats `losslessComposite`
+ * says whether this engine draws tiles; the session opts in only then.
  */
 class AndroidMedia internal constructor(private val activity: MainActivity, private val engine: FlutterEngine, private val gate: UdpPathGate,
     private val registerChannels: Boolean = true) {
@@ -187,9 +196,26 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     private val arrivalRecent = RecentWindow()
     private val presentRecent = RecentWindow()
 
+    // tiles-v1 (LosslessTiles.kt): the GPU renderer between the decoder and
+    // the Flutter texture, and the tiles it shows; null when this start
+    // cannot composite them (a scaled source, or no GL on this device).
+    private var renderer: AndroidTileRenderer? = null
+    private var tiles: LosslessCompositor? = null
+    private val tileOrder = LosslessFrameOrder()
+    /** Added tiles wait for a republish the pacer did not allow yet. */
+    private var republishDue = false
+    private var republishChecks = 0
+    private var losslessPackets = 0L
+    private var losslessIgnored = 0L
+    private var losslessTimestampMismatches = 0L
+    private var losslessPacketNanos = 0L
+    /** stats `losslessComposite`: this start's engine shows tiles (the session opts in only then). */
+    @Volatile private var losslessComposite = false
+    private val republishCheck = Runnable { checkRepublish() }
+
     private val frames = object : AndroidFrameSink {
-        override fun render(frame: Int) { decoder?.releaseOutputBuffer(frame, true) }
-        override fun discard(frame: Int) { decoder?.releaseOutputBuffer(frame, false) }
+        override fun render(frame: Int) { tileOrder.rendered(frame); decoder?.releaseOutputBuffer(frame, true) }
+        override fun discard(frame: Int) { tileOrder.discarded(frame); decoder?.releaseOutputBuffer(frame, false) }
     }
     private val pacingCheck = Runnable {
         checkPosted = false
@@ -235,6 +261,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             else {
                 try { pacer.foreground(System.nanoTime(), frames) } catch (_: Exception) { fail(lease) }
                 scheduleCheck()
+                if (republishDue) republish()
             }
         }
     }
@@ -521,7 +548,11 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
                 if (disposed || trackState !== state || !ownership.owns(state.lease)) { result.error("session_replaced", null, null); return@post }
                 val primary = state.lanes.first { it.track.primary }
                 val value = HashMap(readings.getValue(primary.track.id))
-                for (key in listOf("decodedFrames", "textureFrames", "decodeCalls", "queuedPackets", "queuedBytes", "skippedDecodedFrames")) {
+                // tiles-v1: the session opts in only while every output's engine draws tiles.
+                value["losslessComposite"] = readings.values.all { it["losslessComposite"] == true }
+                value["losslessPoisoned"] = readings.values.any { it["losslessPoisoned"] == true }
+                for (key in listOf("decodedFrames", "textureFrames", "decodeCalls", "queuedPackets", "queuedBytes", "skippedDecodedFrames",
+                    "losslessPackets", "losslessIgnoredPackets", "losslessRepublishes", "losslessPresentTiles", "losslessTimestampMismatches")) {
                     value[key] = readings.values.sumOf { (it[key] as? Number)?.toLong() ?: 0L }
                 }
                 for (key in listOf("decodeTotalMs", "decodeBusyMs")) value[key] = readings.values.sumOf { (it[key] as? Number)?.toDouble() ?: 0.0 }
@@ -621,6 +652,13 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             }
             closeEngine(); audioEnabled = nextAudioEnabled; audioOpus = nextAudioOpus
             texture = entry; surface = nextSurface; width = w; height = h; targetFps = track.fps; allowHardware = request.hardware; exactSizes = exact
+            // tiles-v1 over this start's video: only at the video's own size
+            // (a downscaled stream's tiles describe a larger source).
+            val unscaled = (track.sourceWidth ?: w) == w && (track.sourceHeight ?: h) == h
+            renderer = if (!unscaled) null else try { AndroidTileRenderer.create(nextSurface, w, h, worker, ::tileFrame) } catch (_: Exception) { null }
+            tiles = renderer?.let { LosslessCompositor(w, h) }
+            losslessComposite = renderer != null
+            losslessPackets = 0; losslessIgnored = 0; losslessTimestampMismatches = 0; losslessPacketNanos = 0
             decoded = 0; droppedPackets = 0
             error = 0; decodeCalls = 0; decodeMs = 0.0; decodeMaxMs = 0.0; clock.resetBusy()
             decodeRecent.reset(); arrivalRecent.reset(); presentRecent.reset()
@@ -685,6 +723,17 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             "texturePacing" to pacer.gated,
             "texturePath" to TEXTURE_PATH_SURFACE,
             "displayHz" to displayHz(),
+            // tiles-v1: this engine draws lossless tiles over its video (the
+            // session opts in only while it does), with the Windows engine's
+            // lossless* counters where they mean the same.
+            "losslessComposite" to losslessComposite,
+            "losslessPackets" to losslessPackets,
+            "losslessIgnoredPackets" to losslessIgnored,
+            "losslessRepublishes" to pacer.republishes,
+            "losslessPresentTiles" to (tiles?.presentTiles ?: 0),
+            "losslessPoisoned" to (tiles?.poisoned == true),
+            "losslessTimestampMismatches" to losslessTimestampMismatches,
+            "losslessPacketMs" to losslessPacketNanos / 1e6,
             // This stream: the current track's play head, frames written to its tracks, and frames received
             // and not played (overrun cuts and drift trims of the jitter buffer); what the track holds.
             "audioPlayedFrames" to played, "audioWrittenFrames" to audioOut.written,
@@ -837,6 +886,14 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             done(packet)
             return
         }
+        // tiles-v1 rides in ordinary non-key video packets (only after this
+        // session opted in) and never reaches the H.264 decoder.
+        if (LosslessTiles.isTilePayload(packet.bytes, 12, packet.length - 12)) {
+            try { acceptTiles(packet) } catch (_: Exception) { tiles?.poison() }
+            done(packet)
+            return
+        }
+        tileOrder.videoReceived(androidMediaPts(packet.bytes))
         try {
             if (decoder == null || awaitingKeyFrame) begin(packet)
         } catch (_: Exception) {
@@ -883,7 +940,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
 
     /** Worker, after the start answer: the decoder before its key frame arrives. */
     private fun prepareDecoder(owner: Long) {
-        val output = surface ?: return
+        val output = renderer?.decoderSurface ?: surface ?: return
         val handlers = Callbacks(owner)
         val started = try {
             AvcDecoders.start(width, height, null, null, output, handlers, worker, targetFps, allowHardware, AvcStreamSizes.memoryBudget(activity), exactSizes)
@@ -908,7 +965,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             awaitingKeyFrame = false
             return
         }
-        val output = surface ?: throw IllegalStateException("No surface")
+        val output = renderer?.decoderSurface ?: surface ?: throw IllegalStateException("No surface")
         val handlers = Callbacks(packet.lease)
         val started = AvcDecoders.start(width, height, sps, pps, output, handlers, worker, targetFps, allowHardware, AvcStreamSizes.memoryBudget(activity), exactSizes)
             ?: throw IllegalStateException("No H.264 decoder")
@@ -1015,8 +1072,72 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             // decoded frame).
             main.postDelayed({ if (!disposed) releaseRetired() }, RETIRED_GRACE_MS)
         }
+        tileOrder.decoded(index, info.presentationTimeUs)
         pacer.decoded(index, now, frames)
         scheduleCheck()
+    }
+
+    /**
+     * Worker. tiles-v1 packet: drops wait for their video frame, adds go to
+     * the renderer's tile texture at once. Adds without a video frame behind
+     * them are shown by a republish (the Windows engine's RepublishLossless).
+     */
+    private fun acceptTiles(packet: Packet) {
+        val compositor = tiles
+        val output = renderer
+        if (compositor == null || output == null) { losslessIgnored++; return }
+        val began = System.nanoTime()
+        compositor.accept(packet.bytes, 12, packet.length - 12) { _, x, y, w, h, rgba -> output.upload(x, y, w, h, rgba) }
+        losslessPackets++
+        losslessPacketNanos += System.nanoTime() - began
+        if (!compositor.republishPending) return
+        // The tick's video frame (pts T after this packet's T-1) normally
+        // follows at once and shows the new tiles itself.
+        republishChecks = 0
+        worker.removeCallbacks(republishCheck)
+        worker.postDelayed(republishCheck, REPUBLISH_WAIT_MS)
+    }
+
+    /** Worker. Added tiles not yet shown: republish unless a received video frame is still on its way. */
+    private fun checkRepublish() {
+        val compositor = tiles ?: return
+        if (!compositor.republishPending) return
+        if (tileOrder.videoAhead() && republishChecks++ < REPUBLISH_CHECKS) {
+            worker.postDelayed(republishCheck, REPUBLISH_WAIT_MS)
+            return
+        }
+        republish()
+    }
+
+    /** Worker. The shown picture again with every present tile, when the pacer lets one more frame go to Flutter. */
+    private fun republish() {
+        val output = renderer
+        val compositor = tiles
+        if (output == null || compositor == null || !compositor.republishPending) { republishDue = false; return }
+        if (!output.latched || !pacer.republishAllowed()) { republishDue = true; return }
+        republishDue = false
+        compositor.clearAdded()
+        if (!output.draw(compositor)) { fail(lease); return }
+        pacer.republished(System.nanoTime())
+    }
+
+    /** Worker. The renderer's decoder surface has a new frame: latch it, apply due drops, draw it with the tiles. */
+    private fun tileFrame(output: AndroidTileRenderer) {
+        if (output !== renderer) return
+        try {
+            val timestamp = output.latch()
+            val compositor = tiles
+            val pts = tileOrder.latched(timestamp)
+            if (compositor != null) {
+                if (pts != null) compositor.applyDecoded(pts)
+                else if (!compositor.poisoned) { losslessTimestampMismatches++; compositor.poison() }
+            }
+            // This frame carries every tile added so far.
+            republishDue = false
+            if (!output.draw(compositor)) fail(lease)
+        } catch (_: Exception) {
+            fail(lease)
+        }
     }
 
     /** Worker. Flutter took a frame from [entry] at [at]. */
@@ -1026,6 +1147,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         val waited = pacer.waitTotalNanos
         try { pacer.consumed(at, frames) } catch (_: Exception) { fail(lease) }
         if (pacer.taken > before) presentRecent.add(pacer.waitTotalNanos - waited, at)
+        if (republishDue) republish()
     }
 
     private fun scheduleCheck() {
@@ -1081,6 +1203,10 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         callbacks = null
         try { codec?.stop() } catch (_: Exception) {}
         try { codec?.release() } catch (_: Exception) {}
+        // The decoder no longer renders into it; its last picture stays in the Flutter texture.
+        worker.removeCallbacks(republishCheck)
+        renderer?.release(); renderer = null; tiles = null
+        tileOrder.clear(); republishDue = false; losslessComposite = false
         clock.clear()
         frameWatch.clear()
         opus?.let { concealedBefore += it.stream.concealed; it.close() }; opus = null
@@ -1286,5 +1412,8 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         private const val RETIRED_TEXTURE_MS = 120000L
         /** stream-stats texturePath: 1 = GPU surface texture (0 is the Windows CPU pixel buffer). */
         private const val TEXTURE_PATH_SURFACE = 1
+        /** tiles-v1: how long added tiles wait for the video frame of their tick before a republish, and how often. */
+        private const val REPUBLISH_WAIT_MS = 16L
+        private const val REPUBLISH_CHECKS = 3
     }
 }

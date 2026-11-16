@@ -52,6 +52,8 @@ import { ImeState, imeStateProtocol, imeStateCapability } from './ime-state.mjs'
 const MAX_MESSAGE = 4 * 1024 * 1024;
 const MAX_QUEUE = 8 * 1024 * 1024;
 const MAX_CLIENT_BYTES_PER_SECOND = 32 * 1024 * 1024;
+// A grant that allows every streaming device channel: what a stream could carry, apart from its permission.
+const fullDeviceGrant = Object.freeze({ usbDevices: true, printers: true, drives: true });
 const streamFailures = new Set(['no_interactive_session', 'virtual_display_required', 'worker_failed', 'capture_failed', 'encoder_failed', 'host_maintenance']);
 // Exact, negotiated v2 failures only. Do not widen legacy admission or
 // forward arbitrary SDK/encoder error text from the reusable Host channel.
@@ -469,6 +471,21 @@ export class Relay {
     this.print.policyChanged(userId, desktopId);
     // Streaming drives end with the permission, the stream itself continues.
     for (const session of this.policySessions(userId, desktopId)) if (session.drivePair && !this.drive.allowed(session)) this.drive.closeSession(session, 'drive_policy_changed');
+    return this.devicesAfterReconnect(userId, desktopId);
+  }
+  // Streams this grant now allows a device channel (USB, printers, drives)
+  // that they asked for and their Host offers, but did not get at connect:
+  // a channel is decided when the stream starts, so a widened grant reaches
+  // them with the next connection. The administrator is told how many.
+  devicesAfterReconnect(userId, desktopId) {
+    let count = 0;
+    for (const session of this.policySessions(userId, desktopId)) {
+      const reach = session.deviceReach;
+      if (!reach || session.mode !== 'stream') continue;
+      const policy = this.store.devicePolicy(session.userId, session.desktopId);
+      if ((reach.usb && !session.usb && policy.usbDevices === true) || (reach.print && !session.print && policy.printers === true) || (reach.drive && !session.driveEnabled && policy.drives === true)) count++;
+    }
+    return count;
   }
   assertDisplayIdle(desktopId,mode='stream',consoleGrant,reservation) { if (this.vmConfigBusy?.(desktopId)) throw new HttpError(409, 'vm_audio_busy'); if (this.console?.blocked(desktopId,consoleGrant)) throw new HttpError(409,'console_busy'); this.sessionStop.guard(desktopId,mode); const operation=this.displayBusy.get(desktopId); if (operation && operation !== reservation) throw new HttpError(409, 'display_in_progress'); this.hostUpdate?.guard(desktopId); }
   // VM power resets Windows: a stream cleanup still waiting for a display
@@ -885,9 +902,12 @@ export class Relay {
     // Streaming drive redirection (drive-v1): the per-assignment `drives`
     // permission, for any stream session whose Host advertises it.
     const driveEnabled = mode === 'stream' && negotiateDrive(driveRequested, host, this.store.devicePolicy(user.id, desktopId));
+    // What this stream would carry under a full grant (asked for by the client, offered by the Host): a grant widened
+    // later reaches it only with the next connection (devicePolicyChanged counts those for the administrator).
+    const deviceReach = mode === 'stream' ? { usb: negotiateUsb(usbRequested, host, fullDeviceGrant), print: negotiatePrint(printRequested, host, fullDeviceGrant), drive: negotiateDrive(driveRequested, host, fullDeviceGrant) } : null;
     const trackState = tracks ? new TrackStream(id,tracks,options,{prepareMs:this.viewportReadyMs,readyMs:this.resizeReadyMs,mediaMs:this.trackMediaMs,allowRestored:profileTracks,sizeProtocol:streamSizeVersion,decoderLimits:streamSize,audioOpus}) : null;
     this.activityAt = Date.now();
-    this.sessions.set(id, { id, desktopId, localPc, userId: user.id, tokenHash: tokenHashValue, createdAt: Date.now(), host, mode, observability, stopProtocol: host.capabilities?.sessionStopProtocol, options, epochMedia, initialViewport, profileViewport, profileTracks, viewportEncoderLimits, clipboardEnabled, clipboardPolicy, clipboardProtocol, clipboardSync, bitrateAdaptive, inputLatency: inputLatency ? inputLatencyState() : null, cursor: cursor ? cursorState() : null, cursorTracks, cursorEcho, cursorCompose, backgroundVideo, gamepad, textInput, displayScaleControl, displayScale, displayScaleOutputs, touchInput, relativeMouse, caret, streamSize, streamSizeVersion, print, driveEnabled, driveFs: driveEnabled && driveFsRequested && driveFsCapability(host.capabilities), source: null, usb, udpMedia, udpDirect, udpTracks, audioOpus, resume, epoch: 0, nextEpoch: 0, ws: null, trackState, trackTunnel:null, expiresAt: Date.now() + 30000, streamReady: false });
+    this.sessions.set(id, { id, desktopId, localPc, userId: user.id, tokenHash: tokenHashValue, createdAt: Date.now(), host, mode, observability, stopProtocol: host.capabilities?.sessionStopProtocol, options, epochMedia, initialViewport, profileViewport, profileTracks, viewportEncoderLimits, clipboardEnabled, clipboardPolicy, clipboardProtocol, clipboardSync, bitrateAdaptive, inputLatency: inputLatency ? inputLatencyState() : null, cursor: cursor ? cursorState() : null, cursorTracks, cursorEcho, cursorCompose, backgroundVideo, gamepad, textInput, displayScaleControl, displayScale, displayScaleOutputs, touchInput, relativeMouse, caret, streamSize, streamSizeVersion, print, driveEnabled, driveFs: driveEnabled && driveFsRequested && driveFsCapability(host.capabilities), deviceReach, source: null, usb, udpMedia, udpDirect, udpTracks, audioOpus, resume, epoch: 0, nextEpoch: 0, ws: null, trackState, trackTunnel:null, expiresAt: Date.now() + 30000, streamReady: false });
     // The session grant exists now: remember the use (a convenience that never
     // blocks a connection).
     try { this.store.markUsed(user.id, desktopId); } catch { /* optional */ }

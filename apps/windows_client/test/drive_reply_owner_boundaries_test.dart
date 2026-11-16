@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/data/drive_files.dart';
 import 'package:multitap_client/data/drive_memory.dart';
+import 'package:multitap_client/data/drive_rules.dart';
 import 'package:multitap_client/data/drive_session.dart';
 import 'package:multitap_client/data/product_log.dart';
 
@@ -226,13 +227,16 @@ void main() {
         _write(fixture, id, 0);
       }
       await _pump(tester);
-      expect(files.admittedWrites - before, 8);
+      // All eight are admitted; with two folders shared one folder runs
+      // drivePerFolderRunning of them at a time and the rest wait their turn.
+      expect(files.admittedWrites - before, drivePerFolderRunning);
       expect(fixture.drive.active, 8);
       _write(fixture, 599, 0);
       await _pump(tester);
       expect(fixture.socket.response(599)['error'], 'drive_busy');
       gate.complete();
       await _pump(tester);
+      expect(files.admittedWrites - before, 8, reason: 'the waiting ones ran');
       expect(fixture.drive.active, 0);
       for (var id = 500; id < 508; ++id) {
         expect(fixture.socket.response(id)['ok'], isTrue);

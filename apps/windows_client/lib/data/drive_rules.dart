@@ -10,6 +10,14 @@ const driveProtocol = 'drive-v1';
 const driveMaxShares = 8;
 const driveChunkBytes = 262144;
 const driveMaxInFlight = 8;
+
+/// File calls one shared folder runs at a time while more than one folder is
+/// shared. The PC serves every folder from one pool of three native workers
+/// (drive_channel.cpp): a folder that stops answering (a hung network share)
+/// then holds two of them, and the other folders keep the third. Requests
+/// over it wait (inside their deadline); they are never refused, since the
+/// Host turns a refusal into "in use" in the desktop's Explorer.
+const drivePerFolderRunning = 2;
 const driveListPage = 256;
 const driveMaxPath = 1024;
 const driveMaxName = 255;

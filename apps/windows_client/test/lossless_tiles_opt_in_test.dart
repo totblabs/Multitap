@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/android/android_media.dart';
 import 'package:multitap_client/data/broker_api.dart';
@@ -15,6 +16,13 @@ import 'track_stream_test.dart' show configured, packet;
 class TileMedia extends SessionMedia implements LosslessTileMedia {
   @override
   bool get losslessTiles => true;
+}
+
+/// Android's engine: composites tiles only while its current start can.
+class SwitchingTileMedia extends SessionMedia implements LosslessTileMedia {
+  bool composite = true;
+  @override
+  bool get losslessTiles => composite;
 }
 
 RemoteSession session(SessionSocket socket, SessionMedia media) =>
@@ -146,8 +154,89 @@ void main() {
 
   test('Engines that cannot composite tiles never opt in', () {
     expect(NativeRemoteMedia().losslessTiles, isFalse);
+    // Android: not before its engine said it draws them (stats below).
     expect(AndroidRemoteMedia().losslessTiles, isFalse);
     expect(NativeRemoteMedia(losslessTiles: true).losslessTiles, isTrue);
+  });
+
+  test('Android opts in while its engine reports losslessComposite', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    const channel = MethodChannel('multitap/remote');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var composite = true;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'start') return 70;
+      if (call.method == 'stats') {
+        return <String, dynamic>{'losslessComposite': composite};
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final media = AndroidRemoteMedia();
+    await media.start(1280, 720);
+    expect(media.losslessTiles, isFalse, reason: 'nothing reported yet');
+    await media.stats();
+    expect(media.losslessTiles, isTrue);
+    // A later start whose video is downscaled (or no GL on this device).
+    composite = false;
+    await media.start(1920, 1080);
+    await media.stats();
+    expect(media.losslessTiles, isFalse);
+    composite = true;
+    await media.stats();
+    expect(media.losslessTiles, isTrue);
+    await media.stop();
+    expect(media.losslessTiles, isFalse);
+    media.dispose();
+  });
+
+  test('An engine that stops compositing after the opt-in pauses the tiles (lt0-)', () async {
+    final socket = SessionSocket(), media = SwitchingTileMedia();
+    final remote = session(socket, media);
+    unawaited(remote.start());
+    await flush();
+    socket.incoming.add(jsonEncode(info));
+    await flush();
+    socket.incoming.add(idr());
+    await flush();
+    List<String> pings() => [
+      for (final event in socket.sent)
+        if (event['type'] == 'ping') event['id'] as String,
+    ];
+    expect(pings().single.startsWith(losslessTilesPingPrefix), isTrue);
+    socket.incoming.add(jsonEncode({'type': 'pong', 'id': pings().last}));
+    await flush();
+    media.composite = false;
+    await Future<void>.delayed(const Duration(milliseconds: 1050));
+    expect(pings().last.startsWith(losslessTilesPausePrefix), isTrue);
+    socket.incoming.add(jsonEncode({'type': 'pong', 'id': pings().last}));
+    await flush();
+    media.composite = true;
+    await Future<void>.delayed(const Duration(milliseconds: 1050));
+    expect(pings().last.startsWith(losslessTilesPingPrefix), isTrue);
+    await remote.close();
+    await media.events.close();
+  });
+
+  test('A media that never composited sends plain pings', () async {
+    final socket = SessionSocket(), media = SwitchingTileMedia()
+      ..composite = false;
+    final remote = session(socket, media);
+    unawaited(remote.start());
+    await flush();
+    socket.incoming.add(jsonEncode(info));
+    await flush();
+    socket.incoming.add(idr());
+    await Future<void>.delayed(const Duration(milliseconds: 1050));
+    final ids = [
+      for (final event in socket.sent)
+        if (event['type'] == 'ping') event['id'] as String,
+    ];
+    expect(ids, isNotEmpty);
+    expect(ids.every((id) => !id.startsWith('lt')), isTrue);
+    await remote.close();
+    await media.events.close();
   });
 
   test('A tile packet reaches the native engine unchanged as ordinary non-key video', () async {

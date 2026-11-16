@@ -137,9 +137,13 @@ class FakeFiles implements DriveFileSystem {
   /// Share ids whose device is gone (a pulled USB stick).
   final offline = <String>{};
 
+  /// A hold for one share's calls only (a folder that stops answering).
+  final gates = <String, Completer<void>>{};
   Future<void> _check(String call) async {
     calls.add(call);
     await gate?.future;
+    final parts = call.split(' ');
+    if (parts.length > 1) await gates[parts[1]]?.future;
     if (failure != null) throw failure!;
   }
 
@@ -503,6 +507,78 @@ void main() {
     for (final id in [1, 2]) {
       expect(socket.sent.where((value) => value['id'] == id), hasLength(1));
     }
+  });
+
+  test('a hung folder runs two calls at a time while another folder is shared; the other folder keeps answering', () async {
+    requestDeadline = const Duration(milliseconds: 200);
+    final drive = await started(
+      remembered: const [
+        DriveFolder(path: r'\\nas\share', label: 'NAS'),
+        DriveFolder(path: r'C:\Data', label: 'Data'),
+      ],
+    );
+    final hung = drive.shares[0].id, healthy = drive.shares[1].id;
+    final gate = files.gates[hung] = Completer<void>();
+    for (var id = 1; id <= 4; id++) {
+      request(id, 'stat', hung, 'f$id');
+    }
+    request(5, 'stat', healthy, 'ok');
+    await flush();
+    List<String> begun(String share) =>
+        files.calls.where((call) => call.startsWith('stat $share ')).toList();
+    expect(begun(hung), ['stat $hung f1', 'stat $hung f2']);
+    expect(socket.response(5)['ok'], isTrue, reason: 'the other folder is not behind the hung one');
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await flush();
+    for (var id = 1; id <= 4; id++) {
+      expect(socket.response(id)['error'], 'drive_io_failed', reason: 'call $id');
+    }
+    expect(drive.shares[1].offline, isFalse);
+    request(6, 'stat', healthy, 'still');
+    await flush();
+    expect(socket.response(6)['ok'], isTrue);
+    // The folder answers again: the two waiting calls were already answered
+    // as failed and never run.
+    gate.complete();
+    await flush();
+    expect(begun(hung), ['stat $hung f1', 'stat $hung f2']);
+    expect(drive.active, 0);
+    for (var id = 1; id <= 6; id++) {
+      expect(socket.sent.where((value) => value['id'] == id), hasLength(1), reason: 'call $id');
+    }
+  });
+
+  test('a single shared folder keeps every admitted call running at once', () async {
+    final drive = await sharing();
+    final share = idOf(drive);
+    final gate = files.gates[share] = Completer<void>();
+    for (var id = 1; id <= 4; id++) {
+      request(id, 'stat', share, 'f$id');
+    }
+    await flush();
+    expect(files.calls.where((call) => call.startsWith('stat $share ')), hasLength(4));
+    gate.complete();
+    await flush();
+    expect(drive.active, 0);
+  });
+
+  test('calls waiting for a folder\'s turn never run once the session closes', () async {
+    final drive = await started(
+      remembered: const [
+        DriveFolder(path: r'\\nas\share', label: 'NAS'),
+        DriveFolder(path: r'C:\Data', label: 'Data'),
+      ],
+    );
+    final hung = drive.shares[0].id;
+    final gate = files.gates[hung] = Completer<void>();
+    for (var id = 1; id <= 3; id++) {
+      request(id, 'stat', hung, 'f$id');
+    }
+    await flush();
+    await drive.close();
+    gate.complete();
+    await flush();
+    expect(files.calls.where((call) => call.contains(' $hung ')), hasLength(2));
   });
 
   test(

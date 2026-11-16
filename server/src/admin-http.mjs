@@ -457,11 +457,12 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
         if (req.method === 'PUT') {
           const input = await body(req);
           currentAdmin();
+          let devicesAfterReconnect = 0;
           const expected = expectedAccountId(input);
           if (userMatch[2] === '/password') { fields(input, ['expectedAccountId', 'password', 'passwordConfirmation']); const target = store.findUser(name); if (target?.is_primary_admin && target.id !== actor) { input.password = ''; input.passwordConfirmation = ''; throw new HttpError(403, 'primary_admin_protected'); } const hashed = await passwordJob(() => hashPassword(confirmedPassword(input))); input.password = ''; input.passwordConfirmation = ''; currentAdmin(); store.changePassword(name, hashed, actor, expected); }
           else if (userMatch[2] === '/enabled') { fields(input, ['expectedAccountId', 'enabled']); if (typeof input.enabled !== 'boolean') throw new HttpError(400, 'invalid_enabled'); store.setUserEnabled(name, input.enabled, actor, expected); }
-          else { fields(input, ['expectedAccountId', 'notes', 'displayName', 'role', 'clipboardPolicy', 'devicePolicy']); store.updateUser(name, input, actor, expected); relay?.clipboardPolicyChanged(expected); relay?.devicePolicyChanged(expected); }
-          send(200, { ok: true }); return true;
+          else { fields(input, ['expectedAccountId', 'notes', 'displayName', 'role', 'clipboardPolicy', 'devicePolicy']); store.updateUser(name, input, actor, expected); relay?.clipboardPolicyChanged(expected); devicesAfterReconnect = relay?.devicePolicyChanged(expected) ?? 0; }
+          send(200, { ok: true, ...(devicesAfterReconnect ? { devicesAfterReconnect } : {}) }); return true;
         }
       }
       if (path === '/api/v1/admin/desktops' && req.method === 'POST') {
@@ -569,8 +570,9 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
         // Only sessions whose own VM grant was restricted end; removed
         // assignments end through the authorization sweep as before.
         const changed = result.policiesChanged ? expected : undefined;
-        if (changed) { relay?.clipboardPolicyChanged(changed); relay?.devicePolicyChanged(changed); }
-        send(200, { ok: true, ...result }); return true;
+        let devicesAfterReconnect = 0;
+        if (changed) { relay?.clipboardPolicyChanged(changed); devicesAfterReconnect = relay?.devicePolicyChanged(changed) ?? 0; }
+        send(200, { ok: true, ...result, ...(devicesAfterReconnect ? { devicesAfterReconnect } : {}) }); return true;
       }
       const desktopPermissions = /^\/api\/v1\/admin\/desktops\/([A-Za-z0-9_-]+)\/permissions$/.exec(path);
       if (desktopPermissions) {
@@ -587,8 +589,9 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
           expectedAccountId(entry);
         }
         const result = store.replaceDesktopPermissions(id, input.permissions, actor);
-        for (const userId of result.changedUserIds) { relay?.clipboardPolicyChanged(userId, id); relay?.devicePolicyChanged(userId, id); }
-        send(200, { ok: true, count: result.count, policiesChanged: result.changedUserIds.length }); return true;
+        let devicesAfterReconnect = 0;
+        for (const userId of result.changedUserIds) { relay?.clipboardPolicyChanged(userId, id); devicesAfterReconnect += relay?.devicePolicyChanged(userId, id) ?? 0; }
+        send(200, { ok: true, count: result.count, policiesChanged: result.changedUserIds.length, ...(devicesAfterReconnect ? { devicesAfterReconnect } : {}) }); return true;
       }
       if (path === '/api/v1/admin/assignments' && ['POST', 'DELETE'].includes(req.method)) {
         const input = await body(req); fields(input, ['username', 'expectedAccountId', 'desktopId']);

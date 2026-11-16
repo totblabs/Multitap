@@ -2236,6 +2236,7 @@ export default {
   "permissions.49": "파일 {direction} 허용",
   "permissions.50": "드물게 쓰는 것 (스마트 카드 · COM 포트)",
   "permissions.51": "복사·붙여넣기를 켜면 연결 중에도 바로 적용돼요(앱 1.1.13부터). 그 밖에 켠 것은 다음 접속부터예요.\n복사·붙여넣기를 끄면 그 데스크톱의 진행 중인 연결과 전송이 끝나요.\n프린터·공유 폴더·USB를 끄면 연결은 그대로고 그 장치만 빠져요. 이미 받은 파일은 지우지 않아요.",
+  "permissions.52": "지금 연결 중이면 다시 연결해야 새로 켠 USB·공유 폴더·프린터를 쓸 수 있어요.",
   "resources.1": "{days}일 {value}시간",
   "resources.2": "{hours}시간 {value}분",
   "common.145": "1분 미만",

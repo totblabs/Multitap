@@ -43,6 +43,11 @@ internal interface AndroidFrameSink {
  * at once, or, while a frame Flutter has not taken still waits, as soon as
  * that one is taken. A decoder made in the background (a resume or a resize)
  * therefore no longer renders every frame to a texture nobody draws.
+ *
+ * A lossless-tile republish (AndroidTileRenderer: the shown picture drawn
+ * again with tiles that arrived without a video frame) goes to the texture
+ * only when nothing waits or is held ([republishAllowed]), and then waits for
+ * Flutter like a frame ([republished]) without counting as a decoded frame.
  */
 internal class AndroidFramePacer(private val unconsumedLimitNanos: Long = UNCONSUMED_LIMIT_NANOS) {
     /** A rendered frame Flutter has not taken yet. */
@@ -110,10 +115,13 @@ internal class AndroidFramePacer(private val unconsumedLimitNanos: Long = UNCONS
     fun consumed(now: Long, sink: AndroidFrameSink) {
         if (!waiting) return
         waiting = false
-        taken++
-        val wait = (now - waitingDecodedAt).coerceAtLeast(0)
-        waitTotalNanos += wait
-        if (wait > waitMaxNanos) waitMaxNanos = wait
+        if (republishWaiting) republishWaiting = false
+        else {
+            taken++
+            val wait = (now - waitingDecodedAt).coerceAtLeast(0)
+            waitTotalNanos += wait
+            if (wait > waitMaxNanos) waitMaxNanos = wait
+        }
         val next = held
         if (next >= 0 && !hidden) {
             held = -1
@@ -155,12 +163,37 @@ internal class AndroidFramePacer(private val unconsumedLimitNanos: Long = UNCONS
     /** Forgets every frame (the codec was stopped; its buffer indices are gone). */
     fun reset() {
         waiting = false
+        republishWaiting = false
         held = -1
         firstRenderedAt = -1
     }
 
+    /** The texture is waiting for a republish, not a decoded frame. */
+    private var republishWaiting = false
+
+    /**
+     * A republish may be drawn to the texture now: visible, no decoded frame
+     * held (it will carry the new tiles itself) and nothing Flutter has not
+     * taken yet.
+     */
+    fun republishAllowed(): Boolean = !hidden && held < 0 && (!gated || !waiting)
+
+    /** A republish was drawn to the texture at [now]: it waits for Flutter like a frame. */
+    fun republished(now: Long) {
+        republishes++
+        if (!gated) return
+        waiting = true
+        republishWaiting = true
+        waitingDecodedAt = now
+    }
+
+    /** Republishes drawn to the texture. */
+    var republishes = 0L
+        private set
+
     private fun show(frame: Int, decodedAt: Long, now: Long, sink: AndroidFrameSink) {
         if (firstRenderedAt < 0) firstRenderedAt = now
+        republishWaiting = false
         waiting = true
         waitingDecodedAt = decodedAt
         rendered++
