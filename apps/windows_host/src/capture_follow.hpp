@@ -49,6 +49,31 @@ inline std::string captureFailureNotice(bool resized, bool announced, const std:
   if (resized && !announced) return "{\"type\":\"stream.resize.failed\",\"reason\":\"resize_failed\"" + epochFields + '}';
   return "{\"type\":\"stream.unavailable\",\"sessionId\":" + jsonQuote(session) + ",\"reason\":" + jsonQuote(reason) + '}';
 }
+// Fixed record when a capture cannot follow its output after a topology change: hostAction 200 stage 250 (worker stage 50),
+// error = what the last reading showed. Bits 0-3 the monitors seen (15 at most), 4 a monitor has the owned GDI name, 5 it has
+// the owned identity too, 6 its rectangle is the device's current display mode, 7 that mode could be read, 8 another monitor
+// intersects it, 9 the monitors could not be read, 10 the owned identity is on another GDI name, 11 the stream has more than one
+// output or no device (no follow). Field evidence (a PC with its own monitor): the stream failed about 10 s after the client
+// resized it, and the topology record (stage 206) could not tell which of these happened.
+inline constexpr uint32_t captureTopologyRecordStage = 50;
+inline uint32_t captureTopologyObservation(const CaptureMonitor& selected, const std::optional<std::vector<CaptureMonitor>>& observed, const std::optional<RECT>& mode, bool followable) noexcept {
+  uint32_t value = followable ? 0u : 1u << 11;
+  if (mode) value |= 1u << 7;
+  if (!observed) return value | 1u << 9;
+  value |= uint32_t(std::min<size_t>(observed->size(), 15));
+  const CaptureMonitor* named = nullptr;
+  for (const auto& monitor : *observed) {
+    if (monitor.name == selected.name) { if (!named) named = &monitor; }
+    else if (!selected.identity.empty() && monitor.identity == selected.identity) value |= 1u << 10;
+  }
+  if (named) {
+    value |= 1u << 4;
+    if (!selected.identity.empty() && named->identity == selected.identity) value |= 1u << 5;
+    if (mode && sameRect(named->bounds, *mode)) value |= 1u << 6;
+    for (const auto& monitor : *observed) if (&monitor != named && intersects(monitor.bounds, named->bounds)) { value |= 1u << 8; break; }
+  }
+  return value;
+}
 // The display mode's rectangle of a GDI device (ENUM_CURRENT_SETTINGS).
 inline std::optional<RECT> currentDisplayModeRect(const std::wstring& device) {
   if (device.empty()) return std::nullopt;

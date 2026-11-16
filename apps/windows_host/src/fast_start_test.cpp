@@ -148,7 +148,8 @@ void callSites() {
   const auto agent = code(MULTITAP_AGENT_SOURCE), service = code(MULTITAP_SERVICE_SOURCE), media = code(MULTITAP_MEDIA_SOURCE);
   require(agent.find("class Agent") != std::string::npos && service.find("interactiveWorker") != std::string::npos && media.find("struct Capture::Modern") != std::string::npos, "the sources were read");
   require(count(media, "IsSupported()") == 1 && count(media, "static void requireSupported(){if(!graphicsCaptureSupported())") == 1, "A capture asks Windows whether capture is supported again instead of the process's answer");
-  require(count(media, "hr=createCaptureHardwareDevice(device,context);") == 1 && count(media, "D3D_DRIVER_TYPE_HARDWARE") == 1, "A capture creates its device differently from the warmed one");
+  // createCaptureHardwareDevice asks for a video-support device first and falls back to a plain one: both are hardware devices.
+  require(count(media, "hr=createCaptureHardwareDevice(device,context);") == 1 && count(media, "D3D_DRIVER_TYPE_HARDWARE") == 2, "A capture creates its device differently from the warmed one");
   require(count(agent, "captureSlot.emplace(width, height, source, captureDevices_.take())") == 1, "A stream's first capture does not start with the kept or warmed device");
   require(count(agent, "keepCaptureDevice{captureDevices_,captureSlot}") == 1 && count(agent, "devices.keep(capture->sharedDevice())") == 1, "A capture no longer leaves its device for the next one");
   require(count(agent, "captureDevices_.keep(captureSlot->sharedDevice());captureSlot.reset();") == 1 && count(agent, "captureSlot.emplace(width,height,current,captureDevices_.take())") == 1, "An encode-scale rebuild no longer keeps its device");

@@ -3329,6 +3329,21 @@ inline std::mutex sessionEventsMutex;inline std::vector<SessionEvent> sessionEve
 // are read again, before the service loop has handled the change.
 inline void reportService(DWORD state, DWORD error = NO_ERROR, bool checkpoint = false) { std::lock_guard statusLock(serviceStatusMutex);if(state==SERVICE_RUNNING&&serviceStopRequested.load())return;serviceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS; serviceStatus.dwCurrentState = state; serviceStatus.dwControlsAccepted = state == SERVICE_RUNNING ? SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN | SERVICE_ACCEPT_SESSIONCHANGE : 0; serviceStatus.dwWin32ExitCode = error; serviceStatus.dwWaitHint = state == SERVICE_STOP_PENDING ? 60000 : 0;if(state==SERVICE_STOP_PENDING){if(checkpoint||!serviceStatus.dwCheckPoint)++serviceStatus.dwCheckPoint;}else serviceStatus.dwCheckPoint=0; SetServiceStatus(serviceStatusHandle, &serviceStatus); noteHostServiceStatusReported(); }
 inline DWORD WINAPI serviceHandler(DWORD control, DWORD eventType, void* eventData, void*) { if (control == SERVICE_CONTROL_STOP || control == SERVICE_CONTROL_SHUTDOWN) { serviceStopRequested=true;service_workers::closeCurrentAdmission();if (auto* marker = serviceRunMarker.load()) marker->stopping(); reportService(SERVICE_STOP_PENDING); SetEvent(serviceStopEvent); } else if (control == SERVICE_CONTROL_SESSIONCHANGE) {noteHostSessionChange();DWORD session=0xffffffff;const auto* notification=static_cast<const WTSSESSION_NOTIFICATION*>(eventData);if(notification&&notification->cbSize>=sizeof(WTSSESSION_NOTIFICATION))session=notification->dwSessionId;{std::lock_guard lock(sessionEventsMutex);if(sessionEvents.size()<64)sessionEvents.push_back({eventType,session});else sessionEvents.back()={eventType,0xffffffff};}SetEvent(serviceChangeEvent);} else if(serviceConfigurationChanges.request(control))SetEvent(serviceChangeEvent); return NO_ERROR; }
+// A crash left the service down until somebody restarted Windows: the MSI sets no failure actions, and every update creates
+// the service again. The service sets its own on every start: restart after 5 s, 30 s and 60 s, the count reset after a day,
+// and a stop with an error exit code counts too (ServiceRunMarker::failed). Returns 0, or the Win32 error of the step that failed.
+inline DWORD ensureServiceRecovery() noexcept {
+  SC_HANDLE manager=OpenSCManagerW(nullptr,nullptr,SC_MANAGER_CONNECT);if(!manager)return GetLastError();
+  DWORD error=NO_ERROR;
+  if(SC_HANDLE self=OpenServiceW(manager,serviceName.c_str(),SERVICE_CHANGE_CONFIG|SERVICE_START)){
+    SC_ACTION actions[3]{{SC_ACTION_RESTART,5000},{SC_ACTION_RESTART,30000},{SC_ACTION_RESTART,60000}};
+    SERVICE_FAILURE_ACTIONSW failure{};failure.dwResetPeriod=86400;failure.cActions=3;failure.lpsaActions=actions;
+    SERVICE_FAILURE_ACTIONS_FLAG flag{};flag.fFailureActionsOnNonCrashFailures=TRUE;
+    if(!ChangeServiceConfig2W(self,SERVICE_CONFIG_FAILURE_ACTIONS,&failure)||!ChangeServiceConfig2W(self,SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,&flag))error=GetLastError();
+    CloseServiceHandle(self);
+  }else error=GetLastError();
+  CloseServiceHandle(manager);return error;
+}
 inline void WINAPI serviceMain(DWORD, LPWSTR*) {
   // boot-ready-v1 (boot_timeline.hpp): its stages count from here.
   auto& boot=bootTimeline();
@@ -3399,6 +3414,8 @@ inline void WINAPI serviceMain(DWORD, LPWSTR*) {
     if(!qaService)resetServer=std::make_unique<NativeRecoveryResetServer>([&](HANDLE pipe,const Json& request){std::lock_guard lock(bridgeLifetime);return performNativeRecoveryReset(pipe,request,bridge.get(),nativeDisplay);},nativeResetClientAllowed);
 #endif
     reportService(SERVICE_RUNNING);recordHostEvent("serviceState",{{"running",1}});
+    // hostAction 299: the service could not set its own failure actions (fixed record, ok:false only).
+    if(!qaService)if(const DWORD recovery=ensureServiceRecovery())recordHostEvent("hostAction",{{"action",uint32_t(299)},{"ok",false},{"error",uint32_t(recovery)}});
 #if defined(MULTITAP_NATIVE_DISPLAY) && defined(MULTITAP_PRIVATE_SIGNIN_DIAGNOSTIC_TRIAL)
     // Private BuildOnly trial. Normal packages keep this listener disabled
     // while real cleanup/shutdown acceptance remains unqualified.

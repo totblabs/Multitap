@@ -99,11 +99,40 @@ void failureNoticeAfterTheStreamStarted() {
   // The followed WGC size change keeps its fixed diagnostic code.
   require(streamCaptureFailureCode(CaptureGeometryChanged().what()) == 2, "The geometry change lost its diagnostic code");
 }
+// The record of a follow that gave up (hostAction 200 stage 250): which of the topology cases it was.
+void recordsWhatTheLastReadingShowed() {
+  const auto selected = monitor({0, 0, 1920, 1080});
+  const RECT mode{0, 0, 1920, 1080};
+  // The owned output is there, with its identity, at its mode, alone: 1 monitor | name | identity | mode matches | mode read.
+  require(captureTopologyObservation(selected, std::vector<CaptureMonitor>{monitor(mode)}, mode, true) == (1u | 1u << 4 | 1u << 5 | 1u << 6 | 1u << 7), "A clean reading");
+  // Windows put the PC's own monitor back over it.
+  const std::wstring pcName = L"\\\\.\\DISPLAY1", pcIdentity = L"MONITOR\\REAL0001|{4d36e96e}\\0001";
+  const auto covered = captureTopologyObservation(selected, std::vector<CaptureMonitor>{monitor(mode), monitor({0, 0, 2560, 1440}, pcName, pcIdentity)}, mode, true);
+  require((covered & 0xf) == 2 && (covered & (1u << 8)) && (covered & (1u << 5)), "Another monitor over the owned output");
+  // The owned output went off: only the PC's monitor is left, and the mode of the old device cannot be read.
+  const auto gone = captureTopologyObservation(selected, std::vector<CaptureMonitor>{monitor({0, 0, 2560, 1440}, pcName, pcIdentity)}, std::nullopt, true);
+  require(gone == 1u, "The owned output gone");
+  // The same output under another GDI name.
+  const auto moved = captureTopologyObservation(selected, std::vector<CaptureMonitor>{monitor(mode, L"\\\\.\\DISPLAY4")}, std::nullopt, true);
+  require(moved == (1u | 1u << 10), "The owned identity on another name");
+  // Same name, another identity (the target was created again).
+  const auto renewed = captureTopologyObservation(selected, std::vector<CaptureMonitor>{monitor(mode, name, L"MONITOR\\TOTB0002|{4d36e96e}\\0004")}, mode, true);
+  require((renewed & (1u << 4)) && !(renewed & (1u << 5)), "A new identity under the same name");
+  // The monitors could not be read; and a stream that cannot follow at all.
+  require(captureTopologyObservation(selected, std::nullopt, mode, true) == (1u << 7 | 1u << 9), "An unreadable topology");
+  require(captureTopologyObservation(selected, std::vector<CaptureMonitor>{monitor(mode)}, mode, false) & (1u << 11), "No follow possible");
+  // The topology messages have codes of their own now (they all recorded 0).
+  require(streamCaptureFailureCode("Selected virtual monitor changed; reconnect the session") == 14, "the changed-monitor code");
+  require(streamCaptureFailureCode("A console or unselected monitor intersects the capture area") == 15, "the intersecting-monitor code");
+  require(streamCaptureFailureCode("Cannot validate the selected virtual monitor topology") == 16, "the unreadable-topology code");
+  require(streamCaptureFailureCode("Invalid owned virtual monitor geometry") == 20, "the last topology code");
+}
 }
 
 int main() {
   const struct { const char* name; void (*run)(); } cases[] = {{"follows-owned-output", followsTheOwnedOutput}, {"refuses-other-output", refusesWhatIsNotTheSameOutput},
-    {"settles-before-following", settlesBeforeFollowing}, {"settles-every-output", settlesEveryOutput}, {"failure-notice-after-start", failureNoticeAfterTheStreamStarted}};
+    {"settles-before-following", settlesBeforeFollowing}, {"settles-every-output", settlesEveryOutput}, {"failure-notice-after-start", failureNoticeAfterTheStreamStarted},
+    {"records-last-reading", recordsWhatTheLastReadingShowed}};
   unsigned passed = 0, failed = 0;
   for (const auto& value : cases) try { value.run(); ++passed; } catch (const std::exception& error) { ++failed; std::cerr << value.name << ": " << error.what() << '\n'; }
   std::cout << "{\"kind\":\"capture-follow\",\"passed\":" << passed << ",\"failed\":" << failed << ",\"checks\":" << checks << ",\"displayChanged\":false,\"captureStarted\":false}\n";

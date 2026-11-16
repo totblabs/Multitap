@@ -62,7 +62,9 @@ inline std::optional<std::pair<uint32_t,uint32_t>> streamPreparationObservation(
   return std::pair{uint32_t(stage),uint32_t(error)};
 }
 inline uint32_t streamCaptureFailureCode(const std::string& text){
-  static const std::array<const char*,13> known{"No initial virtual display frame","Virtual display geometry changed; reconnect","Virtual display geometry changed; reconnect the session","Interactive desktop is locked, secure or unavailable","Desktop capture is unavailable","Selected display rectangle cuts a monitor","Capture monitor pixel geometry mismatch","Selected displays are not contiguous","Desktop capture failed; check the interactive desktop","frame_layout_unsupported","frame_memory_unavailable","frame_memory_insufficient","encoder_format_unsupported"};
+  // 14-20: the topology check of a running capture (capture_selection.hpp); before they all recorded 0.
+  static const std::array<const char*,20> known{"No initial virtual display frame","Virtual display geometry changed; reconnect","Virtual display geometry changed; reconnect the session","Interactive desktop is locked, secure or unavailable","Desktop capture is unavailable","Selected display rectangle cuts a monitor","Capture monitor pixel geometry mismatch","Selected displays are not contiguous","Desktop capture failed; check the interactive desktop","frame_layout_unsupported","frame_memory_unavailable","frame_memory_insufficient","encoder_format_unsupported",
+    "Selected virtual monitor changed; reconnect the session","A console or unselected monitor intersects the capture area","Cannot validate the selected virtual monitor topology","Virtual monitors must be adjacent; gaps or console displays are not captured","Overlapping virtual monitors cannot be captured","Selected monitor lies outside the validated capture area","Invalid owned virtual monitor geometry"};
   for(size_t i=0;i<known.size();++i)if(text==known[i])return uint32_t(i+1);return 0;
 }
 // Only fixed public codes from the negotiated v2 vocabulary cross the wire.

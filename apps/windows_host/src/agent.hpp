@@ -1182,8 +1182,16 @@ class Agent {
         // size (`captureChanged`) is always rebuilt.
         const bool followable=selection.monitors.size()==1&&!device.empty();
         Clock::time_point followedAt{},followRecordedAt{};bool tilesAllowed=true;
+        // hostAction 200 stage 250: the last reading of a follow that could not hold its output (capture_follow.hpp).
+        const auto recordTopology=[&]{
+          if(!captureDiagnostic_||selection.monitors.empty())return;
+          try{
+            std::optional<std::vector<CaptureMonitor>> seen;try{seen=currentCaptureMonitors();}catch(...){}
+            captureDiagnostic_(captureTopologyRecordStage,captureTopologyObservation(selection.monitors.front(),seen,currentDisplayModeRect(device),followable));
+          }catch(...){ }
+        };
         const auto follow=[&](const std::string& reason,bool captureChanged)->bool{
-          if(!followable)throw std::runtime_error(reason);
+          if(!followable){recordTopology();throw std::runtime_error(reason);}
           topology.reset();
           const bool wgc=std::string_view(capture.backend())!="gdi";
           // gpu-capture-v1: the rebuilt capture keeps this device (an encoder may take its textures).
@@ -1193,7 +1201,7 @@ class Agent {
             const auto settled=settledOwnedOutput([&]()->std::optional<RECT>{try{return followedOwnedOutput(selection.monitors.front(),currentCaptureMonitors(),currentDisplayModeRect(device));}catch(...){return std::nullopt;}},
               [](std::chrono::milliseconds step){std::this_thread::sleep_for(step);},[]{return Clock::now();},deadline,streamStop_);
             if(streamStop_||stopped_)return false;
-            if(!settled)throw std::runtime_error(reason);
+            if(!settled){recordTopology();throw std::runtime_error(reason);}
             if(!captureChanged&&captureSlot&&sameRect(*settled,current)){topology.emplace(topologyCheck(selection,current),std::chrono::milliseconds(100));return true;}
             // At most one rebuild per captureFollowGap (a game may flip modes); the output is read again after it.
             if(followedAt!=Clock::time_point{}&&Clock::now()<followedAt+captureFollowGap){std::this_thread::sleep_until(std::min(followedAt+captureFollowGap,deadline));continue;}
