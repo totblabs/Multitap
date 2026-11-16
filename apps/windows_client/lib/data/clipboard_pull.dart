@@ -164,6 +164,7 @@ class ClipboardPulls {
     this.failedServing,
     required this.mayServe,
     this.linger = const Duration(milliseconds: 800),
+    this.betweenFiles = const Duration(seconds: 5),
     this.onPaste,
     this.observed,
     this.depth = 1,
@@ -235,6 +236,11 @@ class ClipboardPulls {
   final bool Function(String format) mayServe;
   final Duration linger;
 
+  /// After one file of a paste ended and bytes of its other files remain, how long the progress notice waits for the next file
+  /// (instead of [linger]): Explorer writes, and Defender scans, each file before it asks for the next one, often longer than
+  /// [linger], and the notice must not close and reopen for every file. A cancel or a failure still ends it right away.
+  final Duration betweenFiles;
+
   final _offers = <String, _Received>{};
   final _receivedOffers = <String>{};
   final _operations = <String, int>{};
@@ -265,6 +271,9 @@ class ClipboardPulls {
   int _counter = 0;
   bool _closed = false, _lingering = false, _serving = false;
   Timer? _lingerTimer;
+
+  /// While the notice waits between two files ([betweenFiles]): the paste it describes and whether this side served it.
+  ({_Received offer, bool served})? _between;
   StreamSubscription<ClipboardPullEvent>? _events;
 
   /// The Host reported that an application in the VM waits for data of the PC's offer (on-paste revision).
@@ -379,12 +388,17 @@ class ClipboardPulls {
     }
     final serve = _serve;
     final pull = _active ?? (_queue.isEmpty ? null : _queue.first);
+    final between = pull == null && serve == null && _lingering ? _between : null;
     final received =
-        _servedOffer ?? pull?.progressManifest ?? _offers[_progressOfferId ?? ''];
+        _servedOffer ??
+        pull?.progressManifest ??
+        between?.offer ??
+        _offers[_progressOfferId ?? ''];
     if (received == null) return null;
+    final sending = _serving || (between?.served ?? false);
     final index = pull?.index ?? serve?.index ?? max(0, received.finished - 1);
     return ClipboardProgress(
-      sending: _serving,
+      sending: sending,
       format: received.format,
       fileCount: received.sizes.length,
       folderCount: received.folders,
@@ -399,10 +413,10 @@ class ClipboardPulls {
               received.names[min(index, received.names.length - 1)],
             ),
       asyncConsumer:
-          !_serving &&
+          !sending &&
           _operations.containsKey(_progressOfferId) &&
           onPaste == null,
-      topLevel: _serving ? const [] : received.topLevel,
+      topLevel: sending ? const [] : received.topLevel,
     );
   }
 
@@ -883,11 +897,14 @@ class ClipboardPulls {
     });
   }
 
-  void _settled() {
+  /// [ended]: the offer one of whose files just ended normally (received here, or served to the peer).
+  void _settled({_Received? ended, bool served = false}) {
+    _between = null;
     if (_active != null || _queue.isNotEmpty) return;
-    final offer = _offers[_current ?? ''];
-    // After the last file nothing more is expected; between files a short wait
-    // keeps the progress notice from flickering.
+    final offer = ended ?? _offers[_current ?? ''];
+    // After the last file nothing more is expected. Otherwise the notice waits:
+    // [betweenFiles] when a file just ended and the paste's next one is coming,
+    // [linger] after anything else (a cancel, a failure).
     final complete = offer != null && offer.finished >= offer.sizes.length;
     if (complete || linger == Duration.zero) {
       _lingering = false;
@@ -895,7 +912,13 @@ class ClipboardPulls {
     } else {
       _lingering = true;
       _lingerTimer?.cancel();
-      _lingerTimer = Timer(linger, () {
+      // A file just ended and the paste still has bytes to move: its next file is coming.
+      final between = ended != null &&
+          ended.finished < ended.sizes.length &&
+          ended.pulled < ended.total &&
+          betweenFiles > linger;
+      if (between) _between = (offer: ended, served: served);
+      _lingerTimer = Timer(between ? betweenFiles : linger, () {
         _lingering = false;
         if (!_closed) changed();
       });
@@ -986,7 +1009,7 @@ class ClipboardPulls {
             failed(outcome);
           }
           _startNext();
-          _settled();
+          _settled(ended: outcome == null ? _offers[pull.offerId] : null);
           changed();
         }
       }
@@ -1402,7 +1425,7 @@ class ClipboardPulls {
         // The relay ends the pull at the item end; later acknowledgements are dropped.
         serve.ended = true;
         _sendingObservation.rangeEnded(serve.observation);
-        await _endServe(serve, closeNative: true);
+        await _endServe(serve, closeNative: true, fileEnded: true);
         return;
       }
       final count = min(chunkBytes, serve.size - serve.sent);
@@ -1468,7 +1491,11 @@ class ClipboardPulls {
     await _endServe(serve, closeNative: true);
   }
 
-  Future<void> _endServe(_Serve serve, {required bool closeNative}) async {
+  Future<void> _endServe(
+    _Serve serve, {
+    required bool closeNative,
+    bool fileEnded = false,
+  }) async {
     if (!identical(_serve, serve)) return;
     serve.ended = true;
     _serve = null;
@@ -1481,7 +1508,7 @@ class ClipboardPulls {
     final offer = _servedOffer;
     if (offer != null && serve.sent == serve.size) offer.finished++;
     _servedOffer = null;
-    _settled();
+    _settled(ended: fileEnded ? offer : null, served: true);
     changed();
     // A pull queue: the Host's next pull, which waited for this one.
     if (_serveQueue.isNotEmpty && !_closed) {

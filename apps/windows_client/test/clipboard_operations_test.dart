@@ -250,6 +250,12 @@ void main() {
         reason: 'the old End must not erase the newer fallback linger',
       );
       time.elapse(const Duration(seconds: 1));
+      expect(
+        copy.pulls.active,
+        isTrue,
+        reason: 'b still has its second file: the wait between files',
+      );
+      time.elapse(const Duration(seconds: 5));
       expect(copy.pulls.active, isFalse);
       copy.close();
     });

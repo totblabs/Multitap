@@ -107,6 +107,7 @@ void main() {
   ClipboardSession make({
     ClipboardBridge? with_,
     Duration linger = Duration.zero,
+    Duration between = const Duration(seconds: 5),
   }) => ClipboardSession(
     policy: const ClipboardPolicy.all(),
     url: Uri.parse(
@@ -117,6 +118,7 @@ void main() {
     bridge: with_ ?? bridge,
     dialer: (url, token) async => socket,
     pullLinger: linger,
+    pullBetweenFiles: between,
   );
   Future<void> connect([Map<String, dynamic>? ready]) async {
     final starting = session.start();
@@ -847,6 +849,62 @@ void main() {
         (await socket.nextMessage('clipboard.chunk'))['data'],
         base64Encode([9, 8, 7]),
       );
+    });
+
+    test('a VM paste of two files is one notice: it waits for the next file and ends with the last', () async {
+      session = make(
+        linger: const Duration(milliseconds: 30),
+        between: const Duration(milliseconds: 600),
+      );
+      await connect();
+      bridge.offerCapture = offerOf('tree', [
+        pull.tree('a.bin', 3),
+        pull.tree('b.bin', 3),
+      ], tops: 2);
+      await session.setSharingActive(true);
+      final sending = session.sendLocal(automatic: true);
+      final offer = await socket.nextMessage('clipboard.offer');
+      await socket.nextMessage('clipboard.entries');
+      final id = offer['requestId'] as String;
+      socket.emit({'type': 'clipboard.complete', 'requestId': id});
+      await sending;
+      bridge.files[id] = [
+        Uint8List.fromList([1, 2, 3]),
+        Uint8List.fromList([4, 5, 6]),
+      ];
+      socket.emit({
+        'type': 'clipboard.paste.waiting',
+        'requestId': 'wait-1',
+        'active': true,
+      });
+      socket.emit({
+        'type': 'clipboard.pull',
+        'requestId': 'pullh-1',
+        'offerId': id,
+        'index': 0,
+        'offset': 0,
+      });
+      await socket.nextMessage('clipboard.item.end');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(
+        session.transferring,
+        isTrue,
+        reason: 'the VM is still writing the first file; the second is to come',
+      );
+      expect(session.progress?.fileIndex, 1);
+      expect(session.progress?.fileCount, 2);
+      expect(session.progress?.transferred, 3);
+      expect(session.progress?.total, 6);
+      socket.emit({
+        'type': 'clipboard.pull',
+        'requestId': 'pullh-2',
+        'offerId': id,
+        'index': 1,
+        'offset': 0,
+      });
+      await socket.nextMessage('clipboard.item.end');
+      await base.settle();
+      expect(session.transferring, isFalse, reason: 'the last file ended');
     });
 
     test('a VM paste that pulls our offer shows a card only once the Host says it waits', () async {

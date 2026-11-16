@@ -225,6 +225,7 @@ class ClipboardSession extends ChangeNotifier {
     this.totalTimeout = const Duration(hours: 6),
     this.publishCheckDelay = const Duration(seconds: 3),
     this.pullLinger = const Duration(milliseconds: 800),
+    this.pullBetweenFiles = const Duration(seconds: 5),
     this.claimAfter = const Duration(milliseconds: 500),
     bool? sharedFolders,
   }) : sharedFolders = sharedFolders ?? !Platform.isAndroid,
@@ -627,6 +628,9 @@ class ClipboardSession extends ChangeNotifier {
 
   /// After a pulled file ends, how long the progress notice waits for the next one.
   final Duration pullLinger;
+
+  /// The same while the paste still has bytes of other files to move (ClipboardPulls.betweenFiles).
+  final Duration pullBetweenFiles;
 
   /// How long a copy from the VM may take before this PC's clipboard is claimed for it.
   final Duration claimAfter;
@@ -1881,6 +1885,7 @@ class ClipboardSession extends ChangeNotifier {
                 ? _allowed.textToRemote
                 : _allowed.filesToRemote,
             linger: pullLinger,
+            betweenFiles: pullBetweenFiles,
             onPaste: _onPasteBridge,
             depth: _pullQueue ? clipboardPullQueueDepth : 1,
             deferred: _deferredProtocol ? native as ClipboardDeferredBridge : null,
