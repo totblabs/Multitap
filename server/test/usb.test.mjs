@@ -450,6 +450,26 @@ test('A second channel generation is refused after close, and ending the session
   await new Promise(resolve => setTimeout(resolve, 100));
 });
 
+test('Going over the broker-wide budget pauses the socket for the rest of the second instead of ending the devices', async t => {
+  const f = await fixture(t); const host = await f.host(usbHost);
+  const { sessionId } = await f.stream(host, { usbProtocol: 'usb-v1' });
+  const { usbHost: h, usbClient: c } = await f.usbPair(sessionId);
+  c.json(attach(1, serial)); await h.take(isText); h.json({ type: 'usb.attached', device: 1 }); await c.take(isText);
+  // Other users' traffic filled this second's broker-wide budget.
+  const usb = f.relay().usb; usb.windowAt = Date.now(); usb.windowBytes = 192 * 1024 * 1024;
+  const block = Buffer.alloc(1024, 5);
+  h.send(frame({ type: 1, endpoint: 0x02, seq: 1, length: block.length, payload: block }));
+  assert.equal(parse(await c.take(isFrame)).seq, 1, 'the frame that tipped it still crosses');
+  const pair = f.relay().sessions.get(sessionId).usbPair;
+  assert.equal(pair.closed, false); assert.equal(pair.hostPaused, true);
+  c.send(frame({ type: 2, endpoint: 0x02, seq: 1, length: block.length }));
+  assert.equal(parse(await h.take(isFrame)).seq, 1, 'the other side is not held');
+  // After the second the Host's socket is read again.
+  h.send(frame({ type: 1, endpoint: 0x02, seq: 2, length: block.length, payload: block }));
+  assert.equal(parse(await c.take(isFrame)).seq, 2);
+  assert.equal(pair.closed, false); assert.equal(h.readyState, WebSocket.OPEN);
+});
+
 test('A burst of honest traffic stays inside the relay queue cap', async t => {
   const f = await fixture(t); const host = await f.host(usbHost);
   const { sessionId } = await f.stream(host, { usbProtocol: 'usb-v1' });

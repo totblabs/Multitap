@@ -76,17 +76,24 @@ template <class Core> class BasicUsbIpServer {
       for (auto& connection : connections_) shutdown(connection->socket, SD_BOTH);
     }
     if (thread_.joinable()) thread_.join();
-    std::vector<std::unique_ptr<Connection>> done;
+    std::vector<std::shared_ptr<Connection>> done;
     { std::lock_guard lock(mutex_); done.swap(connections_); }
+    // Joined here; each socket closes when its last owner lets go (it was never closed here before: one handle leaked per device).
     for (auto& connection : done) if (connection->thread.joinable()) connection->thread.join();
     if (listener_ != INVALID_SOCKET) { closesocket(listener_); listener_ = INVALID_SOCKET; }
     core_ = nullptr;
   }
   uint32_t refused() const { return refused_; }
  private:
-  struct Connection { SOCKET socket = INVALID_SOCKET; std::thread thread; std::mutex write; std::atomic<bool> finished{false}; };
+  // Shared by the listener's list, its serving thread and the send / close callbacks the session core keeps for the device: the
+  // core copies a callback and runs it after releasing its lock, so a connection reaped meanwhile must still be there (a freed
+  // mutex or a recycled socket handle in the SYSTEM service before). The socket closes with the last owner.
+  struct Connection {
+    SOCKET socket = INVALID_SOCKET; std::thread thread; std::mutex write; std::atomic<bool> finished{false};
+    ~Connection() { if (socket != INVALID_SOCKET) closesocket(socket); }
+  };
   Core* core_ = nullptr; Access access_; SOCKET listener_ = INVALID_SOCKET; std::atomic<bool> stopped_{true}; std::thread thread_;
-  std::mutex mutex_; std::vector<std::unique_ptr<Connection>> connections_; std::atomic<uint32_t> refused_{0};
+  std::mutex mutex_; std::vector<std::shared_ptr<Connection>> connections_; std::atomic<uint32_t> refused_{0};
 
   void run() {
     while (!stopped_) {
@@ -98,23 +105,22 @@ template <class Core> class BasicUsbIpServer {
       const SOCKET client = accept(listener_, nullptr, nullptr);
       if (client == INVALID_SOCKET) continue;
       if (!access_.trusted || !access_.trusted(client)) { ++refused_; recordUsbEvent(UsbStage::importRefused, false, 1); shutdown(client, SD_BOTH); closesocket(client); continue; }
-      auto connection = std::make_unique<Connection>(); connection->socket = client;
-      Connection* raw = connection.get();
+      auto connection = std::make_shared<Connection>(); connection->socket = client;
       {
         std::lock_guard lock(mutex_);
-        if (connections_.size() >= 16) { closesocket(client); continue; }
-        connections_.push_back(std::move(connection));
+        if (connections_.size() >= 16) continue;  // the connection's destructor closes the socket
+        connections_.push_back(connection);
       }
-      raw->thread = std::thread([this, raw] { serve(*raw); raw->finished = true; });
+      connection->thread = std::thread([this, connection] { serve(connection); connection->finished = true; });
     }
   }
   void reap() {
-    std::vector<std::unique_ptr<Connection>> done;
+    std::vector<std::shared_ptr<Connection>> done;
     {
       std::lock_guard lock(mutex_);
       for (auto it = connections_.begin(); it != connections_.end();) { if ((*it)->finished) { done.push_back(std::move(*it)); it = connections_.erase(it); } else ++it; }
     }
-    for (auto& connection : done) { if (connection->thread.joinable()) connection->thread.join(); closesocket(connection->socket); }
+    for (auto& connection : done) if (connection->thread.joinable()) connection->thread.join();
   }
   static bool receiveAll(SOCKET socket, uint8_t* out, size_t size, const std::atomic<bool>& stopped) {
     size_t at = 0;
@@ -126,7 +132,7 @@ template <class Core> class BasicUsbIpServer {
     }
     return true;
   }
-  bool send(Connection& connection, const Bytes& bytes) {
+  static bool send(Connection& connection, const Bytes& bytes) {
     std::lock_guard lock(connection.write);
     size_t at = 0;
     while (at < bytes.size()) {
@@ -136,33 +142,33 @@ template <class Core> class BasicUsbIpServer {
     }
     return true;
   }
-  void serve(Connection& connection) {
+  void serve(const std::shared_ptr<Connection>& connection) {
     DWORD timeout = 15000;
-    setsockopt(connection.socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-    setsockopt(connection.socket, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-    BOOL noDelay = TRUE; setsockopt(connection.socket, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
+    setsockopt(connection->socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setsockopt(connection->socket, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    BOOL noDelay = TRUE; setsockopt(connection->socket, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
     uint8_t common[usbipCommonSize];
-    if (!receiveAll(connection.socket, common, sizeof(common), stopped_)) return;
+    if (!receiveAll(connection->socket, common, sizeof(common), stopped_)) return;
     const auto op = decodeOpCommon(common, sizeof(common));
     if (!op || op->version != usbipVersion) return;
     if (op->code == opReqDevlist) {                       // an empty list: devices are only ever imported by busid
-      uint8_t reserved[4]; if (!receiveAll(connection.socket, reserved, 4, stopped_)) return;
-      Bytes reply = encodeOpCommon(opRepDevlist, stOk); put32(reply, 0); send(connection, reply); return;
+      uint8_t reserved[4]; if (!receiveAll(connection->socket, reserved, 4, stopped_)) return;
+      Bytes reply = encodeOpCommon(opRepDevlist, stOk); put32(reply, 0); send(*connection, reply); return;
     }
     if (op->code != opReqImport) return;
     uint8_t busIdBytes[usbipBusIdSize];
-    if (!receiveAll(connection.socket, busIdBytes, sizeof(busIdBytes), stopped_)) return;
+    if (!receiveAll(connection->socket, busIdBytes, sizeof(busIdBytes), stopped_)) return;
     const auto busId = decodeBusId(busIdBytes);
     std::optional<typename Core::Imported> imported;
-    if (busId && core_) imported = core_->importDevice(*busId, [this, &connection](const Bytes& bytes) { return send(connection, bytes); }, [&connection] { shutdown(connection.socket, SD_BOTH); });
-    if (!imported) { send(connection, encodeOpCommon(opRepImport, stNoDev)); return; }
+    if (busId && core_) imported = core_->importDevice(*busId, [connection](const Bytes& bytes) { return send(*connection, bytes); }, [connection] { shutdown(connection->socket, SD_BOTH); });
+    if (!imported) { send(*connection, encodeOpCommon(opRepImport, stNoDev)); return; }
     const uint8_t id = imported->id;
-    if (!send(connection, encodeImportReply(imported->exported))) { core_->kernelClosed(id); return; }
+    if (!send(*connection, encodeImportReply(imported->exported))) { core_->kernelClosed(id); return; }
     timeout = 0;                                           // requests wait as long as the VM is quiet
-    setsockopt(connection.socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setsockopt(connection->socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
     std::vector<uint8_t> header(usbipHeaderSize);
     while (!stopped_) {
-      if (!receiveAll(connection.socket, header.data(), header.size(), stopped_)) break;
+      if (!receiveAll(connection->socket, header.data(), header.size(), stopped_)) break;
       const auto urb = decodeUrbHeader(header.data(), header.size());
       if (!urb) break;
       if (urb->command == cmdUnlink) { if (!core_->unlink(id, *urb)) break; continue; }
@@ -170,7 +176,7 @@ template <class Core> class BasicUsbIpServer {
       if (urb->direction == 0 && urb->length > 0) {
         if (size_t(urb->length) > usbdefaults::totalLimit) break;
         data.resize(size_t(urb->length));
-        if (!receiveAll(connection.socket, data.data(), data.size(), stopped_)) break;
+        if (!receiveAll(connection->socket, data.data(), data.size(), stopped_)) break;
       }
       if (!core_->submit(id, *urb, std::move(data))) break;
     }

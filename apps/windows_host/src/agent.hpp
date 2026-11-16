@@ -348,12 +348,14 @@ class Agent {
   void speakerMuteEnd() noexcept { speakerMute_.end(); }
   // Set before starting this agent; called only on a failed capture path.
   void captureDiagnostic(std::function<void(uint32_t,uint32_t)> sink){captureDiagnostic_=std::move(sink);}
-  void start(Credentials credentials) { stop(true); credentials_ = std::move(credentials); updater_.reset(); if (hostUpdateEnvironment_) updater_ = std::make_unique<HostUpdater>(hostUpdateEnvironment_(credentials_.origin), [this](const std::string& message) { text(message); }); power_.reset(); if (hostPowerEnvironment_) power_ = std::make_unique<HostPower>(hostPowerEnvironment_(), [this](const std::string& message) { text(message); }); stopped_ = false; worker_ = std::thread([this] { run(); }); }
+  void start(Credentials credentials) { stop(true); credentials_ = std::move(credentials); updater_.reset(); if (hostUpdateEnvironment_) updater_ = std::make_unique<HostUpdater>(hostUpdateEnvironment_(credentials_.origin), [this](const std::string& message) { text(message); }); power_.reset(); if (hostPowerEnvironment_) power_ = std::make_unique<HostPower>(hostPowerEnvironment_(), [this](const std::string& message) { text(message); }); closing_ = false; stopped_ = false; worker_ = std::thread([this] { run(); }); }
   // reload: the service connects again right after (a new registration or
   // server), so the status says the connection is being prepared, not
   // stopped. Only the call that stops a running agent changes the status:
   // the destructor after a reload stop leaves the next connection's alone.
-  void stop(bool reload = false) { closingNotice("service_stopping");if(bridge_)bridge_->stopMainAdapters(); caretEnd(); cursorEchoEnd(); const bool running = !stopped_.exchange(true); if(brokerStatus_&&running){if(reload)brokerStatus_->preparing();else brokerStatus_->stop();}streamStop_ = true; input_.reset(); closeTransport(); if (worker_.joinable()) worker_.join(); joinDiagnostics(); stopStream(); if (updater_) updater_->stop(); for (int i = 0; i < 10 && input_.pending(); i++) { input_.retry(); std::this_thread::sleep_for(std::chrono::milliseconds(10)); } }
+  // closing_: this stop ends the channel on purpose (the relay drops a Host that sent host.closing without a close frame, and
+  // WinHTTP reports that as 12152): it is not recorded as a lost channel (hostAction 241), which every clean stop did before.
+  void stop(bool reload = false) { closing_ = true; closingNotice("service_stopping");if(bridge_)bridge_->stopMainAdapters(); caretEnd(); cursorEchoEnd(); const bool running = !stopped_.exchange(true); if(brokerStatus_&&running){if(reload)brokerStatus_->preparing();else brokerStatus_->stop();}streamStop_ = true; input_.reset(); closeTransport(); if (worker_.joinable()) worker_.join(); joinDiagnostics(); stopStream(); if (updater_) updater_->stop(); for (int i = 0; i < 10 && input_.pending(); i++) { input_.retry(); std::this_thread::sleep_for(std::chrono::milliseconds(10)); } }
   // Service mode only (set before start): remote Host program update over
   // this authenticated channel, downloading from the configured origin.
   void enableHostUpdate(std::function<HostUpdateEnvironment(const std::wstring& origin)> environment) { hostUpdateEnvironment_ = std::move(environment); }
@@ -630,7 +632,7 @@ class Agent {
     RECT area{};{std::lock_guard lock(cursorAreaMutex_);area=cursorArea_;}const double width=double(area.right-area.left),height=double(area.bottom-area.top);if(width<2||height<2)return;
     cursorInput_.injected(POINT{LONG(std::lround(area.left+*x*(width-1))),LONG(std::lround(area.top+*y*(height-1)))},hostMonotonicUs());
   }
-  Credentials credentials_; Status status_; AgentBridge* bridge_ = nullptr; AgentBridge::Send local_; std::atomic<bool> stopped_{true}, streamStop_{true}, active_{false};
+  Credentials credentials_; Status status_; AgentBridge* bridge_ = nullptr; AgentBridge::Send local_; std::atomic<bool> stopped_{true}, streamStop_{true}, active_{false}, closing_{false};
   BrokerConnectionStatus* brokerStatus_ = nullptr; std::atomic<uint64_t> brokerAttempt_{0};
   // boot-ready-v1: the service's timeline (tests substitute their own).
   BootTimeline* boot_ = &bootTimeline();
@@ -778,7 +780,7 @@ class Agent {
     // The status pipe keeps its released vocabulary.
     if(brokerStatus_&&!stopped_)brokerStatus_->disconnected(brokerAttempt_.load(),std::string_view(reason)=="send_queue_stalled"?"send_failed":reason);
     const auto socket=socket_.exchange(nullptr);signinNegotiated_=false;
-    if(socket){if(bridge_)try{bridge_->mainDisconnected(socket);}catch(...){}WinHttpCloseHandle(socket);if(brokerStatus_&&!stopped_)recordChannelClose(reason,error,remoteCode);}
+    if(socket){if(bridge_)try{bridge_->mainDisconnected(socket);}catch(...){}WinHttpCloseHandle(socket);if(brokerStatus_&&!stopped_&&!closing_)recordChannelClose(reason,error,remoteCode);}
     { std::lock_guard lock(queueMutex_); queueClosed_ = true; queue_.clear(); }
     queueCondition_.notify_all();
   }

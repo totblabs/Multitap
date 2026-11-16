@@ -162,6 +162,22 @@ test('folder trees keep relative paths, empty folders and same-named files; item
   await commit(p.client,p.host,'tree1');
 });
 
+test('names count as one exactly where Windows does: case only, no normalization, no expansion',async t=>{
+  const nfc='한글.txt',nfd=nfc.normalize('NFD');assert.notEqual(nfc,nfd);
+  const entries=[entry('Straße.txt',0),entry('STRASSE.txt',0),entry(nfc,0),entry(nfd,0)];
+  const p=await ready(t,{client:'formats',host:'formats',policy:{...deny,filesToRemote:true}});
+  p.client.json(treeBegin('names',entries));await p.host.take(v=>v.type==='clipboard.begin');
+  p.client.json({type:'clipboard.entries',requestId:'names',start:0,entries});
+  assert.equal((await p.host.take(v=>v.type==='clipboard.entries'||v.type==='clipboard.error')).type,'clipboard.entries','four names Windows keeps apart');
+  for(const [same,other] of [['readme.txt','README.TXT'],['ÄRGER.txt','ärger.txt']]){
+    const q=await ready(t,{client:'formats',host:'formats',policy:{...deny,filesToRemote:true}});
+    const twins=[entry(same,0),entry(other,0)];
+    q.client.json(treeBegin('twins',twins));await q.host.take(v=>v.type==='clipboard.begin');
+    q.client.json({type:'clipboard.entries',requestId:'twins',start:0,entries:twins});
+    assert.equal((await q.host.take(v=>v.type==='clipboard.error')).reason,'clipboard_invalid_message',same+' and '+other+' are one name');
+  }
+});
+
 test('folder tree manifests are validated entry by entry before anything reaches the receiver',async t=>{
   const tops=Array.from({length:129},(_,i)=>entry('d'+i));
   const cases=[

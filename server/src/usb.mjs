@@ -208,7 +208,10 @@ export class UsbRelay {
       const now = Date.now();
       if (now - rate.at >= 1000) { rate.at = now; rate.messages = 0; rate.bytes = 0; }
       if (now - this.windowAt >= 1000) { this.windowAt = now; this.windowBytes = 0; }
-      if (++rate.messages > 4096 || (rate.bytes += data.length) > 48 * 1024 * 1024 || (this.windowBytes += data.length) > 192 * 1024 * 1024) return this.closePair(pair, 'usb_rate_limit');
+      if (++rate.messages > 4096 || (rate.bytes += data.length) > 48 * 1024 * 1024) return this.closePair(pair, 'usb_rate_limit');
+      // The broker-wide budget is shared by every user: going over it pauses this socket until the second is over (as the
+      // drive relay does). Closing the pair whose message tipped it ended an innocent user's devices in the middle of a write.
+      if ((this.windowBytes += data.length) > 192 * 1024 * 1024) this.throttle(pair, role, ws, Math.max(1, this.windowAt + 1000 - now));
       if (!pair.ready) return this.closePair(pair, 'usb_invalid_message');
       try {
         if (binary) this.receiveFrame(pair, role, Buffer.isBuffer(data) ? data : Buffer.concat(data));
@@ -394,9 +397,15 @@ export class UsbRelay {
       this.enforce(pair);
     }
   }
+  throttle(pair, role, ws, ms) {
+    if (pair[role + 'Paused']) return;
+    pair[role + 'Paused'] = true; this.throttled = (this.throttled ?? 0) + 1; ws.pause();
+    setTimeout(() => { pair[role + 'Paused'] = false; if (this.current(pair, role, ws)) ws.resume(); }, ms).unref();
+  }
   heartbeat() {
     for (const pair of this.pairs) for (const role of ['client', 'host']) {
       const ws = pair[role]; if (ws?.readyState !== WebSocket.OPEN) continue;
+      if (pair[role + 'Paused']) continue; // a throttled socket cannot answer pings until it is read again
       if (pair[role + 'Alive'] === false) { this.closePair(pair, 'usb_transport_closed'); break; }
       pair[role + 'Alive'] = false; ws.ping();
     }

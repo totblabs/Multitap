@@ -171,6 +171,20 @@ test('each administrator permission allows only its exact text/file transfer dir
   });
 });
 
+test('the server-wide transfer limit refuses one request and keeps the pair open',async t=>{
+  const f=await ready(t);
+  // Other users' transfers fill the relay.
+  f.relay.clipboard.activeTransfers=32;
+  f.client.json({type:'clipboard.read',requestId:'busy-read'});
+  const refused=await f.client.take(v=>v.type==='clipboard.error');
+  assert.equal(refused.requestId,'busy-read');assert.equal(refused.reason,'clipboard_busy');
+  assert.equal(f.host.queue.some(v=>v.type==='clipboard.read'),false);
+  // They end: the same pair goes on.
+  f.relay.clipboard.activeTransfers=0;
+  f.client.json({type:'clipboard.read',requestId:'after-busy'});
+  assert.equal((await f.host.take(v=>v.type==='clipboard.read')).requestId,'after-busy');
+});
+
 test('direction denial is enforced before a read request or manifest reaches the other endpoint',async t=>{
   const deny={textToRemote:false,textToLocal:false,filesToRemote:false,filesToLocal:false};
   await t.test('remote read not authorized',async t=>{

@@ -86,6 +86,13 @@ const protocolErrors=new Set(['clipboard_path_too_long','clipboard_invalid_messa
 const inFlightTypes=new Set(['clipboard.chunk','clipboard.item.end','clipboard.entries','clipboard.chunk.ack','clipboard.item.ack','clipboard.commit']);
 const exact=(value,keys)=>Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
 function require(ok,reason='clipboard_invalid_message'){if(!ok)throw new Error(reason);}
+// The server-wide transfer limit is nobody's protocol error: the request is answered clipboard_busy and the pair stays open.
+// Closing the pair (as before) left that user's clipboard off until the stream was reconnected.
+class ServerBusy extends Error{constructor(){super('clipboard_busy');}}
+// The names Windows treats as one (NTFS, and CharUpperBuffW in the peers' clipboard_tree.inl): each character mapped to its
+// single-character uppercase, nothing normalized. NFC folding and full case mapping (ß to SS) made the relay refuse folders
+// Windows holds: Straße.txt next to STRASSE.txt, or the NFC and NFD forms of one Korean name copied from a Mac.
+export function windowsFoldedName(name){let out='';for(const character of name){const upper=character.toUpperCase();out+=upper.length===character.length?upper:character;}return out;}
 function syncIdentity(requestId){
   require(/^[a-f0-9]{32}-[0-7][a-f0-9]{15}$/.test(requestId));
   const counter=BigInt('0x'+requestId.slice(33));require(counter>0n);
@@ -173,7 +180,7 @@ function manifest(value,bytes,limits,formats=false,offer=false){
     require(file&&typeof file==='object'&&!Array.isArray(file)&&exact(file,['name','size'])&&safeName(file.name));
     require(Number.isSafeInteger(file.size)&&file.size>=0&&file.size<=limits.maxFileBytes,'clipboard_limits_exceeded');
     total+=file.size;require(total<=limits.maxTotalBytes&&(!limits.scaleProfile||total<=pushBelowBytes),'clipboard_limits_exceeded');
-    const folded=file.name.normalize('NFC').toUpperCase();require(!names.has(folded));names.add(folded);
+    const folded=windowsFoldedName(file.name);require(!names.has(folded));names.add(folded);
     return{name:file.name,size:file.size};
   });
 }
@@ -210,7 +217,7 @@ function treeEntries(tree,value,bytes,limits,offer=false){
     require(parts.length>=1&&entry.path.length>0&&parts.every(part=>safeName(part,limits.scaleProfile?255:240)));
     require(parts.length<=limits.maxDepth,'clipboard_limits_exceeded');
     require(entry.path.length<=limits.maxPathChars&&(!limits.scaleProfile||entry.path.length<=pastePathChars),limits.scaleProfile?'clipboard_path_too_long':'clipboard_limits_exceeded');
-    const folded=parts.map(part=>part.normalize('NFC').toUpperCase());
+    const folded=parts.map(windowsFoldedName);
     if(folded.length>1)require(tree.dirs.has(folded.slice(0,-1).join('/')));else tree.topCount++;
     const key=folded.join('/');require(!tree.names.has(key));tree.names.add(key);
     if(entry.kind==='dir')tree.dirs.add(key);
@@ -323,13 +330,17 @@ export class ClipboardRelay{
       }
       if(ended)return;
       if(binary||data.length>maxMessage||!pair.ready)return this.closePair(pair,'clipboard_invalid_message');
+      let value;
       try{
-        const value=JSON.parse(data.toString('utf8'));
+        value=JSON.parse(data.toString('utf8'));
         require(value&&typeof value==='object'&&!Array.isArray(value)&&typeof value.type==='string');
         if(value.type==='clipboard.watch'||value.type==='clipboard.changed'||value.type==='clipboard.intent'){this.notification(pair,role,value,stored);return;}
         require(typeof value.requestId==='string'&&requestPattern.test(value.requestId));
         this.receive(pair,role,value,data.length,stored);
-      }catch(error){this.closePair(pair,protocolErrors.has(error.message)?error.message:'clipboard_invalid_message');}
+      }catch(error){
+        if(error instanceof ServerBusy){this.send(pair,role,{type:'clipboard.error',requestId:value.requestId,reason:'clipboard_busy'});return;}
+        this.closePair(pair,protocolErrors.has(error.message)?error.message:'clipboard_invalid_message');
+      }
     });
     if(pair.client&&pair.host){
       pair.ready=true;pair.extended=pair.clientExtended===true&&pair.hostExtended===true;
@@ -449,7 +460,7 @@ export class ClipboardRelay{
     const identity=pair.session.clipboardSync?syncIdentity(requestId):null;
     if(identity)require((pair.prefix===null||identity.prefix===pair.prefix)&&identity.counter>pair.highWater);
     else require(!pair.seen.has(requestId)&&pair.seen.size<256);
-    require(this.activeTransfers<32,'clipboard_busy');
+    if(this.activeTransfers>=32)throw new ServerBusy();
     if(identity){pair.prefix=identity.prefix;pair.highWater=identity.counter;}else pair.seen.add(requestId);
     this.activeTransfers++;
     // index/offset is the position the sender has sent up to; units are the sent
