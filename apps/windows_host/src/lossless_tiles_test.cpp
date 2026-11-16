@@ -221,9 +221,50 @@ void tileSourceDiffing() {
   require(loop.packets == packets, "Static ticks with an empty dirty hint produced tile packets");
   loop.canvas.fill(10, 10, 20, 20, 0, 0, 255);
   loop.tick(std::vector<host::capture::PixelRect>{{10, 10, 20, 20}});
-  require(!loop.source.present(0), "Hinted change was not dropped");
+  // A small visible change: its tile is replaced with this tick's content in
+  // the same packet (quickTiles), never left as video.
+  require(loop.source.present(0) && exact(loop.client, loop.canvas), "Hinted small change was not exact on its own tick");
   for (int n = 0; n < 60 && !exact(loop.client, loop.canvas); ++n) loop.tick(std::vector<host::capture::PixelRect>{});
   require(exact(loop.client, loop.canvas), "Hinted change did not settle to exact");
+}
+
+// Typing: every glyph (a small change) is pixel-identical on the very tick it
+// appears, and the tile bytes stay inside the token bucket.
+void smallChangesAreExactAtOnce() {
+  auto settings = deterministic();
+  Loop loop(1280, 720, settings); loop.canvas.texture(5);
+  loop.until(400);
+  require(exact(loop.client, loop.canvas), "Initial frame was not exact before typing");
+  const auto bytes0 = loop.tileBytes; int ticks = 0;
+  for (int glyph = 0; glyph < 40; ++glyph) {
+    // A 9x14 glyph after the previous one on a line; one tick in three.
+    const int x = 40 + glyph * 10, y = 300;
+    loop.canvas.fill(x, y, x + 9, y + 14, uint8_t(glyph * 5), 20, 30);
+    loop.tick(); ++ticks;
+    require(exact(loop.client, loop.canvas), "A typed glyph was shown as video, not exact, on its tick");
+    loop.tick(); loop.tick(); ticks += 2;
+    require(exact(loop.client, loop.canvas), "A typed line was not exact between glyphs");
+  }
+  const double seconds = ticks * 16667 / 1e6;
+  require(double(loop.tileBytes - bytes0) <= double(settings.burstBytes) + double(settings.rateBytesPerSecond) * seconds + double(lossless::maximumTileBytes + 64), "Typing tiles exceeded the token bucket");
+}
+
+// A large change is video while it lasts; once the whole picture stops for
+// stillTicks ticks it becomes exact after stillSettleUs, not settleUs.
+void largeChangeSettlesWhenStill() {
+  auto settings = deterministic();
+  Loop loop(1280, 720, settings); loop.canvas.texture(6);
+  loop.until(400);
+  require(exact(loop.client, loop.canvas), "Initial frame was not exact before the large change");
+  // The first settle spent the token bucket; a still half second refills it.
+  for (int n = 0; n < 30; ++n) loop.tick();
+  loop.canvas.fill(100, 100, 1000, 550, 200, 40, 90);  // ~120 tiles: not a small change
+  loop.tick();
+  require(!exact(loop.client, loop.canvas), "A large change was sent losslessly at once (it should be video first)");
+  int ticks = 1; while (!exact(loop.client, loop.canvas) && ticks < 60) { loop.tick(); ++ticks; }
+  require(exact(loop.client, loop.canvas), "The large change never became exact");
+  const int bound = int(settings.stillTicks) + int((settings.stillSettleUs + 16666) / 16667) + 3;
+  require(ticks <= bound, "A stopped large change waited for settleUs instead of the still-screen settle");
 }
 
 // SSE2 bilinear upscaling equals its scalar definition byte for byte and only
@@ -537,7 +578,7 @@ void compositorRules() {
 
 int main() {
   try {
-    codecRoundTrip(); compositorRules(); upscalerMatchesReference(); scaledCompositorRules(); tileSourceDiffing(); candidateVerification(); budgetsAndMotion(); retirement();
+    codecRoundTrip(); compositorRules(); upscalerMatchesReference(); scaledCompositorRules(); tileSourceDiffing(); smallChangesAreExactAtOnce(); largeChangeSettlesWhenStill(); candidateVerification(); budgetsAndMotion(); retirement();
     pictureAnchorsTiles(); pictureAnchorsScaledTiles();
     std::cout << "{\"kind\":\"lossless-tiles-unit\",\"checks\":" << checks << ",\"syntheticPixels\":true,\"encoder\":false,\"realSessionAcceptance\":false}\n";
     return 0;

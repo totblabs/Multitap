@@ -181,6 +181,8 @@ int main() {
     struct Phase { const char* name; int from, to; };
     const Phase phases[] = {{"desktopSettle", 0, 180}, {"pageSwitchSettle", 180, 360}, {"scroll", 360, 540}, {"mapPan", 540, 720}, {"typing", 720, 900}, {"cursor", 900, 1020}, {"finalSettle", 1020, 1260}};
     std::map<std::string, int> lossless; std::map<std::string, double> plainPsnr, tilesPsnr;
+    // Ticks of each scene whose shown picture was pixel-identical to its source.
+    std::map<std::string, int> exactTicks;
     std::vector<uint8_t> frame, previous, nv12(size_t(width) * height * 3 / 2);
     int typed = 0;
     for (int n = 0; n < 1260; ++n) {
@@ -203,6 +205,7 @@ int main() {
       plain.tick(frame, nv12, n, changed); tiles.tick(frame, nv12, n, changed);
       for (const auto& phase : phases) {
         if (n >= phase.from && n < phase.to && !lossless.contains(phase.name) && !tiles.published.empty() && exact(frame, tiles.published)) lossless[phase.name] = n - phase.from;
+        if (n >= phase.from && n < phase.to && !tiles.published.empty() && exact(frame, tiles.published)) ++exactTicks[phase.name];
         if (n == phase.to - 1) { plainPsnr[phase.name] = psnr(frame, plain.published); tilesPsnr[phase.name] = psnr(frame, tiles.published); }
       }
     }
@@ -214,6 +217,7 @@ int main() {
       const auto& phase = phases[p]; const auto found = lossless.find(phase.name);
       if (p) out << ',';
       out << "{\"name\":\"" << phase.name << "\",\"timeToLosslessMs\":" << (found == lossless.end() ? -1.0 : ms(found->second))
+          << ",\"exactShare\":" << double(exactTicks[phase.name]) / double(phase.to - phase.from)
           << ",\"psnrEnd\":{\"original\":" << plainPsnr[phase.name] << ",\"tiles\":" << (std::isinf(tilesPsnr[phase.name]) ? std::string("\"inf\"") : std::to_string(tilesPsnr[phase.name])) << '}'
           << ",\"submits\":{\"original\":" << plain.submitsIn(phase.from, phase.to) << ",\"tiles\":" << tiles.submitsIn(phase.from, phase.to) << '}'
           << ",\"videoBytes\":{\"original\":" << plain.sum(plain.videoBytes, phase.from, phase.to) << ",\"tiles\":" << tiles.sum(tiles.videoBytes, phase.from, phase.to) << '}'

@@ -70,6 +70,18 @@ struct LosslessSettings {
   // a small share running alongside the encode: <= 20 x 32 KiB per second.
   size_t motionPacketBytes = 32 * 1024;
   double motionTickBudgetMs = 1.0;
+  // A small change (typing, a caret, a ticked box): when at most quickTiles
+  // tiles of the picture changed on a tick, those tiles go losslessly WITH
+  // that tick's video, so the changed text is never shown as blurred video.
+  // Larger changes (scrolling, a moving map) stay video until they settle.
+  // Bounded by the token bucket like every add; 0 turns it off.
+  // Once no part of the picture changed for stillTicks ticks in a row (a
+  // scroll or page switch ended), a tile needs only stillSettleUs unchanged.
+  uint32_t stillTicks = 2;
+  uint64_t stillSettleUs = 30000;
+  uint32_t quickTiles = 24;
+  size_t quickPacketBytes = 128 * 1024;
+  double quickTickBudgetMs = 2.0;
   // The link share for tiles: the CURRENT video target in bytes/s, read every
   // tick (burst = a quarter second of it). An adaptive bitrate controller passes
   // a live callable; empty = the fixed rateBytesPerSecond/burstBytes above.
@@ -107,6 +119,8 @@ class LosslessTileSource {
     // picture changed where the BGRA did not, or an add was refused). Always 0
     // while the capture's BGRA view is the picture's source, as it should be.
     uint64_t mismatchTiles = 0;
+    // Tiles sent with the video of the very tick they changed on (a small change).
+    uint64_t quickTiles = 0;
     double beforeEncodeMs = 0, beforeEncodeMaxMs = 0, payloadMs = 0, afterEncodeMs = 0;
   };
   // `pictureWidth` x `pictureHeight`: the NV12 picture the encoder gets, smaller
@@ -134,6 +148,8 @@ class LosslessTileSource {
     const auto began = Clock::now();
     if (haveTick_ && nowUs <= nowUs_) throw std::runtime_error("Lossless tile clock did not progress");
     nowUs_ = nowUs; haveTick_ = true; ++tick_; drops_.clear(); dirty(frame); pictureChanges(picture, pictureChanged);
+    // Consecutive ticks on which no part of the picture changed (the screen stopped).
+    stillTicks_ = std::find(pictureChanged_.begin(), pictureChanged_.end(), uint8_t(1)) != pictureChanged_.end() ? 0 : stillTicks_ + 1;
     // retire() freed it; every tile is unknown, so afterEncode refills it before any add reads it.
     if (mirror_.empty()) mirror_.assign(size_t(width_) * height_ * 4, 0);
     if (present_) {
@@ -155,14 +171,32 @@ class LosslessTileSource {
     tokens_ = std::min(double(settings_.currentBurst()), tokens_ + double(settings_.currentRate()) * double(nowUs_ - refillUs_) / 1e6);
     refillUs_ = nowUs_;
     const bool adds = !ended_ && initialized_ && addsAllowed && tokens_ > 0 && (!haveAdd_ || nowUs_ - lastAddUs_ >= settings_.addIntervalUs);
-    if (drops_.empty() && !adds) return std::nullopt;
+    const std::vector<uint32_t> quick = quickCandidates(frame, contentChanged, addsAllowed);
+    if (drops_.empty() && !adds && quick.empty()) return std::nullopt;
     lossless::PayloadBuilder builder(width_, height_, sequence_ + 1, nowUs_, drops_);
     const size_t before = builder.size();
-    const size_t packetBytes = contentChanged ? std::min(settings_.packetBytes, before + settings_.motionPacketBytes) : settings_.packetBytes;
+    if (!quick.empty()) {
+      // This tick's small change, verified against this tick's picture (what
+      // the encoder got): an add replaces any drop of the same tile on the
+      // client, so the new content shows at once and stays.
+      const double quickBudgetMs = settings_.tickBudgetMs > 0 ? settings_.quickTickBudgetMs : 0;
+      const size_t limit = std::min(settings_.packetBytes, before + std::min(settings_.quickPacketBytes, size_t(tokens_)));
+      for (const auto i : quick) {
+        if (builder.size() + lossless::addHeaderBytes + lossless::maximumTileBytes > settings_.packetBytes || builder.size() >= limit) break;
+        if (quickBudgetMs > 0 && elapsed(began) >= quickBudgetMs) break;
+        if (!matchesPicture(i)) continue;
+        const auto rect = lossless::tileRect(i, width_, height_);
+        builder.add(uint16_t(i), mirror_.data() + (size_t(rect.y) * width_ + rect.x) * 4, size_t(width_) * 4);
+        tiles_[i].present = true; ++present_; ++stats_.addedTiles; ++stats_.quickTiles;
+      }
+      if (builder.adds()) tokens_ -= double(builder.size() - before);
+    }
+    const size_t afterQuick = builder.size();
+    const size_t packetBytes = contentChanged ? std::min(settings_.packetBytes, afterQuick + settings_.motionPacketBytes) : settings_.packetBytes;
     const double budgetMs = contentChanged ? settings_.motionTickBudgetMs : settings_.tickBudgetMs;
     const auto overBudget = [&] { return budgetMs > 0 && elapsed(began) >= budgetMs; };
     if (adds) {
-      const size_t limit = std::min(packetBytes, before + size_t(tokens_));
+      const size_t limit = std::min(packetBytes, afterQuick + size_t(tokens_));
       const uint32_t start = scan_;  // round-robin: continue where the last packet stopped
       for (uint32_t scanned = 0; scanned < count_ && builder.size() + lossless::addHeaderBytes + lossless::maximumTileBytes <= settings_.packetBytes &&
                                  builder.size() < limit && !overBudget();) {
@@ -170,7 +204,7 @@ class LosslessTileSource {
         std::vector<uint32_t> batch, verify;
         for (; scanned < count_ && batch.size() < 32; ++scanned) {
           const uint32_t i = (start + scanned) % count_;
-          if (tiles_[i].known && !tiles_[i].present && nowUs_ - tiles_[i].changedUs >= settings_.settleUs) {
+          if (tiles_[i].known && !tiles_[i].present && nowUs_ - tiles_[i].changedUs >= settleUs()) {
             batch.push_back(i); if (dirtyTile(i) && tiles_[i].checked != tick_) verify.push_back(i);
           }
         }
@@ -191,7 +225,7 @@ class LosslessTileSource {
         }
         if (builder.adds()) scan_ = (last + 1) % count_;
       }
-      if (builder.adds()) { tokens_ -= double(builder.size() - before); lastAddUs_ = nowUs_; haveAdd_ = true; }
+      if (builder.size() > afterQuick) { tokens_ -= double(builder.size() - afterQuick); lastAddUs_ = nowUs_; haveAdd_ = true; }
     }
     stats_.payloadMs += elapsed(began);
     if (drops_.empty() && !builder.adds()) return std::nullopt;
@@ -299,6 +333,28 @@ class LosslessTileSource {
     }
     if (!dirtyAll_) for (uint32_t i = 0; i < count_; ++i) if (pictureChanged_[i]) dirtyTiles_[i] = 1;
   }
+  // How long a tile must stay unchanged before it is added: the short wait
+  // once the whole picture stopped changing (a scroll or a page switch
+  // ended), else settleUs (other content still moves, so this tile may too).
+  uint64_t settleUs() const { return stillTicks_ >= settings_.stillTicks ? settings_.stillSettleUs : settings_.settleUs; }
+  // The tiles of a small change on this tick (LosslessSettings::quickTiles):
+  // every tile whose part of this tick's picture changed, when there are few
+  // and none is shown losslessly any more; their mirror is brought to this
+  // tick's frame. Empty for a larger change, a downscaled picture or a tick
+  // without video.
+  std::vector<uint32_t> quickCandidates(ComposedFrame& frame, bool contentChanged, bool addsAllowed) {
+    std::vector<uint32_t> quick;
+    if (!settings_.quickTiles || !contentChanged || !addsAllowed || ended_ || !initialized_ || tokens_ <= 0 || scaled()) return quick;
+    for (uint32_t i = 0; i < count_; ++i) {
+      if (!pictureChanged_[i] || tiles_[i].present) continue;
+      if (quick.size() == settings_.quickTiles) return {};
+      quick.push_back(i);
+    }
+    std::vector<uint32_t> verify;
+    for (const auto i : quick) if (tiles_[i].checked != tick_) verify.push_back(i);
+    compare(frame, verify);
+    return quick;
+  }
   // Unscaled: the mirror of tile i converts to exactly this tick's picture there.
   bool matchesPicture(uint32_t i) {
     const auto r = rectOf(i); const size_t w = size_t(r.width()), stride = pictureWidth_, chroma = size_t(pictureWidth_) * pictureHeight_;
@@ -349,6 +405,7 @@ class LosslessTileSource {
   std::vector<uint16_t> drops_;
   uint64_t tick_ = 0, nowUs_ = 0, refillUs_ = 0, lastAddUs_ = 0;
   double tokens_ = 0;
+  uint32_t stillTicks_ = 0;
   bool haveTick_ = false, haveAdd_ = false, initialized_ = false, dirtyAll_ = true, ended_ = false;
   Stats stats_;
 };
