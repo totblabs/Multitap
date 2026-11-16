@@ -50,13 +50,23 @@ void emitPacket(const std::vector<uint8_t>& bytes, lossless::Compositor& composi
   std::printf(" %d\n", int(compositor.Accept(bytes.data(), bytes.size())));
 }
 
-// The video under the tiles: a flat RGBA picture, composed at `pts`.
+// The video under the tiles: a flat RGBA picture of the video size, composed
+// at `pts` as the Windows engine publishes it: a scaled source gets a
+// source-size frame (ComposeDecodedScaled: the flat video upscales to itself),
+// otherwise the video-size frame. "-" when no tile size is known yet.
 void emitState(lossless::Compositor& compositor, uint64_t pts) {
-  std::vector<uint8_t> frame(size_t(W) * H * 4);
+  const uint32_t vw = compositor.videoWidth(), vh = compositor.videoHeight();
+  std::vector<uint8_t> frame(size_t(vw) * vh * 4);
   for (size_t i = 0; i < frame.size(); i += 4) { frame[i] = 0x10; frame[i + 1] = 0x20; frame[i + 2] = 0x30; frame[i + 3] = 0xff; }
-  compositor.ComposeDecoded(frame.data(), size_t(W) * 4, pts);
+  if (compositor.scaled()) {
+    std::vector<uint8_t> source(size_t(compositor.width()) * compositor.height() * 4);
+    compositor.ComposeDecodedScaled(frame.data(), size_t(vw) * 4, source.data(), size_t(compositor.width()) * 4, pts);
+    frame = std::move(source);
+  } else compositor.ComposeDecoded(frame.data(), size_t(vw) * 4, pts);
   std::printf("state %llu ", static_cast<unsigned long long>(pts));
-  for (uint32_t i = 0; i < lossless::tileColumns(W) * lossless::tileRows(H); ++i) std::printf("%d", compositor.present(i) ? 1 : 0);
+  const uint32_t tiles = compositor.width() ? lossless::tileColumns(compositor.width()) * lossless::tileRows(compositor.height()) : 0;
+  if (!tiles) std::printf("-");
+  for (uint32_t i = 0; i < tiles; ++i) std::printf("%d", compositor.present(i) ? 1 : 0);
   std::printf(" %016llx\n", static_cast<unsigned long long>(fnv(frame)));
 }
 }  // namespace
@@ -80,5 +90,24 @@ int main() {
   // A sequence gap poisons: nothing is composited again.
   emitPacket(packet(5, 6000, {}, {1}, a), compositor);
   emitState(compositor, 6000);
+  // Scaled-capable compositors (Configure(..., true), the legacy engine's):
+  // "scaled <video width> <video height>" starts one; the same 144 x 80 tiles
+  // then describe the source of a downscaled video (128 x 72), of a video at
+  // the source size (unscaled), or of a larger video (refused: poisoned).
+  for (const auto& video : {std::pair<uint32_t, uint32_t>{128, 72}, {144, 80}, {160, 96}}) {
+    lossless::Compositor scaled;
+    if (!scaled.Configure(video.first, video.second, true)) return 1;
+    std::printf("scaled %u %u\n", video.first, video.second);
+    emitState(scaled, 500);  // no tile packet yet: the video as it is
+    emitPacket(packet(1, 1000, {}, {0, 1, 2, 3, 4, 5}, a), scaled);
+    emitState(scaled, 999);
+    emitPacket(packet(2, 2000, {1, 4}, {2}, b), scaled);
+    emitState(scaled, 1999);
+    emitState(scaled, 2000);
+    emitPacket(packet(3, 3000, {0, 1}, {0, 5}, b), scaled);
+    emitState(scaled, 3000);
+    emitPacket(packet(5, 6000, {}, {1}, a), scaled);
+    emitState(scaled, 6000);
+  }
   return 0;
 }

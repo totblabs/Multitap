@@ -11,7 +11,7 @@ package me.totb.multitap_client
  * 'T''S''L''1' (H.264 Annex B begins with a zero byte) and is sent only after
  * this client opted in (its pings say `lt1-`). Little endian:
  *   0  'T''S''L''1'
- *   4  u16 width, u16 height     (the decoded frame size)
+ *   4  u16 width, u16 height     (source size; = the decoded size except in a scaled stream)
  *   8  u32 sequence              (1, 2, 3 ... per Host encoder)
  *   12 u64 dropPts               (drops apply to decoded video pts >= this)
  *   20 u16 dropCount, u16 addCount
@@ -21,9 +21,9 @@ package me.totb.multitap_client
  * Android keeps the decoded pictures on the GPU (AndroidTileRenderer), so the
  * compositor here keeps no RGBA layer: every decoded add goes to a [TileSink]
  * (the renderer's tile texture) and [presentMask] says which tiles go over the
- * picture. A scaled source (tiles larger than the video) is not composited on
- * Android: such a packet poisons the compositor, as a size mismatch does on a
- * Windows track.
+ * picture. A scaled source (tiles larger than the downscaled video) is drawn
+ * as on Windows: the tiles at the source size over the video upscaled
+ * bilinearly, by the GPU instead of rgba_upscale.hpp.
  */
 internal object LosslessTiles {
     const val TILE = 64
@@ -138,7 +138,8 @@ internal fun interface TileSink {
 /**
  * One per decoder (the engine of a start, or one output's engine); a new start,
  * topology or size makes a new one, so everything is cleared. Not thread-safe:
- * the decoder worker owns it.
+ * the decoder worker owns it. [videoWidth] x [videoHeight] is the decoded
+ * video (Compositor::Configure in lossless_tiles.hpp).
  *  - a tile packet records its drops (due when a decoded frame with
  *    pts >= dropPts is shown) and hands its adds to the sink;
  *  - every shown decoded frame first applies due drops ([applyDecoded]), then
@@ -146,19 +147,31 @@ internal fun interface TileSink {
  *    its change or later;
  *  - a malformed packet, a size mismatch or a sequence gap poisons it: no tile
  *    is shown again (plain video), never a stale tile.
+ * With [allowScaledSource] (a single start only) the first tile packet may
+ * declare a larger unscaled source, never smaller than the video: the tiles
+ * then live in source coordinates ([width] x [height]) and the picture is
+ * drawn at the source size, video upscaled where no tile is present
+ * (AndroidTileRenderer). Until that packet [width], [height] and [count] are 0.
  */
-internal class LosslessCompositor(val width: Int, val height: Int) {
+internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, private val allowScaledSource: Boolean = false) {
     enum class Outcome { NOT_TILE, ACCEPTED, IGNORED }
 
-    private val valid = LosslessTiles.validFrame(width, height)
-    private val columns = if (valid) LosslessTiles.columns(width) else 0
-    val count = if (valid) columns * LosslessTiles.rows(height) else 0
+    private val valid = LosslessTiles.validFrame(videoWidth, videoHeight)
+    /** The tiles' (source) size: the video's unless scaled; 0 until a scaled-capable compositor's first packet. */
+    var width = 0
+        private set
+    var height = 0
+        private set
+    private var columns = 0
+    var count = 0
+        private set
     /** Per tile 0 (video) or 0xff (lossless), row-major: the renderer's mask texture as is. */
-    val presentMask = ByteArray(count)
+    var presentMask = ByteArray(0)
+        private set
     /** Changes whenever [presentMask] does. */
     var maskVersion = 0
         private set
-    private val dropAt = LongArray(count) { LosslessTiles.NO_DROP }
+    private var dropAt = LongArray(0)
     private var sequence = 0L
     private val added = ArrayList<Int>()
     private val scratch = ByteArray(LosslessTiles.TILE * LosslessTiles.TILE * 4)
@@ -176,8 +189,13 @@ internal class LosslessCompositor(val width: Int, val height: Int) {
     var bytes = 0L
         private set
 
+    init { if (valid && !allowScaledSource) establish(videoWidth, videoHeight) }
+
     /** Adds received since the last shown picture wait to be shown (a republish when no video frame follows). */
     val republishPending: Boolean get() = !poisoned && added.isNotEmpty()
+
+    /** The tiles describe a source larger than the video (Compositor::scaled). */
+    val scaled: Boolean get() = count > 0 && (width != videoWidth || height != videoHeight)
 
     fun present(index: Int): Boolean = index in 0 until count && presentMask[index].toInt() != 0
 
@@ -187,7 +205,7 @@ internal class LosslessCompositor(val width: Int, val height: Int) {
      */
     fun accept(payload: ByteArray, offset: Int, length: Int, sink: TileSink): Outcome {
         if (!LosslessTiles.isTilePayload(payload, offset, length)) return Outcome.NOT_TILE
-        if (poisoned || count == 0) return Outcome.IGNORED
+        if (poisoned || (count == 0 && !allowScaledSource) || !valid) return Outcome.IGNORED
         val parsed = try { parse(payload, offset, length, sink) } catch (_: RuntimeException) { false }
         if (!parsed) { poison(); return Outcome.IGNORED }
         return Outcome.ACCEPTED
@@ -195,7 +213,8 @@ internal class LosslessCompositor(val width: Int, val height: Int) {
 
     /**
      * A decoded frame of presentation time [pts] (microseconds) is shown now:
-     * its due drops apply and the adds so far are part of it.
+     * its due drops apply and the adds so far are part of it (ApplyDecoded;
+     * ApplyDecodedScaled makes the same state changes for a scaled source).
      */
     fun applyDecoded(pts: Long) {
         added.clear()
@@ -215,6 +234,12 @@ internal class LosslessCompositor(val width: Int, val height: Int) {
         if (presentTiles > 0) { presentMask.fill(0); presentTiles = 0; maskVersion++ }
     }
 
+    private fun establish(width: Int, height: Int) {
+        this.width = width; this.height = height
+        columns = LosslessTiles.columns(width)
+        count = columns * LosslessTiles.rows(height)
+    }
+
     private fun due(i: Int, pts: Long): Boolean {
         val at = dropAt[i]
         if (at == LosslessTiles.NO_DROP || java.lang.Long.compareUnsigned(pts, at) < 0) return false
@@ -224,6 +249,16 @@ internal class LosslessCompositor(val width: Int, val height: Int) {
 
     private fun parse(p: ByteArray, offset: Int, size: Int, sink: TileSink): Boolean {
         if (size < LosslessTiles.HEADER || size > LosslessTiles.MAX_PAYLOAD || offset + size > p.size) return false
+        if (count == 0) {
+            // First packet of a scaled-capable compositor: the unscaled source
+            // size, never smaller than the video. The wire limits replace an
+            // arbitrary magnification ratio (the C++ upscaler's own checks
+            // pass for every valid frame at least the video's size).
+            val w = LosslessTiles.u16(p, offset + 4)
+            val h = LosslessTiles.u16(p, offset + 6)
+            if (!LosslessTiles.validFrame(w, h) || w < videoWidth || h < videoHeight) return false
+            establish(w, h)
+        }
         if (LosslessTiles.u16(p, offset + 4) != width || LosslessTiles.u16(p, offset + 6) != height) return false
         val next = LosslessTiles.u32(p, offset + 8)
         if (next != ((sequence + 1) and 0xFFFFFFFFL)) return false
@@ -231,6 +266,8 @@ internal class LosslessCompositor(val width: Int, val height: Int) {
         val drops = LosslessTiles.u16(p, offset + 20)
         val adds = LosslessTiles.u16(p, offset + 22)
         if (size < LosslessTiles.HEADER + drops * 2) return false
+        // Allocated on the first tile packet: sessions with released Hosts pay nothing.
+        if (presentMask.size != count) { presentMask = ByteArray(count); dropAt = LongArray(count) { LosslessTiles.NO_DROP } }
         for (n in 0 until drops) {
             val index = LosslessTiles.u16(p, offset + LosslessTiles.HEADER + n * 2)
             if (index >= count) return false

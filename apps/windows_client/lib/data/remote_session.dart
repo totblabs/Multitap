@@ -1338,8 +1338,9 @@ class RemoteSession extends ChangeNotifier {
   void _sendPing(int now) {
     final tiles = _losslessTilesSession;
     // An engine that stopped compositing after the opt-in (Android: a later
-    // start whose video is downscaled) pauses the tiles as 마우스 잠금 does;
-    // the Host keeps the opt-in for the whole session otherwise.
+    // start without GPU or memory room for its picture) pauses the tiles as
+    // 마우스 잠금 does; the Host keeps the opt-in for the whole session
+    // otherwise.
     final prefix = tiles
         ? (_losslessPaused ? losslessTilesPausePrefix : losslessTilesPingPrefix)
         : (_losslessOffered ? losslessTilesPausePrefix : '');

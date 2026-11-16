@@ -105,12 +105,24 @@ class AndroidRemoteMedia extends NativeRemoteMedia
   }
 
   /// ToTBSeamless lossless tiles: true while the engine of the current start
-  /// draws tiles over its video (stats `losslessComposite`: GL on this device
-  /// and the video at its source size). The session opts in only then, and
-  /// asks the Host to stop sending them (lt0-) when a later start cannot.
+  /// draws tiles over its video (stats `losslessComposite`: GL, GPU and
+  /// memory room on this device; a downscaled start is drawn at its source
+  /// size). The session opts in only then, and asks the Host to stop sending
+  /// them (lt0-) when a later start cannot.
   @override
   bool get losslessTiles => _losslessComposite;
   bool _losslessComposite = false;
+
+  /// The pixel size of [texture] when the engine draws it at the source size
+  /// of a downscaled start (stats `losslessTexture*`), else null: the
+  /// texture then has the video's size. The picture's place on screen and the
+  /// input mapping do not change; only its filtering follows the real pixels.
+  Size? texturePixels(int texture) {
+    final known = _sourceSizedTexture;
+    return known != null && known.$1 == texture ? known.$2 : null;
+  }
+
+  (int, Size)? _sourceSizedTexture;
 
   @override
   Future<Map<String, dynamic>> stats() async {
@@ -118,6 +130,12 @@ class AndroidRemoteMedia extends NativeRemoteMedia
     diagnostics = result;
     observeAudio(result);
     _losslessComposite = result['losslessComposite'] == true;
+    final id = result['losslessTextureId'];
+    final width = result['losslessTextureWidth'];
+    final height = result['losslessTextureHeight'];
+    _sourceSizedTexture = id is int && width is int && height is int
+        ? (id, Size(width.toDouble(), height.toDouble()))
+        : null;
     return result;
   }
 
@@ -192,6 +210,7 @@ class AndroidRemoteMedia extends NativeRemoteMedia
   Future<void> stop() {
     cursorState.reset();
     _losslessComposite = false;
+    _sourceSizedTexture = null;
     return super.stop();
   }
 

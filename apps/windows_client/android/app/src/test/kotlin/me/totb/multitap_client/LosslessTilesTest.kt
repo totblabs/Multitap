@@ -11,30 +11,47 @@ import org.junit.Test
 // states were composed by the Windows client's Compositor
 // (apps/windows_client/test/native/lossless_tiles_vectors.cpp).
 class LosslessTilesTest {
-    private class Vectors(val width: Int, val height: Int, val steps: List<List<String>>)
+    /** One compositor of the fixture: "frame" (unscaled) or "scaled" (Configure(..., true)) over [width] x [height] video. */
+    private class Section(val width: Int, val height: Int, val scaled: Boolean, val steps: List<List<String>>)
+    private class Vectors(val sections: List<Section>) {
+        // The first, unscaled section: 144 x 80.
+        val width get() = sections.first().width
+        val height get() = sections.first().height
+        val steps get() = sections.first().steps
+    }
 
     private fun vectors(): Vectors {
         val text = javaClass.classLoader!!.getResourceAsStream("lossless_tiles_vectors.txt")!!.bufferedReader().readText()
         val lines = text.lines().filter { it.isNotBlank() && !it.startsWith("#") }.map { it.trim().split(' ') }
-        val frame = lines.first { it[0] == "frame" }
-        return Vectors(frame[1].toInt(), frame[2].toInt(), lines.filter { it[0] != "frame" })
+        val sections = ArrayList<Section>()
+        for (line in lines) {
+            if (line[0] == "frame" || line[0] == "scaled") sections.add(Section(line[1].toInt(), line[2].toInt(), line[0] == "scaled", ArrayList()))
+            else (sections.last().steps as ArrayList).add(line)
+        }
+        return Vectors(sections)
     }
 
     private fun hex(text: String) = ByteArray(text.length / 2) { text.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
 
-    /** The C++ test's CPU picture: the tiles the sink got, over flat video where present. */
+    /** The C++ test's CPU picture: the tiles the sink got (source coordinates), over flat video where present. */
     private class Layer(val width: Int, val height: Int) : TileSink {
         val rgba = ByteArray(width * height * 4)
         override fun tile(index: Int, x: Int, y: Int, width: Int, height: Int, rgba: ByteArray) {
             for (row in 0 until height) System.arraycopy(rgba, row * width * 4, this.rgba, ((y + row) * this.width + x) * 4, width * 4)
         }
+        /**
+         * The published frame: the source size once tiles describe one (a
+         * scaled source: flat video upscales to itself), else the video's.
+         */
         fun compose(compositor: LosslessCompositor): ByteArray {
-            val frame = ByteArray(width * height * 4)
+            val w = if (compositor.count > 0) compositor.width else compositor.videoWidth
+            val h = if (compositor.count > 0) compositor.height else compositor.videoHeight
+            val frame = ByteArray(w * h * 4)
             for (i in frame.indices step 4) { frame[i] = 0x10; frame[i + 1] = 0x20; frame[i + 2] = 0x30; frame[i + 3] = -1 }
-            val columns = LosslessTiles.columns(width)
-            for (y in 0 until height) for (x in 0 until width) {
+            val columns = LosslessTiles.columns(w)
+            for (y in 0 until h) for (x in 0 until w) {
                 if (!compositor.present((y / 64) * columns + x / 64)) continue
-                System.arraycopy(rgba, (y * width + x) * 4, frame, (y * width + x) * 4, 4)
+                System.arraycopy(rgba, (y * width + x) * 4, frame, (y * w + x) * 4, 4)
             }
             return frame
         }
@@ -49,25 +66,36 @@ class LosslessTilesTest {
     @Test
     fun theAndroidPortReachesTheSameTilesAndPixelsAsTheSharedCpp() {
         val vectors = vectors()
-        val compositor = LosslessCompositor(vectors.width, vectors.height)
-        val layer = Layer(vectors.width, vectors.height)
+        assertEquals(listOf("frame 144 80", "scaled 128 72", "scaled 144 80", "scaled 160 96"),
+            vectors.sections.map { "${if (it.scaled) "scaled" else "frame"} ${it.width} ${it.height}" })
         var states = 0
-        for (step in vectors.steps) when (step[0]) {
-            "packet" -> {
-                val payload = hex(step[1])
-                val expected = if (step[2] == "1") LosslessCompositor.Outcome.ACCEPTED else LosslessCompositor.Outcome.IGNORED
-                assertEquals(expected, compositor.accept(payload, 0, payload.size, layer))
+        val poisoned = ArrayList<Boolean>()
+        val scaled = ArrayList<Boolean>()
+        for (section in vectors.sections) {
+            val compositor = LosslessCompositor(section.width, section.height, allowScaledSource = section.scaled)
+            // Every packet of the fixture carries 144 x 80 tiles.
+            val layer = Layer(144, 80)
+            for (step in section.steps) when (step[0]) {
+                "packet" -> {
+                    val payload = hex(step[1])
+                    val expected = if (step[2] == "1") LosslessCompositor.Outcome.ACCEPTED else LosslessCompositor.Outcome.IGNORED
+                    assertEquals("${section.width}x${section.height}", expected, compositor.accept(payload, 0, payload.size, layer))
+                }
+                "state" -> {
+                    compositor.applyDecoded(step[1].toLong())
+                    val present = if (compositor.count == 0) "-" else (0 until compositor.count).joinToString("") { if (compositor.present(it)) "1" else "0" }
+                    val at = "${section.width}x${section.height} at pts ${step[1]}"
+                    assertEquals("present tiles $at", step[2], present)
+                    assertEquals("composed picture $at", step[3], fnv(layer.compose(compositor)))
+                    states++
+                }
             }
-            "state" -> {
-                compositor.applyDecoded(step[1].toLong())
-                val present = (0 until compositor.count).joinToString("") { if (compositor.present(it)) "1" else "0" }
-                assertEquals("present tiles at pts ${step[1]}", step[2], present)
-                assertEquals("composed picture at pts ${step[1]}", step[3], fnv(layer.compose(compositor)))
-                states++
-            }
+            poisoned.add(compositor.poisoned)
+            scaled.add(compositor.scaled)
         }
-        assertEquals(6, states)
-        assertTrue("the sequence gap poisoned", compositor.poisoned)
+        assertEquals(6 + 3 * 6, states)
+        assertEquals("every sequence gap (and the larger video) poisoned", listOf(true, true, true, true), poisoned)
+        assertEquals("only tiles over a smaller video are scaled", listOf(false, true, false, false), scaled)
     }
 
     @Test
@@ -109,12 +137,83 @@ class LosslessTilesTest {
     }
 
     @Test
-    fun aScaledSourceIsNotCompositedOnAndroid() {
-        // The first packet declares 144 x 80 tiles over 128 x 72 video.
+    fun aScaledSourceNeedsTheScaledOptIn() {
+        // The first packet declares 144 x 80 tiles over 128 x 72 video: a size
+        // mismatch for a compositor of an output of tracks-v1.
         val payload = hex(vectors().steps.first { it[0] == "packet" }[1])
         val compositor = LosslessCompositor(128, 72)
+        assertEquals(128, compositor.width)
         assertEquals(LosslessCompositor.Outcome.IGNORED, compositor.accept(payload, 0, payload.size) { _, _, _, _, _, _ -> })
         assertTrue(compositor.poisoned)
+        assertFalse(compositor.scaled)
+    }
+
+    @Test
+    fun aScaledSourceTakesItsSizeFromTheFirstPacketAndPlacesTilesInSourceCoordinates() {
+        val packets = vectors().steps.filter { it[0] == "packet" }.map { hex(it[1]) }
+        val compositor = LosslessCompositor(128, 72, allowScaledSource = true)
+        assertEquals("no size before the first packet", 0, compositor.count)
+        assertFalse(compositor.scaled)
+        val placed = ArrayList<List<Int>>()
+        assertEquals(LosslessCompositor.Outcome.ACCEPTED,
+            compositor.accept(packets[0], 0, packets[0].size) { index, x, y, w, h, _ -> placed.add(listOf(index, x, y, w, h)) })
+        assertTrue(compositor.scaled)
+        assertEquals(144, compositor.width); assertEquals(80, compositor.height); assertEquals(6, compositor.count)
+        assertEquals(128, compositor.videoWidth); assertEquals(72, compositor.videoHeight)
+        // Tile 2 is the partial right column of the 144-wide source, tile 5 its corner.
+        assertEquals(listOf(2, 128, 0, 16, 64), placed[2])
+        assertEquals(listOf(5, 128, 64, 16, 16), placed[5])
+        assertEquals(6, compositor.presentTiles)
+        assertTrue(compositor.republishPending)
+        // Drops are due by the shown frame's pts exactly as unscaled (ApplyDecodedScaled).
+        assertEquals(LosslessCompositor.Outcome.ACCEPTED, compositor.accept(packets[1], 0, packets[1].size) { _, _, _, _, _, _ -> })
+        compositor.applyDecoded(1999)
+        assertEquals(6, compositor.presentTiles)
+        compositor.applyDecoded(2000)
+        assertEquals(4, compositor.presentTiles)
+        assertFalse(compositor.republishPending)
+    }
+
+    @Test
+    fun aScaledSourceKeepsItsFirstSizeAndRefusesOneSmallerThanTheVideo() {
+        val packets = vectors().steps.filter { it[0] == "packet" }.map { hex(it[1]) }
+        // A later packet of another source size: poisoned, the mask cleared.
+        val resized = LosslessCompositor(128, 72, allowScaledSource = true)
+        resized.accept(packets[0], 0, packets[0].size) { _, _, _, _, _, _ -> }
+        val other = packets[1].copyOf().also { it[4] = 0x92.toByte() } // 146 wide
+        assertEquals(LosslessCompositor.Outcome.IGNORED, resized.accept(other, 0, other.size) { _, _, _, _, _, _ -> })
+        assertTrue(resized.poisoned)
+        assertEquals(0, resized.presentTiles)
+        assertTrue(resized.presentMask.all { it.toInt() == 0 })
+        // Narrower than the video in one dimension, odd, or under the tiles-v1 minimum: refused before any size is taken.
+        for ((label, video, edit) in listOf<Triple<String, Pair<Int, Int>, (ByteArray) -> Unit>>(
+            Triple("narrower", 146 to 72, { _ -> }),
+            Triple("shorter", 128 to 82, { _ -> }),
+            Triple("odd", 128 to 72, { it[4] = 0x91.toByte() }),
+        )) {
+            val compositor = LosslessCompositor(video.first, video.second, allowScaledSource = true)
+            val bytes = packets[0].copyOf().also(edit)
+            var sunk = 0
+            assertEquals(label, LosslessCompositor.Outcome.IGNORED, compositor.accept(bytes, 0, bytes.size) { _, _, _, _, _, _ -> sunk++ })
+            assertTrue(label, compositor.poisoned)
+            assertEquals(label, 0, compositor.count)
+            assertEquals(label, 0, sunk)
+        }
+        // An invalid video size accepts nothing, scaled or not.
+        assertEquals(LosslessCompositor.Outcome.IGNORED,
+            LosslessCompositor(15, 15, allowScaledSource = true).accept(packets[0], 0, packets[0].size) { _, _, _, _, _, _ -> })
+    }
+
+    @Test
+    fun aSinkThatCannotPlaceATilePoisons() {
+        // AndroidMedia's renderer check: a tile of a source it does not draw throws in the sink.
+        val payload = hex(vectors().steps.first { it[0] == "packet" }[1])
+        val compositor = LosslessCompositor(128, 72, allowScaledSource = true)
+        assertEquals(LosslessCompositor.Outcome.IGNORED,
+            compositor.accept(payload, 0, payload.size) { _, _, _, _, _, _ -> throw IllegalStateException("tile source size") })
+        assertTrue(compositor.poisoned)
+        assertEquals(0, compositor.presentTiles)
+        assertFalse(compositor.republishPending)
     }
 
     @Test

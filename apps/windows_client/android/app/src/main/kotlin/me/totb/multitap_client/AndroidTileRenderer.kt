@@ -21,17 +21,22 @@ import java.nio.FloatBuffer
  * The decoder renders into a SurfaceTexture of our own ([decoderSurface]);
  * each latched frame is drawn into the Flutter texture's Surface with one
  * shader pass: the video, and where [LosslessCompositor.presentMask] says a
- * tile is present, the tile's exact pixels from an RGBA texture of the frame's
+ * tile is present, the tile's exact pixels from an RGBA texture of the output's
  * size. Tile pixels and the mask reach the GPU only when tiles arrive or
- * change; a frame without tiles is a plain copy of the video. The output is
- * the same size as the video, so pixel centres line up and a tile is shown
- * exactly (nearest sampling), as the Windows client shows it.
+ * change. The output ([width] x [height], LosslessOutput) is the video's own
+ * size, where a frame without tiles is a plain copy of the video, or for a
+ * downscaled stream the larger source size, where the video is upscaled
+ * bilinearly (pixel centres aligned, as rgba_upscale.hpp on Windows) and a
+ * tile is still shown at its exact source pixels. Tile pixel centres always
+ * line up with the output's (nearest sampling), as the Windows client shows them.
  *
  * All calls on one thread (the engine's decoder worker), which holds the EGL
  * context current while it exists. The shared default EGL display is never
  * terminated: Flutter's own renderer uses it.
  */
 internal class AndroidTileRenderer private constructor(
+    val videoWidth: Int,
+    val videoHeight: Int,
     val width: Int,
     val height: Int,
     private val display: EGLDisplay,
@@ -69,14 +74,17 @@ internal class AndroidTileRenderer private constructor(
 
     companion object {
         /**
-         * A renderer drawing into [output] (the Flutter texture's Surface,
+         * A renderer drawing [videoWidth] x [videoHeight] video into [output]
+         * (the Flutter texture's Surface, whose buffers the caller sized
          * [width] x [height]); its decoder surface calls [onFrame] on
          * [handler]'s thread for every frame the decoder renders. Null when
-         * this device cannot (no EGL/GLES 2 window, a texture too large):
-         * the decoder then renders to [output] directly, without tiles.
+         * this device cannot (no EGL/GLES 2 window, a texture or viewport
+         * too large): the decoder then renders to [output] directly, without tiles.
          */
-        fun create(output: Surface, width: Int, height: Int, handler: Handler, onFrame: (AndroidTileRenderer) -> Unit): AndroidTileRenderer? {
-            if (!LosslessTiles.validFrame(width, height)) return null
+        fun create(output: Surface, videoWidth: Int, videoHeight: Int, width: Int, height: Int, handler: Handler,
+            onFrame: (AndroidTileRenderer) -> Unit): AndroidTileRenderer? {
+            if (!LosslessTiles.validFrame(width, height) || !LosslessTiles.validFrame(videoWidth, videoHeight) ||
+                videoWidth > width || videoHeight > height) return null
             val display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
             if (display == EGL14.EGL_NO_DISPLAY) return null
             val version = IntArray(2)
@@ -92,7 +100,7 @@ internal class AndroidTileRenderer private constructor(
             if (context == null || context == EGL14.EGL_NO_CONTEXT) return null
             val window = try { EGL14.eglCreateWindowSurface(display, config, output, intArrayOf(EGL14.EGL_NONE), 0) } catch (_: Exception) { null }
             if (window == null || window == EGL14.EGL_NO_SURFACE) { EGL14.eglDestroyContext(display, context); return null }
-            val renderer = AndroidTileRenderer(width, height, display, context, window)
+            val renderer = AndroidTileRenderer(videoWidth, videoHeight, width, height, display, context, window)
             return try {
                 if (renderer.setUp(handler, onFrame)) renderer else { renderer.release(); null }
             } catch (_: Exception) {
@@ -144,8 +152,10 @@ void main() {
         // A queued picture replaces an older one Flutter has not latched yet; a swap never waits.
         EGL14.eglSwapInterval(display, 0)
         val size = IntArray(1)
+        val viewport = IntArray(2)
         GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, size, 0)
-        if (size[0] < maxOf(width, height)) return false
+        GLES20.glGetIntegerv(GLES20.GL_MAX_VIEWPORT_DIMS, viewport, 0)
+        if (!LosslessOutput.fitsGpu(width, height, videoWidth, videoHeight, size[0], viewport[0], viewport[1])) return false
         program = link() ?: return false
         position = GLES20.glGetAttribLocation(program, "aPosition")
         uv = GLES20.glGetAttribLocation(program, "aUv")
@@ -174,7 +184,7 @@ void main() {
         GLES20.glUniform2f(uMaskScale, width.toFloat() / (columns * LosslessTiles.TILE), height.toFloat() / (rows * LosslessTiles.TILE))
         val texture = SurfaceTexture(videoTexture)
         surfaceTexture = texture
-        texture.setDefaultBufferSize(width, height)
+        texture.setDefaultBufferSize(videoWidth, videoHeight)
         texture.setOnFrameAvailableListener({ if (!released) onFrame(this) }, handler)
         decoderSurface = Surface(texture)
         return true

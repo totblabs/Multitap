@@ -81,8 +81,9 @@ import kotlin.math.roundToInt
  * is held and rendered when the app is visible again (AndroidFramePacer).
  * Audio plays on as before, at the volume its audio focus allows (AndroidAudioFocus: muted during a call).
  *
- * tiles-v1 (docs/lossless-tiles-design.md): a start at the video's own size
- * puts AndroidTileRenderer between the decoder and the texture. The decoder
+ * tiles-v1 (docs/lossless-tiles-design.md): a start puts AndroidTileRenderer
+ * between the decoder and the texture, drawing at the video's own size or,
+ * for a downscaled single start, at the source size (LosslessOutput). The decoder
  * renders into the renderer's surface; each latched frame gets its due drops
  * (by its pts) and every present lossless tile, drawn on the GPU into the
  * texture. Tile packets never reach the decoder. Adds with no video frame
@@ -198,7 +199,8 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
 
     // tiles-v1 (LosslessTiles.kt): the GPU renderer between the decoder and
     // the Flutter texture, and the tiles it shows; null when this start
-    // cannot composite them (a scaled source, or no GL on this device).
+    // cannot composite them (no GL, GPU or memory room on this device, or a
+    // downscaled output of tracks-v1).
     private var renderer: AndroidTileRenderer? = null
     private var tiles: LosslessCompositor? = null
     private val tileOrder = LosslessFrameOrder()
@@ -652,11 +654,20 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             }
             closeEngine(); audioEnabled = nextAudioEnabled; audioOpus = nextAudioOpus
             texture = entry; surface = nextSurface; width = w; height = h; targetFps = track.fps; allowHardware = request.hardware; exactSizes = exact
-            // tiles-v1 over this start's video: only at the video's own size
-            // (a downscaled stream's tiles describe a larger source).
-            val unscaled = (track.sourceWidth ?: w) == w && (track.sourceHeight ?: h) == h
-            renderer = if (!unscaled) null else try { AndroidTileRenderer.create(nextSurface, w, h, worker, ::tileFrame) } catch (_: Exception) { null }
-            tiles = renderer?.let { LosslessCompositor(w, h) }
+            // tiles-v1 over this start's video, drawn at the video's own size
+            // or, for a downscaled single start, at the source size its tiles
+            // describe (LosslessOutput): the texture's buffers take that size.
+            val output = LosslessOutput.plan(w, h, track.sourceWidth, track.sourceHeight, registerChannels) {
+                try { AvcStreamSizes.memoryBudget(activity) } catch (_: Exception) { 0L }
+            }
+            val sized = output == null || !output.scaled ||
+                try { entry.surfaceTexture().setDefaultBufferSize(output.width, output.height); true } catch (_: Exception) { false }
+            renderer = if (output == null || !sized) null else try {
+                AndroidTileRenderer.create(nextSurface, w, h, output.width, output.height, worker, ::tileFrame)
+            } catch (_: Exception) { null }
+            // Without the renderer the decoder renders into the texture at the video size.
+            if (renderer == null && output?.scaled == true) try { entry.surfaceTexture().setDefaultBufferSize(w, h) } catch (_: Exception) {}
+            tiles = renderer?.let { LosslessCompositor(w, h, allowScaledSource = output!!.scaled) }
             losslessComposite = renderer != null
             losslessPackets = 0; losslessIgnored = 0; losslessTimestampMismatches = 0; losslessPacketNanos = 0
             decoded = 0; droppedPackets = 0
@@ -708,6 +719,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         val depthMs = if (playing) sound[6] / 48.0 else 0.0
         val decoder = opus
         val audioError = audioOut.error
+        val sourceSized = renderer?.takeIf { it.width != width || it.height != height }
         return mapOf(
             "decodedFrames" to decoded,
             "textureFrames" to textureFrames,
@@ -734,6 +746,13 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             "losslessPoisoned" to (tiles?.poisoned == true),
             "losslessTimestampMismatches" to losslessTimestampMismatches,
             "losslessPacketMs" to losslessPacketNanos / 1e6,
+            // The tiles describe a larger source than the video (the Windows key).
+            "losslessScaledSource" to (tiles?.scaled == true),
+            // A downscaled start drawn at its source size: the Flutter texture
+            // is then that size, not the video's (the view filters by it).
+            "losslessTextureId" to sourceSized?.let { texture?.id() },
+            "losslessTextureWidth" to sourceSized?.width,
+            "losslessTextureHeight" to sourceSized?.height,
             // This stream: the current track's play head, frames written to its tracks, and frames received
             // and not played (overrun cuts and drift trims of the jitter buffer); what the track holds.
             "audioPlayedFrames" to played, "audioWrittenFrames" to audioOut.written,
@@ -1087,7 +1106,14 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         val output = renderer
         if (compositor == null || output == null) { losslessIgnored++; return }
         val began = System.nanoTime()
-        compositor.accept(packet.bytes, 12, packet.length - 12) { _, x, y, w, h, rgba -> output.upload(x, y, w, h, rgba) }
+        // The renderer draws this start's announced picture size: tiles of
+        // another source size cannot be placed, so they poison (plain video).
+        val fits = { compositor.width == output.width && compositor.height == output.height }
+        compositor.accept(packet.bytes, 12, packet.length - 12) { _, x, y, w, h, rgba ->
+            if (!fits()) throw IllegalStateException("tile source size")
+            output.upload(x, y, w, h, rgba)
+        }
+        if (compositor.count > 0 && !compositor.poisoned && !fits()) compositor.poison()
         losslessPackets++
         losslessPacketNanos += System.nanoTime() - began
         if (!compositor.republishPending) return

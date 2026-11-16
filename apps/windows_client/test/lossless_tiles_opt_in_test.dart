@@ -14,6 +14,7 @@ import 'track_stream_test.dart' show configured, packet;
 
 /// A media fake whose native engine composites ToTBSeamless tiles-v1.
 class TileMedia extends SessionMedia implements LosslessTileMedia {
+  TileMedia({super.expectedWidth, super.expectedHeight});
   @override
   bool get losslessTiles => true;
 }
@@ -178,7 +179,7 @@ void main() {
     expect(media.losslessTiles, isFalse, reason: 'nothing reported yet');
     await media.stats();
     expect(media.losslessTiles, isTrue);
-    // A later start whose video is downscaled (or no GL on this device).
+    // A later start this device cannot draw tiles for (no GL, GPU or memory room).
     composite = false;
     await media.start(1920, 1080);
     await media.stats();
@@ -188,6 +189,89 @@ void main() {
     expect(media.losslessTiles, isTrue);
     await media.stop();
     expect(media.losslessTiles, isFalse);
+    media.dispose();
+  });
+
+  test('A downscaled start opts in when its engine composites at the source size', () async {
+    // Field row: a 1264x1000 desktop the Host encodes at 1088x862.
+    final socket = SessionSocket();
+    final media = TileMedia(expectedWidth: 1088, expectedHeight: 862);
+    final remote = session(socket, media);
+    unawaited(remote.start());
+    await flush();
+    socket.incoming.add(
+      jsonEncode({
+        ...info,
+        'width': 1088,
+        'height': 862,
+        'sourceWidth': 1264,
+        'sourceHeight': 1000,
+      }),
+    );
+    await flush();
+    socket.incoming.add(idr());
+    await flush();
+    expect(remote.closed, isFalse);
+    expect(remote.width, 1088);
+    expect(remote.sourceWidth, 1264);
+    final pings = [
+      for (final event in socket.sent)
+        if (event['type'] == 'ping') event['id'] as String,
+    ];
+    expect(pings.single.startsWith(losslessTilesPingPrefix), isTrue);
+    await remote.close();
+    await media.events.close();
+  });
+
+  test('Android: a downscaled start reports its source-size texture', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    const channel = MethodChannel('multitap/remote');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    Map<String, dynamic> reading = {};
+    final starts = <Map<Object?, Object?>>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'start') {
+        starts.add(call.arguments as Map<Object?, Object?>);
+        return 70;
+      }
+      if (call.method == 'stats') return reading;
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final media = AndroidRemoteMedia();
+    // The engine learns the source size with the start (LosslessOutput.plan).
+    media.videoConfiguration(3840, 2160, 60, true);
+    await media.start(2730, 1536);
+    expect(starts.single['width'], 2730);
+    expect(starts.single['sourceWidth'], 3840);
+    expect(starts.single['sourceHeight'], 2160);
+    expect(media.texturePixels(70), isNull, reason: 'nothing reported yet');
+    reading = {
+      'losslessComposite': true,
+      'losslessScaledSource': false,
+      'losslessTextureId': 70,
+      'losslessTextureWidth': 3840,
+      'losslessTextureHeight': 2160,
+    };
+    await media.stats();
+    expect(media.losslessTiles, isTrue);
+    expect(media.texturePixels(70), const Size(3840, 2160));
+    expect(media.texturePixels(71), isNull, reason: 'another texture');
+    // No GPU or memory room for the source size: plain video, no opt-in.
+    reading = {'losslessComposite': false};
+    await media.stats();
+    expect(media.losslessTiles, isFalse);
+    expect(media.texturePixels(70), isNull);
+    reading = {
+      'losslessComposite': true,
+      'losslessTextureId': 70,
+      'losslessTextureWidth': 3840,
+      'losslessTextureHeight': 2160,
+    };
+    await media.stats();
+    await media.stop();
+    expect(media.texturePixels(70), isNull);
     media.dispose();
   });
 

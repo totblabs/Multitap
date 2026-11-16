@@ -175,7 +175,8 @@ client, C++17).
   NDK in the APK. `LosslessTilesTest` decodes payloads made by the C++
   `PayloadBuilder` and compares present tiles and composed pixels with the
   C++ `Compositor` (`apps/windows_client/test/native/lossless_tiles_vectors.cpp`
-  writes the fixture).
+  writes the fixture, unscaled and scaled-capable compositors over a smaller,
+  equal and larger video).
 - Drops apply by the latched frame's pts: since Android 6 a rendered output
   buffer carries its presentation time as the SurfaceTexture timestamp.
   `LosslessFrameOrder` checks it against the frames the pacer rendered; any
@@ -184,11 +185,22 @@ client, C++17).
   latched within 16 ms, three checks) redraw the latched picture with them,
   only when the pacer lets one more frame go to Flutter.
 - Each start (and each output of tracks-v1) has its own renderer and
-  compositor. Only a start whose video is the source size composites; a
-  downscaled start, or a device without a usable GL context, renders
+  compositor. A start whose video is the source size draws at that size. A
+  downscaled single start (`LosslessOutput`) draws at the source size it
+  announced: the Flutter texture's buffers take that size, the video is
+  upscaled bilinearly by the GPU (pixel centres aligned) and present tiles are
+  exact. Its compositor is scaled-capable; tiles of any other size than the
+  renderer draws poison it. The scaled output must fit the memory reserve
+  (`AvcStreamSizes.memoryBudget`, with the decoder's own estimate, 16 bytes
+  per source pixel for the tile texture and the texture's buffers) and
+  `GL_MAX_TEXTURE_SIZE` / `GL_MAX_VIEWPORT_DIMS`; otherwise, for a downscaled
+  output of tracks-v1, or without a usable GL context, the start renders
   directly as before. Stats `losslessComposite` says which: the session opts
   in (`lt1-`) only while it is true and pauses (`lt0-`) after an opt-in when
-  it turns false.
+  it turns false. Stats `losslessTexture*` give a source-size texture's
+  size; the view keeps the picture's place and input mapping (normalized,
+  source coordinates) and only chooses its filter by the texture's real
+  pixels.
 
 ## Scaled video
 

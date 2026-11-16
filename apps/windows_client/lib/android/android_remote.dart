@@ -4444,6 +4444,12 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
     // (sharp text); zoom and fractional fits are filtered.
     final whole = view.wholePixelScale(shown.size, _dpr);
     _viewPixelScale = whole;
+    // A downscaled start whose lossless tiles are drawn at the source size
+    // has a texture of that size: it is sharp only at whole pixels of its own.
+    final pixels = media?.texturePixels(shown.texture);
+    final sharp = pixels == null
+        ? whole != null
+        : view.wholePixelScale(pixels, _dpr) != null;
     final picture = Stack(
       fit: StackFit.expand,
       children: [
@@ -4451,9 +4457,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
             Texture(
               key: ValueKey(shown.texture),
               textureId: shown.texture,
-              filterQuality: whole != null
-                  ? FilterQuality.none
-                  : FilterQuality.low,
+              filterQuality: sharp ? FilterQuality.none : FilterQuality.low,
             ),
         // 마우스 잠금 with the cursor in the video: none drawn here.
         if (cursor != null && !_relativeMouse.composedEngaged)
