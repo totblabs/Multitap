@@ -48,7 +48,7 @@ export function userForm(ctx, user = null) {
     if (made) ctx.state.ui.detailTab = { key: 'user:' + made.id, tab: 'desktops' };
     ctx.navigate('user', made?.username ?? input.username);
     ctx.notice(t('users.12', { username: input.username }));
-  }, { reload: false, save: user ? t('common.20') : t('common.139'), description: user?.is_primary_admin ? t('users.13') : user ? t('users.14') : t('users.15') });
+  }, { reload: false, save: user ? t('common.20') : t('common.139'), description: user?.is_primary_admin ? t('users.13') : user ? t('users.14') : t('users.15') + '\n' + t('users.passwordPendingHint') });
 }
 // 계정 중지, 계정 삭제 and 비밀번호 재설정 end the account's sign-ins, and a connection goes with its sign-in: the
 // confirmation says so when the person is connected now, as the other confirmations that end a connection do.
@@ -57,7 +57,7 @@ const passwordForm = (ctx, user) => {
   if (user.is_primary_admin && user.id !== ctx.state.user?.id) return;
   const target = mutationTarget(ctx, user);
   if (!target) return;
-  return ctx.modal(t('users.16'), [...liveLine(ctx, user), ...passwordFields(t('users.17'))], input => ctx.change(target.path + '/password', 'PUT', { ...input, expectedAccountId: target.expectedAccountId }, t('users.18', { username: target.username })), { save: t('users.16'), description: t('users.19', { username: target.username }) });
+  return ctx.modal(t('users.16'), [...liveLine(ctx, user), ...passwordFields(t('users.17'))], input => ctx.change(target.path + '/password', 'PUT', { ...input, expectedAccountId: target.expectedAccountId }, t('users.18', { username: target.username })), { save: t('users.16'), description: t('users.19', { username: target.username }) + (user.id !== ctx.state.user?.id ? '\n' + t('users.passwordPendingHint') : '') });
 };
 // Stopping an account ends its sign-ins, so it asks once; turning it back on
 // takes nothing away and happens at once.
@@ -112,7 +112,8 @@ function accountList(ctx, current = null) {
       // The role stands beside the name as plain text; 메모 is what was written as one, here and in the window.
       [ctx.link(el('span', { class: 'account-choice-text' }, el('strong', {}, u.username), el('small', {}, t('users.37', { memo, count }))), 'user', u.username,
         { class: 'account-choice', 'aria-label': u.username, 'aria-description': t('users.39', { roleText: roleText(u), count, value: u.disabled ? t('common.25') : t('users.34'), value2: live ? t('users.38') : '' }), 'aria-current': current?.id === u.id ? 'true' : null, 'data-focus': 'account:' + u.id }),
-        u.role === 'admin' ? el('small', { class: 'account-role' }, roleText(u)) : null],
+        u.role === 'admin' ? el('small', { class: 'account-role' }, roleText(u)) : null,
+        u.password_change_required ? el('small', { class: 'account-role' }, t('users.passwordPending')) : null],
       u.notes ? memo : el('span', { class: 'muted' }, memo), t('users.40', { count }), live ? stateDot(t('common.49'), 'green') : u.disabled ? stateDot(t('users.41'), 'muted') : stateDot(t('users.34'), 'blue'),
       button(t('common.91'), open, 'secondary small', null, { 'aria-label': t('users.42', { username: u.username }) })] };
   };
@@ -193,7 +194,8 @@ function desktopsPanel(ctx, user) {
     actions: [disable(button(t('common.140'), () => assignDesktops(ctx, user), assigned.length ? 'secondary' : 'primary', 'plus'), locked)] },
     assigned.length ? [el('ul', { class: 'row-list' }, rows), everything] : el('p', { class: 'panel-empty' }, user.disabled ? t('users.62') : t('users.63')),
     user.unavailableAssignmentCount ? el('p', { class: 'assignment-retained' }, t('users.64', { unavailableAssignmentCount: user.unavailableAssignmentCount })) : null,
-    el('p', { class: 'note' }, icon('info'), el('span', {}, user.disabled ? t('users.65') : t('users.66'))));
+    el('p', { class: 'note' }, icon('info'), el('span', {}, user.disabled ? t('users.65') : t('users.66'))),
+    user.role === 'admin' ? el('p', { class: 'note' }, icon('info'), el('span', {}, t('users.adminAllDesktops'))) : null);
 }
 
 // The window of one account (dom.js detailWindow): the account in 기본 정보, its desktops and their sharing in
@@ -207,7 +209,7 @@ function accountWindow(ctx, user) {
   const state = user.disabled ? stateDot(t('common.25'), 'muted') : live.length ? stateDot(t('common.49'), 'green') : stateDot(t('users.34'), 'blue');
   const info = facts([
     [t('users.3'), user.username], [t('users.5'), user.is_primary_admin ? el('span', { title: t('users.67') }, roleText(user)) : roleText(user)],
-    [t('common.61'), state.cloneNode(true)], [t('users.assignedLabel'), t('users.68', { assignmentCount: assignmentCount(ctx, user) })],
+    [t('common.61'), user.password_change_required ? el('span', {}, state.cloneNode(true), ' · ' + t('users.passwordPending')) : state.cloneNode(true)], [t('users.assignedLabel'), t('users.68', { assignmentCount: assignmentCount(ctx, user) })],
     [t('users.28'), el('span', { class: 'account-notes' + (user.notes ? '' : ' muted') }, user.notes || t('users.36'))],
     [t('common.69'), !sessionsEntry?.value ? t('common.30') : live.length ? el('ul', { class: 'fact-list' }, live.map(s => { const d = ctx.desktopById(s.desktopId); return el('li', {}, d ? ctx.link(desktopLabel(d), 'desktop', d.id) : el('span', {}, s.desktopId)); })) : t('common.36')],
   ], 'form-table is-pairs');

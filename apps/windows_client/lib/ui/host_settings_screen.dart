@@ -1809,23 +1809,31 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
 
   Future<void> _saveAccount() async {
     if (_busy || !_admin) return;
-    final setup = _passwordSetup;
+    var setup = _passwordSetup;
     final username = setup?.username ?? _accountUsername.text.trim();
-    // A blank password: does this local account have none? Then the form
-    // offers making one instead of Windows Settings.
+    // A blank password: does this local account have none? Then it is saved
+    // as it is, without a password (2026-11-16); the form also lets a new one
+    // be typed instead of going to Windows Settings.
     if (setup == null &&
         username.isNotEmpty &&
         _accountPassword.text.isEmpty &&
         _accountPasswordConfirmation.text.isEmpty) {
-      await _checkPasswordless(username);
-      return;
+      setup = await _checkPasswordless(username);
+      if (setup == null || !mounted) return;
     }
+    // The checked account without a password, both fields still blank.
+    final passwordless =
+        setup != null &&
+        _accountPassword.text.isEmpty &&
+        _accountPasswordConfirmation.text.isEmpty;
     final minimum = setup?.minimumLength ?? 0;
     setState(() {
       _accountUsernameError = username.isEmpty
           ? l10n.enterWindowsAccount
           : null;
-      _accountPasswordError = _accountPassword.text.isEmpty
+      _accountPasswordError = passwordless
+          ? null
+          : _accountPassword.text.isEmpty
           ? setup != null
                 ? l10n.enterNewPassword
                 : l10n.enterWindowsPassword
@@ -1852,7 +1860,9 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     final takeover = login.state == 'external' && login.canTakeOwnershipApply;
     final enable = takeover || login.canApply;
     final confirmed = await _confirm(
-      setup != null
+      passwordless
+          ? l10n.saveWithoutPasswordQuestion
+          : setup != null
           ? l10n.createNewPassword
           : enable
           ? l10n.saveWindowsAccountTurnAuto
@@ -1860,7 +1870,12 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       [
         l10n.windowsAccount2(username),
         '',
-        if (setup != null) ...[
+        if (passwordless) ...[
+          l10n.accountHasNoPasswordSavedAsIs,
+          enable
+              ? l10n.whenWindowsStartsSignsAccount
+              : _autologonUnavailable(login),
+        ] else if (setup != null) ...[
           l10n.accountGetsWindowsPasswordNeeded,
           enable ? l10n.thenAccountSavedAutoSign : _autologonUnavailable(login),
         ] else ...[
@@ -1870,10 +1885,11 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
               : _autologonUnavailable(login),
         ],
         if (takeover) l10n.hostTakesOverExistingAuto,
-        l10n.passwordStoredOnlyHostsProtected,
-        if (setup == null) l10n.windowsAccountPasswordsSecurityPolicies,
+        if (!passwordless) l10n.passwordStoredOnlyHostsProtected,
+        if (setup == null || passwordless)
+          l10n.windowsAccountPasswordsSecurityPolicies,
       ].join('\n'),
-      accept: setup != null
+      accept: setup != null && !passwordless
           ? l10n.createPassword
           : enable
           ? l10n.saveTurn
@@ -1887,7 +1903,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     // Step 1 (only for an account without a password): make it. Every step
     // below reports its own line; a step that did not finish stops the rest.
     final made = l10n.windowsPasswordCreatedNeededFrom;
-    if (setup != null) {
+    if (setup != null && !passwordless) {
       final code = await _makePassword(setup, password, confirmation);
       if (!mounted) return;
       if (code != '') {
@@ -1925,11 +1941,11 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       l10n.checkingSavingWindowsAccount,
       l10n.windowsAccountCheckedSaved,
       notify: false,
-      quiet: setup != null,
+      quiet: setup != null && !passwordless,
     );
     if (!mounted) return;
     if (!saved) {
-      if (setup != null) {
+      if (setup != null && !passwordless) {
         await _reportAccountSteps([
           made,
           l10n.windowsAccountNotSaved2(_notice ?? '').trim(),
@@ -1940,6 +1956,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     }
     setState(() {
       _editAccount = false;
+      _passwordSetup = null;
       _accountUsername.text = '${_section('windowsAccount')['username'] ?? ''}';
     });
     unawaited(_syncClose());
@@ -1962,7 +1979,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
       turnedOn = _notice != null && !_error;
     }
     await _reportAccountSteps([
-      if (setup != null) made,
+      if (setup != null && !passwordless) made,
       l10n.windowsAccountSaved,
       l10n.autoSign(autologon),
     ], ok: turnedOn);
@@ -2040,9 +2057,11 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     );
   }
 
-  /// windowsAccountPasswordState: an empty password opens 새 비밀번호 만들기
-  /// for exactly this account; anything else asks for the password as before.
-  Future<void> _checkPasswordless(String username) async {
+  /// windowsAccountPasswordState: for an account without a password, exactly
+  /// this account (returned; the form can also make a new password for it);
+  /// anything else asks for the password as before (null).
+  Future<({String username, String sid, int minimumLength})?>
+  _checkPasswordless(String username) async {
     _approvalTimer?.cancel();
     setState(() {
       _busy = true;
@@ -2091,6 +2110,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         _scheduleApprovalPoll();
       }
     }
+    return setup;
   }
 
   /// Fixed codes of windowsAccountPasswordState / setWindowsAccountPassword.
@@ -4619,7 +4639,7 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
     if (_passwordSetup case final setup?) ...[
       const SizedBox(height: 18),
       KeepAllText(
-        l10n.createNewPassword2,
+        l10n.accountWithoutPassword,
         key: const Key('host-new-password-title'),
         style: TextStyle(
           fontSize: 13.5,
@@ -4700,7 +4720,11 @@ class _HostSettingsScreenState extends State<HostSettingsScreen>
         onPressed: enabled ? _saveAccount : null,
         icon: const Icon(Icons.verified_user_outlined, size: 18),
         label: KeepAllText(
-          _passwordSetup != null
+          _passwordSetup != null &&
+                  _accountPassword.text.isEmpty &&
+                  _accountPasswordConfirmation.text.isEmpty
+              ? l10n.saveWithoutPassword
+              : _passwordSetup != null
               ? l10n.createPasswordSave
               : turnOn
               ? l10n.saveTurnAutoSign

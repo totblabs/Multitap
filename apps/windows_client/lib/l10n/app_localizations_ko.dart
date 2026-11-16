@@ -7952,7 +7952,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get savingAlsoSwitchesAutoSign => '저장하면 자동 로그인도 이 계정으로 바뀌어요.';
 
   @override
-  String get enterPasswordOnceMoreTurn => '비밀번호를 한 번 더 입력하면 자동 로그인이 켜져요.';
+  String get enterPasswordOnceMoreTurn =>
+      '비밀번호를 한 번 더 입력하면 자동 로그인이 켜져요. 비밀번호가 없는 계정은 비워 두세요.';
 
   @override
   String get turnAutoSign => '자동 로그인 켜기';
@@ -8001,13 +8002,26 @@ class AppLocalizationsKo extends AppLocalizations {
   String get createNewPassword2 => '새 비밀번호 만들기';
 
   @override
+  String get accountWithoutPassword => '비밀번호 없는 계정';
+
+  @override
+  String get saveWithoutPassword => '비밀번호 없이 저장';
+
+  @override
+  String get saveWithoutPasswordQuestion => '비밀번호 없이 저장할까요?';
+
+  @override
+  String get accountHasNoPasswordSavedAsIs =>
+      '이 계정은 Windows 비밀번호가 없어요. 비밀번호 없이 그대로 저장해요.';
+
+  @override
   String leastCharacters(Object minimumLength) {
     return '$minimumLength자 이상, ';
   }
 
   @override
   String accountHasNoWindowsPassword(Object setup) {
-    return '이 계정은 Windows 비밀번호가 없어요.\n${setup}Windows 비밀번호 규칙에 맞게 만드세요.';
+    return '이 계정은 Windows 비밀번호가 없어요. 비워 두고 저장하면 비밀번호 없이 써요.\n비밀번호를 만들려면 ${setup}Windows 비밀번호 규칙에 맞게 입력하세요.';
   }
 
   @override
@@ -11388,4 +11402,22 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String get samePcMessage =>
       '지금 Multitap 앱을 쓰고 있는 PC라 연결할 수 없어요. 다른 기기에서 연결하세요.';
+
+  @override
+  String get setNewPasswordTitle => '새 비밀번호 정하기';
+
+  @override
+  String get setNewPasswordSubtitle => '관리자가 정해 준 비밀번호예요. 앞으로 쓸 비밀번호를 정해 주세요.';
+
+  @override
+  String get setNewPasswordToSignIn => '새 비밀번호를 정해야 로그인할 수 있어요.';
+
+  @override
+  String get chooseDifferentFromFirstPassword => '처음 비밀번호와 다른 비밀번호를 정해 주세요.';
+
+  @override
+  String get passwordAlreadyChangedSignIn => '비밀번호가 이미 바뀌었어요. 새 비밀번호로 로그인하세요.';
+
+  @override
+  String get changeAndSignIn => '바꾸고 로그인';
 }

@@ -19,8 +19,8 @@
     },
     {
       "path": "console.js",
-      "bytes": 46469,
-      "sha256": "123dca5b1f6a2300312ab89e73f17f42ce3e2fae57f197891d5ab8c900eb6752"
+      "bytes": 46575,
+      "sha256": "41cecf710bcd4773a820aa9dc0c968f28e43d79dc68d33ba182cdf7b9a85e155"
     },
     {
       "path": "fonts/LICENSE.txt",
@@ -44,8 +44,8 @@
     },
     {
       "path": "i18n.js",
-      "bytes": 30477,
-      "sha256": "b0f8734b4fe6a3c598c00f8c793558a9d995be89e01e80f3f916b54d6abfaf7f"
+      "bytes": 30876,
+      "sha256": "44dcd8b90a67665aeae8aadc074a9c2d106b06c86fd060a40810b56be2462d55"
     },
     {
       "path": "index.html",

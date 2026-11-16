@@ -52,6 +52,8 @@ class _Host implements HostSettingsApi {
     'minimumLength': 0,
   };
   String passwordResult = '';
+  // The password windowsAutologonApply must carry ('' for an account without one).
+  String appliedPassword = 'synthetic-password';
   bool losePasswordResponse = false;
   final passwordSets = <Map<String, dynamic>>[];
   @override
@@ -101,7 +103,7 @@ class _Host implements HostSettingsApi {
         'confirmed',
       });
       expect(fields['confirmed'], isTrue);
-      expect(fields['password'], 'synthetic-password');
+      expect(fields['password'], appliedPassword);
       // Saving the account comes first, with the same account.
       expect(
         base.requests
@@ -245,6 +247,11 @@ Future<void> _openNewPassword(
     'fixture-user',
   );
   await tap(t, 'host-save-account');
+  await t.pumpAndSettle();
+  // The account has no password: saving it as it is comes first (2026-11-16).
+  // Declining leaves the form where a new password can be typed instead.
+  expect(find.text('비밀번호 없이 저장할까요?'), findsOneWidget);
+  await t.tap(find.text('취소'));
   await t.pumpAndSettle();
 }
 
@@ -700,7 +707,64 @@ void main() {
     },
   );
   testWidgets(
-    'A blank password on an account without one offers 새 비밀번호 만들기 for that account',
+    'An account without a password is saved as it is: one question, no password made',
+    (t) async {
+      final api = _Host()..appliedPassword = '';
+      api.passwordState = {
+        'error': '',
+        'state': 'empty',
+        'sid': fixtureSid,
+        'minimumLength': 8,
+      };
+      await _open(t, api);
+      await t.enterText(
+        find.byKey(const Key('host-account-username')),
+        'fixture-user',
+      );
+      await tap(t, 'host-save-account');
+      await t.pumpAndSettle();
+      final question = find.byKey(const Key('host-confirm-dialog'));
+      expect(question, findsOneWidget);
+      for (final (text, count) in [
+        ('비밀번호 없이 저장할까요?', 1),
+        ('Windows 계정: fixture-user', 1),
+        ('이 계정은 Windows 비밀번호가 없어요. 비밀번호 없이 그대로 저장해요.', 1),
+        ('Windows가 시작되면 이 계정으로 자동 로그인해요.', 1),
+        ('비밀번호는 이 Host의 보호 저장소에만', 0),
+        ('다음 로그인부터 이 비밀번호가 필요해요', 0),
+      ]) {
+        expect(
+          find.descendant(of: question, matching: find.textContaining(text)),
+          findsNWidgets(count),
+          reason: text,
+        );
+      }
+      await t.tap(find.byKey(const Key('host-confirm')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('host-confirm-dialog')), findsNothing);
+      expect(
+        api.calls.where(
+          (v) => const {
+            'windowsAccountPasswordState',
+            'setWindowsAccountPassword',
+            'saveRdpCredentials',
+            'windowsAutologonApply',
+          }.contains(v),
+        ),
+        [
+          'windowsAccountPasswordState',
+          'saveRdpCredentials',
+          'windowsAutologonApply',
+        ],
+      );
+      expect(api.passwordSets, isEmpty);
+      expect(says('Windows 계정: 저장했어요.'), isTrue);
+      expect(says('Windows 비밀번호: 만들었어요'), isFalse);
+      await t.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'Declining it offers a new password for exactly that account instead',
     (t) async {
       final api = _Host();
       await _openNewPassword(t, api);
@@ -709,8 +773,19 @@ void main() {
       ]);
       expect(find.byKey(const Key('host-confirm-dialog')), findsNothing);
       expect(find.byKey(const Key('host-new-password-title')), findsOneWidget);
+      expect(find.text('비밀번호 없는 계정'), findsOneWidget);
       expect(find.textContaining('8자 이상'), findsOneWidget);
       expect(find.text('새 Windows 비밀번호'), findsOneWidget);
+      // Blank fields still save it without a password.
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('host-save-account')),
+          matching: find.text('비밀번호 없이 저장'),
+        ),
+        findsOneWidget,
+      );
+      await t.enterText(find.byKey(const Key('host-account-password')), 'x');
+      await t.pump();
       expect(
         find.descendant(
           of: find.byKey(const Key('host-save-account')),

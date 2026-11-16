@@ -67,6 +67,8 @@ The username is remembered per server.
 The password is saved in the credentials of the current Windows user. On a shared PC, turn **Remember password** off.
 A saved password is filled in on the sign-in screen even after you sign out.
 
+The first time you sign in with a password an administrator set, **Set a new password** opens. Enter the password you will use from now on twice and click **Change and sign in**.
+
 Accounts with two-step verification are asked once more for the 6-digit code from the authenticator app or a recovery code.
 
 **How to check:** the **My desktops** list appears instead of the sign-in screen.
@@ -76,7 +78,7 @@ If the password does not work, ask your administrator about your account. If the
 
 ## Find your desktops
 
-After you sign in, only the desktops assigned to you appear as cards.
+After you sign in, only the desktops assigned to you appear as cards. Administrator accounts see every desktop.
 
 | Item | How to use it |
 | --- | --- |

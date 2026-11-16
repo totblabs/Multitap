@@ -120,7 +120,9 @@ test('Reused authorization statements observe every live revocation', t => {
   let prepared = 0; const prepare = store.db.prepare;
   store.db.prepare = function (...args) { prepared++; return prepare.apply(this, args); };
   for (let n = 0; n < 50; n++) { assert.equal(store.authenticate(hash)?.id, alice.id); assert.equal(store.assignedDesktop(alice.id, 'pve-821')?.id, 'pve-821'); assert.ok(store.authenticateHost(hostHash)); store.clipboardPolicy(alice.id, 'pve-821'); store.devicePolicy(alice.id, 'pve-821'); }
-  assert.ok(prepared <= 5, `per-message authorization must not recompile its SQL (prepared=${prepared})`);
+  // Six statements, each compiled once: session, assignment, Host token, the two policies and the
+  // administrator check the policies share (store.adminDesktop).
+  assert.ok(prepared <= 6, `per-message authorization must not recompile its SQL (prepared=${prepared})`);
   store.db.prepare = prepare;
   store.revoke('alice', 'pve-821'); assert.equal(store.assignedDesktop(alice.id, 'pve-821'), undefined);
   store.assign('alice', 'pve-821'); assert.equal(store.assignedDesktop(alice.id, 'pve-821')?.id, 'pve-821');

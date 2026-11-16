@@ -52,6 +52,7 @@ const errors = {
   session_reauthentication_required:[t('console.console.13'),t('console.console.14')],
   invalid_credentials_format:[t('console.console.15'),t('console.console.16')],
   credentials_change_required:[t('console.console.17'),t('console.console.18')],
+  password_change_required:[t('console.console.passwordChange'),t('console.console.passwordChangeText')],
   csrf_required:[t('console.console.10'),t('console.console.19')],
   desktop_forbidden:assignment,
   desktop_not_found:assignment,

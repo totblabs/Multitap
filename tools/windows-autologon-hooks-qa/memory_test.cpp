@@ -58,6 +58,7 @@ int main() {
   valid.action = "apply"; valid.phase = "owned"; valid.account = {L"fixture", L"FIXTURE-PC", L"S-1-5-21-1-2-3-1001", true};
   valid.expected.values[0] = textValue(L"1"); valid.expected.secretExists = true; valid.expected.secret = Secret{L"synthetic-password"}; valid.next = valid.expected;
   check(completedJournalForUpdate(valid), "completed owned metadata can be preserved without OS reads");
+  { auto r = valid; r.expected.secret = Secret{}; r.next = r.expected; check(completedJournalForUpdate(r), "owned account without a password keeps an empty secret through updates"); }
   { auto r = valid; r.intent = true; check(!completedJournalForUpdate(r), "inflight intent defers update"); }
   { auto r = valid; r.phase = "changing"; check(!completedJournalForUpdate(r), "unknown native outcome defers update"); }
   { auto r = valid; r.next.values[1] = textValue(L"different"); check(!completedJournalForUpdate(r), "uncommitted next image defers"); }

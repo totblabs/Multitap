@@ -35,6 +35,8 @@ Start with the default **Pointer** mode, and try **Touch** once you are used to 
 11. If you want, turn on **Remember password**.
 12. Tap **Sign in**.
 
+The first time you sign in with a password an administrator set, **Set a new password** opens. Enter the password you will use from now on twice and tap **Change and sign in**.
+
 To change the server, tap the address at the top of the sign-in screen.
 After you change the address or the connection type, run the test again.
 If the APK installation is blocked, check Android's prompt to allow installs from this source.

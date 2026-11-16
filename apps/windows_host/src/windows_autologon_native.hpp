@@ -250,6 +250,19 @@ class NativeAccess final : public Access {
     if (!LogonUserW(account.name.c_str(), account.domain.c_str(), password.text.c_str(), LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, &token)) {
       const auto code = GetLastError();
       if (code == ERROR_LOGON_FAILURE || code == ERROR_WRONG_PASSWORD) throw Failure("credentials_rejected");
+      // An account without a password: Windows answers the blank-password
+      // restriction (LimitBlankPasswordUse, left as it is) only after the blank
+      // password matched, so a random password must then be refused as wrong.
+      // No token exists here; the SID is the account read before and after.
+      if (code == ERROR_ACCOUNT_RESTRICTION && password.text.empty()) {
+        const Secret random{randomName() + L"#Aa1"}; HANDLE other = nullptr;
+        if (LogonUserW(account.name.c_str(), account.domain.c_str(), random.text.c_str(), LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, &other)) { CloseHandle(other); throw Failure("account_restricted"); }
+        const auto second = GetLastError();
+        if (second != ERROR_LOGON_FAILURE && second != ERROR_WRONG_PASSWORD) throw Failure("account_restricted");
+        const auto again = localAccount(account.name);
+        if (again.sid != account.sid || !again.usable) throw Failure("account_changed");
+        return account;
+      }
       throw Failure("account_restricted");
     }
     struct Cleanup { HANDLE token; ~Cleanup() { CloseHandle(token); } } cleanup{token};

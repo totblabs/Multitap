@@ -34,12 +34,14 @@ test('schema9→10 defaults every retained account to deny and preserves identit
   const before=Object.fromEntries(['users','sessions','assignments','desktops','settings'].map(table=>[table,previous.prepare('SELECT rowid,* FROM '+table+' ORDER BY rowid').all().map(row=>({...row}))]));previous.close();
   store=new Store(path);
   assert.equal(store.db.prepare('PRAGMA user_version').get().user_version,19);
-  const users=store.db.prepare('SELECT rowid,* FROM users ORDER BY rowid').all().map(({clipboard_permissions,rdp_redirections,favorite,last_used_at,sound_card_add,authorization_revision,...row})=>{assert.equal(clipboard_permissions,0);assert.equal(rdp_redirections,0);assert.equal(authorization_revision,1);return row;});
+  const users=store.db.prepare('SELECT rowid,* FROM users ORDER BY rowid').all().map(({clipboard_permissions,rdp_redirections,favorite,last_used_at,sound_card_add,authorization_revision,password_change_required, ...row})=>{ assert.equal(password_change_required, 0);assert.equal(clipboard_permissions,0);assert.equal(rdp_redirections,0);assert.equal(authorization_revision,1);return row;});
   assert.deepEqual(users,before.users);
-  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({clipboard_permissions,rdp_redirections,favorite,last_used_at,sound_card_add,group_id,...row})=>{assert.equal(clipboard_permissions,0);assert.equal(rdp_redirections,0);assert.equal(group_id,null);return row;}),before.assignments);
+  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({clipboard_permissions,rdp_redirections,favorite,last_used_at,sound_card_add,group_id,via_admin, ...row})=>{ assert.equal(via_admin, 0);assert.equal(clipboard_permissions,0);assert.equal(rdp_redirections,0);assert.equal(group_id,null);return row;}),before.assignments);
   assert.equal(store.setting('hostless_assignments_cleanup'),'0');
   for(const table of ['sessions','desktops','settings'])assert.deepEqual(store.db.prepare('SELECT rowid,* FROM '+table+(table==='settings'?" WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')":'')+' ORDER BY rowid').all().map(({pve_tags,pve_pool,issuer,replaced_at,...row})=>({...row})),before[table]);
-  for(const id of [admin,member])assert.deepEqual(store.clipboardPolicy(id,'pve-710'),deny);
+  assert.deepEqual(store.clipboardPolicy(member,'pve-710'),deny);
+  // 관리자는 모든 데스크톱 (2026-11-16): an administrator has every permission on every registered desktop.
+  assert.deepEqual(store.clipboardPolicy(admin,'pve-710'),Object.fromEntries(Object.keys(deny).map(key=>[key,true])));
   // The account-wide compatibility field applies to the account's current assignments only.
   const account=store.findUser('사용자');store.updateUser('사용자',{clipboardPolicy:{...deny,textToRemote:true}},admin);
   assert.deepEqual({...store.findUser('사용자')},{...account},'the account row (identity, hash, notes, legacy masks) is untouched');
@@ -49,5 +51,6 @@ test('schema9→10 defaults every retained account to deny and preserves identit
   assert.equal(store.db.prepare('SELECT count(*) AS n FROM sessions').get().n,1,'a policy grant must not revoke account login');
   store.assign('메인관리자','pve-710',admin);
   assert.throws(()=>store.updateUser('메인관리자',{role:'user',clipboardPolicy:{...deny,textToLocal:true}},admin),/primary_admin_required/);
-  assert.deepEqual(store.clipboardPolicy(admin,'pve-710'),deny,'failed combined updates are atomic');
+  assert.equal(store.db.prepare('SELECT clipboard_permissions FROM assignments WHERE user_id=? AND desktop_id=?').get(admin,'pve-710').clipboard_permissions,0,'failed combined updates are atomic');
+  assert.equal(store.findUser('메인관리자').role,'admin');
 });

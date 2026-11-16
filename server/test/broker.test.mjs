@@ -66,12 +66,29 @@ test('Real HTTP authentication stores only password and token hashes', async t =
   assert.equal((await f.call('/api/v1/desktops')).status, 401);
 });
 
-test('Each account sees only assigned desktops, including the admin account', async t => {
+test('A standard account sees only its assigned desktops; an administrator sees every registered desktop', async t => {
   const f = await fixture(t);
   const alice = (await f.login()).body.sessionToken;
   const bobby = (await f.login('bobby')).body.sessionToken;
   assert.deepEqual((await f.call('/api/v1/desktops', { token: alice })).body.desktops.map(d => d.id), ['office']);
-  assert.deepEqual((await f.call('/api/v1/desktops', { token: bobby })).body.desktops.map(d => d.id), ['private-vm']);
+  // 관리자는 모든 데스크톱 (2026-11-16): no assignment needed.
+  assert.deepEqual((await f.call('/api/v1/desktops', { token: bobby })).body.desktops.map(d => d.id), ['office', 'private-vm']);
+  assert.equal((await f.call('/api/v1/desktops/office', { token: bobby })).status, 200);
+  // An administrator that becomes a standard account keeps only what was assigned to it; its own marks on
+  // the other desktops go with the role.
+  f.store.addUser({ name: 'carol', passwordHash: await hashPassword(password), role: 'admin' });
+  f.store.assign('carol', 'private-vm');
+  let carol = (await f.login('carol')).body.sessionToken;
+  assert.deepEqual((await f.call('/api/v1/desktops', { token: carol })).body.desktops.map(d => d.id), ['office', 'private-vm']);
+  assert.equal((await f.call('/api/v1/desktops/office/favorite', { token: carol, method: 'PUT', data: { favorite: true } })).status, 200);
+  assert.equal((await f.call('/api/v1/desktops', { token: carol })).body.desktops.find(d => d.id === 'office').favorite, true);
+  assert.deepEqual(f.store.userAssignments(f.store.findUser('carol').id).map(a => a.desktopId), ['private-vm'], 'a mark is not an assignment');
+  f.store.updateUser('carol', { role: 'user' }, 'test');
+  assert.equal((await f.call('/api/v1/desktops', { token: carol })).status, 401);
+  carol = (await f.login('carol')).body.sessionToken;
+  assert.deepEqual((await f.call('/api/v1/desktops', { token: carol })).body.desktops.map(d => d.id), ['private-vm']);
+  assert.equal((await f.call('/api/v1/desktops/office', { token: carol })).status, 404);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM assignments WHERE via_admin=1').get().n, 0);
   for (const path of ['/api/v1/desktops/private-vm', '/api/v1/desktops/missing']) assert.equal((await f.call(path, { token: alice })).status, 404);
   assert.equal((await f.call('/api/v1/desktops/private-vm/connect', { token: alice, method: 'POST' })).status, 404);
   const own = await f.call('/api/v1/desktops/office/connect', { token: alice, method: 'POST' });

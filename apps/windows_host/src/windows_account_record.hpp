@@ -18,17 +18,30 @@ inline bool windowsAccountText(const std::wstring& value,size_t minimum,size_t m
 inline WindowsAccount parseWindowsAccount(const std::string& username,const std::string& password) {
   WindowsAccount value;
   try{value.enteredName=wide(username);value.password=wide(password);}catch(...){throw WindowsAccountError("rdp_credentials_invalid_input");}
-  if(!windowsAccountText(value.enteredName,1,256)||!windowsAccountText(value.password,1,256))throw WindowsAccountError("rdp_credentials_invalid_input");
+  // An empty password is an account without one; saving proves it (validateWindowsAccount).
+  if(!windowsAccountText(value.enteredName,1,256)||!windowsAccountText(value.password,0,256))throw WindowsAccountError("rdp_credentials_invalid_input");
   const auto slash=value.enteredName.find(L'\\');
   if(slash!=std::wstring::npos){value.domain=value.enteredName.substr(0,slash);value.username=value.enteredName.substr(slash+1);if(value.username.find(L'\\')!=std::wstring::npos||!windowsAccountText(value.domain,1,255)||!windowsAccountText(value.username,1,256))throw WindowsAccountError("rdp_credentials_invalid_input");}
   else {value.username=value.enteredName;if(value.enteredName.find(L'@')==std::wstring::npos)value.domain=L".";}
   return value;
 }
 using WindowsAccountValidator=std::function<DWORD(const WindowsAccount&)>;
+// One logon result for the entered password. A blank password is proven, not
+// assumed: Windows answers the blank-password restriction (LimitBlankPasswordUse,
+// left as it is) only after the blank password matched, so a random password
+// must then be refused as wrong. `logon` signs in with the given password.
+inline DWORD provenWindowsAccountResult(const WindowsAccount& value,const std::function<DWORD(const std::wstring&)>& logon,const std::function<std::wstring()>& random) {
+  const DWORD result=logon(value.password);
+  if(!value.password.empty()||result!=ERROR_ACCOUNT_RESTRICTION)return result;
+  const DWORD other=logon(random());
+  return other==ERROR_LOGON_FAILURE||other==ERROR_WRONG_PASSWORD?DWORD(ERROR_SUCCESS):result;
+}
 inline DWORD validateWindowsAccount(const WindowsAccount& value) {
-  HANDLE token=nullptr;
-  const BOOL valid=LogonUserW(value.username.c_str(),value.domain.empty()?nullptr:value.domain.c_str(),value.password.c_str(),LOGON32_LOGON_NETWORK,LOGON32_PROVIDER_DEFAULT,&token);
-  const DWORD result=valid?ERROR_SUCCESS:GetLastError();if(token)CloseHandle(token);return result;
+  return provenWindowsAccountResult(value,[&](const std::wstring& password){
+    HANDLE token=nullptr;
+    const BOOL valid=LogonUserW(value.username.c_str(),value.domain.empty()?nullptr:value.domain.c_str(),password.c_str(),LOGON32_LOGON_NETWORK,LOGON32_PROVIDER_DEFAULT,&token);
+    const DWORD result=valid?ERROR_SUCCESS:GetLastError();if(token)CloseHandle(token);return result;
+  },[]{return randomName()+L"#Aa1";});
 }
 inline void checkWindowsAccountResult(DWORD result) {
   if(result==ERROR_SUCCESS)return;

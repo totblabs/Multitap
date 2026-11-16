@@ -14,8 +14,9 @@ inline bool completedJournalForUpdate(const Record& r) {
     if ((!image->secretExists && !image->secret.text.empty()) || image->secret.text.size() > 256 ||
         !image->values[5].bytes.empty() || image->plainPasswordBytes != 0) return false;
   }
+  // The owned secret is empty for an account without a password.
   if (r.phase == "owned") return r.action == "apply" && r.expected.secretExists &&
-    !r.expected.secret.text.empty() && r.expected.values[0] == textValue(L"1");
+    r.expected.values[0] == textValue(L"1");
   if (r.phase == "disabled") return r.action == "disable" && baselineSafe(r.expected);
   return false;
 }

@@ -73,7 +73,7 @@ test('An existing database gains groups on start: every desktop ungrouped, nothi
     store = new Store(path);
     try {
       assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 19, label);
-      assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ group_id, ...row }) => { assert.equal(group_id, null); return { ...row }; }), before, label + ': assignments are kept as they were');
+      assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ group_id, via_admin, ...row }) => { assert.equal(via_admin, 0); assert.equal(group_id, null); return { ...row }; }), before.map(({ via_admin, ...row }) => row), label + ': assignments are kept as they were');
       assert.deepEqual(store.desktopGroups(owner), []);
       assert.deepEqual(store.listDesktops(owner).map(desktop => [desktop.id, desktop.group, desktop.favorite]), [['pve-710', null, false], ['pve-711', null, true]]);
       assert.equal(store.clipboardPolicy(owner, 'pve-710').textToRemote, true, label + ': permissions survive');
@@ -226,7 +226,9 @@ test('PUT desktops/:id/group sets and clears this account\'s group, 404 without 
   const unassigned = await f.putGroup('pve-712', a.id), unknown = await f.putGroup('pve-999', a.id), malformed = await f.putGroup('bad%20id!', a.id);
   assert.equal(unassigned.status, 404); assert.equal(unassigned.body.error.code, 'desktop_not_found');
   assert.deepEqual(unknown, unassigned); assert.deepEqual(malformed, unassigned);
-  assert.equal((await f.putGroup('pve-712', null, { as: 'admin' })).status, 404, 'an administrator is not assigned either');
+  // 관리자는 모든 데스크톱 (2026-11-16): an administrator files any registered desktop in its own groups.
+  assert.equal((await f.putGroup('pve-712', null, { as: 'admin' })).status, 200, 'an administrator uses every registered desktop');
+  assert.equal((await f.putGroup('pve-999', null, { as: 'admin' })).status, 404, 'an unknown desktop stays unknown to an administrator');
   // Strict body.
   const put = data => f.call('/desktops/pve-710/group', { method: 'PUT', data });
   for (const data of [{}, { group: 5 }, { group: true }, { group: [] }, { group: { id: a.id } }]) assert.deepEqual([(await put(data)).status, (await put(data)).body.error.code], [400, 'invalid_group'], JSON.stringify(data));

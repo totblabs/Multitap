@@ -291,7 +291,9 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
     // Sound-card states refresh beside it, never inside the watchers' time limit.
     void vmAudio.refreshStale();
     if (!userIds.length) return;
-    const rows = store.db.prepare(`SELECT DISTINCT p.* FROM power_tasks p JOIN assignments a ON a.desktop_id=p.desktop_id WHERE p.active=1 AND a.user_id IN (${userIds.map(() => '?').join(',')}) ORDER BY p.id`).all(...userIds);
+    // An administrator watches every desktop's power task (store.adminDesktop).
+    const marks = userIds.map(() => '?').join(',');
+    const rows = store.db.prepare(`SELECT p.* FROM power_tasks p WHERE p.active=1 AND (EXISTS (SELECT 1 FROM assignments a WHERE a.desktop_id=p.desktop_id AND a.via_admin=0 AND a.user_id IN (${marks})) OR EXISTS (SELECT 1 FROM users u WHERE u.role='admin' AND u.disabled=0 AND u.id IN (${marks}))) ORDER BY p.id`).all(...userIds, ...userIds);
     if (!rows.length) { powerTaskCursor = 0; return; }
     const batch = Array.from({ length: Math.min(16, rows.length) }, (_, index) => rows[(powerTaskCursor + index) % rows.length]);
     powerTaskCursor = (powerTaskCursor + batch.length) % rows.length;
@@ -590,6 +592,9 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
         try { valid = await passwordJob(() => verifyPassword(input.password, user?.password_hash ?? dummyHash)); }
         finally { input.password = ''; }
         if (!valid || !user || user.disabled || (admin && user.role !== 'admin')) { store.audit('login_failed', name, ''); throw new HttpError(401, 'invalid_credentials'); }
+        // An administrator set this password: the account picks its own first
+        // (POST /api/v1/auth/password/initial), in the app or the admin page.
+        if (user.password_change_required) throw new HttpError(428, 'password_change_required');
         if (!admin && user.must_change_credentials) throw new HttpError(428, 'credentials_change_required');
         const fresh = store.findUser(name);
         if (!fresh || fresh.password_hash !== user.password_hash || fresh.authorization_revision !== user.authorization_revision || fresh.disabled || (admin && fresh.role !== 'admin')) throw new HttpError(401, 'invalid_credentials');
@@ -655,6 +660,38 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
         const input = await body(req); fields(input, ['code', 'hostname', 'machineUuid', 'version']);
         const result = await relay.enroll(input); input.code = '';
         send(201, { ...result, serverOrigin: requestOrigin }); return;
+      }
+      // 첫 로그인 비밀번호 (2026-11-16): the account whose password an
+      // administrator set replaces it with its own, before any session exists.
+      // Same admission as a sign-in (address and account budgets, one password
+      // check); the new password must differ. The caller signs in afterwards.
+      if (req.method === 'POST' && path === '/api/v1/auth/password/initial') {
+        const input = await body(req, 2048);
+        try {
+          fields(input, ['username', 'password', 'newPassword', 'passwordConfirmation']);
+          let name;
+          try { name = username(input.username); } catch { throw new HttpError(400, 'invalid_credentials_format'); }
+          if (typeof input.password !== 'string' || !input.password || input.password.length > 256) throw new HttpError(400, 'invalid_credentials_format');
+          if (typeof input.newPassword !== 'string' || input.newPassword !== input.passwordConfirmation) throw new HttpError(400, 'password_confirmation_mismatch');
+          if (input.newPassword.length < 10 || input.newPassword.length > 256) throw new HttpError(400, 'password_length_10_to_256');
+          const now = Date.now();
+          if (!addresses.take(address, now) || !accounts.take(name, now)) throw new HttpError(429, 'too_many_attempts');
+          const user = store.findUser(name);
+          const replacement = await passwordJob(async () => {
+            const valid = await verifyPassword(input.password, user?.password_hash ?? dummyHash);
+            if (!valid || !user || user.disabled) return null;
+            if (!user.password_change_required) throw new HttpError(409, 'password_change_not_required');
+            if (await verifyPassword(input.newPassword, user.password_hash)) throw new HttpError(400, 'password_unchanged');
+            return hashPassword(input.newPassword);
+          });
+          if (!replacement) { store.audit('login_failed', name, ''); throw new HttpError(401, 'invalid_credentials'); }
+          try { store.setInitialPassword(user.id, user.password_hash, replacement); }
+          catch (error) {
+            if (error.message === 'credentials_changed' || error.message === 'password_change_not_required') throw new HttpError(409, 'credentials_changed');
+            throw error;
+          }
+        } finally { input.password = ''; input.newPassword = ''; input.passwordConfirmation = ''; }
+        send(200, { ok: true }); return;
       }
       if (req.method === 'POST' && path === '/api/v1/auth/login') {
         const policy = clientSessionPolicy(req);

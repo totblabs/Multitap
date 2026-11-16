@@ -8495,7 +8495,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get enterPasswordOnceMoreTurn =>
-      'Enter the password once more to turn on auto sign-in.';
+      'Enter the password once more to turn on auto sign-in. Leave it blank for an account without a password.';
 
   @override
   String get turnAutoSign => 'Turn on auto sign-in';
@@ -8545,13 +8545,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createNewPassword2 => 'Create a new password';
 
   @override
+  String get accountWithoutPassword => 'Account without a password';
+
+  @override
+  String get saveWithoutPassword => 'Save without a password';
+
+  @override
+  String get saveWithoutPasswordQuestion => 'Save without a password?';
+
+  @override
+  String get accountHasNoPasswordSavedAsIs =>
+      'This account has no Windows password. It is saved as it is, without one.';
+
+  @override
   String leastCharacters(Object minimumLength) {
     return 'at least $minimumLength characters, ';
   }
 
   @override
   String accountHasNoWindowsPassword(Object setup) {
-    return 'This account has no Windows password.\nCreate one: ${setup}matching the Windows password rules.';
+    return 'This account has no Windows password. Leave it blank and save to use it without one.\nTo create one: ${setup}matching the Windows password rules.';
   }
 
   @override
@@ -12235,4 +12248,25 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get samePcMessage =>
       'This desktop is the PC you\'re using Multitap on, so you can\'t connect to it. Connect from another device.';
+
+  @override
+  String get setNewPasswordTitle => 'Set a new password';
+
+  @override
+  String get setNewPasswordSubtitle =>
+      'An administrator set this password. Choose the one you will use from now on.';
+
+  @override
+  String get setNewPasswordToSignIn => 'Set a new password to sign in.';
+
+  @override
+  String get chooseDifferentFromFirstPassword =>
+      'Choose a password different from the first one.';
+
+  @override
+  String get passwordAlreadyChangedSignIn =>
+      'The password has already changed. Sign in with the new one.';
+
+  @override
+  String get changeAndSignIn => 'Change and sign in';
 }

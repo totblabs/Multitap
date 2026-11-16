@@ -18,7 +18,7 @@ function vmsPrivilege(permissions, privilege) {
 }
 // Clipboard and device permissions belong to each assignment
 // (user x VM); account responses list them per assigned VM instead.
-const publicUser = u => ({ id: u.id, username: u.username, displayName: u.username, notes: u.notes, isPrimaryAdmin: !!u.is_primary_admin, role: u.role, mustChangeCredentials: !!u.must_change_credentials });
+const publicUser = u => ({ id: u.id, username: u.username, displayName: u.username, notes: u.notes, isPrimaryAdmin: !!u.is_primary_admin, role: u.role, mustChangeCredentials: !!u.must_change_credentials, passwordChangeRequired: !!u.password_change_required });
 // Catalog metadata of the latest Host installer plus each VM's update view.
 function hostUpdateSummary({ latest, desktops }) {
   return { latest: latest ? { version: latest.version, filename: latest.filename, size: latest.size, sha256: latest.sha256, changelog: latest.changelog ?? '', ...(latest.releasedAt ? { releasedAt: latest.releasedAt } : {}) } : null, desktops };
@@ -437,7 +437,8 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
         currentAdmin();
         const passwordHash = await passwordJob(() => hashPassword(confirmedPassword(input))); input.password = ''; input.passwordConfirmation = '';
         currentAdmin();
-        store.addUser({ name: input.username, notes: input.notes, displayName: input.displayName, passwordHash, role: input.role, clipboardPolicy: input.clipboardPolicy, devicePolicy: input.devicePolicy }, actor);
+        // The new account picks its own password at its first sign-in.
+        store.addUser({ name: input.username, notes: input.notes, displayName: input.displayName, passwordHash, role: input.role, clipboardPolicy: input.clipboardPolicy, devicePolicy: input.devicePolicy, passwordChangeRequired: true }, actor);
         send(201, { ok: true }); return true;
       }
       if (path === '/api/v1/admin/users' && req.method === 'GET') { send(200, { users: store.inventory().users }); return true; }

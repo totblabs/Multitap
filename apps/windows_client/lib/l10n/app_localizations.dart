@@ -13672,7 +13672,7 @@ abstract class AppLocalizations {
   /// No description provided for @enterPasswordOnceMoreTurn.
   ///
   /// In ko, this message translates to:
-  /// **'비밀번호를 한 번 더 입력하면 자동 로그인이 켜져요.'**
+  /// **'비밀번호를 한 번 더 입력하면 자동 로그인이 켜져요. 비밀번호가 없는 계정은 비워 두세요.'**
   String get enterPasswordOnceMoreTurn;
 
   /// No description provided for @turnAutoSign.
@@ -13759,6 +13759,30 @@ abstract class AppLocalizations {
   /// **'새 비밀번호 만들기'**
   String get createNewPassword2;
 
+  /// No description provided for @accountWithoutPassword.
+  ///
+  /// In ko, this message translates to:
+  /// **'비밀번호 없는 계정'**
+  String get accountWithoutPassword;
+
+  /// No description provided for @saveWithoutPassword.
+  ///
+  /// In ko, this message translates to:
+  /// **'비밀번호 없이 저장'**
+  String get saveWithoutPassword;
+
+  /// No description provided for @saveWithoutPasswordQuestion.
+  ///
+  /// In ko, this message translates to:
+  /// **'비밀번호 없이 저장할까요?'**
+  String get saveWithoutPasswordQuestion;
+
+  /// No description provided for @accountHasNoPasswordSavedAsIs.
+  ///
+  /// In ko, this message translates to:
+  /// **'이 계정은 Windows 비밀번호가 없어요. 비밀번호 없이 그대로 저장해요.'**
+  String get accountHasNoPasswordSavedAsIs;
+
   /// No description provided for @leastCharacters.
   ///
   /// In ko, this message translates to:
@@ -13768,7 +13792,7 @@ abstract class AppLocalizations {
   /// No description provided for @accountHasNoWindowsPassword.
   ///
   /// In ko, this message translates to:
-  /// **'이 계정은 Windows 비밀번호가 없어요.\n{setup}Windows 비밀번호 규칙에 맞게 만드세요.'**
+  /// **'이 계정은 Windows 비밀번호가 없어요. 비워 두고 저장하면 비밀번호 없이 써요.\n비밀번호를 만들려면 {setup}Windows 비밀번호 규칙에 맞게 입력하세요.'**
   String accountHasNoWindowsPassword(Object setup);
 
   /// No description provided for @newWindowsPassword.
@@ -19646,6 +19670,42 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'지금 Multitap 앱을 쓰고 있는 PC라 연결할 수 없어요. 다른 기기에서 연결하세요.'**
   String get samePcMessage;
+
+  /// No description provided for @setNewPasswordTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'새 비밀번호 정하기'**
+  String get setNewPasswordTitle;
+
+  /// No description provided for @setNewPasswordSubtitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'관리자가 정해 준 비밀번호예요. 앞으로 쓸 비밀번호를 정해 주세요.'**
+  String get setNewPasswordSubtitle;
+
+  /// No description provided for @setNewPasswordToSignIn.
+  ///
+  /// In ko, this message translates to:
+  /// **'새 비밀번호를 정해야 로그인할 수 있어요.'**
+  String get setNewPasswordToSignIn;
+
+  /// No description provided for @chooseDifferentFromFirstPassword.
+  ///
+  /// In ko, this message translates to:
+  /// **'처음 비밀번호와 다른 비밀번호를 정해 주세요.'**
+  String get chooseDifferentFromFirstPassword;
+
+  /// No description provided for @passwordAlreadyChangedSignIn.
+  ///
+  /// In ko, this message translates to:
+  /// **'비밀번호가 이미 바뀌었어요. 새 비밀번호로 로그인하세요.'**
+  String get passwordAlreadyChangedSignIn;
+
+  /// No description provided for @changeAndSignIn.
+  ///
+  /// In ko, this message translates to:
+  /// **'바꾸고 로그인'**
+  String get changeAndSignIn;
 }
 
 class _AppLocalizationsDelegate

@@ -37,6 +37,8 @@ let modalDraftDirty = () => false;
 // One line for the sign-in page, set by what is about to end this sign-in on
 // purpose (a restore: the accounts become the backup's).
 let loginNotice = '';
+// 첫 로그인 비밀번호: the name and password an administrator set, held only while the new-password form is open.
+let initialPasswordPending = null;
 let activeModalSubmission = null, modalBusy = false;
 // A new login is a new owner even when its account object/id is reused. This
 // fences local async UI effects; it does not cancel or replay server writes.
@@ -385,6 +387,7 @@ function showLogin({ completedMfa, entering = false } = {}) {
   serverInfoRevision++; state.serverInfo = null; state.serverInfoLoading = false; state.serverInfoError = ''; $('#broker-version').textContent = '—'; $('#server-version-header').textContent = t('common.17');
   shutDetail();
   $('#console').hidden = true; $('#setup').hidden = true; $('#login').hidden = false; renderExpiryBanner();
+  initialPasswordPending = null; $('#initial-password').hidden = true; $('#initial-password-form').reset(); $('#initial-password-error').textContent = '';
   showSetupRestore(false);
   const announce = $('#login-notice'); if (announce) { announce.textContent = loginNotice; announce.hidden = !loginNotice; }
   if ($('#modal').open) $('#modal').close();
@@ -1207,8 +1210,38 @@ $('#login-form').addEventListener('submit', async event => {
       adminMfaTimer = setTimeout(() => { if (adminMfaChallenge === pending && authenticationCurrent(ticket)) { showLogin(); $('#login-error').textContent = t('common.26'); } }, pending.deadline.remaining());
       $('#login').hidden = true; $('#admin-mfa').hidden = false; $('#admin-mfa-form').elements.code.focus?.();
     } else { const entering = enter(result.session); owner = sessionOwner(); await entering; }
-  } catch (error) { if (sessionCurrent(owner) && ticket.revision === authRevision) { $('#login-error').textContent = error.message; form.elements.password.value = ''; form.elements.password.focus?.(); } }
+  } catch (error) {
+    if (sessionCurrent(owner) && ticket.revision === authRevision && error.code === 'password_change_required') {
+      // An administrator set this password: pick a new one first (첫 로그인 비밀번호).
+      initialPasswordPending = { username: input.username, password: input.password };
+      form.elements.password.value = ''; $('#login').hidden = true; $('#initial-password').hidden = false; $('#initial-password-form').elements.password.focus?.();
+    } else if (sessionCurrent(owner) && ticket.revision === authRevision) { $('#login-error').textContent = error.message; form.elements.password.value = ''; form.elements.password.focus?.(); }
+  }
   finally { if (sessionCurrent(owner) && ticket.revision === authRevision) { submit.disabled = false; submit.textContent = t('common.16'); } input.password = ''; }
+});
+$('#initial-password-cancel').addEventListener('click', () => showLogin());
+$('#initial-password-form').addEventListener('submit', async event => {
+  event.preventDefault(); const form = event.target, pending = initialPasswordPending;
+  if (!pending) { showLogin(); return; }
+  const input = Object.fromEntries(new FormData(form)); $('#initial-password-error').textContent = '';
+  if (input.password !== input.confirmation) { $('#initial-password-error').textContent = t('app.38'); form.elements.confirmation.focus?.(); return; }
+  if (input.password.length < 10) { $('#initial-password-error').textContent = t('initialPassword.length'); form.elements.password.focus?.(); return; }
+  const buttons = [...form.querySelectorAll('button')]; buttons.forEach(node => node.disabled = true);
+  let code = null;
+  try {
+    const response = await fetch('/api/v1/auth/password/initial', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: pending.username, password: pending.password, newPassword: input.password, passwordConfirmation: input.confirmation }) });
+    if (!response.ok) code = (await response.json().catch(() => null))?.error?.code ?? 'request_failed';
+  } catch { code = 'network_error'; }
+  finally { input.password = ''; input.confirmation = ''; buttons.forEach(node => node.disabled = false); }
+  if (initialPasswordPending !== pending) return;
+  if (!code) { showLogin(); $('#login-form').elements.username.value = pending.username; $('#login-error').textContent = t('initialPassword.done'); $('#login-error').className = 'form-message is-success'; $('#login-form').elements.password.focus?.(); return; }
+  if (code === 'password_unchanged') { form.reset(); $('#initial-password-error').textContent = t('initialPassword.unchanged'); form.elements.password.focus?.(); return; }
+  if (code === 'password_confirmation_mismatch') { $('#initial-password-error').textContent = t('app.38'); return; }
+  if (code === 'password_length_10_to_256') { $('#initial-password-error').textContent = t('initialPassword.length'); return; }
+  if (code === 'too_many_attempts') { $('#initial-password-error').textContent = t('mfa-auth.tooManySignInF3'); return; }
+  if (code === 'network_error' || code === 'login_busy' || code === 'request_failed') { $('#initial-password-error').textContent = t('mfa-auth.15'); return; }
+  // invalid_credentials, credentials_changed, password_change_not_required: start over.
+  showLogin(); $('#login-form').elements.username.value = pending.username; $('#login-error').textContent = t('initialPassword.again');
 });
 $('#admin-mfa-mode').addEventListener('click', () => {
   if (adminMfaBusy || !adminMfaChallenge) return;

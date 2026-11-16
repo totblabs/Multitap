@@ -48,9 +48,9 @@ test('schema 13→14 copies every account mask into each of its existing assignm
   store = new Store(path);
   assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 19);
   assert.equal(store.setting('hostless_assignments_cleanup'), '0', 'the one-time cleanup found nothing to remove');
-  for (const table of ['users', 'sessions', 'desktops', 'settings', 'audit_events']) assert.deepEqual(store.db.prepare('SELECT rowid,* FROM ' + table + (table === 'settings' ? " WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')" : '') + ' ORDER BY rowid').all().map(({ pve_tags, pve_pool, issuer, replaced_at, authorization_revision, ...row }) => { if (table === 'users') assert.equal(authorization_revision, 1); return { ...row }; }), before[table], table + ' is unchanged');
+  for (const table of ['users', 'sessions', 'desktops', 'settings', 'audit_events']) assert.deepEqual(store.db.prepare('SELECT rowid,* FROM ' + table + (table === 'settings' ? " WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')" : '') + ' ORDER BY rowid').all().map(({ pve_tags, pve_pool, issuer, replaced_at, authorization_revision, password_change_required, ...row }) => { if (table === 'users') { assert.equal(authorization_revision, 1); assert.equal(password_change_required, 0); } return { ...row }; }), before[table], table + ' is unchanged');
   const masks = Object.fromEntries(before.users.map(user => [user.id, [user.clipboard_permissions, user.rdp_redirections]]));
-  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ clipboard_permissions, rdp_redirections, favorite, last_used_at, sound_card_add, group_id, ...row }) => {
+  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ clipboard_permissions, rdp_redirections, favorite, last_used_at, sound_card_add, group_id, via_admin, ...row }) => { assert.equal(via_admin, 0);
     assert.deepEqual([clipboard_permissions, rdp_redirections, favorite, last_used_at, group_id], [...masks[row.user_id], 0, null, null], 'each assignment keeps its account mask'); return { ...row };
   }), before.assignments);
   const aliceClipboard = { ...clipDeny, textToRemote: true, filesToRemote: true }, aliceDevices = { ...deny, drives: true, serialPorts: true };

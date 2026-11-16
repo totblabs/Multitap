@@ -247,7 +247,13 @@ test('Korean account ids authenticate and support encoded-path CRUD with optiona
   const f = await setup(t); await f.login();
   const name = '테스트계정'; const path = '/api/v1/admin/users/' + encodeURIComponent(name);
   assert.equal((await f.call('/api/v1/admin/users', 'POST', { username: name.normalize('NFD'), password, role: 'user', notes: '회계팀\n담당자' })).status, 201);
-  const client = await f.call('/api/v1/auth/login', 'POST', { username: name.normalize('NFD'), password });
+  // 첫 로그인 비밀번호 (2026-11-16): the account an administrator made picks its own password first.
+  const first = await f.call('/api/v1/auth/login', 'POST', { username: name.normalize('NFD'), password });
+  assert.deepEqual([first.status, first.body.error.code], [428, 'password_change_required']);
+  const own = 'Korean-own-password-71!';
+  assert.equal((await f.call('/api/v1/auth/password/initial', 'POST', { username: name.normalize('NFD'), password, newPassword: own, passwordConfirmation: own })).status, 200);
+  assert.equal((await f.call('/api/v1/auth/login', 'POST', { username: name, password })).status, 401, 'the first password is gone');
+  const client = await f.call('/api/v1/auth/login', 'POST', { username: name.normalize('NFD'), password: own });
   assert.equal(client.status, 200); assert.equal(client.body.user.username, name); assert.equal(client.body.user.displayName, name);
   const account = (await f.call('/api/v1/admin/inventory')).body.users.find(u => u.username === name);
   assert.equal(account.notes, '회계팀\n담당자'); assert.equal(account.display_name, name);

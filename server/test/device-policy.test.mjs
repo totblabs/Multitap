@@ -47,11 +47,13 @@ test('schema 12→13 adds a deny-all device permission column and preserves ever
   const before = Object.fromEntries(['users', 'sessions', 'assignments', 'desktops', 'settings'].map(table => [table, previous.prepare('SELECT rowid,* FROM ' + table + ' ORDER BY rowid').all().map(row => ({ ...row }))])); previous.close();
   store = new Store(path);
   assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 19);
-  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM users ORDER BY rowid').all().map(({ rdp_redirections, authorization_revision, ...row }) => { assert.equal(rdp_redirections, 0); assert.equal(authorization_revision, 1); return { ...row }; }), before.users);
-  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ clipboard_permissions, rdp_redirections, favorite, last_used_at, sound_card_add, group_id, ...row }) => { assert.equal(clipboard_permissions, 1); assert.equal(rdp_redirections, 0); assert.equal(group_id, null); return { ...row }; }), before.assignments);
+  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM users ORDER BY rowid').all().map(({ rdp_redirections, authorization_revision, password_change_required, ...row }) => { assert.equal(password_change_required, 0); assert.equal(rdp_redirections, 0); assert.equal(authorization_revision, 1); return { ...row }; }), before.users);
+  assert.deepEqual(store.db.prepare('SELECT rowid,* FROM assignments ORDER BY rowid').all().map(({ clipboard_permissions, rdp_redirections, favorite, last_used_at, sound_card_add, group_id, via_admin, ...row }) => { assert.equal(via_admin, 0); assert.equal(clipboard_permissions, 1); assert.equal(rdp_redirections, 0); assert.equal(group_id, null); return { ...row }; }), before.assignments);
   assert.equal(store.setting('hostless_assignments_cleanup'), '0');
   for (const table of ['sessions', 'desktops', 'settings']) assert.deepEqual(store.db.prepare('SELECT rowid,* FROM ' + table + (table === 'settings' ? " WHERE key NOT IN ('hostless_assignments_cleanup','usage_backfill')" : '') + ' ORDER BY rowid').all().map(({ pve_tags, pve_pool, issuer, replaced_at, ...row }) => ({ ...row })), before[table]);
-  for (const id of [admin, member]) assert.deepEqual(store.devicePolicy(id, 'pve-730'), deny);
+  assert.deepEqual(store.devicePolicy(member, 'pve-730'), deny);
+  // 관리자는 모든 데스크톱 (2026-11-16): an administrator has every permission on every registered desktop.
+  assert.deepEqual(store.devicePolicy(admin, 'pve-730'), all);
   assert.deepEqual(store.clipboardPolicy(member, 'pve-730'), { ...clipDeny, textToRemote: true }, 'clipboard permission is reused on the assignment, not reset');
   for (const table of ['users', 'assignments']) assert.throws(() => store.db.prepare(`UPDATE ${table} SET rdp_redirections=128 WHERE ${table === 'users' ? 'id' : 'user_id'}=?`).run(member), /CHECK/);
   store.updateUser('사용자', { devicePolicy: { ...deny, drives: true } }, admin);
@@ -59,7 +61,8 @@ test('schema 12→13 adds a deny-all device permission column and preserves ever
   assert.equal(store.db.prepare('SELECT count(*) AS n FROM sessions').get().n, 1, 'a redirection grant does not revoke login');
   store.assign('관리자', 'pve-730', admin);
   assert.throws(() => store.updateUser('관리자', { role: 'user', devicePolicy: all }, admin), /primary_admin_required/);
-  assert.deepEqual(store.devicePolicy(admin, 'pve-730'), deny, 'failed combined updates are atomic');
+  assert.equal(store.db.prepare('SELECT rdp_redirections FROM assignments WHERE user_id=? AND desktop_id=?').get(admin, 'pve-730').rdp_redirections, 0, 'failed combined updates are atomic');
+  assert.equal(store.findUser('관리자').role, 'admin');
   store.setUserEnabled('사용자', false, admin); assert.deepEqual(store.devicePolicy(member, 'pve-730'), deny, 'disabled accounts never carry a grant');
   store.close(); const newer = new DatabaseSync(path); newer.exec('PRAGMA user_version=20;'); newer.close();
   assert.throws(() => new Store(path), /database_version_too_new/);

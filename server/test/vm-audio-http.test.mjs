@@ -63,8 +63,7 @@ test('a released client is told the sound-card dialog is not offered, and its st
   // Who may not see the desktop learns nothing more than before.
   assert.equal((await f.call(path, { name: 'audio-other' })).status, 404);
   assert.equal((await f.call(path, { name: 'audio-admin' })).status, 401, 'an administrator-purpose token is not a client session');
-  assert.equal((await f.call(path, { name: 'admin-client' })).status, 404);
-  f.store.assign('audio-admin', 'pve-149', f.admin);
+  // An administrator sees every registered desktop without an assignment (2026-11-16) and is refused the same way.
   assert.deepEqual([(await f.call(path, { name: 'admin-client' })).body.error.code, (await f.call(path, { name: 'admin-client', method: 'POST', data: input })).body.error.code], ['vm_audio_permission_denied', 'vm_audio_permission_denied'], 'an administrator account is refused the same way');
   assert.deepEqual(f.asked.filter(entry => !entry.startsWith('vmConfig')), [], 'no audio request asked Proxmox for anything but the list state');
   assert.equal(f.asked.some(entry => /^(PUT|POST|DELETE) /.test(entry)), false);

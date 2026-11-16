@@ -180,7 +180,8 @@ class Controller {
       if (!image->values[5].bytes.empty() || (!image->values[5].exists && image->plainPasswordBytes != 0)) throw Failure("recovery_invalid");
       for (const auto& value : image->values) if (value.bytes.size() > 4096) throw Failure("recovery_invalid");
     }
-    if (r.phase == "owned" && (r.action != "apply" || r.intent || !r.expected.secretExists || r.expected.secret.text.empty() || r.expected.secret.text.size() > 256 || !(r.expected.values[0] == textValue(L"1")) || r.expected.values[3].exists || r.expected.values[4].exists || r.expected.values[5].exists)) throw Failure("recovery_invalid");
+    // An owned image always has the LSA secret; it is empty for an account without a password.
+    if (r.phase == "owned" && (r.action != "apply" || r.intent || !r.expected.secretExists || r.expected.secret.text.size() > 256 || !(r.expected.values[0] == textValue(L"1")) || r.expected.values[3].exists || r.expected.values[4].exists || r.expected.values[5].exists)) throw Failure("recovery_invalid");
     if (r.phase == "disabled" && (r.intent || !baselineSafe(r.expected))) throw Failure("recovery_invalid");
   }
   Status statusLocked(const std::string& operation) {
@@ -293,7 +294,9 @@ class Controller {
     Account account;
     if (action == "apply") {
       if (current.policyBlocked) throw Failure("policy_restricted");
-      if (request.username.empty() || request.username.size() > 256 || request.password.text.empty() || request.password.text.size() > 256 || request.password.text.find(L'\0') != std::wstring::npos || request.password.text != request.confirmation.text) throw Failure("invalid_credentials");
+      // An empty password is an account without one (2026-11-16): the adapter
+      // proves it before anything is written, and the LSA secret is stored empty.
+      if (request.username.empty() || request.username.size() > 256 || request.password.text.size() > 256 || request.password.text.find(L'\0') != std::wstring::npos || request.password.text != request.confirmation.text) throw Failure("invalid_credentials");
       account = access_.validateInteractive(request.username, request.password);
       if (!account.usable || account.sid.empty()) throw Failure("account_restricted");
       // Validation is exactly one explicit INTERACTIVE attempt. Never timer retry.

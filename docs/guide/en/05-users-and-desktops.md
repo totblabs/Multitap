@@ -3,6 +3,7 @@
 [Contents](README.md) · [Previous: Install Host](04-host-install.md) · [Next: Windows client](06-windows-client.md) · [한국어](../05-사용자와-VM-배정.md)
 
 Users see only the desktops (VMs and local PCs) an admin assigned to them.
+Administrator accounts see every registered desktop without assignments, and may use copy and paste, shared folders, printers and USB on all of them.
 You set assignments and sharing in **Users** in the admin console.
 
 **Where: the Multitap admin console in a browser on your PC**
@@ -60,6 +61,7 @@ In **Desktops** you manage desktops and their Hosts together.
 8. Press **Create user**.
 
 The new account's screen opens.
+When the user first signs in with this password, they choose the password they will use from now on. Until then the user list shows **Password not changed yet**.
 A username has 2 to 64 characters with no spaces, and Korean letters are allowed.
 
 **Check:** The new username appears in the user list.
@@ -166,7 +168,7 @@ There you find **Everyone at once**.
 | --- | --- |
 | Server address | `https://vdi.example.com` or the internal-network HTTP address the operator chose |
 | Multitap username | The username you just created |
-| Initial password | Give it by a separate, secure way |
+| Initial password | Give it by a separate, secure way. The user sets a new password at the first sign-in. |
 | Client download | `/get/client` or `/get/android` on the server |
 
 You can copy the download addresses from **Addresses to give users** in **Downloads**.
@@ -213,7 +215,7 @@ A connection marked **Estimated** has an end time the server estimated (when the
 **Reset password** is at the top of the user screen; **Disable account** and **Delete** are under **More**.
 
 **Disable account** ends existing sign-ins but keeps assignments and sharing.
-If a user forgot the password, set a new one with **Reset password**.
+If a user forgot the password, set a temporary one with **Reset password** and tell them. They set a new password at their next sign-in.
 
 Resetting the password, changing the role or deleting ends that account's existing sign-ins.
 The first **Main admin** cannot be demoted, disabled or deleted.

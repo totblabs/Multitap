@@ -874,7 +874,9 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
               : pcLoginTerminalMessage(error.code),
         );
       }
-      return error.code == 'invalid_credentials'
+      return error.code == 'password_change_required'
+          ? SignInResult.passwordChangeRequired
+          : error.code == 'invalid_credentials'
           ? SignInResult.rejected
           : error.code == 'network_error' || error.serverRestarting
           ? SignInResult.unreachable
@@ -889,6 +891,26 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
         setState(() => _busy = false);
       }
     }
+  }
+
+  /// 첫 로그인 비밀번호: the new password of an account an administrator set
+  /// the password of. The sign-in screen signs in with it afterwards.
+  Future<void> _setInitialPassword(
+    String name,
+    String password,
+    String newPassword,
+    String confirmation,
+  ) async {
+    final api = _api;
+    if (api is! InitialPasswordBrokerApi) {
+      throw const BrokerException('password_change_required', 428);
+    }
+    await (api as InitialPasswordBrokerApi).setInitialPassword(
+      name.trim(),
+      password,
+      newPassword,
+      confirmation,
+    );
   }
 
   SessionRenewer? _renewer;
@@ -2654,6 +2676,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
         : Builder(
             builder: (loginContext) => SignInScreen(
               onLogin: (name, password) => _login(loginContext, name, password),
+              onInitialPassword: _setInitialPassword,
               serverOrigin: _origin,
               onServerChanged: _changeServer,
               loginMemory: widget.loginMemory,

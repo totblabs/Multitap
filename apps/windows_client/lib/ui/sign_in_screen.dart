@@ -15,12 +15,21 @@ import 'server_settings_dialog.dart';
 import 'password_input_scope.dart';
 import 'korean_text.dart';
 import 'app_info_dialog.dart';
+import 'initial_password_dialog.dart';
 import '../l10n/l10n.dart';
 
 /// [rejected]: the server said the ID or password is wrong. [unreachable]:
 /// the server did not answer at all. [failed]: anything else (a cancelled
 /// two-step verification, a refusal for another reason).
-enum SignInResult { success, rejected, unreachable, failed }
+/// [passwordChangeRequired]: the password is right, but an administrator set
+/// it; the account picks its own first (첫 로그인 비밀번호).
+enum SignInResult {
+  success,
+  rejected,
+  unreachable,
+  failed,
+  passwordChangeRequired,
+}
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({
@@ -34,8 +43,15 @@ class SignInScreen extends StatefulWidget {
     this.error,
     this.onEdited,
     this.restorePassword = true,
+    this.onInitialPassword,
   });
   final Future<SignInResult> Function(String, String) onLogin;
+
+  /// Sends the new password of an account an administrator set the password
+  /// of (username, that password, new password, confirmation). Without it,
+  /// [SignInResult.passwordChangeRequired] stays a failed sign-in.
+  final Future<void> Function(String, String, String, String)?
+  onInitialPassword;
   final Uri? serverOrigin;
   final Future<void> Function(Uri) onServerChanged;
   final LoginMemory loginMemory;
@@ -169,7 +185,7 @@ class _SignInScreenState extends State<SignInScreen> {
   Future<void> _submit() async {
     if (widget.busy || _submitting || widget.serverOrigin == null) return;
     final username = _id.text.trim();
-    final password = _password.text;
+    var password = _password.text;
     final origin = widget.serverOrigin!;
     // Over HTTP nothing is remembered, and a password stored earlier is
     // forgotten by this sign-in.
@@ -183,7 +199,24 @@ class _SignInScreenState extends State<SignInScreen> {
     });
     try {
       // Remembering credentials is optional and must never gate authentication.
-      final result = await widget.onLogin(username, password);
+      var result = await widget.onLogin(username, password);
+      final setInitial = widget.onInitialPassword;
+      if (result == SignInResult.passwordChangeRequired &&
+          setInitial != null &&
+          mounted) {
+        final first = password;
+        final chosen = await showInitialPasswordDialog(
+          context,
+          onSubmit: (next, confirmation) =>
+              setInitial(username, first, next, confirmation),
+        );
+        if (chosen != null && mounted) {
+          // The new password signs in, and is what 비밀번호 기억 keeps.
+          password = chosen;
+          _password.text = chosen;
+          result = await widget.onLogin(username, password);
+        }
+      }
       if (mounted) {
         setState(() => _unreachable = result == SignInResult.unreachable);
       }

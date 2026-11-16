@@ -27,6 +27,14 @@
       <button data-i18n="html.18" id="admin-mfa-mode" class="quiet" type="button">복구 코드 사용</button><button data-i18n="html.19" id="admin-mfa-cancel" class="quiet" type="button">로그인으로 돌아가기</button>
     </form></div>
   </section>
+  <section id="initial-password" class="auth-screen" hidden>
+    <div class="auth-body"><form id="initial-password-form" class="auth-card">
+      <h2 data-i18n="initialPassword.title">새 비밀번호 정하기</h2><p data-i18n="initialPassword.lead" class="auth-lead">관리자가 정해 준 비밀번호로 처음 로그인했어요. 앞으로 쓸 비밀번호를 정해 주세요.</p>
+      <label data-i18n="html.30">새 비밀번호<input data-i18n-attr="placeholder:html.31" name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="256" placeholder="10자 이상"></label><label data-i18n="html.32">비밀번호 확인<input name="confirmation" type="password" autocomplete="new-password" required minlength="10" maxlength="256"></label>
+      <p id="initial-password-error" class="error" role="alert"></p><button data-i18n="initialPassword.submit" class="primary" type="submit">비밀번호 바꾸기</button>
+      <button data-i18n="initialPassword.back" id="initial-password-cancel" class="quiet" type="button">로그인으로</button>
+    </form></div>
+  </section>
   <section id="setup" class="auth-screen" hidden>
     <header class="auth-top"><div class="lang-switch" role="group" aria-label="언어 / Language" data-language-switch><button type="button" data-language="ko" lang="ko" aria-pressed="true">한국어</button><button type="button" data-language="en" lang="en" aria-pressed="false">English</button></div><button data-i18n-attr="aria-label:html.3" type="button" class="icon-button theme-toggle" data-theme-toggle aria-label="화면 모드 전환"><span class="when-dark" data-icon="sun"></span><span class="when-light" data-icon="moon"></span></button></header>
     <div class="auth-body">

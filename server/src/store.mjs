@@ -3,7 +3,7 @@ import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { username, text, notes as accountNotes, desktopId } from './security.mjs';
-import { clipboardPolicyFromMask, clipboardPolicyMask } from './clipboard-policy.mjs';
+import { clipboardPolicyFromMask, clipboardPolicyKeys, clipboardPolicyMask } from './clipboard-policy.mjs';
 import { devicePolicyBits, devicePolicyFromMask, devicePolicyMask } from './device-policy.mjs';
 import { normalizeTags, normalizePool, storedTags, groupEntries, newGroupId } from './desktop-organize.mjs';
 import { approvedPcSql, availableDesktopSql } from './local-pc.mjs';
@@ -28,6 +28,8 @@ const registeredDesktopSql = `EXISTS (SELECT 1 FROM hosts rh WHERE rh.desktop_id
 // the SQL text, parameters and returned rows are unchanged, so every caller
 // still observes the live database state on each call.
 const reusableStatements = new WeakMap();
+// Every clipboard permission (an administrator's, see adminDesktop).
+const allClipboardPermissions = (1 << clipboardPolicyKeys.length) - 1;
 function reusable(db, sql) {
   let statements = reusableStatements.get(db);
   if (!statements) reusableStatements.set(db, statements = new Map());
@@ -369,6 +371,20 @@ export class Store {
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('assignments') WHERE name='group_id'").get()) this.db.exec('ALTER TABLE assignments ADD COLUMN group_id TEXT REFERENCES desktop_groups(id) ON DELETE SET NULL');
       this.db.exec('CREATE INDEX IF NOT EXISTS assignments_group ON assignments(group_id)');
     });
+    // 관리자는 모든 데스크톱 (2026-11-16): an administrator's authority over
+    // every registered desktop comes from the role, not from rows. via_admin
+    // marks a row that only holds an administrator's own favorite, group and
+    // last use of a desktop nobody assigned; it grants nothing by itself and
+    // goes when the account stops being an administrator.
+    // 첫 로그인 비밀번호 (2026-11-16): password_change_required is set when an
+    // administrator sets another account's password; that account picks its
+    // own before it can sign in. It is not must_change_credentials (the
+    // first-server-setup state). Both columns are additive; older brokers
+    // ignore them.
+    this.transaction(() => {
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('assignments') WHERE name='via_admin'").get()) this.db.exec('ALTER TABLE assignments ADD COLUMN via_admin INTEGER NOT NULL DEFAULT 0 CHECK(via_admin IN (0,1))');
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='password_change_required'").get()) this.db.exec('ALTER TABLE users ADD COLUMN password_change_required INTEGER NOT NULL DEFAULT 0 CHECK(password_change_required IN (0,1))');
+    });
     // Old releases could already have cached UUID B beside a Host for UUID A.
     // Repair only known mismatches; do not manufacture a fresh Proxmox check.
     this.transaction(() => {
@@ -418,7 +434,9 @@ export class Store {
   // Compatibility: an account-wide clipboardPolicy/devicePolicy is
   // validated and applies to the account's current assignments, of which a new
   // account has none. Its later assignments therefore start denied.
-  addUser({ name, notes, displayName, passwordHash, role = 'user', clipboardPolicy, devicePolicy }, actor = 'server-admin') {
+  // passwordChangeRequired: an administrator chose this password for someone
+  // else, who picks their own at the first sign-in (setInitialPassword).
+  addUser({ name, notes, displayName, passwordHash, role = 'user', clipboardPolicy, devicePolicy, passwordChangeRequired = false }, actor = 'server-admin') {
     const canonical = username(name);
     if (!['admin', 'user'].includes(role)) throw new Error('invalid_role');
     const memo = accountNotes(notes === undefined ? (displayName !== undefined && displayName !== canonical ? displayName : '') : notes);
@@ -427,7 +445,7 @@ export class Store {
     const id = randomUUID();
     this.transaction(() => {
       const primary = role === 'admin' && !this.db.prepare('SELECT 1 FROM users WHERE is_primary_admin=1').get();
-      this.db.prepare('INSERT INTO users(id,username,display_name,notes,password_hash,role,created_at,is_primary_admin) VALUES(?,?,?,?,?,?,?,?)').run(id, canonical, canonical, memo, passwordHash, role, Date.now(), primary ? 1 : 0);
+      this.db.prepare('INSERT INTO users(id,username,display_name,notes,password_hash,role,created_at,is_primary_admin,password_change_required) VALUES(?,?,?,?,?,?,?,?,?)').run(id, canonical, canonical, memo, passwordHash, role, Date.now(), primary ? 1 : 0, passwordChangeRequired === true ? 1 : 0);
       this.audit('user_created', actor, id);
     });
     return id;
@@ -436,15 +454,21 @@ export class Store {
   findUserById(id) { return this.db.prepare('SELECT * FROM users WHERE id=?').get(id); }
   // Enforcement reads the assignment (user x VM) of an enabled account. A
   // missing assignment, disabled account or absent VM id grants nothing.
-  clipboardPolicy(userId, id) { return clipboardPolicyFromMask(typeof id === 'string' ? reusable(this.db, 'SELECT a.clipboard_permissions FROM assignments a JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND a.desktop_id=? AND u.disabled=0').get(userId, id)?.clipboard_permissions : undefined); }
-  devicePolicy(userId, id) { return devicePolicyFromMask(typeof id === 'string' ? reusable(this.db, 'SELECT a.rdp_redirections FROM assignments a JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND a.desktop_id=? AND u.disabled=0').get(userId, id)?.rdp_redirections : undefined); }
+  // An enabled administrator has every permission on every desktop it may use.
+  clipboardPolicy(userId, id) { return clipboardPolicyFromMask(typeof id === 'string' ? (this.adminDesktop(userId, id) ? allClipboardPermissions : reusable(this.db, 'SELECT a.clipboard_permissions FROM assignments a JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND a.desktop_id=? AND a.via_admin=0 AND u.disabled=0').get(userId, id)?.clipboard_permissions) : undefined); }
+  devicePolicy(userId, id) { return devicePolicyFromMask(typeof id === 'string' ? (this.adminDesktop(userId, id) ? devicePolicyBits : reusable(this.db, 'SELECT a.rdp_redirections FROM assignments a JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND a.desktop_id=? AND a.via_admin=0 AND u.disabled=0').get(userId, id)?.rdp_redirections) : undefined); }
+  // Whether this enabled administrator account may use this desktop: every
+  // available desktop with a registered Host, as the client list shows them.
+  adminDesktop(userId, id) {
+    return typeof userId === 'string' && typeof id === 'string' && !!reusable(this.db, `SELECT 1 FROM desktops d JOIN users u ON u.id=? WHERE d.id=? AND u.role='admin' AND u.disabled=0 AND ${availableDesktopSql} AND ${registeredDesktopSql}`).get(userId, id);
+  }
   // The action layer owns any administrator bypass and still checks the VM.
   soundCardAddAllowed(userId, id) {
     if (typeof userId !== 'string' || typeof id !== 'string') return false;
     return reusable(this.db, `SELECT a.sound_card_add FROM assignments a JOIN users u ON u.id=a.user_id JOIN desktops d ON d.id=a.desktop_id WHERE a.user_id=? AND a.desktop_id=? AND u.disabled=0 AND d.kind='vm' AND ${availableDesktopSql}`).get(userId, id)?.sound_card_add === 1;
   }
   userAssignments(userId) {
-    return this.db.prepare('SELECT a.desktop_id,a.clipboard_permissions,a.rdp_redirections,a.sound_card_add FROM assignments a JOIN desktops d ON d.id=a.desktop_id WHERE a.user_id=? ORDER BY d.pve_vmid IS NULL,d.pve_vmid,a.desktop_id').all(userId)
+    return this.db.prepare('SELECT a.desktop_id,a.clipboard_permissions,a.rdp_redirections,a.sound_card_add FROM assignments a JOIN desktops d ON d.id=a.desktop_id WHERE a.user_id=? AND a.via_admin=0 ORDER BY d.pve_vmid IS NULL,d.pve_vmid,a.desktop_id').all(userId)
       .map(row => ({ desktopId: row.desktop_id, ...assignmentPolicy(row) }));
   }
   // Inside a transaction: set one existing assignment's masks (undefined keeps
@@ -470,7 +494,7 @@ export class Store {
     return this.transaction(() => {
       const user = this.findUser(name);
       if (!user) throw new Error('user_not_found');
-      if (!this.db.prepare('SELECT 1 FROM assignments WHERE user_id=? AND desktop_id=?').get(user.id, desktopId(id))) throw new Error('assignment_not_found');
+      if (!this.db.prepare('SELECT 1 FROM assignments WHERE user_id=? AND desktop_id=? AND via_admin=0').get(user.id, desktopId(id))) throw new Error('assignment_not_found');
       if (soundCardAdd === true && this.db.prepare('SELECT kind FROM desktops WHERE id=?').get(id)?.kind !== 'vm') throw new Error('sound_card_vm_only');
       return this.writeAssignmentPolicy(user.id, id, clipboard, redirections, actor, soundCardAdd);
     });
@@ -502,7 +526,9 @@ export class Store {
     this.transaction(() => {
       const user = this.expectedUser(name, expectedId);
       if (user.is_primary_admin && actor !== 'server-admin' && actor !== user.id) throw new Error('primary_admin_protected');
-      this.db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash, user.id);
+      // Set by another administrator: the account picks its own at the next
+      // sign-in. Its own change and the server's recovery commands do not ask.
+      this.db.prepare('UPDATE users SET password_hash=?,password_change_required=? WHERE id=?').run(passwordHash, actor !== 'server-admin' && actor !== user.id ? 1 : 0, user.id);
       this.db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);
       this.audit('password_changed', actor, user.id);
     });
@@ -517,9 +543,22 @@ export class Store {
       }
       const current = this.db.prepare('SELECT password_hash,disabled FROM users WHERE id=?').get(userId);
       if (!current || current.disabled || current.password_hash !== expectedHash) throw new Error('credentials_changed');
-      this.db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash, userId);
+      this.db.prepare('UPDATE users SET password_hash=?,password_change_required=0 WHERE id=?').run(passwordHash, userId);
       this.db.prepare('DELETE FROM sessions WHERE user_id=?').run(userId);
       this.audit('password_changed', userId, userId);
+    });
+  }
+  // The first sign-in after an administrator set this account's password: the
+  // account's own new password replaces it (the caller verified the old one,
+  // expectedHash, and that the new one differs). No session exists yet.
+  setInitialPassword(userId, expectedHash, passwordHash) {
+    this.transaction(() => {
+      const current = this.db.prepare('SELECT password_hash,disabled,password_change_required FROM users WHERE id=?').get(userId);
+      if (!current || current.disabled || current.password_hash !== expectedHash) throw new Error('credentials_changed');
+      if (current.password_change_required !== 1) throw new Error('password_change_not_required');
+      this.db.prepare('UPDATE users SET password_hash=?,password_change_required=0 WHERE id=?').run(passwordHash, userId);
+      this.db.prepare('DELETE FROM sessions WHERE user_id=?').run(userId);
+      this.audit('initial_password_set', userId, userId);
     });
   }
   issueEnrollment(id, machineUuid, codeHash, actor, now = Date.now()) {
@@ -750,8 +789,10 @@ export class Store {
     const row = this.db.prepare('SELECT name FROM desktops WHERE id=?').get(id);
     return typeof row?.name === 'string' && row.name.trim() ? row.name.slice(0, 80) : null;
   }
+  // The desktop row when this account may use it: an assignment, or (an
+  // administrator) any desktop with a registered Host (adminDesktop).
   assignedDesktop(userId, id) {
-    return reusable(this.db, `SELECT d.* FROM desktops d JOIN assignments a ON a.desktop_id=d.id JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND d.id=? AND u.disabled=0 AND ${availableDesktopSql}`).get(userId, id);
+    return reusable(this.db, `SELECT d.* FROM desktops d JOIN users u ON u.id=? WHERE d.id=? AND u.disabled=0 AND ${availableDesktopSql} AND (EXISTS (SELECT 1 FROM assignments a WHERE a.user_id=u.id AND a.desktop_id=d.id AND a.via_admin=0) OR (u.role='admin' AND ${registeredDesktopSql}))`).get(userId, id);
   }
   guardAdmin(user) {
     if (user.is_primary_admin) throw new Error('primary_admin_required');
@@ -778,10 +819,12 @@ export class Store {
       if (user.role === 'admin' && role !== 'admin') this.guardAdmin(user);
       this.db.prepare('UPDATE users SET notes=?,role=? WHERE id=?').run(memo, role, user.id);
       if (role !== user.role) this.db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);
+      // No longer an administrator: only the desktops assigned to it remain.
+      if (user.role === 'admin' && role !== 'admin') this.db.prepare('DELETE FROM assignments WHERE user_id=? AND via_admin=1').run(user.id);
       this.audit('user_updated', actor, user.id);
       // Compatibility: an account-wide value applies to every current assignment.
       if (clipboard !== undefined || redirections !== undefined) {
-        for (const { desktop_id: id } of this.db.prepare('SELECT desktop_id FROM assignments WHERE user_id=?').all(user.id)) this.writeAssignmentPolicy(user.id, id, clipboard, redirections, actor);
+        for (const { desktop_id: id } of this.db.prepare('SELECT desktop_id FROM assignments WHERE user_id=? AND via_admin=0').all(user.id)) this.writeAssignmentPolicy(user.id, id, clipboard, redirections, actor);
       }
     });
   }
@@ -825,7 +868,8 @@ export class Store {
       const user = expectedId === undefined ? this.findUser(name) : this.expectedUser(name, expectedId);
       const desktop = this.db.prepare(`SELECT d.id FROM desktops d WHERE d.id=? AND ${availableDesktopSql}`).get(desktopId(id));
       if (!user || user.disabled || !desktop) throw new Error('user_or_desktop_unavailable');
-      this.db.prepare('INSERT OR IGNORE INTO assignments(user_id,desktop_id) VALUES(?,?)').run(user.id, id);
+      // An administrator's own favorite/group row becomes the assignment.
+      this.db.prepare('INSERT INTO assignments(user_id,desktop_id) VALUES(?,?) ON CONFLICT(user_id,desktop_id) DO UPDATE SET via_admin=0').run(user.id, id);
       this.audit('desktop_assigned', actor, `${user.id}:${id}`);
     });
   }
@@ -850,7 +894,7 @@ export class Store {
       const registered = registeredOnly ? this.registeredHostIds() : null;
       if (registered && [...selected.keys()].some(id => !registered.has(id))) throw new Error('host_not_registered');
       if (availableRows.some(row => row.kind !== 'vm' && selected.get(row.id)?.soundCardAdd === true)) throw new Error('sound_card_vm_only');
-      const current = new Set(this.db.prepare('SELECT desktop_id FROM assignments WHERE user_id=?').all(user.id).map(row => row.desktop_id));
+      const current = new Set(this.db.prepare('SELECT desktop_id FROM assignments WHERE user_id=? AND via_admin=0').all(user.id).map(row => row.desktop_id));
       let added = 0, removed = 0, policiesChanged = 0;
       for (const id of current) {
         if (available.has(id) && (!registered || registered.has(id)) && !selected.has(id)) {
@@ -859,15 +903,16 @@ export class Store {
       }
       for (const [id, entry] of selected) {
         if (!current.has(id)) {
-          this.db.prepare('INSERT INTO assignments(user_id,desktop_id,clipboard_permissions,rdp_redirections,sound_card_add) VALUES(?,?,?,?,?)').run(user.id, id, entry.clipboard ?? 0, entry.redirections ?? 0, entry.soundCardAdd === true ? 1 : 0); added++;
+          // An administrator's own favorite/group row becomes the assignment.
+          this.db.prepare('INSERT INTO assignments(user_id,desktop_id,clipboard_permissions,rdp_redirections,sound_card_add) VALUES(?,?,?,?,?) ON CONFLICT(user_id,desktop_id) DO UPDATE SET via_admin=0,clipboard_permissions=excluded.clipboard_permissions,rdp_redirections=excluded.rdp_redirections,sound_card_add=excluded.sound_card_add').run(user.id, id, entry.clipboard ?? 0, entry.redirections ?? 0, entry.soundCardAdd === true ? 1 : 0); added++;
           if (entry.clipboard) this.audit('clipboard_policy_changed', actor, `${user.id}:${id}`);
           if (entry.redirections) this.audit('device_policy_changed', actor, `${user.id}:${id}`);
           if (entry.soundCardAdd === true) this.audit('sound_card_add_permission_changed', actor, `${user.id}:${id}`);
         } else if (this.writeAssignmentPolicy(user.id, id, entry.clipboard, entry.redirections, actor, entry.soundCardAdd)) policiesChanged++;
       }
       const preservedUnavailable = this.db.prepare(registeredOnly
-        ? `SELECT count(*) AS n FROM assignments a JOIN desktops d ON d.id=a.desktop_id WHERE a.user_id=? AND NOT ((${availableDesktopSql}) AND (${registeredDesktopSql}))`
-        : "SELECT count(*) AS n FROM assignments a JOIN desktops d ON d.id=a.desktop_id WHERE a.user_id=? AND d.kind='vm' AND d.pve_vmid IS NOT NULL AND d.pve_available=0").get(user.id).n;
+        ? `SELECT count(*) AS n FROM assignments a JOIN desktops d ON d.id=a.desktop_id WHERE a.user_id=? AND a.via_admin=0 AND NOT ((${availableDesktopSql}) AND (${registeredDesktopSql}))`
+        : "SELECT count(*) AS n FROM assignments a JOIN desktops d ON d.id=a.desktop_id WHERE a.user_id=? AND a.via_admin=0 AND d.kind='vm' AND d.pve_vmid IS NOT NULL AND d.pve_available=0").get(user.id).n;
       this.audit('assignments_replaced', actor, `${user.id}:+${added}:-${removed}`);
       return { added, removed, count: selected.size, preservedUnavailable, policiesChanged };
     });
@@ -889,7 +934,7 @@ export class Store {
       const users = parsed.map(entry => entry.expectedId === undefined ? this.findUser(entry.name) : this.expectedUser(entry.name, entry.expectedId));
       if (users.some(user => !user || user.disabled)) throw new Error('user_or_desktop_unavailable');
       if (new Set(users.map(user => user.id)).size !== users.length) throw new Error('invalid_assignment_entry');
-      if (users.some(user => !this.db.prepare('SELECT 1 FROM assignments WHERE user_id=? AND desktop_id=?').get(user.id, desktop.id))) throw new Error('assignment_changed');
+      if (users.some(user => !this.db.prepare('SELECT 1 FROM assignments WHERE user_id=? AND desktop_id=? AND via_admin=0').get(user.id, desktop.id))) throw new Error('assignment_changed');
       const changedUserIds = users.filter((user, index) => this.writeAssignmentPolicy(user.id, desktop.id, parsed[index].clipboard, parsed[index].redirections, actor, parsed[index].soundCardAdd)).map(user => user.id);
       this.audit('desktop_permissions_replaced', actor, `${desktop.id}:${changedUserIds.length}`);
       return { count: parsed.length, changedUserIds };
@@ -900,8 +945,9 @@ export class Store {
     // removes its assignments). Offline registration remains valid authority.
     // group: the id of the account's own group holding the desktop, or null.
     // hostMachineTag (same-pc.mjs): derived from the current Host's machine UUID;
-    // the UUID itself is not part of the row.
-    return this.db.prepare(`SELECT d.id,d.name,d.kind,d.description,d.os,d.pve_os_type,d.pve_os_family,d.pve_os_source,d.pve_tags,d.pve_pool,a.favorite,a.last_used_at,(SELECT g.id FROM desktop_groups g WHERE g.id=a.group_id AND g.user_id=a.user_id) AS group_id,(SELECT ch.machine_uuid FROM hosts ch WHERE ch.desktop_id=d.id AND ch.revoked=0) AS host_machine_uuid FROM desktops d JOIN assignments a ON a.desktop_id=d.id JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND u.disabled=0 AND ${availableDesktopSql} AND ${registeredDesktopSql} ORDER BY d.pve_vmid IS NULL,d.pve_vmid,d.name,d.id`).all(userId)
+    // the UUID itself is not part of the row. An administrator lists every
+    // such desktop (adminDesktop), with its own marks where it has a row.
+    return this.db.prepare(`SELECT d.id,d.name,d.kind,d.description,d.os,d.pve_os_type,d.pve_os_family,d.pve_os_source,d.pve_tags,d.pve_pool,a.favorite,a.last_used_at,(SELECT g.id FROM desktop_groups g WHERE g.id=a.group_id AND g.user_id=u.id) AS group_id,(SELECT ch.machine_uuid FROM hosts ch WHERE ch.desktop_id=d.id AND ch.revoked=0) AS host_machine_uuid FROM desktops d JOIN users u ON u.id=? LEFT JOIN assignments a ON a.desktop_id=d.id AND a.user_id=u.id WHERE u.disabled=0 AND (a.via_admin=0 OR u.role='admin') AND ${availableDesktopSql} AND ${registeredDesktopSql} ORDER BY d.pve_vmid IS NULL,d.pve_vmid,d.name,d.id`).all(userId)
       .map(({ pve_tags, pve_pool, favorite, last_used_at, group_id, host_machine_uuid, ...row }) => ({ ...row, ...(row.kind === 'pc' ? { localPcApproved: true } : {}), ...sameMachineTag(row.id, host_machine_uuid), tags: storedTags(pve_tags), pool: pve_pool ?? null, favorite: favorite === 1, lastUsedAt: Number.isFinite(last_used_at) ? new Date(last_used_at).toISOString() : null, group: group_id ?? null, status: 'host_not_registered', canConnect: false }));
   }
   // The account's own desktop groups, [{id, name}] in its order.
@@ -937,7 +983,8 @@ export class Store {
     if (groupId !== null && typeof groupId !== 'string') throw new Error('invalid_group');
     return this.transaction(() => {
       if (groupId !== null && !this.db.prepare('SELECT 1 FROM desktop_groups WHERE id=? AND user_id=?').get(groupId, userId)) throw new Error('unknown_group');
-      return this.db.prepare(`UPDATE assignments SET group_id=? WHERE user_id=? AND desktop_id=? AND EXISTS (SELECT 1 FROM users u WHERE u.id=assignments.user_id AND u.disabled=0) AND EXISTS (SELECT 1 FROM desktops d WHERE d.id=assignments.desktop_id AND ${availableDesktopSql} AND ${registeredDesktopSql})`).run(groupId, userId, id).changes > 0;
+      this.adminMarkRow(userId, id);
+      return this.db.prepare(`UPDATE assignments SET group_id=? WHERE user_id=? AND desktop_id=? AND EXISTS (SELECT 1 FROM users u WHERE u.id=assignments.user_id AND u.disabled=0 AND (assignments.via_admin=0 OR u.role='admin')) AND EXISTS (SELECT 1 FROM desktops d WHERE d.id=assignments.desktop_id AND ${availableDesktopSql} AND ${registeredDesktopSql})`).run(groupId, userId, id).changes > 0;
     });
   }
   // The account's own favorite mark of one assigned VM. False (nothing
@@ -945,11 +992,23 @@ export class Store {
   // answers that with the ordinary 404. Last write wins.
   setFavorite(userId, id, favorite) {
     if (typeof favorite !== 'boolean') throw new Error('invalid_favorite');
-    return this.db.prepare(`UPDATE assignments SET favorite=? WHERE user_id=? AND desktop_id=? AND EXISTS (SELECT 1 FROM users u WHERE u.id=assignments.user_id AND u.disabled=0) AND EXISTS (SELECT 1 FROM desktops d WHERE d.id=assignments.desktop_id AND ${availableDesktopSql} AND ${registeredDesktopSql})`).run(favorite ? 1 : 0, userId, id).changes > 0;
+    return this.transaction(() => {
+      this.adminMarkRow(userId, id);
+      return this.db.prepare(`UPDATE assignments SET favorite=? WHERE user_id=? AND desktop_id=? AND EXISTS (SELECT 1 FROM users u WHERE u.id=assignments.user_id AND u.disabled=0 AND (assignments.via_admin=0 OR u.role='admin')) AND EXISTS (SELECT 1 FROM desktops d WHERE d.id=assignments.desktop_id AND ${availableDesktopSql} AND ${registeredDesktopSql})`).run(favorite ? 1 : 0, userId, id).changes > 0;
+    });
   }
   // A session grant for this assignment was issued.
   markUsed(userId, id, now = Date.now()) {
-    return reusable(this.db, 'UPDATE assignments SET last_used_at=? WHERE user_id=? AND desktop_id=?').run(now, userId, id).changes > 0;
+    return this.transaction(() => {
+      this.adminMarkRow(userId, id);
+      return reusable(this.db, 'UPDATE assignments SET last_used_at=? WHERE user_id=? AND desktop_id=?').run(now, userId, id).changes > 0;
+    });
+  }
+  // Inside a transaction: an administrator keeps its own favorite, group and
+  // last use of a desktop nobody assigned to it on a via_admin row (it grants
+  // nothing; see the via_admin column).
+  adminMarkRow(userId, id) {
+    if (this.adminDesktop(userId, id)) reusable(this.db, 'INSERT OR IGNORE INTO assignments(user_id,desktop_id,via_admin) VALUES(?,?,1)').run(userId, id);
   }
   // Proxmox tags/pool from one successful whole-inventory read. Only VMs the
   // read contains are touched (a missing VM keeps its last values); a VM whose
@@ -1074,10 +1133,10 @@ export class Store {
   logout(hash) { this.db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hash); noteLoginEnd(this, hash, 'logout'); }
   inventory() {
     return {
-      users: this.db.prepare(`SELECT u.id,u.username,u.username AS display_name,u.notes,u.is_primary_admin,u.role,u.disabled,(SELECT count(*) FROM assignments a JOIN desktops d ON d.id=a.desktop_id WHERE a.user_id=u.id AND NOT ((${availableDesktopSql}) AND (${registeredDesktopSql}))) AS unavailableAssignmentCount FROM users u ORDER BY u.username`).all(),
+      users: this.db.prepare(`SELECT u.id,u.username,u.username AS display_name,u.notes,u.is_primary_admin,u.role,u.disabled,u.password_change_required,(SELECT count(*) FROM assignments a JOIN desktops d ON d.id=a.desktop_id WHERE a.user_id=u.id AND a.via_admin=0 AND NOT ((${availableDesktopSql}) AND (${registeredDesktopSql}))) AS unavailableAssignmentCount FROM users u ORDER BY u.username`).all(),
       desktops: this.db.prepare(`SELECT d.*,CASE WHEN ${approvedPcSql} THEN 1 ELSE 0 END AS local_pc_approved,w.adapters AS wake_adapters,w.reported_at AS wake_reported_at FROM desktops d LEFT JOIN pc_wake w ON w.desktop_id=d.id ORDER BY d.pve_vmid IS NULL,d.pve_vmid,d.name,d.id`).all().map(({local_pc_approved,wake_adapters,wake_reported_at,...row}) => ({ ...row, pve_tags: storedTags(row.pve_tags), ...(row.kind==='pc'?{localPcApproved:local_pc_approved===1,wake:storedWake(wake_adapters,wake_reported_at)}:{}) })),
       // Permissions belong to each assignment (user x VM), not to the account.
-      assignments: this.db.prepare('SELECT u.username,a.desktop_id,a.clipboard_permissions,a.rdp_redirections,a.sound_card_add FROM assignments a JOIN users u ON u.id=a.user_id JOIN desktops d ON d.id=a.desktop_id ORDER BY u.username,d.pve_vmid IS NULL,d.pve_vmid,a.desktop_id').all()
+      assignments: this.db.prepare('SELECT u.username,a.desktop_id,a.clipboard_permissions,a.rdp_redirections,a.sound_card_add FROM assignments a JOIN users u ON u.id=a.user_id JOIN desktops d ON d.id=a.desktop_id WHERE a.via_admin=0 ORDER BY u.username,d.pve_vmid IS NULL,d.pve_vmid,a.desktop_id').all()
         .map(({ clipboard_permissions, rdp_redirections, sound_card_add, ...row }) => ({ ...row, ...assignmentPolicy({ clipboard_permissions, rdp_redirections, sound_card_add }) })),
     };
   }

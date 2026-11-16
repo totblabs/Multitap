@@ -185,7 +185,12 @@ class BrokerException implements Exception {
         'server_restarting' => l10n.serverIsntRespondingTryAgain,
         'current_password_incorrect' => l10n.checkCurrentPassword,
         'password_confirmation_mismatch' => l10n.newPasswordConfirmationDontMatch,
-        'invalid_password' => l10n.passwordsMust10256Characters,
+        'invalid_password' ||
+        'password_length_10_to_256' => l10n.passwordsMust10256Characters,
+        'password_change_required' => l10n.setNewPasswordToSignIn,
+        'password_unchanged' => l10n.chooseDifferentFromFirstPassword,
+        'password_change_not_required' ||
+        'credentials_changed' => l10n.passwordAlreadyChangedSignIn,
         'host_disconnected' ||
         'host_unavailable' => l10n.lostConnectionHostTryAgain,
         'desktop_busy' || 'session_busy' => l10n.desktopHasAnotherConnection,
@@ -2007,6 +2012,19 @@ abstract interface class InteractiveLoginBrokerApi {
   Future<BrokerSession> loginInteractively(String username, String password);
 }
 
+/// 첫 로그인 비밀번호 (2026-11-16): an account whose password an administrator
+/// set answers a sign-in with `password_change_required` and picks its own
+/// password here first. No session exists yet; the caller signs in with the
+/// new password afterwards.
+abstract interface class InitialPasswordBrokerApi {
+  Future<void> setInitialPassword(
+    String username,
+    String password,
+    String newPassword,
+    String confirmation,
+  );
+}
+
 abstract interface class LoginConfirmationBrokerApi {
   Future<BrokerSession> confirmLogin(LoginConfirmation challenge);
 }
@@ -2028,6 +2046,7 @@ class HttpBrokerApi
     implements
         BrokerApi,
         InteractiveLoginBrokerApi,
+        InitialPasswordBrokerApi,
         LoginConfirmationBrokerApi,
         SessionActivityBrokerApi,
         MfaBrokerApi,
@@ -4046,6 +4065,25 @@ class HttpBrokerApi
       _hostReadyDesktops = {};
     }
     await _request('/api/v1/auth/logout', method: 'POST', token: token);
+  }
+
+  @override
+  Future<void> setInitialPassword(
+    String username,
+    String password,
+    String newPassword,
+    String confirmation,
+  ) async {
+    await _request(
+      '/api/v1/auth/password/initial',
+      method: 'POST',
+      data: {
+        'username': username,
+        'password': password,
+        'newPassword': newPassword,
+        'passwordConfirmation': confirmation,
+      },
+    );
   }
 
   @override

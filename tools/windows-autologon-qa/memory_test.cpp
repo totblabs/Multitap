@@ -142,7 +142,16 @@ void fixture() {
   { Memory m; Controller c(m); check(c.status().state == "off" && m.writes == 0 && m.validations == 0, "default off performs no mutation/authentication"); }
   { Memory m; Controller c(m); auto r = request(m); r.confirmed = false; rejects([&] { c.apply(r); }, "confirmation_required"); check(m.writes == 0 && m.validations == 0, "unconfirmed never validates"); }
   { Memory m; Controller c(m); auto r = request(m); r.confirmation = Secret{L"different"}; rejects([&] { c.apply(r); }, "invalid_credentials"); check(m.validations == 0, "mismatch never authenticates"); }
-  { Memory m; Controller c(m); auto r = request(m); r.password = Secret{}; r.confirmation = Secret{}; rejects([&] { c.apply(r); }, "invalid_credentials"); }
+  // An account without a password (2026-11-16): the adapter proves the blank
+  // password; the owned LSA secret exists and is empty.
+  { Memory m; Controller c(m); auto r = request(m); r.password = Secret{}; r.confirmation = Secret{}; const auto out = c.apply(r);
+    check(out.state == "configured" && m.current.secretExists && m.current.secret.text.empty() && m.current.values[0] == textValue(L"1") && m.validations == 1, "blank password: empty LSA secret, enabled after one validation");
+    check(m.record && m.record->phase == "owned" && c.status().state == "configured", "owned record with an empty secret stays valid");
+    check(c.disable(next(m)).state == "off" && !m.current.secretExists && baselineSafe(m.current), "empty-secret ownership disables cleanly"); }
+  { Memory m; m.deny = true; Controller c(m); auto r = request(m); r.password = Secret{}; r.confirmation = Secret{}; rejects([&] { c.apply(r); }, "credentials_rejected"); check(m.writes == 0 && !m.record, "unproven blank password writes nothing"); }
+  { Memory m; Controller c(m); auto r = request(m); r.password = Secret{}; r.confirmation = Secret{L"x"}; rejects([&] { c.apply(r); }, "invalid_credentials"); check(m.validations == 0, "blank mismatch never authenticates"); }
+  { Memory m; Controller c(m); c.apply(request(m)); auto r = next(m); r.password = Secret{}; r.confirmation = Secret{}; c.apply(r);
+    check(m.current.secretExists && m.current.secret.text.empty() && m.record->expected.secret.text.empty(), "a password account can switch to a blank one"); }
   { Memory m; m.current.secretExists = true; m.current.secret = Secret{L"foreign"}; Controller c(m); rejects([&] { c.apply(request(m)); }, "foreign_configuration"); check(m.writes == 0 && m.validations == 0, "foreign secret preserved"); }
   { Memory m; m.current.values[5] = textValue(L"foreign-plaintext"); Controller c(m); check(c.status().state == "external", "plaintext presence blocks"); rejects([&] { c.apply(request(m)); }, "foreign_configuration"); }
   for (size_t field : {size_t(3), size_t(4)}) { Memory m; m.current.values[field] = textValue(L"0"); Controller c(m); rejects([&] { c.apply(request(m)); }, "foreign_configuration"); check(m.writes == 0, "force/count settings never adopted"); }

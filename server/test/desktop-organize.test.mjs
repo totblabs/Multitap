@@ -171,7 +171,11 @@ test('PUT favorite: only the assigned account, strict body, per account, 404 wit
   const unassigned = await put('pve-712', { favorite: true }), unknown = await put('pve-999', { favorite: true }), malformed = await put('bad%20id!', { favorite: true });
   assert.equal(unassigned.status, 404); assert.deepEqual(unassigned, unknown); assert.deepEqual(unassigned, malformed);
   assert.equal(unassigned.body.error.code, 'desktop_not_found');
-  assert.equal((await put('pve-712', { favorite: true }, { as: 'admin' })).status, 404, 'an administrator is not assigned either');
+  // 관리자는 모든 데스크톱 (2026-11-16): an administrator marks any registered desktop as its own, and that mark is not an assignment.
+  assert.equal((await put('pve-712', { favorite: true }, { as: 'admin' })).status, 200, 'an administrator uses every registered desktop');
+  assert.equal((await f.call('/desktops', { as: 'admin' })).body.desktops.find(d => d.id === 'pve-712').favorite, true);
+  assert.equal((await f.call('/desktops', { as: 'bobby' })).body.desktops.find(d => d.id === 'pve-712').favorite, false);
+  assert.equal((await put('pve-999', { favorite: true }, { as: 'admin' })).status, 404, 'an unknown desktop stays unknown to an administrator');
   // Strict body.
   for (const data of [{}, { favorite: 'true' }, { favorite: 1 }, { favorite: null }, { favorite: true, extra: 1 }, { Favorite: true }]) assert.equal((await put('pve-710', data)).status, 400, JSON.stringify(data));
   assert.equal((await put('pve-710', undefined, { raw: '[true]' })).status, 400);

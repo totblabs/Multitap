@@ -52,6 +52,7 @@ import '../ui/desktop_tile.dart'
 import '../ui/launcher_view_menu.dart' show LauncherCardSizeButton;
 import '../ui/korean_text.dart';
 import '../ui/mfa_login_dialog.dart';
+import '../ui/initial_password_dialog.dart';
 import '../ui/mfa_account_dialog.dart';
 import '../ui/mfa_completion_overlay.dart';
 import '../data/mfa_account_host.dart';
@@ -1470,9 +1471,10 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
     _mfa.retire();
     FocusManager.instance.primaryFocus?.unfocus();
     final origin = _origin!;
-    final username = _id.text.trim(), password = _password.text;
+    final username = _id.text.trim();
+    var password = _password.text;
     final remember = _remember;
-    final inputRevision = _loginInputRevision;
+    var inputRevision = _loginInputRevision;
     final request = ++_loginRequestRevision;
     setState(() {
       _busy = true;
@@ -1489,7 +1491,7 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
       try {
         await _authenticationRetirement;
         if (!current() || !mounted) return;
-        authenticated = await confirmManualLogin(
+        Future<BrokerSession?> attempt() => confirmManualLogin(
           context,
           api: api,
           current: current,
@@ -1500,6 +1502,39 @@ class _AndroidHomeState extends State<AndroidHome> with WidgetsBindingObserver {
                 )
               : api.login(username, password),
         );
+        try {
+          authenticated = await attempt();
+        } on BrokerException catch (error) {
+          // 첫 로그인 비밀번호: an administrator set this password; the account
+          // picks its own, then signs in with it (and 비밀번호 기억 keeps it).
+          if (error.code != 'password_change_required' ||
+              api is! InitialPasswordBrokerApi ||
+              !mounted ||
+              !current()) {
+            rethrow;
+          }
+          final first = password;
+          final chosen = await showInitialPasswordDialog(
+            context,
+            onSubmit: (next, confirmation) =>
+                (api as InitialPasswordBrokerApi).setInitialPassword(
+                  username,
+                  first,
+                  next,
+                  confirmation,
+                ),
+          );
+          if (!mounted || !current()) return;
+          if (chosen == null) {
+            setState(() => _error = error.message);
+            return;
+          }
+          password = chosen;
+          final unchanged = inputRevision == _loginInputRevision;
+          _password.text = chosen;
+          if (unchanged) inputRevision = _loginInputRevision;
+          authenticated = await attempt();
+        }
       } on MfaRequiredException catch (required) {
         if (!mounted || !current()) {
           required.challenge.forget();
