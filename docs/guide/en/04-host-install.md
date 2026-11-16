@@ -162,7 +162,7 @@ A standard (non-administrator) Windows account can stream too.
 It is separate from the account you use to sign in to Multitap.
 
 Do not enter the PIN you use to sign in to Windows.
-Have the **real Windows account password** ready for automatic sign-in.
+Have the **real Windows account password** ready for automatic sign-in. An account without a password is used as it is, [below](#accounts-without-a-windows-password).
 
 1. Open **Windows sign-in** in Host settings.
 2. In **Windows account**, enter the local user name or `<computer name>\<user name>`.
@@ -189,15 +189,12 @@ In that case the button in the confirmation window also shows **Save**.
 1. In **Windows account**, enter the local account.
 2. Leave both password fields empty.
 3. Press the save button.
-4. When **Create a new password** appears, enter a **New Windows password**.
-5. In **Confirm new password**, enter the same password.
-6. Press **Create password and save**.
-7. Check the Windows account shown in the confirmation window.
-8. If you agree to change the password, press **Create password**.
-9. Check the password creation, account save and automatic sign-in results separately.
+4. In the **Save without a password?** confirmation window, check the account and the automatic sign-in notice, then save.
+5. Check the account save result and the automatic sign-in result separately.
 
-> This creates a password on the real Windows account.
-> From the next Windows sign-in, the new password is needed.
+To give the account a password instead, cancel the confirmation window, enter a **New Windows password** and **Confirm new password**, then press **Create password and save**.
+
+> Creating a password puts it on the real Windows account, and from the next Windows sign-in that password is needed.
 
 ## Step 5. Check the virtual display
 
