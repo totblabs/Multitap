@@ -321,6 +321,13 @@ class Capture {
   void observeReadback(bool enabled) { observeReadback_ = enabled; lastReadbackMs_.reset(); }
   std::optional<double> lastReadbackMs() const { return lastReadbackMs_; }
   const char* backend() const;
+  // WGC: every captured monitor's session took the 1 ms MinUpdateInterval
+  // (capture_session_interval.hpp). false on GDI or where Windows lacks it.
+  bool minUpdateIntervalSet() const;
+  // WGC: when the newest frame the last frame() took arrived (its FrameArrived,
+  // us on the QPC clock of hostMonotonicUs); 0 when it took none (a refresh,
+  // GDI). Diagnostics only (input_latency.hpp).
+  uint64_t lastArrivedUs() const;
   const std::string& backendError() const { return backendError_; }
   // capture-dirty-v1 (capture_dirty.hpp): every captured monitor reports its
   // dirty rectangles and the CPU path reads back only those (WARP device on

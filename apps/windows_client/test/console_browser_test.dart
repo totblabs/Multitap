@@ -275,7 +275,17 @@ void main() {
       await open();
       // Asked and not there yet: the tile says so beside its moving mark.
       expect(t.widget<Text>(working).data, 'Console을 여는 중이에요');
-      expect(find.byKey(const Key('status-busy-lab_149')), findsOneWidget);
+      // One turning mark on the card: the picture's (this desktop is still
+      // being checked), so the status sign beside the words stands still.
+      expect(find.byKey(const Key('thumb-busy-lab_149')), findsOneWidget);
+      expect(find.byKey(const Key('status-still-lab_149')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('card-lab_149')),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
       answer.complete(true);
       await pumpWork(t);
       expect(working, findsNothing);

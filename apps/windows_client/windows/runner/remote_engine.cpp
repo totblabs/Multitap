@@ -518,8 +518,11 @@ void RemoteEngine::Publish(DecodedFrame&& frame, bool replaceable) {
     previous = std::move(frames_->latest); frames_->latest = std::move(next); ++frames_->published;
     waiting = uint32_t(pending.size()); skipped_total = frames_->skipped;
   }
-  {
-    // Kind 1 stall: what the engine saw since the last publication.
+  // Kind 1 stall: what the engine saw since the last decoded picture. A lossless
+  // republish repeats that picture with sharper tiles (same pts): it neither ends
+  // nor restarts the gap, so a still screen whose tiles land later is no stall,
+  // and a late video frame behind such tiles still is one.
+  if (!replaceable) {
     const auto now = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(mutex_);
     if (!hidden && since_.at != std::chrono::steady_clock::time_point{} && now - since_.at >= kStall) {
@@ -527,7 +530,7 @@ void RemoteEngine::Publish(DecodedFrame&& frame, bool replaceable) {
       stall.gap_ms = std::chrono::duration<double, std::milli>(now - since_.at).count();
       stall.queue = uint32_t(queue_.size()); stall.queue_max = since_.queue_max; stall.offers = since_.offers; stall.full = since_.full;
       stall.decodes = since_.decodes; stall.decode_max_ms = since_.decode_max_ms; stall.pending = waiting;
-      stall.skipped = uint32_t(std::min<uint64_t>(skipped_total - since_.skipped, UINT32_MAX)); stall.key = !replaceable && publishing_key_;
+      stall.skipped = uint32_t(std::min<uint64_t>(skipped_total - since_.skipped, UINT32_MAX)); stall.key = publishing_key_;
       stall.pts_gap_ms = pts > since_.pts ? double(pts - since_.pts) / 1000 : 0;
       stalls_.push_back(stall);
       while (stalls_.size() > kStallRecords) stalls_.pop_front();

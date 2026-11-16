@@ -26,6 +26,7 @@
 #include "touch_input.hpp"
 #include "caret_follow.hpp"
 #include "frame_pacer.hpp"
+#include "capture_loop_stats.hpp"
 #include "audio_capture_control.hpp"
 #include "speaker_mute_native.hpp"
 #include "capture_topology_watch.hpp"
@@ -669,6 +670,8 @@ class Agent {
   }
   StreamObservability observability_;
   std::atomic<uint64_t> observedWriteUs_{0};
+  // Worker: the longest service pipe write since the capture loop's last report (capture_loop_stats.hpp).
+  PipeWriteMax pipeWriteMax_;
   std::atomic<bool> observedWriteKnown_{false};
   std::mutex dropMutex_; Clock::time_point lastKeyFrameRequest_{}, lastDropRecord_{}, lastCloseRecord_{}; size_t droppedVideo_ = 0, droppedOther_ = 0; bool dropReported_ = false;
   std::string sessionId_; SessionStopBinding stopBinding_; RemoteInput input_; std::atomic<uint16_t> mediaEpoch_{0};
@@ -809,7 +812,7 @@ class Agent {
   }
   void enqueue(Outgoing packet) {
     if (!bridge_ && !packet.text) stampMediaEpoch(packet.bytes,mediaEpoch_.load());
-    if (local_) { if(!bridge_&&!packet.capabilities)local_(packet.text,std::move(packet.bytes));else (void)publishOutgoing(packet,[this](bool text,const std::vector<uint8_t>& bytes){local_(text,bytes);return true;});return; }
+    if (local_) { const auto began=Clock::now(); if(!bridge_&&!packet.capabilities)local_(packet.text,std::move(packet.bytes));else (void)publishOutgoing(packet,[this](bool text,const std::vector<uint8_t>& bytes){local_(text,bytes);return true;}); if(!bridge_)pipeWriteMax_.observe(Clock::now()-began); return; }
     // An adaptive session observes what enters the send queue and its depth.
     const bool adaptive = adaptive_.active();
     // The worker's mark on video that answers a LOSS (mediaPacket) is for the UDP leg only.
@@ -1147,6 +1150,9 @@ class Agent {
         // part of a client's display gap the Host owes while the picture changed (about one period normally; an idle
         // screen's 1 s refreshes never count). The client's own gap past the frames' pts spacing is the rest.
         struct { Clock::time_point lastOutput{},lastFresh{},waitBegan{},lastTick{}; double encodeGap=0,captureGap=0,wait=0,capture=0,convert=0,encode=0,tickWait=0,changeLate=0; uint32_t keyFrames=0,keyRequests=0,steps=0; int targetMinKbps=0; bool gapTick=false; } stall;
+        // The window's time outside the measured stages (skipped ticks by reason, pacing lateness, the unmeasured tail):
+        // appended to "stall" (capture_loop_stats.hpp). Observational only.
+        CaptureLoopStats loopStats;
         const auto emit = [&](Frame frame) { const auto outputUs=uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now()-beginning).count());if(!encodePolicy.output(frame.ptsUs,frame.key,outputUs,frame.bytes.size()))throw std::runtime_error("Encoder output timestamp did not match a submitted frame");encoded++; bytes += frame.bytes.size(); if(rate.adaptive)shareTiles(encodePolicy.lastOutputRefinement()?0:frame.bytes.size());
           {const auto at=Clock::now();if(stall.lastOutput!=Clock::time_point{}){const double gap=std::chrono::duration<double,std::milli>(at-stall.lastOutput).count();if(gap>stall.encodeGap){stall.encodeGap=gap;stall.gapTick=true;}}stall.lastOutput=at;if(frame.key)++stall.keyFrames;}
           // input-latency-v1: the tag precedes exactly the video packet it names.
@@ -1194,6 +1200,7 @@ class Agent {
         };
         const auto follow=[&](const std::string& reason,bool captureChanged)->bool{
           if(!followable){recordTopology();throw std::runtime_error(reason);}
+          struct FollowTime{CaptureLoopStats& stats;Clock::time_point began=Clock::now();~FollowTime(){stats.skipped(CaptureLoopStats::Skip::follow,Clock::now()-began);}}followTime{loopStats};
           topology.reset();
           const bool wgc=std::string_view(capture.backend())!="gdi";
           // gpu-capture-v1: the rebuilt capture keeps this device (an encoder may take its textures).
@@ -1291,6 +1298,8 @@ class Agent {
         // One tick while the secure desktop shows: the helper's frame when it streams, otherwise the notice.
         // Returns how long this tick may wait for the next one. Nothing the helper side does can end the stream:
         // an error there shows the notice for the rest of this secure desktop.
+        // What the last secureFill showed (loopStats): hold, notice or the helper's frame.
+        CaptureLoopStats::Skip secureTickKind=CaptureLoopStats::Skip::secureNotice;
         const auto secureFill=[&](const Clock::time_point& now)->std::chrono::milliseconds{
           bool notice=true,hold=false;auto wait=noticePeriod;
           if(!secureOff)try{
@@ -1323,6 +1332,7 @@ class Agent {
             notice=true;hold=false;wait=noticePeriod;secureOff=true;secureMapping.reset();helperNv12.clear();keyFrameRequested_=true;
             try{if(secureSwitch.reset())secureSend(secure::worker::controlJson(secure::controlStop,session));secureRecord(streamed?secure::record244HelperLost:secure::record244HelperLaunchFail);}catch(...){ }
           }
+          secureTickKind=hold?CaptureLoopStats::Skip::secureHold:notice?CaptureLoopStats::Skip::secureNotice:CaptureLoopStats::Skip::secureHelper;
           if(hold)return wait;
           if(notice)noticeTick();else{
             secureDesktop.answerable(now);stillTick(helperNv12);
@@ -1360,12 +1370,12 @@ class Agent {
             if(step==SecureDesktopStep::resume){secureRecord(secureDesktop.resumedRecord());secureTeardown();}
             // A capture that could not be made yet (the desktop flipped again) leaves the notice showing.
             if(step!=SecureDesktopStep::notice&&!resumeCapture())(void)secureDesktop.step(false,true,iteration);
-            if(secureDesktop.active()){if(const auto wait=secureFill(iteration);wait.count()>0)std::this_thread::sleep_for(wait);continue;}
+            if(secureDesktop.active()){if(const auto wait=secureFill(iteration);wait.count()>0)std::this_thread::sleep_for(wait);loopStats.skipped(secureTickKind,Clock::now()-iteration);continue;}
           }
           try{topology->verify();}catch(const std::exception& error){if(!follow(error.what(),false))break;continue;}
           // background-video-v1 (background_video.hpp): while the client's view is hidden, one tick a second
           // captures and encodes, at an idle screen's pace; the others only wait, so a return is seen at once.
-          if(!backgroundPace.due(streamBackground_.load(),Clock::now())){std::this_thread::sleep_for(BackgroundPace::idleWait);continue;}
+          if(!backgroundPace.due(streamBackground_.load(),Clock::now())){std::this_thread::sleep_for(BackgroundPace::idleWait);loopStats.skipped(CaptureLoopStats::Skip::background,Clock::now()-iteration);continue;}
           const auto captureBegan = Clock::now();
           // The client wants tiles now (opted in, not paused by 게임 마우스) and the
           // capture still describes the announced source (no follow since).
@@ -1382,8 +1392,10 @@ class Agent {
             // A secure desktop of this unlocked session (a UAC prompt; a WGC error of the same switch counts):
             // the notice instead of the end of the stream (secure_desktop_notice.hpp).
             if((std::string_view(error.what())==secureDesktopUnavailable||!interactiveDesktopAvailable())&&ownSessionUnlocked()&&secureDesktop.step(false,true,Clock::now())==SecureDesktopStep::notice){
-              if(const auto wait=secureFill(Clock::now());wait.count()>0)std::this_thread::sleep_for(wait);continue;}
+              if(const auto wait=secureFill(Clock::now());wait.count()>0)std::this_thread::sleep_for(wait);loopStats.skipped(secureTickKind,Clock::now()-iteration);continue;}
             if(!followable||std::string_view(error.what()).rfind("Windows capture failed (0x",0)!=0)throw;if(!follow(error.what(),true))break;continue;}
+          // input-latency-v1: the arrival of the newest WGC frame this tick took (guest vs loop split).
+          inputLatency_.arrived(capture.lastArrivedUs());
           if(const auto gpuFailure=capture.takeGpuFailure())gpuPath.failed(*gpuFailure);
           // On a GPU tick the picture is the capture's texture and `frame` is stale.
           const auto* gpuPicture=capture.gpuPicture();const EncoderPicture encoderInput=capture.encoderPicture();
@@ -1485,9 +1497,13 @@ class Agent {
             if(scaler)stats<<",\"encodeScale\":"<<scaler->scalePermille()<<",\"encodeLimit\":\""<<encodeLimitName(scaler->reason())<<'"';
             // The rate capture paces at now (below fpsTarget of stream.info only for a software encoder's overload).
             stats<<",\"fpsTarget\":"<<1000000/std::max<int64_t>(1,period.count());
+            // The capture backend now ("gdi" | "wgc-d3d11" | "wgc-warp"; a rebuild may change it) and, for WGC, whether
+            // every session took the 1 ms MinUpdateInterval (capture_session_interval.hpp). Clients before it ignore both.
+            stats<<",\"captureBackend\":\""<<capture.backend()<<'"';if(std::string_view(capture.backend())!="gdi")stats<<",\"captureMinInterval\":"<<(capture.minUpdateIntervalSet()?"true":"false");
             {const auto ms=[](double value){return int64_t(std::lround(std::clamp(value,0.0,600000.0)));};
               stats<<",\"stall\":{\"encodeGapMs\":"<<ms(stall.encodeGap)<<",\"captureGapMs\":"<<ms(stall.captureGap)<<",\"waitMs\":"<<ms(stall.wait)<<",\"captureMs\":"<<ms(stall.capture)<<",\"convertMs\":"<<ms(stall.convert)<<",\"encodeMs\":"<<ms(stall.encode)
-                <<",\"keyFrames\":"<<stall.keyFrames<<",\"keyRequests\":"<<stall.keyRequests<<",\"bitrateSteps\":"<<stall.steps<<",\"changeLateMs\":"<<ms(stall.changeLate);
+                <<",\"keyFrames\":"<<stall.keyFrames<<",\"keyRequests\":"<<stall.keyRequests<<",\"bitrateSteps\":"<<stall.steps<<",\"changeLateMs\":"<<ms(stall.changeLate)
+                <<loopStats.takeJson(local_&&!bridge_?std::optional<uint64_t>(pipeWriteMax_.take()):std::nullopt);
               if(stall.targetMinKbps)stats<<",\"targetMinKbps\":"<<stall.targetMinKbps;
               stats<<'}';
               stall.encodeGap=stall.captureGap=stall.wait=stall.capture=stall.convert=stall.encode=stall.changeLate=0;stall.keyFrames=stall.keyRequests=stall.steps=0;stall.targetMinKbps=0;}
@@ -1532,10 +1548,11 @@ class Agent {
           // fixed tick; never sooner than the frame-rate cap after the last
           // tick that captured or submitted a frame (idle ticks do not count).
           next += period; if (next < now) next = now;
-          stall.waitBegan = Clock::now();
+          stall.waitBegan = Clock::now(); loopStats.tail(stall.waitBegan - now);
           const HANDLE frameEvent = capture.frameEvent();
           HANDLE wakeEvents[2]; DWORD wakeCount = 0; if (frameEvent) wakeEvents[wakeCount++] = frameEvent; if (inputWake_.handle) wakeEvents[wakeCount++] = inputWake_.handle;
           if (pacer.wait(next, std::span<const HANDLE>(wakeEvents, wakeCount), lastWork + captureMinimumGap(period))) next = Clock::now();
+          loopStats.overshoot(pacer.late());
         }
         // The notice leaves before this scope's capture, encoder and threads are torn down.
         }catch(const std::exception& error){failed(error.what());}

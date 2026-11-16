@@ -56,6 +56,16 @@ test('Every connect refusal the relay answers (409) is kept as the client report
   }
 });
 
+test('The broker own refusals of a connect (404, 409, 503 from the relay) and of a request are kept as the client reported them', async () => {
+  const relay = await readFile(new URL('../src/relay.mjs', import.meta.url), 'utf8');
+  const refusals = [...new Set([...relay.matchAll(/HttpError\((404|409|503),\s*'([a-z_]+)'/g)].map(match => match[2]))];
+  assert.ok(refusals.includes('session_not_found') && refusals.includes('relay_busy'));
+  for (const code of [...refusals, 'session_access_unavailable', 'session_reauthentication_required', 'too_many_attempts', 'invalid_stream_options', 'method_not_allowed']) {
+    const raw = report();raw.events[0].event = 'streamEnd';raw.events[0].code = code;
+    assert.equal(safeClientDiagnosticReport(raw).events[0].code, code, code);
+  }
+});
+
 test('fixed negotiated sign-in failures survive projection without admitting peer text or new prefixes', () => {
   for (const code of ['signin_stream_unavailable','invalid_signin_request','signin_authority_lost','invalid_signin_info','invalid_signin_ack','signin_phase_changed']) {
     const raw = report(); raw.events[0].event = 'brokerRequest'; raw.events[0].code = code;
@@ -395,4 +405,25 @@ test('gamepad-v1 counts are kept on streamStats (pads within four, the grant a b
   const dropped=safeClientDiagnosticReport(bad).events[0].values;
   for(const key of ['gamepad','gamepadPads','gamepadStates'])assert.equal(dropped[key],undefined,key);
   assert.equal(dropped.decodeFps10,598,'the rest of the row survives');
+});
+
+test('Host latency split and capture loop fields are kept on streamStats and streamStall rows as fixed integers; anything else is dropped',()=>{
+  // Guest vs Host share of input -> capture, skipped ticks by reason, pacing lateness, the unmeasured tail and the
+  // worker pipe write: numbers only, so an old field set or a text value never rejects the row.
+  const loop={hostBackgroundTicks:19,hostBackgroundMs:961,hostSecureHoldTicks:3,hostSecureHoldMs:48,hostSecureNoticeTicks:2,hostSecureNoticeMs:400,
+    hostSecureHelperTicks:30,hostSecureHelperMs:510,hostFollows:1,hostFollowMs:1500,hostOvershootMaxUs:4200,hostTailMaxUs:12000,hostPipeWriteMaxUs:2500};
+  const split={hostInputArrivedP50Us:31000,hostInputArrivedP95Us:52000,hostArrivedCaptureP50Us:1800,hostArrivedCaptureP95Us:9000,hostArrivedSamples:20,hostArrivedUnknown:3,
+    hostCaptureBackend:3,hostCaptureMinInterval:1};
+  const sent=statsReport(1);Object.assign(sent.events[0].values,loop,split,{hostCaptureBackendName:'wgc-warp',hostTailMaxMs:-1,hostFollowMs2:5});
+  const values=safeClientDiagnosticReport(sent).events[0].values;
+  for(const [key,value] of Object.entries({...loop,...split}))assert.equal(values[key],value,key);
+  for(const key of ['hostCaptureBackendName','hostTailMaxMs','hostFollowMs2'])assert.equal(values[key],undefined,key);
+  assert.equal(values.decodeFps10,598,'the rest of the row survives');
+  const bad=statsReport(2);Object.assign(bad.events[0].values,{hostTailMaxUs:-1,hostOvershootMaxUs:2**32,hostCaptureBackend:'wgc-warp',hostArrivedSamples:1.5});
+  const dropped=safeClientDiagnosticReport(bad).events[0].values;
+  for(const key of ['hostTailMaxUs','hostOvershootMaxUs','hostCaptureBackend','hostArrivedSamples'])assert.equal(dropped[key],undefined,key);
+  const stall={time:new Date().toISOString(),event:'streamStall',desktopId:'pve-149',mode:'stream',values:{stallKind:1,stallMs:420,hostWindows:2,...loop,hostCaptureBackend:3}};
+  const kept=safeClientDiagnosticReport({...statsReport(3),events:[stall]}).events[0].values;
+  for(const [key,value] of Object.entries(loop))assert.equal(kept[key],value,key);
+  assert.equal(kept.stallMs,420);
 });

@@ -7,6 +7,18 @@ import 'package:multitap_client/data/stream_stall.dart';
 import 'package:multitap_client/data/stream_stats_report.dart';
 
 void main() {
+  test('Every refusal the relay answers to a connect (404, 409, 503) is recorded as itself', () {
+    // 2026-11-16: after a server update one window stopped reconnecting and the
+    // record said only unknown_failure; its code was not in this list.
+    final relay = File('../../server/src/relay.mjs').readAsStringSync();
+    final refusals = RegExp(r"HttpError\((404|409|503),\s*'([a-z_]+)'")
+        .allMatches(relay)
+        .map((match) => match[2]!)
+        .toSet();
+    expect(refusals, containsAll(['session_not_found', 'relay_busy', 'host_offline']));
+    expect(diagnosticCodes, containsAll(refusals));
+  });
+
   test('A relay end keeps its own reason; an unknown one keeps the grouped code', () {
     final grouped = SessionFailure.ended('tracks_source_stalled').code;
     expect(grouped, 'session_ended', reason: 'The message stays grouped.');

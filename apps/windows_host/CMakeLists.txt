@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.26 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.27 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -797,6 +797,9 @@ add_executable(MultitapHostCapturePacingTest EXCLUDE_FROM_ALL src/capture_pacing
 target_compile_definitions(MultitapHostCapturePacingTest PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
 target_link_libraries(MultitapHostCapturePacingTest PRIVATE d3d11 dxgi windowsapp user32 gdi32)
 target_compile_options(MultitapHostCapturePacingTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# The capture loop's window diagnostics (skipped ticks by reason, pacing lateness, tail, pipe write maximum).
+add_executable(MultitapHostCaptureLoopStatsTest EXCLUDE_FROM_ALL src/capture_loop_stats_test.cpp)
+target_compile_options(MultitapHostCaptureLoopStatsTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostCapturePacingBenchmark EXCLUDE_FROM_ALL src/capture_pacing_benchmark.cpp)
 target_link_libraries(MultitapHostCapturePacingBenchmark PRIVATE host_engine)
 target_compile_options(MultitapHostCapturePacingBenchmark PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
@@ -811,6 +814,10 @@ target_compile_options(MultitapHostCaptureDirtyTest PRIVATE /W4 /WX /permissive-
 add_executable(MultitapHostCaptureDirtyLiveTest EXCLUDE_FROM_ALL src/capture_dirty_live_test.cpp)
 target_link_libraries(MultitapHostCaptureDirtyLiveTest PRIVATE host_engine)
 target_compile_options(MultitapHostCaptureDirtyLiveTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# The real Capture's frame arrival stamp (input-latency guest/loop split) and update interval, on the primary monitor (reads the desktop into memory).
+add_executable(MultitapHostCaptureArrivalLiveTest EXCLUDE_FROM_ALL src/capture_arrival_live_test.cpp)
+target_link_libraries(MultitapHostCaptureArrivalLiveTest PRIVATE host_engine)
+target_compile_options(MultitapHostCaptureArrivalLiveTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostInputAttributionBenchmark EXCLUDE_FROM_ALL src/input_attribution_benchmark.cpp)
 target_link_libraries(MultitapHostInputAttributionBenchmark PRIVATE host_engine)
 target_compile_options(MultitapHostInputAttributionBenchmark PRIVATE /W4 /WX /permissive- /EHsc /utf-8)

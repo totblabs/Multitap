@@ -68,6 +68,22 @@ void pacer() {
   require(!pacer.wait(began + std::chrono::milliseconds(20), std::span<const HANDLE>(), began), "Plain wait reported a frame");
   require(ms(Clock::now() - began) >= 19.5, "Plain wait returned early");
   require(host::captureMinimumGap(std::chrono::microseconds(16666)) == std::chrono::microseconds(14999), "Minimum gap is not 90 % of the period");
+  // Lateness (diagnostics): only time inside the wait past its target counts.
+  {
+    using std::chrono::microseconds; const auto t = Clock::time_point{} + std::chrono::seconds(100);
+    require(host::paceLate(t, t + microseconds(500), t + microseconds(1700)) == microseconds(1200), "Lateness past the target is wrong");
+    require(host::paceLate(t, t + microseconds(500), t + microseconds(400)) == microseconds(0), "An early return counted as late");
+    require(host::paceLate(t + microseconds(9000), t, t + microseconds(9300)) == microseconds(300), "A target already behind counted the tick's own overrun");
+  }
+  // A deadline already behind: the wait returns at once and is not late by the overrun.
+  began = Clock::now();
+  require(!pacer.wait(began - std::chrono::milliseconds(50), events, began - std::chrono::milliseconds(50)), "A past deadline reported a frame");
+  require(pacer.late() < std::chrono::milliseconds(20), "A past deadline counted its overrun as lateness");
+  // A plain deadline: late() is the time past it, never negative and never the whole wait.
+  began = Clock::now();
+  (void)pacer.wait(began + std::chrono::milliseconds(20), events, began);
+  require(pacer.late() >= std::chrono::microseconds(0) && pacer.late() <= std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - began - std::chrono::milliseconds(20)) + std::chrono::microseconds(1),
+          "Deadline lateness is outside the time past the deadline");
 }
 
 void watch() {

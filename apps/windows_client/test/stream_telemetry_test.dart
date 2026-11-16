@@ -112,6 +112,65 @@ void main() {
     );
   });
 
+  test('Host input timing split at the WGC frame arrival is optional and consistent', () {
+    final timing = {
+      'samples': 12,
+      'injectToCaptureP50Ms': 31.5,
+      'injectToCaptureP95Ms': 70.25,
+      'captureToEncodedP50Ms': 2.1,
+      'captureToEncodedP95Ms': 6.4,
+      'expired': 0,
+      'ambient': 0,
+      'arrivedSamples': 10,
+      'arrivedUnknown': 2,
+      'injectToArrivedP50Ms': 29.0,
+      'injectToArrivedP95Ms': 61.5,
+      'arrivedToCaptureP50Ms': 1.2,
+      'arrivedToCaptureP95Ms': 8.75,
+    };
+    HostInputFrameMetrics parsed(Map<String, Object?> value) =>
+        HostStreamTelemetry.parse({...validTelemetry(), 'inputFrame': value})!
+            .inputFrame!;
+    final value = parsed(timing);
+    expect(value.arrivedSamples, 10);
+    expect(value.arrivedUnknown, 2);
+    expect(value.injectToArrivedP50Ms, 29.0);
+    expect(value.injectToArrivedP95Ms, 61.5);
+    expect(value.arrivedToCaptureP50Ms, 1.2);
+    expect(value.arrivedToCaptureP95Ms, 8.75);
+    // A Host before the split: the rest stays.
+    final older = parsed({
+      for (final entry in timing.entries)
+        if (!entry.key.contains('rrived')) entry.key: entry.value,
+    });
+    expect(older.injectToCaptureP50Ms, 31.5);
+    expect(older.arrivedSamples, isNull);
+    expect(older.injectToArrivedP50Ms, isNull);
+    // No sample could be split: the counts, no percentiles.
+    final none = parsed({
+      ...timing,
+      'arrivedSamples': 0,
+      'arrivedUnknown': 12,
+    }..removeWhere((key, _) => key.endsWith('Ms') && key.contains('rrived')));
+    expect(none.arrivedSamples, 0);
+    expect(none.arrivedUnknown, 12);
+    expect(none.injectToArrivedP95Ms, isNull);
+    // Inconsistent counts or percentiles drop the split, never the timing.
+    for (final corrupted in [
+      {...timing, 'arrivedSamples': 11},
+      {...timing, 'arrivedUnknown': -1},
+      {...timing, 'arrivedSamples': 10.0},
+      {...timing, 'injectToArrivedP50Ms': 70},
+      {...timing, 'arrivedToCaptureP95Ms': 10001},
+      {...timing, 'arrivedToCaptureP50Ms': 'x'},
+    ]) {
+      final value = parsed(corrupted);
+      expect(value.injectToCaptureP50Ms, 31.5, reason: '$corrupted');
+      expect(value.injectToArrivedP50Ms, isNull, reason: '$corrupted');
+      expect(value.arrivedToCaptureP95Ms, isNull, reason: '$corrupted');
+    }
+  });
+
   test('Host input timing is optional, bounded and ordered', () {
     final timing = {
       'samples': 12,

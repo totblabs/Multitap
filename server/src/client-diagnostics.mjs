@@ -33,6 +33,9 @@ const udpProbeBounds = Object.freeze({ udpProbe: 5, udpRttP50Ms: 60000, udpRttP9
 // gamepad-v1 (client lib/data/gamepad.dart GamepadTally): the pads the Host was asked to hold (gamepad.dart gamepadMaxPads).
 const gamepadBounds = Object.freeze({ gamepadPads: 4 });
 const diagnosticBounds = { ...observabilityDiagnosticBounds, ...udpProbeBounds, ...gamepadBounds };
+// Host capture loop fields of streamStats rows and (summed or the largest over the covering windows) streamStall rows.
+const hostLoopNumeric = ['hostBackgroundTicks', 'hostBackgroundMs', 'hostSecureHoldTicks', 'hostSecureHoldMs', 'hostSecureNoticeTicks', 'hostSecureNoticeMs',
+  'hostSecureHelperTicks', 'hostSecureHelperMs', 'hostFollows', 'hostFollowMs', 'hostOvershootMaxUs', 'hostTailMaxUs', 'hostPipeWriteMaxUs'];
 const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samples', 'windowMs', 'srcWidth', 'srcHeight', 'decodeFps10', 'decodeFpsMin10', 'textureFps10', 'captureFps10', 'encodeFps10',
   // tracks-v1 clients: the slowest output's rates (the others are summed over outputs).
   'decodeFpsLow10', 'captureFpsLow10', 'encodeFpsLow10', 'receiveKbps', 'bitrateKbps', 'targetKbps', 'networkDelayMs', 'rttMs', 'rttMaxMs', 'hostWorkUs', 'hostP95Us', 'hostMaxUs', 'captureUs', 'convertUs', 'encodeUs', 'decodeUs', 'decodeMaxUs', 'queueMaxMs', 'skipped', 'losslessTiles', 'losslessKbps', 'inputHostP50Us', 'inputHostP95Us', 'inputFrameP50Us', 'inputFrameP95Us',
@@ -51,6 +54,18 @@ const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samp
   // that tick -> encoder output. Client clock: tagged packet arrival -> native
   // engine accepted it, accepted -> handed to the texture.
   'hostInputCaptureP50Us', 'hostInputCaptureP95Us', 'hostCaptureEncodedP50Us', 'hostCaptureEncodedP95Us', 'inputPushP50Us', 'inputDecodeP50Us',
+  // hostInputCapture split at the arrival of the newest WGC frame of the
+  // changed tick (host clock, us): injection -> arrival (the application, the
+  // guest's compositor and WGC's delivery), arrival -> capture tick (the Host loop's
+  // pacing), and the Host's tagged inputs with / without that time.
+  'hostInputArrivedP50Us', 'hostInputArrivedP95Us', 'hostArrivedCaptureP50Us', 'hostArrivedCaptureP95Us', 'hostArrivedSamples', 'hostArrivedUnknown',
+  // The Host capture loop's time outside its stages in the window (client
+  // lib/data/host_loop_stats.dart): ticks and ms skipped while the client's
+  // view was hidden, for a UAC prompt (helper awaited, notice, helper frames),
+  // capture rebuilds; the longest pacing overshoot, unmeasured tick tail and
+  // worker -> service pipe write (us); the capture backend (1 GDI, 2 WGC on a
+  // GPU, 3 WGC on WARP) and whether WGC took the 1 ms update interval (0/1).
+  ...hostLoopNumeric, 'hostCaptureBackend', 'hostCaptureMinInterval',
   // The tagged packet after the encoder:
   // host clock, encoder output -> its WebSocket write start
   // (worker pipe, service send queue) and that write's duration; relay clock,
@@ -141,7 +156,7 @@ const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samp
 const streamStallNumeric = ['stallMs', 'stallQueue', 'stallQueueMax', 'stallOffers', 'stallFull', 'stallDecodes', 'stallDecodeMaxUs', 'stallPending', 'stallSkipped', 'stallWaitMs',
   'stallPtsGapMs', 'stallArrivalMs', 'stallUdpLost', 'stallUdpKeys', 'stallUdpWaits', 'stallUdpSkips', 'stallUdpNacks', 'stallUdpFallbacks',
   'hostWindows', 'hostEncodeGapMs', 'hostCaptureGapMs', 'hostWaitMs', 'hostCaptureMs', 'hostConvertMs', 'hostEncodeMs', 'hostKeyFrames', 'hostKeyRequests', 'hostBitrateSteps', 'hostTargetMinKbps',
-  'hostUdpBacklogKeys', 'hostUdpClientKeys', 'hostUdpRefused', 'hostChangeLateMs', 'stallDropped'];
+  'hostUdpBacklogKeys', 'hostUdpClientKeys', 'hostUdpRefused', 'hostChangeLateMs', 'stallDropped', ...hostLoopNumeric];
 // viewportResult, milliseconds: the client's
 // decoder check before the request, request -> relay acknowledgement, request
 // -> the new size's stream.info, its decoder start, decoder start -> first new
@@ -178,6 +193,8 @@ codes.add('active_session_limit'); // Bounded login admission; never a token or 
 // unrecognized suffix is admitted by this finite list.
 for (const code of ['signin_stream_unavailable', 'invalid_signin_request', 'signin_authority_lost', 'invalid_signin_info', 'invalid_signin_ack', 'signin_phase_changed']) codes.add(code);
 codes.add('server_restarting'); // 502/503/504 or a reset while the broker itself restarts.
+// The broker's own refusals of a connect or a request (relay.mjs, http.mjs), as the apps record them: a failed reconnect says why.
+for (const code of ['relay_busy', 'session_not_found', 'session_access_unavailable', 'session_reauthentication_required', 'signin_stream_unavailable', 'invalid_signin_request', 'invalid_connection_mode', 'invalid_resize_protocol', 'invalid_clipboard_protocol', 'invalid_udp_direct_protocol', 'invalid_profile_tracks', 'invalid_stream_options', 'too_many_attempts', 'too_many_takeover_attempts', 'too_many_vm_audio_attempts', 'origin_not_allowed', 'invalid_desktop_id', 'unexpected_body', 'body_too_large', 'invalid_json', 'request_aborted', 'method_not_allowed', 'not_found', 'host_diagnostics_unavailable']) codes.add(code);
 // The relay's connect refusals (relay.mjs, 409), e.g. a Host restarting for its update: not registered yet,
 // or not yet able to stream. Kept literally (the client's code test reads this file).
 for (const code of ['host_not_registered', 'stream_unavailable', 'desktop_unavailable', 'desktop_changed', 'host_machine_mismatch', 'monitor_unavailable', 'vm_audio_busy', 'proxmox_not_configured', 'proxmox_settings_changed', 'host_diagnostics_update_required']) codes.add(code);

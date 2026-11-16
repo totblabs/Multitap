@@ -1,5 +1,6 @@
 #pragma once
 #include "support.hpp"
+#include "qpc_clock.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -42,13 +43,9 @@ inline constexpr size_t inputLatencyAssignedLimit = 4;
 
 // System-wide monotonic microseconds from QueryPerformanceCounter. QPC values
 // are comparable between processes on one machine, so the Session0 service's
-// receive stamp and the interactive worker's injection stamp share one clock.
-inline uint64_t hostMonotonicUs() {
-  static const int64_t frequency = [] { LARGE_INTEGER value{}; QueryPerformanceFrequency(&value); return value.QuadPart > 0 ? value.QuadPart : 1; }();
-  LARGE_INTEGER now{}; QueryPerformanceCounter(&now);
-  const auto ticks = uint64_t(std::max<int64_t>(0, now.QuadPart));
-  return ticks / uint64_t(frequency) * 1000000 + ticks % uint64_t(frequency) * 1000000 / uint64_t(frequency);
-}
+// receive stamp and the interactive worker's injection stamp share one clock
+// (as does the capture's frame arrival stamp, Capture::lastArrivedUs).
+inline uint64_t hostMonotonicUs() { return qpcMicroseconds(); }
 
 inline std::optional<uint64_t> inputLatencyInteger(const Json& value, uint64_t minimum, uint64_t maximum) {
   const auto* number = std::get_if<double>(&value.value);
@@ -103,7 +100,16 @@ class InputFrameTagger {
   // injection -> start of the capture tick that got its changed frame (the
   // application and compositor reacting, plus capture pacing), and that
   // tick's start -> its encoder output (capture, convert, encode).
-  struct Timing { uint64_t injectToCaptureUs = 0, captureToEncodedUs = 0, atUs = 0; };
+  // With the arrival time of the newest WGC frame that tick took (known: its
+  // FrameArrived on the QPC clock): injection -> that arrival (the application,
+  // the guest's compositor and WGC's delivery) and arrival -> the tick's start
+  // (the capture loop's pacing; 0 when the frame arrived after the tick began).
+  // It is the newest frame of the tick, so with several frames taken the first
+  // part is an upper bound. Unknown: no WGC frame that tick (GDI, a
+  // cursor-only change), or one that arrived before the injection or far after
+  // the tick. (WGC's own SystemRelativeTime is not used: it is the compositor's
+  // vblank-aligned target, measured up to a refresh after the arrival.)
+  struct Timing { uint64_t injectToCaptureUs = 0, captureToEncodedUs = 0, atUs = 0; bool arrivedKnown = false; uint64_t injectToArrivedUs = 0, arrivedToCaptureUs = 0; };
   static constexpr size_t timingLimit = 64;
   // Any successfully injected input (sampled or not): the picture is changing
   // because of the user for a while, so changes that follow are no evidence of
@@ -124,10 +130,13 @@ class InputFrameTagger {
   // Called before capture.frame(): every injection seen here happened before
   // this frame's capture began.
   void beginCapture(uint64_t nowUs) {
-    captureUs_ = nowUs;
+    captureUs_ = nowUs; arrivedUs_ = 0;
     if (injected_) { if (candidate_) ++superseded_; candidate_ = injected_; injected_.reset(); }
     if (candidate_ && nowUs > candidate_->atUs && nowUs - candidate_->atUs > options_.windowUs) { ++unchanged_; miss(Miss::expired, nowUs); candidate_.reset(); }
   }
+  // After capture.frame(): the arrival time (host clock, us) of the newest WGC
+  // frame this tick took (Capture::lastArrivedUs), 0 for none.
+  void arrived(uint64_t arrivedUs) { arrivedUs_ = arrivedUs; }
   // The encode decision of the frame captured after beginCapture(). Only a
   // frame whose final NV12 actually changed is tagged; an unchanged refresh,
   // refinement or skipped tick leaves the candidate waiting.
@@ -137,7 +146,7 @@ class InputFrameTagger {
     // A change that continues a slow rhythm seen while nobody was injecting
     // (a blinking caret) is not the effect of this input: keep waiting.
     if (options_.ambient && periodic(captureUs_)) { miss(Miss::ambient, captureUs_); return; }
-    assigned_.push_back({candidate_->sample, pts, candidate_->atUs, captureUs_}); candidate_.reset();
+    assigned_.push_back({candidate_->sample, pts, candidate_->atUs, captureUs_, arrivedUs_}); candidate_.reset();
     while (assigned_.size() > inputLatencyAssignedLimit) { assigned_.pop_front(); ++superseded_; }
   }
   // An encoder output in PTS order. A dropped tagged input is represented by
@@ -150,7 +159,12 @@ class InputFrameTagger {
     ++tagged_;
     Tag tag{found->sample, found->pts};
     if (nowUs && found->capturedUs >= found->injectedUs && nowUs >= found->capturedUs) {
-      timings_.push_back({found->capturedUs - found->injectedUs, nowUs - found->capturedUs, nowUs});
+      Timing timing{found->capturedUs - found->injectedUs, nowUs - found->capturedUs, nowUs};
+      if (found->arrivedUs >= found->injectedUs && found->arrivedUs <= found->capturedUs + inputLatencyFrameWindowUs) {
+        timing.arrivedKnown = true; timing.injectToArrivedUs = found->arrivedUs - found->injectedUs;
+        timing.arrivedToCaptureUs = found->capturedUs > found->arrivedUs ? found->capturedUs - found->arrivedUs : 0;
+      }
+      timings_.push_back(timing);
       while (timings_.size() > timingLimit) timings_.pop_front();
       tag.captureUs = timings_.back().injectToCaptureUs; tag.encodeUs = timings_.back().captureToEncodedUs;
     }
@@ -187,23 +201,24 @@ class InputFrameTagger {
     return onBeat(atUs - quiet_.back(), period, beats) && beats <= 6;
   }
   struct Pending { uint32_t sample = 0; uint64_t atUs = 0; };
-  struct Assigned { uint32_t sample = 0; uint64_t pts = 0, injectedUs = 0, capturedUs = 0; };
+  struct Assigned { uint32_t sample = 0; uint64_t pts = 0, injectedUs = 0, capturedUs = 0, arrivedUs = 0; };
   std::optional<Pending> injected_, candidate_;
   std::deque<Assigned> assigned_;
   std::deque<Timing> timings_;
   std::deque<MissEvent> misses_;
   std::deque<uint64_t> quiet_;
   Options options_;
-  uint64_t captureUs_ = 0, lastInputUs_ = 0;
+  uint64_t captureUs_ = 0, arrivedUs_ = 0, lastInputUs_ = 0;
   uint64_t tagged_ = 0, superseded_ = 0, unchanged_ = 0;
 };
 // Fixed-field stream.stats member for the tagged inputs of the last 30 s
 // (nearest-rank p50/p95 like the client): ",\"inputFrame\":{...}" or "".
 inline std::string inputFrameTimingJson(const std::deque<InputFrameTagger::Timing>& timings, uint64_t nowUs, const std::deque<InputFrameTagger::MissEvent>& misses = {}) {
-  std::vector<double> capture, encoded;
+  std::vector<double> capture, encoded, toArrived, arrivedToCapture;
   for (const auto& timing : timings) {
     if (nowUs < timing.atUs || nowUs - timing.atUs > 30000000) continue;
     capture.push_back(double(timing.injectToCaptureUs) / 1000); encoded.push_back(double(timing.captureToEncodedUs) / 1000);
+    if (timing.arrivedKnown) { toArrived.push_back(double(timing.injectToArrivedUs) / 1000); arrivedToCapture.push_back(double(timing.arrivedToCaptureUs) / 1000); }
   }
   // Sampled inputs without a tagged frame (optional members; released clients
   // read only the percentile fields and ignore these): `expired` named no
@@ -219,7 +234,15 @@ inline std::string inputFrameTimingJson(const std::deque<InputFrameTagger::Timin
   const auto rank = [](std::vector<double> values, double fraction) { std::sort(values.begin(), values.end()); const auto at = size_t(std::max(0.0, std::ceil(fraction * double(values.size())) - 1)); return std::min(values[std::min(at, values.size() - 1)], 10000.0); };
   std::ostringstream out; out << std::fixed << std::setprecision(2)
     << ",\"inputFrame\":{\"samples\":" << capture.size() << ",\"injectToCaptureP50Ms\":" << rank(capture, .5) << ",\"injectToCaptureP95Ms\":" << rank(capture, .95)
-    << ",\"captureToEncodedP50Ms\":" << rank(encoded, .5) << ",\"captureToEncodedP95Ms\":" << rank(encoded, .95) << ",\"expired\":" << expired << ",\"ambient\":" << ambient << '}';
+    << ",\"captureToEncodedP50Ms\":" << rank(encoded, .5) << ",\"captureToEncodedP95Ms\":" << rank(encoded, .95) << ",\"expired\":" << expired << ",\"ambient\":" << ambient;
+  // The split of injectToCapture at the WGC frame's arrival (Timing; optional
+  // members: released clients read only the fields above). arrivedUnknown:
+  // tagged inputs of the window without it.
+  out << ",\"arrivedSamples\":" << toArrived.size() << ",\"arrivedUnknown\":" << capture.size() - toArrived.size();
+  if (!toArrived.empty())
+    out << ",\"injectToArrivedP50Ms\":" << rank(toArrived, .5) << ",\"injectToArrivedP95Ms\":" << rank(toArrived, .95)
+        << ",\"arrivedToCaptureP50Ms\":" << rank(arrivedToCapture, .5) << ",\"arrivedToCaptureP95Ms\":" << rank(arrivedToCapture, .95);
+  out << '}';
   return out.str();
 }
 
@@ -348,6 +371,7 @@ class InputLatencySession {
   }
   // Worker capture thread.
   void beginCapture(uint64_t nowUs) { std::lock_guard lock(mutex_); if (enabled_) tagger_.beginCapture(nowUs); }
+  void arrived(uint64_t arrivedUs) { std::lock_guard lock(mutex_); if (enabled_) tagger_.arrived(arrivedUs); }
   void submitted(uint64_t pts, bool contentChanged) { std::lock_guard lock(mutex_); if (enabled_) tagger_.submitted(pts, contentChanged); }
   // The tag to send immediately before this video output, if any. A worker
   // (`privateOutputTime`) adds the encoder output time for its service, which

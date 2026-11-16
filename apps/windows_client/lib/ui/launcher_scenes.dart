@@ -1081,6 +1081,11 @@ class _DesktopControlPanelState extends State<_DesktopControlPanel> {
             preview: widget.preview,
             onDetails: d.actions.details,
             working: d.actions.working,
+            // The hero picture beside it turns for the same work.
+            pictureMoves:
+                d.progress != null ||
+                d.readiness.phase == TilePhase.power ||
+                d.readiness.phase == TilePhase.waiting,
           ),
         ],
       ],

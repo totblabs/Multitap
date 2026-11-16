@@ -80,7 +80,8 @@ class RemoteEngine {
   // 0 = CPU pixel buffer (glTexImage2D upload by Flutter's raster thread),
   // 1 = GPU surface (DXGI shared handle of a BGRA texture, no CPU copy).
   static constexpr int64_t kTexturePathPixelBuffer = 0, kTexturePathGpuSurface = 1;
-  // Stall forensics: a gap of kStall or more between two published frames (kind 1), or
+  // Stall forensics: a gap of kStall or more between two decoded pictures (kind 1; a
+  // lossless republish of the same picture does not count as one), or
   // between two frames Flutter took while the later one already waited (kind 2), leaves
   // a record of fixed numbers (Stats "stalls", newest last, at most kStallRecords each).
   static constexpr std::chrono::milliseconds kStall{250};

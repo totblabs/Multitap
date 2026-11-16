@@ -466,6 +466,13 @@ class _DesktopTileState extends State<DesktopTile> {
               onDetails: a.details,
               working: a.working,
               touch: touch,
+              // The picture's turning mark (power work, waiting) is the
+              // card's one moving sign while previews are shown.
+              pictureMoves:
+                  widget.showPreview &&
+                  (progress != null ||
+                      r.phase == TilePhase.power ||
+                      r.phase == TilePhase.waiting),
             ),
             const Spacer(),
             _ActionRow(
@@ -835,9 +842,14 @@ class DesktopStatusArea extends StatelessWidget {
     this.detailOverride,
     this.working,
     this.touch = false,
+    this.pictureMoves = false,
   });
   final DesktopMachine machine;
   final DesktopReadiness readiness;
+
+  /// The picture above this card already turns for the same work: the sign
+  /// here stands still (one moving mark per card, not one per line).
+  final bool pictureMoves;
 
   /// What this client is doing for the desktop right now
   /// ([DesktopActions.working]): the second line says it and the sign turns
@@ -902,6 +914,14 @@ class DesktopStatusArea extends StatelessWidget {
         key: Key('status-busy-$id'),
         size: 14,
         strokeWidth: 1.8,
+      );
+    }
+    if (pictureMoves && lead is TileBusyMark) {
+      lead = Container(
+        key: Key('status-still-$id'),
+        width: 9,
+        height: 9,
+        decoration: BoxDecoration(shape: BoxShape.circle, color: p.amber),
       );
     }
     final Widget headline;
@@ -1429,13 +1449,9 @@ class _ActionRow extends StatelessWidget {
           key: Key(keyName + id),
           onPressed: onPressed,
           style: focus(filled(emphasized, split: more)),
-          icon: moving
-              ? TileBusyMark(
-                  key: Key('action-busy-$id'),
-                  size: 18,
-                  color: emphasized ? p.onAmber : p.amber,
-                )
-              : Icon(icon, size: 18),
+          // Never a turning mark: the card's status already moves, and a
+          // power task's elapsed time counts up beside these words.
+          icon: Icon(icon, size: 18),
           label: elapsed == null
               ? words
               : Row(
@@ -1594,17 +1610,17 @@ class DesktopThumbnailView extends StatelessWidget {
         );
       case TilePhase.power:
         overlay = _ThumbMessage(
-          icon: const SizedBox(
-            width: 44,
-            height: 44,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              color: Color(0xFFF5A623),
-              backgroundColor: Color(0x29FFFFFF),
-            ),
+          icon: TileBusyMark(
+            key: Key('thumb-busy-${machine.id}'),
+            size: 44,
+            strokeWidth: 3,
+            color: const Color(0xFFF5A623),
+            track: const Color(0x29FFFFFF),
           ),
+          // The sign alone for a power task: the status card right below
+          // says the same headline. A start's own wait and clock stay.
           label: progress == null
-              ? r.headline
+              ? null
               : '${progress.waiting} · ${progress.clock}',
           note: progress == null ? null : l10n.connectsByStreamingAsSoon,
         );

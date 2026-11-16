@@ -364,3 +364,24 @@ test('address <url>... while the public IP is followed keeps the followed addres
   assert.equal(m.run(['address', 'http://192.0.2.20:8080', 'http://a.lan.example:8080']).status, 0);
   assert.deepEqual(m.policy().config.http.extraOrigins, ['http://a.lan.example:8080']);
 });
+
+test('update shows its five steps in order; the Linux text console gets English and ASCII marks unless the run names a language', { skip }, t => {
+  const m = commandMachine(t, { version: VERSION, env: ['MULTITAP_LANG=ko'] });
+  const steps = ['1/5 ', '2/5 ', '3/5 ', '4/5 ', '5/5 '];
+  const order = out => steps.map(s => out.indexOf(s));
+  // A graphical terminal with the saved Korean: Korean words and the step bar.
+  const korean = m.run(['update', '9.9.9'], { TERM: 'xterm-256color' });
+  assert.equal(korean.status, 0, korean.out);
+  assert.match(korean.out, /\[■□□□□\] 1\/5 새 버전 받기/); assert.match(korean.out, /\[■■■■■\] 5\/5 새 버전이 응답하기를 기다려요/);
+  assert.deepEqual(order(korean.out), [...order(korean.out)].sort((a, b) => a - b)); assert.ok(order(korean.out).every(i => i >= 0), korean.out);
+  assert.match(korean.out, /9\.9\.9 버전으로 올렸어요/);
+  // The Linux console (a Proxmox VM console) draws Hangul and symbols as boxes: English, ASCII.
+  const again = m.run(['update', VERSION], { TERM: 'linux' });
+  assert.equal(again.status, 0, again.out);
+  assert.match(again.out, /\[#----\] 1\/5 Downloading the new version/); assert.match(again.out, /\[#####\] 5\/5 Waiting for the new version to answer/);
+  assert.match(again.out, /OK Updated to /); assert.match(again.out, / -> /);
+  assert.doesNotMatch(again.out, /[ㄱ-힝✔⚠•✖■□→]/, 'nothing the Linux console cannot draw:\n' + again.out);
+  // A language named for this run wins there too.
+  const named = m.run(['update', '9.9.9'], { TERM: 'linux', MULTITAP_LANG: 'ko' });
+  assert.equal(named.status, 0, named.out); assert.match(named.out, /버전으로 올렸어요/);
+});

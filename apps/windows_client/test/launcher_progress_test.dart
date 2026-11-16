@@ -178,17 +178,19 @@ void main() {
       ]);
       await _show(tester, shell);
       for (final id in ['boot', 'wait']) {
-        // The sign on the picture, the sign of the status card and the
-        // main button's icon: each a turning mark in the old sign's place.
+        // One turning mark per card: the picture's. The status card's sign
+        // stands still beside the words and the main button keeps its icon.
         expect(_mark('thumb', id), findsOneWidget, reason: id);
-        expect(_mark('status', id), findsOneWidget, reason: id);
-        expect(_mark('action', id), findsOneWidget, reason: id);
+        expect(_mark('status', id), findsNothing, reason: id);
+        expect(find.byKey(Key('status-still-$id')), findsOneWidget, reason: id);
+        expect(_mark('action', id), findsNothing, reason: id);
         expect(
           find.descendant(
-            of: _mark('status', id),
+            of: find.byKey(Key('card-$id')),
             matching: find.byType(CircularProgressIndicator),
           ),
           findsOneWidget,
+          reason: id,
         );
       }
       expect(find.text('Windows를 시작하고 있어요'), findsOneWidget);
@@ -244,8 +246,31 @@ void main() {
         await _show(tester, shell);
         await tester.pump(const Duration(milliseconds: 100));
         for (final id in ['p1', 'p2']) {
-          expect(_mark('status', id), findsOneWidget, reason: id);
-          expect(_mark('action', id), findsOneWidget, reason: id);
+          // One turning mark per card: the picture's while previews are
+          // shown, the status card's sign without them; never the button.
+          expect(_mark('thumb', id), previews ? findsOneWidget : findsNothing);
+          expect(_mark('status', id), previews ? findsNothing : findsOneWidget);
+          expect(_mark('action', id), findsNothing, reason: id);
+          expect(
+            find.descendant(
+              of: find.byKey(Key('card-$id')),
+              matching: find.byType(CircularProgressIndicator),
+            ),
+            findsOneWidget,
+            reason: id,
+          );
+          // The same sentence is not said on the picture as well.
+          expect(
+            find
+              .descendant(
+              of: find.byKey(Key('card-$id')),
+              matching: find.textContaining('하는 중이에요'),
+              )
+              .evaluate()
+              .length,
+            lessThanOrEqualTo(1),
+            reason: id,
+          );
           // No time is invented for a task this client did not start.
           expect(find.byKey(Key('power-elapsed-$id')), findsNothing);
         }
@@ -342,7 +367,8 @@ void main() {
       ];
       await _again(tester, shell);
       expect(bar().value, isNull);
-      expect(_mark('status', 'u1'), findsOneWidget);
+      // The picture turns; the status sign beside the words stands still.
+      expect(_mark('status', 'u1'), findsNothing);
       expect(_mark('thumb', 'u1'), findsOneWidget);
       expect(find.text('Host 업데이트 중'), findsWidgets);
 
@@ -488,7 +514,8 @@ void main() {
       final working = find.byKey(const Key('tile-working-w1'));
       expect(tester.widget<Text>(working).data, '원격 창을 여는 중이에요');
       expect(_mark('status', 'w1'), findsOneWidget);
-      expect(_mark('action', 'w1'), findsOneWidget);
+      // The status sign turns (no picture work); the button keeps its icon.
+      expect(_mark('action', 'w1'), findsNothing);
       expect(button().onPressed, isNull, reason: 'one window, one request');
       expect(tester.getSize(find.byKey(const Key('card-w1'))).height, height);
 

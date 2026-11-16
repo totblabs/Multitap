@@ -313,6 +313,34 @@ const diagnosticCodes = {
   'host_service_stopping',
   'host_protocol_rejected',
   'host_closing',
+  // The broker's own refusals of a connect or a request (server relay.mjs, http.mjs): fixed codes, so a
+  // failed reconnect says why. On 2026-11-16 a window stopped reconnecting after a server update and the
+  // record said only unknown_failure.
+  'relay_busy',
+  'session_not_found',
+  'session_access_unavailable',
+  'session_reauthentication_required',
+  'signin_stream_unavailable',
+  'invalid_signin_request',
+  'invalid_connection_mode',
+  'invalid_resize_protocol',
+  'invalid_clipboard_protocol',
+  'invalid_udp_direct_protocol',
+  'invalid_profile_tracks',
+  'invalid_stream_options',
+  'too_many_attempts',
+  'too_many_takeover_attempts',
+  'too_many_vm_audio_attempts',
+  'origin_not_allowed',
+  'invalid_desktop_id',
+  'unexpected_body',
+  'body_too_large',
+  'invalid_json',
+  'request_aborted',
+  'method_not_allowed',
+  'not_found',
+  'rdp_not_supported',
+  'host_diagnostics_unavailable',
 };
 
 // A record's `ok` is its verdict; a code beside ok:true is information only.

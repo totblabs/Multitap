@@ -71,6 +71,13 @@ class HostPipelineMetrics {
 /// injection -> start of the capture tick that got the changed frame (the
 /// application and compositor reacting, plus capture pacing);
 /// captureToEncoded: that tick -> its encoder output.
+///
+/// injectToCapture split at the arrival (FrameArrived) of the newest WGC
+/// frame the changed tick took (absent from older Hosts): injectToArrived (the
+/// application, the guest's compositor and WGC's delivery) and
+/// arrivedToCapture (the Host's capture loop pacing). arrivedSamples /
+/// arrivedUnknown: tagged inputs with / without that time (no WGC frame that
+/// tick, or one that arrived before the injection).
 class HostInputFrameMetrics {
   const HostInputFrameMetrics({
     required this.samples,
@@ -78,10 +85,19 @@ class HostInputFrameMetrics {
     required this.injectToCaptureP95Ms,
     required this.captureToEncodedP50Ms,
     required this.captureToEncodedP95Ms,
+    this.arrivedSamples,
+    this.arrivedUnknown,
+    this.injectToArrivedP50Ms,
+    this.injectToArrivedP95Ms,
+    this.arrivedToCaptureP50Ms,
+    this.arrivedToCaptureP95Ms,
   });
   final int samples;
   final double injectToCaptureP50Ms, injectToCaptureP95Ms;
   final double captureToEncodedP50Ms, captureToEncodedP95Ms;
+  final int? arrivedSamples, arrivedUnknown;
+  final double? injectToArrivedP50Ms, injectToArrivedP95Ms;
+  final double? arrivedToCaptureP50Ms, arrivedToCaptureP95Ms;
   static HostInputFrameMetrics? parse(Object? value) {
     if (value is! Map) return null;
     final count = value['samples'];
@@ -96,12 +112,36 @@ class HostInputFrameMetrics {
         metricNumber(value[key], 10000),
     ];
     if (n.any((v) => v == null) || n[0]! > n[1]! || n[2]! > n[3]!) return null;
+    final rawKnown = value['arrivedSamples'], rawUnknown = value['arrivedUnknown'];
+    final known = rawKnown is int ? rawKnown : -1;
+    final unknown = rawUnknown is int ? rawUnknown : -1;
+    final counted = known >= 0 && unknown >= 0 && known + unknown == count;
+    final split = [
+      for (final key in [
+        'injectToArrivedP50Ms',
+        'injectToArrivedP95Ms',
+        'arrivedToCaptureP50Ms',
+        'arrivedToCaptureP95Ms',
+      ])
+        metricNumber(value[key], 10000),
+    ];
+    final splitValid = counted &&
+        known > 0 &&
+        split.every((v) => v != null) &&
+        split[0]! <= split[1]! &&
+        split[2]! <= split[3]!;
     return HostInputFrameMetrics(
       samples: count,
       injectToCaptureP50Ms: n[0]!,
       injectToCaptureP95Ms: n[1]!,
       captureToEncodedP50Ms: n[2]!,
       captureToEncodedP95Ms: n[3]!,
+      arrivedSamples: counted ? known : null,
+      arrivedUnknown: counted ? unknown : null,
+      injectToArrivedP50Ms: splitValid ? split[0] : null,
+      injectToArrivedP95Ms: splitValid ? split[1] : null,
+      arrivedToCaptureP50Ms: splitValid ? split[2] : null,
+      arrivedToCaptureP95Ms: splitValid ? split[3] : null,
     );
   }
 }

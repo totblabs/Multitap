@@ -31,6 +31,7 @@ import 'session_resume.dart';
 import 'product_log.dart';
 import 'stream_size.dart';
 import 'stream_capacity.dart';
+import 'host_loop_stats.dart';
 import 'stream_stall.dart';
 import 'stream_stats_report.dart';
 import 'audio_stats.dart';
@@ -732,6 +733,9 @@ class RemoteSession extends ChangeNotifier {
   /// stream-stall-v1 events (stream_stall.dart), optional like [statsSink].
   final StreamStatsSink? stallSink;
   final _stallWatch = StallWatch();
+
+  /// Host capture loop readings since the last statistics sample (host_loop_stats.dart).
+  final _hostLoop = HostLoopTally();
   int? hostFpsTarget;
   bool _observabilityEnabled;
   bool get observabilityEnabled => _observabilityEnabled;
@@ -3102,6 +3106,7 @@ class RemoteSession extends ChangeNotifier {
         hostTelemetry = telemetry;
         _audioStats.host(event, nowUs: _clock.elapsedMicroseconds);
         _stallWatch.host(event, _clock.elapsedMicroseconds);
+        _hostLoop.add(HostLoopTally.reading(event));
         final fpsTarget = event['fpsTarget'];
         hostFpsTarget = fpsTarget is int && fpsTarget > 0 && fpsTarget <= 240
             ? fpsTarget
@@ -3990,6 +3995,7 @@ class RemoteSession extends ChangeNotifier {
         stalls: stalls.$1,
         stallMaxMs: stalls.$2,
         fpsTarget: hostFpsTarget,
+        hostLoop: _hostLoop.take(),
         gpuHardware: gpuHardware,
         remoteSession: clientRemoteSession,
         texturePath: texturePath,

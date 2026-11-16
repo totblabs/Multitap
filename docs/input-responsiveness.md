@@ -20,11 +20,17 @@
 | `inputHostP50Us` | 입력 송신 → Host 주입 반환(왕복에서 Host 대기를 뺀 절반의 추정 + 실측 주입 시간) |
 | `inputFrameP50Us` | 입력 송신 → 그 뒤 처음 바뀐 프레임이 디코딩되어 텍스처에 넘겨짐 |
 | `hostInputCaptureP50Us` | Host 주입 → 바뀐 프레임의 캡처 틱(게스트 앱·DWM 반응 포함) |
+| `hostInputArrivedP50Us` | Host 주입 → 바뀐 틱이 가져온 가장 새 WGC 프레임의 도착(FrameArrived, 게스트 앱·DWM·WGC 전달 몫). 여러 프레임을 한 틱에 가져오면 위쪽 한계 |
+| `hostArrivedCaptureP50Us` | 그 도착 → 캡처 틱 시작(Host 캡처 루프의 속도 조절 몫, 틱 안에서 도착하면 0) |
 | `hostCaptureEncodedP50Us` | 캡처 틱 → 인코더 출력 |
 | `hostSendQueueP50Us` | 인코더 출력 → 송신 시작 |
 | `inputPushP50Us`, `inputDecodeP50Us` | 클라이언트 수신 → 디코더 큐, 디코더 큐 → 텍스처 |
 | `inputTransferP50Us`, `inputFrameBytes` | 태그 도착 → 영상 도착, 그 프레임의 크기 |
 | `inputDownlinkP50Us` | Host 태그 기록 → 영상 도착(도착 − 송신 − 상향 추정 − Host 시간) |
+
+`hostArrivedSamples`·`hostArrivedUnknown`은 나눌 수 있었던 입력과 그렇지 못한 입력(그 틱에 WGC 프레임이 없음: GDI, 커서만 바뀜, 또는 주입 전에 도착한 프레임)의 수다. 도착 시각은 Host가 FrameArrived에서 QPC 시계로 찍는다(`MultitapHostCaptureArrivalLiveTest`). WGC 프레임의 `SystemRelativeTime`은 같은 QPC 시계지만 화면 갱신 주기에 맞춘 합성 목표 시각이라 도착보다 한 주기까지 늦게 찍혀(측정: 도착보다 7.7 ms, 15.5 ms 뒤) 나누는 기준으로 쓰지 않는다.
+
+캡처 루프가 단계 밖에서 쓴 시간도 보고한다(`streamStats`는 창 합계·최댓값, `streamStall`은 덮는 Host 창의 합계·최댓값). `hostBackgroundTicks/Ms`(PC 창이 숨겨져 기다린 틱), `hostSecureHoldTicks/Ms`·`hostSecureNoticeTicks/Ms`·`hostSecureHelperTicks/Ms`(UAC 창: 도우미 대기, 안내 화면, 도우미 프레임), `hostFollows`·`hostFollowMs`(화면 모드 변경 뒤 캡처 다시 만들기), `hostOvershootMaxUs`(속도 조절 대기가 목표보다 늦게 끝난 최대), `hostTailMaxUs`(인코드 끝 → 대기 시작 사이 어느 단계에도 들지 않는 시간의 최대, 통계를 보낸 틱은 다음 창에), `hostPipeWriteMaxUs`(작업자 → 서비스 파이프 쓰기 한 번의 최대), `hostCaptureBackend`(1 GDI, 2 GPU의 WGC, 3 WARP의 WGC), `hostCaptureMinInterval`(WGC가 1 ms 간격을 받아들였으면 1). 모니터별 독립 출력 세션에는 아직 없다.
 
 `inputFrame`에는 클라이언트 훅·Flutter 처리 이전 시간, Flutter 래스터, 클라이언트 DWM, 모니터 표시가 들어가지 않는다. 서로 다른 구간의 백분위수는 더해지지 않으므로, p50끼리 빼서 남은 값은 측정값이 아니라 추정이다. `inputDownlink`가 크고 `inputTransfer`가 `inputFrameBytes`와 함께 커지면 망·중계 전달이고, `hostSendQueue`가 크면 Host 송신 큐다. 서비스 ping, `SendInput` 성공, 디코더 콜백은 서로 다른 단계이며 체감 지연을 대신하지 않는다.
 

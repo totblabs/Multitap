@@ -1,5 +1,6 @@
 import 'audio_stats.dart';
 import 'gamepad.dart';
+import 'host_loop_stats.dart';
 import 'stream_telemetry.dart';
 import 'stream_observability.dart';
 
@@ -111,6 +112,21 @@ const streamStatsFields = <String>{
   'hostCaptureEncodedP95Us',
   'inputPushP50Us',
   'inputDecodeP50Us',
+  // hostInputCapture split at the arrival of the newest WGC frame of the
+  // changed tick (latest rolling p50/p95, us; absent from older Hosts):
+  // injection -> arrival (the application, the guest's compositor and WGC's
+  // delivery), arrival -> capture tick start (the Host loop's pacing), and the Host's
+  // tagged inputs of its 30 s with / without that time.
+  'hostInputArrivedP50Us',
+  'hostInputArrivedP95Us',
+  'hostArrivedCaptureP50Us',
+  'hostArrivedCaptureP95Us',
+  'hostArrivedSamples',
+  'hostArrivedUnknown',
+  // The Host capture loop's time outside its stages, its capture backend and
+  // the WGC update interval (host_loop_stats.dart). Brokers before these
+  // fields drop them; the row itself stays valid.
+  ...hostLoopFields,
   // The tagged packet after the encoder (latest rolling p50/p95, us). Host
   // clock (absent from older Hosts): encoder output -> its WebSocket write start,
   // and that write. Relay clock (absent from older brokers): the host's complete
@@ -295,7 +311,12 @@ class StreamStatsSample {
     this.stalls,
     this.stallMaxMs,
     this.fpsTarget,
+    this.hostLoop,
   });
+
+  /// The Host loop readings since the last sample (HostLoopTally.take); null
+  /// without any (older Hosts, no Host statistics in that second).
+  final Map<String, int>? hostLoop;
 
   /// audio-stats-v1 changes of this reading; null without audio.
   final AudioStatsReading? audio;
@@ -458,6 +479,7 @@ class StreamStatsWindow {
   var _audio = AudioStatsWindow();
   var _stalls = _Sum(), _stallMax = _Max();
   int? _fpsTarget;
+  var _hostLoop = HostLoopTally();
   double? _inputHost50, _inputHost95, _inputFrame50, _inputFrame95;
   double? _inputPush50, _inputDecode50;
   double? _transfer50, _transfer95, _frameBytes, _downlink50, _downlink95;
@@ -504,6 +526,7 @@ class StreamStatsWindow {
     _stalls.add(sample.stalls);
     _stallMax.add(sample.stallMaxMs == null || sample.stallMaxMs == 0 ? null : sample.stallMaxMs!.toDouble());
     _fpsTarget = sample.fpsTarget ?? _fpsTarget;
+    _hostLoop.add(sample.hostLoop);
     _inputHost50 = sample.inputHostP50Ms ?? _inputHost50;
     _inputHost95 = sample.inputHostP95Ms ?? _inputHost95;
     _inputFrame50 = sample.inputFrameP50Ms ?? _inputFrame50;
@@ -606,6 +629,13 @@ class StreamStatsWindow {
       'hostInputCaptureP95Us': _latest(_hostInput?.injectToCaptureP95Ms),
       'hostCaptureEncodedP50Us': _latest(_hostInput?.captureToEncodedP50Ms),
       'hostCaptureEncodedP95Us': _latest(_hostInput?.captureToEncodedP95Ms),
+      'hostInputArrivedP50Us': _latest(_hostInput?.injectToArrivedP50Ms),
+      'hostInputArrivedP95Us': _latest(_hostInput?.injectToArrivedP95Ms),
+      'hostArrivedCaptureP50Us': _latest(_hostInput?.arrivedToCaptureP50Ms),
+      'hostArrivedCaptureP95Us': _latest(_hostInput?.arrivedToCaptureP95Ms),
+      'hostArrivedSamples': _hostInput?.arrivedSamples,
+      'hostArrivedUnknown': _hostInput?.arrivedUnknown,
+      ...?_hostLoop.take(),
       'inputPushP50Us': _latest(_inputPush50),
       'inputDecodeP50Us': _latest(_inputDecode50),
       'hostSendQueueP50Us': _latest(_hostSend?.firstP50Ms),
@@ -710,6 +740,7 @@ class StreamStatsWindow {
     _stalls = _Sum();
     _stallMax = _Max();
     _fpsTarget = null;
+    _hostLoop = HostLoopTally();
     _inputHost50 = _inputHost95 = _inputFrame50 = _inputFrame95 = null;
     _inputPush50 = _inputDecode50 = null;
     _transfer50 = _transfer95 = _frameBytes = _downlink50 = _downlink95 = null;

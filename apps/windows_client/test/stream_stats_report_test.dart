@@ -224,6 +224,64 @@ void main() {
     expect(next.containsKey('inputPushP50Us'), isFalse);
   });
 
+  test('A window reports the Host split of input -> capture at the WGC frame arrival (latest)', () {
+    final window = StreamStatsWindow(firstPeriod: const Duration(seconds: 10));
+    HostStreamTelemetry host(double arrived) => HostStreamTelemetry(
+      capturedFps: 60,
+      encodedFps: 60,
+      bitrateKbps: 4000,
+      inputFrame: HostInputFrameMetrics(
+        samples: 9,
+        injectToCaptureP50Ms: 40,
+        injectToCaptureP95Ms: 60,
+        captureToEncodedP50Ms: 2.25,
+        captureToEncodedP95Ms: 5.5,
+        arrivedSamples: 8,
+        arrivedUnknown: 1,
+        injectToArrivedP50Ms: arrived,
+        injectToArrivedP95Ms: arrived + 10,
+        arrivedToCaptureP50Ms: 1.5,
+        arrivedToCaptureP95Ms: 7.25,
+      ),
+    );
+    window.add(StreamStatsSample(width: 1264, height: 760, decodedFps: 60, host: host(38)), 0);
+    window.add(StreamStatsSample(width: 1264, height: 760, decodedFps: 60, host: host(36.5)), 1000000);
+    final report = window.take(10000000)!;
+    expect(report['hostInputArrivedP50Us'], 36500, reason: 'latest host value');
+    expect(report['hostInputArrivedP95Us'], 46500);
+    expect(report['hostArrivedCaptureP50Us'], 1500);
+    expect(report['hostArrivedCaptureP95Us'], 7250);
+    expect(report['hostArrivedSamples'], 8);
+    expect(report['hostArrivedUnknown'], 1);
+    expect(report['hostInputCaptureP95Us'], 60000);
+    expect(report.keys.every(streamStatsFields.contains), isTrue);
+    // A Host without the split: no fields, not zeros.
+    final older = StreamStatsWindow(firstPeriod: const Duration(seconds: 10));
+    older.add(
+      const StreamStatsSample(
+        width: 1264,
+        height: 760,
+        decodedFps: 60,
+        host: HostStreamTelemetry(
+          capturedFps: 60,
+          encodedFps: 60,
+          bitrateKbps: 4000,
+          inputFrame: HostInputFrameMetrics(
+            samples: 9,
+            injectToCaptureP50Ms: 40,
+            injectToCaptureP95Ms: 60,
+            captureToEncodedP50Ms: 2.25,
+            captureToEncodedP95Ms: 5.5,
+          ),
+        ),
+      ),
+      0,
+    );
+    final plain = older.take(10000000)!;
+    expect(plain['hostInputCaptureP50Us'], 40000);
+    expect(plain.keys.where((key) => key.contains('Arrived')), isEmpty);
+  });
+
   test('A window reports the tagged packet after the encoder (host send, relay, transfer, size)', () {
     final window = StreamStatsWindow(firstPeriod: const Duration(seconds: 10));
     window.add(

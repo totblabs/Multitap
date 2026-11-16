@@ -12,6 +12,8 @@
 /// rest are counted (`stallDropped`, also as one row at the session's end).
 library;
 
+import 'host_loop_stats.dart';
+
 /// The broker acknowledges this before a client may send `streamStall` rows;
 /// released brokers reject a batch with an unknown event.
 const streamStallProtocol = 'stream-stall-v1';
@@ -48,6 +50,12 @@ const streamStallFields = <String>{
   'hostKeyRequests', 'hostBitrateSteps', 'hostTargetMinKbps',
   'hostUdpBacklogKeys', 'hostUdpClientKeys', 'hostUdpRefused',
   'hostChangeLateMs',
+  // The covering windows' Host loop time outside its stages (host_loop_stats.dart;
+  // absent from older Hosts): ticks and ms skipped while this PC's view was
+  // hidden, for a UAC prompt (helper awaited, notice, helper frames) and for
+  // capture rebuilds (summed), and the longest pacing overshoot, unmeasured
+  // tick tail and worker pipe write (us).
+  ...hostLoopStallFields,
   // Session state at the end: round trip (ms), decoder busy (per mille) and
   // stalls not sent since the last row (spacing, per-minute and per-session
   // caps). A row with only this field is the session's closing count.
@@ -56,7 +64,7 @@ const streamStallFields = <String>{
 
 const _hostMax = [
   'encodeGapMs', 'captureGapMs', 'waitMs', 'captureMs', 'convertMs', 'encodeMs',
-  'changeLateMs',
+  'changeLateMs', ...hostLoopLargest,
 ];
 
 /// A display gap this long or longer is a stall (RemoteEngine kStall).
@@ -72,7 +80,7 @@ const _lossFields = [
   'stallUdpFallbacks', 'hostKeyRequests', 'hostUdpBacklogKeys',
   'hostUdpClientKeys',
 ];
-const _hostSum = ['keyFrames', 'keyRequests', 'bitrateSteps'];
+const _hostSum = ['keyFrames', 'keyRequests', 'bitrateSteps', ...hostLoopSummed];
 const _hostCounters = {
   'udpBacklogKeys': 'hostUdpBacklogKeys',
   'udpClientKeys': 'hostUdpClientKeys',

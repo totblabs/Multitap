@@ -1391,6 +1391,19 @@ a changed frame on the next beat is not credited to the pending candidate and
 is counted as `ambient`. Typing never counts as a rhythm; video or other fast
 changes are not filtered. Both counts appear in `stream.stats`
 `inputFrame:{samples, ..., expired, ambient}` (last 30 s, at most 64 events).
+After them come `arrivedSamples` and `arrivedUnknown` (tagged inputs with
+and without the arrival time of the newest WGC frame the changed tick took,
+stamped in its FrameArrived on the QPC clock) and, when `arrivedSamples` is at
+least 1, `injectToArrivedP50Ms/P95Ms` and `arrivedToCaptureP50Ms/P95Ms`
+(injection -> that arrival, arrival -> the tick's start; 0 when the frame
+arrived during the tick). Clients before these members ignore them.
+The single-output worker's `stream.stats` also carries `captureBackend`
+(`gdi`, `wgc-d3d11`, `wgc-warp`), for WGC `captureMinInterval` (boolean), and
+in `stall` the window's skipped ticks by reason (`backgroundTicks/Ms`,
+`secureHoldTicks/Ms`, `secureNoticeTicks/Ms`, `secureHelperTicks/Ms`,
+`follows`, `followMs`), `overshootMaxUs`, `tailMaxUs` and, in a worker,
+`pipeWriteMaxUs` (apps/windows_host/src/capture_loop_stats.hpp). The relay
+forwards them unchanged; all are observational.
 A rising `expired + ambient` with a flat percentile is not a latency
 regression.
 

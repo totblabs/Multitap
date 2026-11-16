@@ -30,6 +30,11 @@ UPDATE_COPIES=3
 # Language (docs/i18n.md). .env is root-only: without root the locale decides.
 saved_lang=$( { grep -E '^MULTITAP_LANG=' "$DIR/.env" 2>/dev/null | tail -n 1 | cut -d= -f2-; } || true)
 case "${MULTITAP_LANG:-${saved_lang:-${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}}}" in ko*|KO*) ML=ko ;; *) ML=en ;; esac
+# The Linux text console (TERM=linux: a VM console such as Proxmox's) has no
+# Hangul and no symbol glyphs and shows each as a box: there the command speaks
+# English with ASCII marks, unless MULTITAP_LANG names a language for this run.
+VT=no; [ "${TERM:-}" = linux ] && VT=yes
+if [ "$VT" = yes ] && [ -z "${MULTITAP_LANG:-}" ]; then ML=en; fi
 t() { if [ "$ML" = ko ]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
 # shellcheck disable=SC2059
 pf() { local ko=$1 en=$2; shift 2; if [ "$ML" = ko ]; then printf "$ko" "$@"; else printf "$en" "$@"; fi; }
@@ -39,11 +44,23 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
 else
   B='' DIM='' RED='' GREEN='' YELLOW='' CYAN='' OFF=''
 fi
-ok() { printf '  %s✔%s %s\n' "$GREEN" "$OFF" "$*"; }
-warn() { printf '  %s⚠%s %s\n' "$YELLOW" "$OFF" "$*"; }
-say() { printf '  %s•%s %s\n' "$CYAN" "$OFF" "$*"; }
+if [ "$VT" = yes ]; then
+  MARK_OK='OK' MARK_WARN='!' MARK_SAY='*' MARK_FAIL='x' BAR_DONE='#' BAR_TODO='-'
+else
+  MARK_OK='✔' MARK_WARN='⚠' MARK_SAY='•' MARK_FAIL='✖' BAR_DONE='■' BAR_TODO='□'
+fi
+ok() { printf '  %s%s%s %s\n' "$GREEN" "$MARK_OK" "$OFF" "$*"; }
+warn() { printf '  %s%s%s %s\n' "$YELLOW" "$MARK_WARN" "$OFF" "$*"; }
+say() { printf '  %s%s%s %s\n' "$CYAN" "$MARK_SAY" "$OFF" "$*"; }
 note() { printf '    %s%s%s\n' "$DIM" "$*" "$OFF"; }
-fail() { printf '  %s✖ %s%s\n    %s\n' "$RED" "$(t '멈췄어요' 'Stopped')" "$OFF" "$*" >&2; exit 1; }
+fail() { if [ -t 1 ]; then printf '\r\033[K'; fi; printf '  %s%s %s%s\n    %s\n' "$RED" "$MARK_FAIL" "$(t '멈췄어요' 'Stopped')" "$OFF" "$*" >&2; exit 1; }
+# One line per step of a long command: [■■□□□] 2/5 what it does now. The bar
+# counts steps that began, never a guessed share of the time.
+step() {
+  local n=$1 total=$2 bar='' i; shift 2
+  for ((i = 1; i <= total; i++)); do if [ "$i" -le "$n" ]; then bar+=$BAR_DONE; else bar+=$BAR_TODO; fi; done
+  printf '  %s[%s]%s %d/%d %s\n' "$CYAN" "$bar" "$OFF" "$n" "$total" "$*"
+}
 
 usage() {
   if [ "$ML" = ko ]; then
@@ -183,13 +200,21 @@ container_line() {
   docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}} {{index .Config.Labels "org.opencontainers.image.version"}}' "$id" 2>/dev/null || true
 }
 wait_ready() { # wait_ready [release]: the release in .env unless another is named
-  local want=${1:-$(version)} i state health restarts release
+  local result=0
+  wait_ready_once "$@" || result=$?
+  # WAIT_CLOCK: the seconds counted on one line (a terminal only) go again.
+  if [ -n "${WAIT_CLOCK:-}" ] && [ -t 1 ]; then printf '\r\033[K'; fi
+  return "$result"
+}
+wait_ready_once() {
+  local want=${1:-$(version)} i state health restarts release started=$SECONDS
   for i in $(seq 1 90); do
     state='' health='' restarts='' release=''
     read -r state health restarts release <<< "$(container_line)" || true
     if [ "$state" = running ] && [ "$health" = healthy ] && [ "$release" = "$want" ]; then return 0; fi
     [ "$health" != unhealthy ] || return 1
     if [[ $restarts =~ ^[0-9]+$ ]] && [ "$restarts" -ge 2 ]; then return 1; fi
+    if [ -n "${WAIT_CLOCK:-}" ] && [ -t 1 ]; then printf '\r    %s' "$(pf '%d초 지났어요 (최대 3분)' '%ds so far (at most 3 min)' "$((SECONDS - started))")"; fi
     sleep 2
   done
   return 1
@@ -977,12 +1002,21 @@ case "${1:-status}" in
       note "$(t "예전 버전으로 돌아가려면 버전을 적어요: multitap update $target" "To go back to an earlier release, name it: multitap update $target")"
       exit 0
     fi
-    say "$(t "Multitap 서버 $current → $target" "Multitap server $current → $target")"
-    if ! docker image inspect "$(image):$target" >/dev/null 2>&1; then
+    arrow='→'; [ "$VT" = no ] || arrow='->'
+    say "$(t "Multitap 서버 $current $arrow $target" "Multitap server $current $arrow $target")"
+    step 1 5 "$(t "새 버전 받기" "Downloading the new version")"
+    if docker image inspect "$(image):$target" >/dev/null 2>&1; then
+      note "$(t "이미 받아 둔 이미지예요." "The image is already here.")"
+    elif [ -t 1 ]; then
+      # Docker's own progress: the bytes each layer actually received.
+      docker pull "$(image):$target" || fail "$(t "$target 이미지를 받지 못했어요. 지금 서버는 그대로예요." "Could not download the $target image. The current server is unchanged.")"
+    else
       docker pull --quiet "$(image):$target" >/dev/null || fail "$(t "$target 이미지를 받지 못했어요. 지금 서버는 그대로예요." "Could not download the $target image. The current server is unchanged.")"
     fi
+    step 2 5 "$(t "데이터 백업 (서버를 잠깐 멈춰요)" "Backing up the data (the server stops for a moment)")"
     backup update
     prune_update_copies
+    step 3 5 "$(t "새 버전의 설정 파일 받기" "Getting the new release's files")"
     # The new release's compose file, kept beside the previous one.
     if [ -z "${MULTITAP_LOCAL:-}" ]; then
       if curl -fsSL "https://raw.githubusercontent.com/$REPOSITORY/v$target/compose.yaml" -o "$DIR/compose.yaml.new"; then
@@ -1002,9 +1036,10 @@ case "${1:-status}" in
     if [ -n "$policy" ]; then
       if knows_policy; then drop_env_seed; else write_env_seed "$policy"; fi
     fi
+    step 4 5 "$(t "새 버전 시작" "Starting the new version")"
     compose up -d --quiet-pull >/dev/null 2>&1 || true
-    say "$(t "새 버전이 응답하기를 기다려요." "Waiting for the new version to answer.")"
-    if wait_ready "$target"; then
+    step 5 5 "$(t "새 버전이 응답하기를 기다려요" "Waiting for the new version to answer")"
+    if WAIT_CLOCK=yes wait_ready "$target"; then
       ok "$(t "$target 버전으로 올렸어요. 데이터는 그대로예요." "Updated to $target. Your data is unchanged.")"
       # Run again on the same release, the one before it is not known here:
       # nothing is removed, so the way back stays.

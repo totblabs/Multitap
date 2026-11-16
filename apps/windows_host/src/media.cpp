@@ -9,6 +9,7 @@
 #endif
 #include "owned_output_size.hpp"
 #include "capture_session_interval.hpp"
+#include "qpc_clock.hpp"
 #include "capture_compose.hpp"
 #include "capture_dirty.hpp"
 #include "capture_scale.hpp"
@@ -647,7 +648,7 @@ void warmLoopbackAudio(){
 // selection remains independent. Every pool captures an exact selected monitor.
 struct Capture::Modern {
   struct Apartment { Apartment(){check(RoInitialize(RO_INIT_MULTITHREADED),"Capture WinRT startup");} ~Apartment(){RoUninitialize();} } apartment;
-  struct Signal { HANDLE handle=CreateEventW(nullptr,FALSE,FALSE,nullptr); ~Signal(){if(handle)CloseHandle(handle);} };
+  struct Signal { HANDLE handle=CreateEventW(nullptr,FALSE,FALSE,nullptr); std::atomic<uint64_t> arrivedUs{0}; ~Signal(){if(handle)CloseHandle(handle);} };
   struct Surface {
     RECT bounds{};
     capture::PixelRect placed{}; // Unscaled frame-space position.
@@ -667,6 +668,8 @@ struct Capture::Modern {
     // (false after GPU ticks consumed frames without a readback), and the
     // sweep band of the next partial tick.
     bool dirtyReporting=false,stagingComplete=false;int sweepIndex=0;
+    // deliverEveryComposedFrame took effect on this session (diagnostics: stream.stats captureMinInterval).
+    bool intervalSet=false;
     std::unique_ptr<capture::AreaScaler> scaler;
     ~Surface(){try{if(pool)pool.FrameArrived(arrived);if(session)session.Close();if(pool)pool.Close();}catch(...) {}}
   };
@@ -676,6 +679,11 @@ struct Capture::Modern {
   std::vector<std::unique_ptr<Surface>> surfaces;
   bool warp=false;
   std::optional<uint64_t> adapter;
+  // The last FrameArrived stamp (us, QPC clock) seen when a frame was taken
+  // since Capture::frame() began: the newest taken frame's arrival (a frame
+  // arriving between the take and this read is not taken, so at worst this
+  // is that later arrival). 0: none taken. Diagnostics only.
+  uint64_t arrivedUs=0;
   capture::Nv12CursorPatch cursor;
   // gpu-capture-v1 (gpu_capture.hpp): the armed composer (null: CPU path only),
   // the CPU picture being stale (GPU ticks consumed frames: the next CPU tick
@@ -716,11 +724,11 @@ struct Capture::Modern {
       check(factory->CreateForMonitor(monitor,winrt::guid_of<GraphicsCaptureItem>(),winrt::put_abi(surface->item)),"Capture selected monitor");
       const auto size=surface->item.Size();if(size.Width!=bounds.right-bounds.left||size.Height!=bounds.bottom-bounds.top)throw std::runtime_error("Capture monitor pixel geometry mismatch");
       surface->pool=Direct3D11CaptureFramePool::CreateFreeThreaded(winDevice,winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size);
-      const auto shared=signal;surface->arrived=surface->pool.FrameArrived([shared](auto const&,auto const&){SetEvent(shared->handle);});
+      const auto shared=signal;surface->arrived=surface->pool.FrameArrived([shared](auto const&,auto const&){shared->arrivedUs.store(qpcMicroseconds(),std::memory_order_relaxed);SetEvent(shared->handle);});
       surface->session=surface->pool.CreateCaptureSession(surface->item);surface->session.IsCursorCaptureEnabled(false);
       // The loop's own pacing caps the rate; WGC's 16 ms default would hold a
       // jittered frame until the next composition (capture_session_interval.hpp).
-      deliverEveryComposedFrame(surface->session);
+      surface->intervalSet=deliverEveryComposedFrame(surface->session);
       // capture-dirty-v1: a WARP device copies with the CPU, so the CPU path
       // reads back only the rectangles WGC reports as changed. Not on a GPU
       // device (capture_dirty.hpp: its reports were stale on 23% of frames).
@@ -824,6 +832,7 @@ struct Capture::Modern {
         std::vector<capture::PixelRect> dirty;bool dirtyKnown=surface->dirtyReporting;
         for(int n=0;n<3;++n){auto frame=surface->pool.TryGetNextFrame();if(!frame)break;if(dirtyKnown)dirtyKnown=collectDirtyRegions(frame,dirty);if(latest)latest.Close();latest=std::move(frame);}
         if(!latest)continue;
+        arrivedUs=std::max(arrivedUs,signal->arrivedUs.load(std::memory_order_relaxed));
         const auto size=latest.ContentSize();const int sw=surface->bounds.right-surface->bounds.left,sh=surface->bounds.bottom-surface->bounds.top;
         if(size.Width!=sw||size.Height!=sh)throw CaptureGeometryChanged();
         auto access=latest.Surface().as<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();Com<ID3D11Texture2D> texture;
@@ -924,6 +933,8 @@ Capture::Capture(int width, int height,RECT source,std::shared_ptr<ID3D11Device>
 void Capture::clear() noexcept { modern_.reset(); if (memory_ && previous_) SelectObject(memory_, previous_); if (bitmap_) DeleteObject(bitmap_); if (memory_) DeleteDC(memory_); if (screen_) ReleaseDC(nullptr, screen_); bitmap_ = nullptr; memory_ = screen_ = nullptr; previous_ = nullptr; pixels_ = nullptr; }
 Capture::~Capture() { clear(); }
 const char* Capture::backend()const{return modern_?(modern_->warp?"wgc-warp":"wgc-d3d11"):"gdi";}
+bool Capture::minUpdateIntervalSet()const{return modern_&&!modern_->surfaces.empty()&&std::all_of(modern_->surfaces.begin(),modern_->surfaces.end(),[](const auto& s){return s->intervalSet;});}
+uint64_t Capture::lastArrivedUs()const{return modern_?modern_->arrivedUs:0;}
 bool Capture::dirtyReadback()const{return modern_&&!modern_->surfaces.empty()&&std::all_of(modern_->surfaces.begin(),modern_->surfaces.end(),[](const auto& s){return s->dirtyReporting;});}
 HANDLE Capture::frameEvent()const{return modern_?modern_->signal->handle:nullptr;}
 std::optional<uint64_t> Capture::adapterLuid()const{return modern_?modern_->adapter:std::nullopt;}
@@ -1001,6 +1012,7 @@ const std::vector<uint8_t>& Capture::frame() {
   double directConvertMs = 0, readbackMs = 0;
   lastReadbackMs_.reset();
   gpuTick_ = gpuChanged_ = false;
+  if (modern_) modern_->arrivedUs = 0;
   // gpu-capture-v1: an armed capture whose consumer reads no CPU pixels this
   // tick, unless the cursor shown last tick cannot be composed on the GPU.
   if (gpuWanted_ && direct_ && modern_ && modern_->gpu && !modern_->gpuFailed &&

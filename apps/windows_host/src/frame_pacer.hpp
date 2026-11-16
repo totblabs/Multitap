@@ -10,6 +10,13 @@ namespace host {
 // the period after the previous tick began: the frame-rate cap, with room for
 // arrival jitter (owned outputs compose at 60 Hz, at most every 16.7 ms).
 inline std::chrono::microseconds captureMinimumGap(std::chrono::microseconds period) { return period * 9 / 10; }
+// How late a wait returned against the time it meant to return at (`target`),
+// counting only time spent inside the wait: a target already behind when the
+// wait began (the tick itself ran past it) is no lateness of the wait.
+inline std::chrono::microseconds paceLate(std::chrono::steady_clock::time_point entered, std::chrono::steady_clock::time_point target, std::chrono::steady_clock::time_point returned) {
+  const auto from = std::max(entered, target);
+  return returned > from ? std::chrono::duration_cast<std::chrono::microseconds>(returned - from) : std::chrono::microseconds::zero();
+}
 // Paces a capture/encode loop on a high-resolution waitable timer. A loop
 // that owns a WGC capture also passes its frame-arrival events: a newly
 // composed frame then starts the next tick at once instead of waiting for the
@@ -22,25 +29,33 @@ class FramePacer {
   ~FramePacer() { if (timer_) CloseHandle(timer_); }
   FramePacer(const FramePacer&) = delete;
   FramePacer& operator=(const FramePacer&) = delete;
-  void wait(Clock::time_point deadline) { until(deadline); }
+  void wait(Clock::time_point deadline) { const auto entered = Clock::now(); until(deadline); late_ = paceLate(entered, deadline, Clock::now()); }
   // Waits until `deadline`; returns true instead when one of `frames` (auto-
   // reset events) is signaled at or after `earliest`. A signal before
   // `earliest` stays pending until then.
   bool wait(Clock::time_point deadline, std::span<const HANDLE> frames, Clock::time_point earliest) {
-    if (frames.empty() || frames.size() > MAXIMUM_WAIT_OBJECTS - 1) { until(deadline); return false; }
-    until(std::min(earliest, deadline));
-    const auto remaining = deadline - Clock::now();
-    if (remaining <= Clock::duration::zero()) return poll(frames);
+    const auto entered = Clock::now();
+    if (frames.empty() || frames.size() > MAXIMUM_WAIT_OBJECTS - 1) { until(deadline); late_ = paceLate(entered, deadline, Clock::now()); return false; }
+    const auto gate = std::min(earliest, deadline);
+    until(gate);
+    const auto gated = Clock::now();
+    const auto remaining = deadline - gated;
+    if (remaining <= Clock::duration::zero()) { late_ = paceLate(entered, deadline, gated); return poll(frames); }
     HANDLE handles[MAXIMUM_WAIT_OBJECTS]; DWORD count = 0;
     for (const HANDLE frame : frames) handles[count++] = frame;
     DWORD timeout = DWORD(std::clamp<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count() + 1, 1, 1100));
     if (timer_ && arm(remaining)) { handles[count++] = timer_; timeout = 1100; }
     const DWORD result = WaitForMultipleObjects(count, handles, FALSE, timeout);
-    if (result < WAIT_OBJECT_0 + frames.size()) { if (timer_) CancelWaitableTimer(timer_); return true; }
+    // A frame or input wake: only the gate's lateness is known (when the event
+    // was signaled is not), so a later wake counts nothing more.
+    if (result < WAIT_OBJECT_0 + frames.size()) { if (timer_) CancelWaitableTimer(timer_); late_ = paceLate(entered, gate, gated); return true; }
     // Timer, coarse timeout or a failed wait: finish exactly like the plain wait.
     until(deadline);
+    late_ = paceLate(entered, deadline, Clock::now());
     return poll(frames);
   }
+  // The last wait's lateness (paceLate): diagnostics only, never pacing.
+  std::chrono::microseconds late() const { return late_; }
  private:
   static bool poll(std::span<const HANDLE> frames) {
     for (const HANDLE frame : frames) if (WaitForSingleObject(frame, 0) == WAIT_OBJECT_0) return true;
@@ -57,5 +72,6 @@ class FramePacer {
     while (Clock::now() < deadline) SwitchToThread();
   }
   HANDLE timer_ = nullptr;
+  std::chrono::microseconds late_{};
 };
 }

@@ -64,14 +64,51 @@ void taggerHostTiming() {
   // Fixed fields, nearest-rank percentiles, samples older than 30 s left out.
   std::deque<InputFrameTagger::Timing> timings{{20000, 3000, 1000000}, {10000, 1000, 1000000}, {30000, 5000, 1000000}, {90000, 9000, 1}};
   const auto json = inputFrameTimingJson(timings, 31000000);
-  require(json == ",\"inputFrame\":{\"samples\":3,\"injectToCaptureP50Ms\":20.00,\"injectToCaptureP95Ms\":30.00,\"captureToEncodedP50Ms\":3.00,\"captureToEncodedP95Ms\":5.00,\"expired\":0,\"ambient\":0}", "Timing report fields differ");
+  require(json == ",\"inputFrame\":{\"samples\":3,\"injectToCaptureP50Ms\":20.00,\"injectToCaptureP95Ms\":30.00,\"captureToEncodedP50Ms\":3.00,\"captureToEncodedP95Ms\":5.00,\"expired\":0,\"ambient\":0,\"arrivedSamples\":0,\"arrivedUnknown\":3}", "Timing report fields differ");
   // Inputs without a tagged frame (last 30 s only), also when nothing was tagged.
   std::deque<InputFrameTagger::MissEvent> misses{{InputFrameTagger::Miss::expired, 1000000}, {InputFrameTagger::Miss::ambient, 1000000}, {InputFrameTagger::Miss::ambient, 1000000}, {InputFrameTagger::Miss::expired, 1}};
-  require(inputFrameTimingJson(timings, 31000000, misses).ends_with(",\"expired\":1,\"ambient\":2}"), "Miss counts are not reported with the percentiles");
+  require(inputFrameTimingJson(timings, 31000000, misses).ends_with(",\"expired\":1,\"ambient\":2,\"arrivedSamples\":0,\"arrivedUnknown\":3}"), "Miss counts are not reported with the percentiles");
   require(inputFrameTimingJson({}, 31000000, misses) == ",\"inputFrame\":{\"samples\":0,\"expired\":1,\"ambient\":2}", "Misses alone are not reported");
   require(inputFrameTimingJson({}, 99000000, misses).empty(), "Stale misses were reported");
   require(inputFrameTimingJson(timings, 99000000).empty(), "Stale timings were reported");
   InputLatencySession unnegotiated; require(unnegotiated.frameTimingJson(1).empty(), "An unnegotiated session reported timings");
+}
+// The split of injection -> capture tick at the arrival of the newest WGC
+// frame the changed tick took (Capture::lastArrivedUs).
+void taggerArrivalSplit() {
+  InputFrameTagger tagger;
+  // Injection 1000, arrival 31000, tick 33000, output 36000: 30 ms guest, 2 ms loop.
+  tagger.injected(1, 1000); tagger.beginCapture(33000); tagger.arrived(31000); tagger.submitted(33000, true);
+  require(tagger.output(33000, 36000).has_value(), "The tick with an arrival was not tagged");
+  auto timing = tagger.timings().back();
+  require(timing.arrivedKnown && timing.injectToArrivedUs == 30000 && timing.arrivedToCaptureUs == 2000 && timing.injectToCaptureUs == 32000, "Arrival split is wrong");
+  // A frame that arrived after the tick began (taken by the same tick): no loop share.
+  tagger.injected(2, 40000); tagger.beginCapture(50000); tagger.arrived(50400); tagger.submitted(50000, true);
+  require(tagger.output(50000, 52000).has_value(), "The second tick was not tagged");
+  timing = tagger.timings().back();
+  require(timing.arrivedKnown && timing.injectToArrivedUs == 10400 && timing.arrivedToCaptureUs == 0, "A frame arriving during its tick was split wrong");
+  // No WGC frame that tick (GDI, cursor-only change), one that arrived before
+  // the injection, or one far after the tick: unknown, never a guess.
+  tagger.injected(3, 60000); tagger.beginCapture(61000); tagger.submitted(61000, true);
+  require(tagger.output(61000, 62000) && !tagger.timings().back().arrivedKnown, "A tick without a frame got an arrival time");
+  tagger.injected(4, 70000); tagger.beginCapture(71000); tagger.arrived(69000); tagger.submitted(71000, true);
+  require(tagger.output(71000, 72000) && !tagger.timings().back().arrivedKnown, "A frame that arrived before the injection was credited");
+  tagger.injected(5, 80000); tagger.beginCapture(81000); tagger.arrived(81000 + inputLatencyFrameWindowUs + 1); tagger.submitted(81000, true);
+  require(tagger.output(81000, 82000) && !tagger.timings().back().arrivedKnown, "An arrival far after the tick was credited");
+  // beginCapture forgets the previous tick's arrival: an unchanged tick
+  // with a frame, then a changed tick without one, stays unknown.
+  tagger.injected(6, 90000); tagger.beginCapture(91000); tagger.arrived(90500); tagger.submitted(91000, false);
+  tagger.beginCapture(95000); tagger.submitted(95000, true);
+  require(tagger.output(95000, 96000) && !tagger.timings().back().arrivedKnown, "A stale arrival time was reused");
+  // The report: percentiles over the known samples, counts of both.
+  const auto json = inputFrameTimingJson(tagger.timings(), 100000);
+  require(json.find(",\"arrivedSamples\":2,\"arrivedUnknown\":4,\"injectToArrivedP50Ms\":10.40,\"injectToArrivedP95Ms\":30.00,\"arrivedToCaptureP50Ms\":0.00,\"arrivedToCaptureP95Ms\":2.00}") != std::string::npos, "Arrival report fields differ");
+  // Through the negotiated session as the capture thread calls it.
+  InputLatencySession latency; latency.configure(JsonParser::parse(start(true)));
+  latency.injected(JsonParser::parse("{\"event\":\"button\",\"sample\":1,\"latencyReceivedUs\":100}"), true, 200);
+  latency.beginCapture(5200); latency.arrived(4200); latency.submitted(5200, true);
+  (void)latency.output(5200, 0);
+  require(latency.frameTimingJson(hostMonotonicUs()).find("\"arrivedSamples\":1,\"arrivedUnknown\":0,\"injectToArrivedP50Ms\":4.00") != std::string::npos, "The session did not carry the arrival time");
 }
 // Which injected inputs may name a frame, and which unsampled ones drop a
 // pending candidate (the next change may be theirs).
@@ -432,7 +469,7 @@ void servicePublication() {
 }
 }
 int main() {
-  const struct { const char* name; void (*run)(); } cases[] = {{"tagger-first-changed-frame", taggerFirstChangedFrameAfterInjection}, {"tagger-latest-and-bounds", taggerLatestAndBounds}, {"tagger-host-timing", taggerHostTiming},
+  const struct { const char* name; void (*run)(); } cases[] = {{"tagger-first-changed-frame", taggerFirstChangedFrameAfterInjection}, {"tagger-latest-and-bounds", taggerLatestAndBounds}, {"tagger-host-timing", taggerHostTiming}, {"tagger-arrival-split", taggerArrivalSplit},
     {"candidate-rules", candidateRules}, {"tagger-no-visible-change", taggerNoVisibleChange}, {"tagger-interruption", taggerInterruption},
     {"session-negotiation-and-math", sessionNegotiationAndMath}, {"session-frame-tag", sessionFrameTagMessage}, {"worker-ordering-and-reports", workerOrderingAndReports},
     {"worker-frame-candidates", workerFrameCandidates}, {"session-send-timing", sessionSendTiming}, {"service-publication", servicePublication}};
