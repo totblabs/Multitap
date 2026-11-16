@@ -193,6 +193,8 @@ struct ClientClipboardState::State {
   bool WalkCancelled(const std::string& walk) { std::lock_guard lock(walkMutex); return std::find(cancelledWalks.begin(),cancelledWalks.end(),walk)!=cancelledWalks.end(); }
   std::mutex eventMutex; std::deque<PullEvent> events; std::function<void()> notify;
   std::atomic<DWORD>* ownSequence = nullptr;
+  // The application window is in front (PullOptions::refuseHdrop of the peer's small file offers).
+  std::function<bool()> inFront;
   void Post(PullEvent event) { std::lock_guard lock(eventMutex); events.push_back(std::move(event)); if (notify) notify(); }
   void CloseOffers(bool withdraw,const std::string& scope={}) {
     std::vector<std::shared_ptr<clip::PullOffer>> old;std::shared_ptr<clip::PullOffer> current;bool haveCurrent=false;
@@ -277,7 +279,7 @@ std::shared_ptr<clip::PullOffer> ClientClipboardState::State::MakeOffer(const M&
       offer=clip::PullOffer::createDeferred(offerId,std::move(hooks),{},options);
     } else if(offerFormat=="tree") {
       clip::PullOptions options; options.explorerProgress=!ownProgress; options.prefetchDepth=prefetchDepth;
-      if(ownProgress) { if(!s.offerStore) s.offerStore=std::make_shared<clip::Storage>(s.Parent()); options.stagingParent=s.offerStore->parent(); options.storage=s.offerStore; }
+      if(ownProgress) { if(!s.offerStore) s.offerStore=std::make_shared<clip::Storage>(s.Parent()); options.stagingParent=s.offerStore->parent(); options.storage=s.offerStore; options.refuseHdrop=s.inFront; }
       offer=clip::PullOffer::create(offerId,std::move(entries),std::move(mtimes),std::move(hooks),{},options);
     } else offer=clip::PullOffer::createContent(offerId,offerFormat,std::move(entries),std::move(hooks),{},std::move(policy));
     *holder=offer;
@@ -775,6 +777,7 @@ std::vector<PullEvent> ClientClipboardState::TakePullEvents() {
   return out;
 }
 void ClientClipboardState::SetPullNotify(std::function<void()> notify) { std::lock_guard lock(state_->eventMutex); state_->notify=std::move(notify); }
+void ClientClipboardState::SetInFront(std::function<bool()> inFront) { state_->inFront=std::move(inFront); }
 void ClientClipboardState::SetOwnSequenceSink(std::atomic<DWORD>* sink) { state_->ownSequence=sink;state_->pending.SetOwnSequenceSink([sink](DWORD sequence){if(sink)sink->store(sequence);}); }
 void ClientClipboardState::AttachPending(HWND writer){state_->pending.Attach(writer);}
 void ClientClipboardState::SetPendingRenderQueue(std::function<bool(std::function<void()>)> queue){state_->pending.SetRenderQueue(std::move(queue));}
@@ -816,11 +819,13 @@ struct ClientClipboardChannel::State {
   struct Job { std::string method; M args; std::unique_ptr<flutter::MethodResult<V>> result; V value; std::string error; std::string detail; std::function<void()> work; };
   HWND window;
   explicit State(HWND window,clip::ChangeWatchAccess access,std::function<bool()> foreground,ClientClipboardAccess state_access,std::filesystem::path state_parent): window(window), watch(
-      [this,foreground=std::move(foreground)]{return !stopped&&this->window&&(foreground?foreground():GetAncestor(GetForegroundWindow(),GA_ROOT)==GetAncestor(this->window,GA_ROOT));},
+      [this,foreground]{return !stopped&&this->window&&(foreground?foreground():GetAncestor(GetForegroundWindow(),GA_ROOT)==GetAncestor(this->window,GA_ROOT));},
       [this](const std::string& owner,DWORD sequence){if(onChanged)onChanged(owner,sequence);},std::move(access)), core(std::move(state_parent),std::move(state_access)), thread([this]{Work();}), serveThread([this]{Serve();}),pendingThread([this]{DeliverPending();}) {
     // The virtual files published for the peer's offer are an OLE data object: no window of ours owns the
     // clipboard, so the publisher's own sequence is what marks them as ours.
     core.SetOwnSequenceSink(&ownSequence);
+    // Set before any offer exists (offers are made on the worker thread, which starts with the first job).
+    core.SetInFront([this,foreground]{return this->window&&(foreground?foreground():GetAncestor(GetForegroundWindow(),GA_ROOT)==GetAncestor(this->window,GA_ROOT));});
     core.SetPendingRenderQueue([this](std::function<void()> work){
       {std::lock_guard lock(mutex);if(stopped||pendingJobs.size()>=8)return false;Job job;job.work=std::move(work);pendingJobs.push_back(std::move(job));}
       pendingChanged.notify_one();return true;

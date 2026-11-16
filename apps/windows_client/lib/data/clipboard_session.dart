@@ -2697,6 +2697,7 @@ class ClipboardSession extends ChangeNotifier {
     if (bridge == null) return;
     try {
       for (final id in await bridge.dropOffers(_owner)) {
+        _pulls?.ownOfferWithdrawn(id);
         try {
           _send({'type': 'clipboard.offer.withdraw', 'requestId': id});
         } catch (_) {}

@@ -72,6 +72,8 @@ class ClientClipboardState {
   std::vector<PullEvent> TakePullEvents();
   void SetPullNotify(std::function<void()> notify);
   void SetOwnSequenceSink(std::atomic<DWORD>* sink);
+  // Whether the application window is in front: a small file offer of the peer refuses CF_HDROP meanwhile (PullOptions::refuseHdrop).
+  void SetInFront(std::function<bool()> inFront);
   void AttachPending(HWND writer);
   void SetPendingRenderQueue(std::function<bool(std::function<void()>)> queue);
   void DetachPending();

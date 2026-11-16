@@ -248,6 +248,11 @@ struct PullOptions {
   std::shared_ptr<Storage> storage;
   // Files asked for ahead of their reader: 1 for a released pair (one pull at a time), up to maxPrefetchDepth for a pull-queue pair.
   size_t prefetchDepth = 1;
+  // CF_HDROP is refused (GetData fails at once, nothing is pulled) while this returns true. The client sets it to "its own window is in
+  // front": then nobody on this PC is pasting, and whatever asks for CF_HDROP right after a copy in the remote desktop is a clipboard
+  // monitor that ignores ExcludeClipboardContentFromMonitorProcessing; answering it would pull every file and show the transfer card on a
+  // copy alone. A paste started from another window asks again and gets it. Unset: never refused.
+  std::function<bool()> refuseHdrop;
 };
 
 // The receiver's view of one offer: the entries, the data object, and the ranges being pulled.

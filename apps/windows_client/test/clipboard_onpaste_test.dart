@@ -907,6 +907,107 @@ void main() {
       expect(session.transferring, isFalse, reason: 'the last file ended');
     });
 
+    // A PC offer of two files, published; the VM's paste waits and takes the first file.
+    Future<String> twoFilesFirstServed() async {
+      bridge.offerCapture = offerOf('tree', [
+        pull.tree('a.bin', 3),
+        pull.tree('b.bin', 3),
+      ], tops: 2);
+      await session.setSharingActive(true);
+      final sending = session.sendLocal(automatic: true);
+      final offer = await socket.nextMessage('clipboard.offer');
+      await socket.nextMessage('clipboard.entries');
+      final id = offer['requestId'] as String;
+      socket.emit({'type': 'clipboard.complete', 'requestId': id});
+      await sending;
+      bridge.files[id] = [
+        Uint8List.fromList([1, 2, 3]),
+        Uint8List.fromList([4, 5, 6]),
+      ];
+      socket.emit({
+        'type': 'clipboard.paste.waiting',
+        'requestId': 'wait-1',
+        'active': true,
+      });
+      socket.emit(pullRequest('pullh-1', id));
+      await socket.nextMessage('clipboard.item.end');
+      return id;
+    }
+
+    Map<String, dynamic> secondFile(String id, String offer) => {
+      'type': 'clipboard.pull',
+      'requestId': id,
+      'offerId': offer,
+      'index': 1,
+      'offset': 0,
+    };
+
+    test('a VM paste keeps its offer when the PC copies twice more meanwhile', () async {
+      session = make(linger: const Duration(milliseconds: 30));
+      await connect();
+      final pasted = await twoFilesFirstServed();
+      // Two more copies on the PC: the first of them is idle when the second is made, so it is withdrawn.
+      final idle = await offeredFiles(Uint8List.fromList([7]));
+      bridge.offersToDrop = [idle];
+      await offeredFiles(Uint8List.fromList([8]));
+      socket.sent.clear();
+      socket.emit(secondFile('pullh-2', pasted));
+      expect(
+        (await socket.nextMessage('clipboard.chunk'))['data'],
+        base64Encode([4, 5, 6]),
+        reason: 'the paste in the VM goes on with its second file',
+      );
+      expect(sentOf('clipboard.error'), isEmpty);
+    });
+
+    test('a second VM paste of the same copy counts from zero', () async {
+      session = make(
+        linger: const Duration(milliseconds: 30),
+        between: const Duration(milliseconds: 600),
+      );
+      await connect();
+      final id = await twoFilesFirstServed();
+      socket.emit(secondFile('pullh-2', id));
+      await socket.nextMessage('clipboard.item.end');
+      await base.settle();
+      expect(session.transferring, isFalse, reason: 'the first paste ended');
+      socket.emit(pullRequest('pullh-3', id));
+      await socket.nextMessage('clipboard.item.end');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(
+        session.transferring,
+        isTrue,
+        reason: 'the second paste waits for its second file',
+      );
+      expect(session.progress?.transferred, 3);
+      expect(session.progress?.total, 6);
+      expect(session.progress?.fileIndex, 1);
+    });
+
+    test('between two files the input lock waits for the Host to say the VM waits', () async {
+      session = make(
+        linger: const Duration(milliseconds: 30),
+        between: const Duration(milliseconds: 600),
+      );
+      await connect();
+      await twoFilesFirstServed();
+      await base.settle();
+      expect(session.userWaiting, isTrue);
+      // The VM's Explorer asks "replace or skip": the Host says nothing waits.
+      socket.emit({
+        'type': 'clipboard.paste.waiting',
+        'requestId': 'wait-1',
+        'active': false,
+      });
+      await base.settle();
+      expect(session.transferring, isTrue, reason: 'the notice stays');
+      expect(
+        session.userWaiting,
+        isFalse,
+        reason: 'the user answers the question in the remote view',
+      );
+    });
+
     test('a VM paste that pulls our offer shows a card only once the Host says it waits', () async {
       await connect();
       final id = await offeredFiles(Uint8List(3 * 1024 * 1024));

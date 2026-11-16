@@ -151,8 +151,16 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
   // A fresh server prints its one-time setup code to its own log now.
   const initialSetup = new InitialSetupCode(store, initialSetupOptions); initialSetup.startup();
   const dummyHash = await hashPassword(newToken());
+  // Sign-in attempts for an account count per address: one address that keeps
+  // failing on a known name locks only itself out, not the account's owner. A
+  // wider budget for the account from every address together still slows
+  // guessing spread over many addresses.
   const accounts = new Limiter(loginLimit);
+  const accountsEverywhere = new Limiter(loginLimit * 8);
   const addresses = new Limiter(addressLimit);
+  // The address first: a refused address must not spend (or create) other
+  // accounts' budgets.
+  const signInAttempt = (address, name, now) => addresses.take(address, now) && accounts.take(`${name} ${address}`, now) && accountsEverywhere.take(name, now);
   const enrollmentAttempts = new Limiter(20);
   const powerAttempts = new Limiter(10);
   const audioAttempts = new Limiter(10);
@@ -584,9 +592,7 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
         if (typeof input.password !== 'string' || input.password.length > 256 || !input.password) throw new HttpError(400, 'invalid_credentials_format');
         if (Object.keys(input).some(key => !['username', 'password'].includes(key))) throw new HttpError(400, 'unexpected_field');
         const now = Date.now();
-        // The address first: a refused address must not spend (or create)
-        // other accounts' budgets.
-        if (!addresses.take(address, now) || !accounts.take(name, now)) throw new HttpError(429, 'too_many_attempts');
+        if (!signInAttempt(address, name, now)) throw new HttpError(429, 'too_many_attempts');
         const user = store.findUser(name);
         let valid;
         try { valid = await passwordJob(() => verifyPassword(input.password, user?.password_hash ?? dummyHash)); }
@@ -675,7 +681,7 @@ export async function buildServer({ store, vault, proxmox = new Proxmox(), publi
           if (typeof input.newPassword !== 'string' || input.newPassword !== input.passwordConfirmation) throw new HttpError(400, 'password_confirmation_mismatch');
           if (input.newPassword.length < 10 || input.newPassword.length > 256) throw new HttpError(400, 'password_length_10_to_256');
           const now = Date.now();
-          if (!addresses.take(address, now) || !accounts.take(name, now)) throw new HttpError(429, 'too_many_attempts');
+          if (!signInAttempt(address, name, now)) throw new HttpError(429, 'too_many_attempts');
           const user = store.findUser(name);
           const replacement = await passwordJob(async () => {
             const valid = await verifyPassword(input.password, user?.password_hash ?? dummyHash);

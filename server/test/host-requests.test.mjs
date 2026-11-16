@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { Store } from '../src/store.mjs';
 import { Vault } from '../src/vault.mjs';
@@ -143,10 +143,26 @@ test('Pending/global capacity and separate proof/address polling limits remain b
   assert.equal(f.requests.create(input,'one').requestId,created.requestId);
   f.advance(60001);f.requests.cancel(claim(created,input),'one');
   const second=f.requests.create(metadata(newToken(),otherUuid),'two');f.requests.reject(second.requestId,f.authorize);
-  assert.throws(()=>f.requests.create(metadata(),'one'),error('host_request_capacity'));
+  // Finished requests make room: the oldest of them goes and the row limit holds (a day-long refusal of every new request before).
+  const third=f.requests.create(metadata(),'one');
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM host_requests').get().n,2);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM host_requests WHERE id=?').get(created.requestId).n,0);
+  assert.equal(f.store.db.prepare('SELECT status FROM host_requests WHERE id=?').get(third.requestId).status,'pending');
+  // Live requests still count: with the pending limit reached nothing is removed to make room.
+  assert.throws(()=>f.requests.create(metadata(newToken(),otherUuid),'two'),error('host_request_capacity'));
   const limits=fixture(t,{createLimit:1,statusAddressLimit:1});const owned=metadata(),a=limits.requests.create(owned,'one');
   assert.throws(()=>limits.requests.create(owned,'one'),error('too_many_host_requests'));
   limits.requests.status(claim(a,owned),'address');assert.throws(()=>limits.requests.status({...claim(a,owned),requestKey:newToken()},'address'),error('too_many_host_request_polls'));
+});
+
+test('One address cannot fill the pending limit; others still file requests',t=>{
+  const f=fixture(t,{createLimit:100});
+  for(let i=0;i<20;i++)f.requests.create(metadata(newToken(),randomUUID()),'flood');
+  assert.throws(()=>f.requests.create(metadata(newToken(),randomUUID()),'flood'),error('too_many_host_requests'));
+  assert.equal(f.requests.create(metadata(),'real-host').status,'pending');
+  // Its requests expire: the address may file again.
+  f.advance(600001);
+  assert.equal(f.requests.create(metadata(newToken(),randomUUID()),'flood').status,'pending');
 });
 
 test('Existing hosts require explicit replacement, old tokens are revoked, and stale encrypted delivery cannot reclaim the replacement',async t=>{

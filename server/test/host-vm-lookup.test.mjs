@@ -147,7 +147,7 @@ test('a Proxmox failure is reported as unavailable, cached, and retried no soone
 });
 
 test('many unverified requests cost one cluster read; polls are served from it', async t => {
-  const f = fixture(t, { options: { createLimit: 1000 } }), ids = [];
+  const f = fixture(t, { options: { createLimit: 1000, pendingPerAddress: 1000 } }), ids = [];
   for (let i = 0; i < 60; i++) ids.push(f.create(metadata('cccccccc-3333-4333-8333-' + String(i).padStart(12, '0'))).id);
   const real = f.create();
   const [first, second, third] = await Promise.all([f.requests.pendingResolved(), f.requests.pendingResolved(), f.requests.pendingResolved()]);
@@ -163,7 +163,7 @@ test('many unverified requests cost one cluster read; polls are served from it',
 });
 
 test('a flood of new UUIDs cannot make Proxmox reads more frequent than the minimum interval', async t => {
-  const f = fixture(t, { options: { createLimit: 1000 } }); let n = 0;
+  const f = fixture(t, { options: { createLimit: 1000, pendingPerAddress: 1000 } }); let n = 0;
   const flood = () => f.create(metadata('dddddddd-4444-4444-8444-' + String(n++).padStart(12, '0')));
   flood(); await f.requests.pendingResolved(); assert.equal(f.scans, 1);
   // A new claim every second for 60 s, with the console polling after each one.

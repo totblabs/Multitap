@@ -23,15 +23,20 @@ class Limit {
 // in Proxmox (host-vm-lookup.mjs); that only fills in node and VM ID for the
 // administrator, it proves nothing about who sent the request.
 const maxClaimsPerMachine=4;
+// Live pending requests one address may hold by default (as many as it may
+// file in a minute): a single address cannot fill the server-wide pending limit.
+const defaultPendingPerAddress=20;
 export class HostRequests {
-  constructor({store,vault,proxmox,changed=()=>{},now=Date.now,ttlMs=600000,maxPending=100,maxRows=1000,createLimit=20,statusLimit=60,statusAddressLimit=600,code=hostRequestCode,lookup,lookupOptions={},lookupWaitMs=2500}) {
-    Object.assign(this,{store,vault,proxmox,changed,now,ttlMs,code,lookupWaitMs,maxPending:Math.min(100,maxPending),maxRows:Math.min(1000,maxRows)});
+  constructor({store,vault,proxmox,changed=()=>{},now=Date.now,ttlMs=600000,maxPending=100,maxRows=1000,createLimit=20,statusLimit=60,statusAddressLimit=600,pendingPerAddress=defaultPendingPerAddress,code=hostRequestCode,lookup,lookupOptions={},lookupWaitMs=2500}) {
+    Object.assign(this,{store,vault,proxmox,changed,now,ttlMs,code,lookupWaitMs,pendingPerAddress,maxPending:Math.min(100,maxPending),maxRows:Math.min(1000,maxRows)});
     this.lookup=lookup??new HostVmLookup({proxmox,now,...lookupOptions});
     this.creates=new Limit(createLimit);this.polls=new Limit(statusLimit);this.addressPolls=new Limit(statusAddressLimit);
     // Requests whose Host declared (X-Multitap-Host-Request-Code) that it shows
     // the code. Self-reported and kept in memory: Hosts poll every 3 s, so a
     // restart relearns it at once. A Host that does not show the code never sends it.
     this.codeHosts=new Map();
+    // The requests each address filed (in memory; a restart forgets them).
+    this.byAddress=new Map();
   }
   showsCode(id,shows){if(!shows)return;this.codeHosts.delete(id);this.codeHosts.set(id,true);if(this.codeHosts.size>2*this.maxRows)this.codeHosts.delete(this.codeHosts.keys().next().value);}
   // Other live pending requests that claim the same machine (and so the same VM).
@@ -62,10 +67,21 @@ export class HostRequests {
     // refused: refusing let whoever asked first (possibly not the real Host)
     // hold the only request the administrator could see.
     if(this.store.db.prepare("SELECT count(*) AS n FROM host_requests WHERE machine_uuid=? AND status='pending' AND expires_at>?").get(machineUuid,this.now()).n>=maxClaimsPerMachine)throw new HttpError(409,'host_request_pending');
+    // Finished requests (expired, rejected) are kept a day only so that their
+    // Host can read the outcome. Past the row limit the oldest of them go first,
+    // instead of every new request being refused until that day is over.
+    const total=this.store.db.prepare('SELECT count(*) AS n FROM host_requests').get().n;
+    if(total>=this.maxRows)this.store.db.prepare("DELETE FROM host_requests WHERE id IN (SELECT id FROM host_requests WHERE status IN ('expired','rejected') ORDER BY created_at,id LIMIT ?)").run(total-this.maxRows+1);
+    const filed=[...(this.byAddress.get(address)??[])];
+    const live=filed.length?this.store.db.prepare(`SELECT id FROM host_requests WHERE status='pending' AND expires_at>? AND id IN (${filed.map(()=>'?').join(',')})`).all(this.now(),...filed).map(row=>row.id):[];
+    if(live.length)this.byAddress.set(address,new Set(live));else this.byAddress.delete(address);
+    if(live.length>=this.pendingPerAddress)throw new HttpError(429,'too_many_host_requests');
     if(this.store.db.prepare("SELECT count(*) AS n FROM host_requests WHERE status='pending'").get().n>=this.maxPending||this.store.db.prepare('SELECT count(*) AS n FROM host_requests').get().n>=this.maxRows)throw new HttpError(429,'host_request_capacity');
     const id=randomUUID(),now=this.now(),expiresAt=now+this.ttlMs;
     this.store.db.prepare("INSERT INTO host_requests(id,key_hash,hostname,machine_uuid,version,status,created_at,expires_at) VALUES(?,?,?,?,?,'pending',?,?)").run(id,hash,hostname,machineUuid,version,now,expiresAt);
     this.store.audit('host_request_created','unverified-host',id,now);this.showsCode(id,showsCode);
+    const mine=this.byAddress.get(address)??new Set();mine.add(id);this.byAddress.delete(address);this.byAddress.set(address,mine);
+    if(this.byAddress.size>this.maxRows)this.byAddress.delete(this.byAddress.keys().next().value);
     return this.public(this.store.db.prepare('SELECT * FROM host_requests WHERE id=?').get(id));
   }
   claimed(input,address){

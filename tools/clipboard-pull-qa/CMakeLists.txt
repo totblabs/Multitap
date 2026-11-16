@@ -28,3 +28,11 @@ add_executable(clipboard_settled_selection_qa settled_selection_qa.cpp)
 target_compile_features(clipboard_settled_selection_qa PRIVATE cxx_std_20)
 target_compile_options(clipboard_settled_selection_qa PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 target_include_directories(clipboard_settled_selection_qa PRIVATE ../../native/windows_clipboard)
+
+# Narrow, non-interactive regression: CF_HDROP of a small pulled set is refused while the application's window is in front (no clipboard).
+add_executable(clipboard_hdrop_front_qa hdrop_front_qa.cpp ../../native/windows_clipboard/clipboard.cpp)
+target_compile_features(clipboard_hdrop_front_qa PRIVATE cxx_std_20)
+target_compile_definitions(clipboard_hdrop_front_qa PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+target_compile_options(clipboard_hdrop_front_qa PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+target_include_directories(clipboard_hdrop_front_qa PRIVATE ../../native/windows_clipboard)
+target_link_libraries(clipboard_hdrop_front_qa PRIVATE user32 shell32 advapi32 bcrypt ole32 windowscodecs shlwapi)

@@ -1232,6 +1232,7 @@ std::shared_ptr<PullOffer> PullOffer::create(std::string offerId, std::vector<It
   tree->operationState = [impl = offer->impl_](bool started, HRESULT result) { if (impl->hooks.operationState) impl->hooks.operationState(started, result); };
   if (s.hdropOffered) {
     tree->extras.push_back({CF_HDROP, [impl = offer->impl_](std::string& failure) -> HGLOBAL {
+      if (impl->options.refuseHdrop && impl->options.refuseHdrop()) { failure = "clipboard_cancelled"; return nullptr; }
       std::shared_ptr<RenderJob> staged; if (!impl->stagedCopy(staged, failure)) return nullptr;
       return makeDropFiles(staged->paths);
     }});

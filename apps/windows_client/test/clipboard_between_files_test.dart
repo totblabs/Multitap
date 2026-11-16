@@ -97,6 +97,24 @@ void main() {
     expect(pulls.active, isFalse);
   });
 
+  test('a paste after a cancelled one counts from zero', () async {
+    final pull = await request(1, 0);
+    await pulls.handle({
+      'type': 'clipboard.chunk',
+      'requestId': pull['requestId'],
+      'index': 0,
+      'offset': 0,
+      'data': base64Encode([1, 2]),
+    });
+    await pulls.handle({
+      'type': 'clipboard.cancel',
+      'requestId': pull['requestId'],
+    });
+    await receive(await request(2, 0), 0);
+    expect(pulls.progress?.transferred, 4, reason: 'not 2 + 4');
+    expect(pulls.progress?.total, 8);
+  });
+
   test('the notice ends after the wait when the next file never comes', () async {
     await receive(await request(1, 0), 0);
     await Future<void>.delayed(const Duration(milliseconds: 900));

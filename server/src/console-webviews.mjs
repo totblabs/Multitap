@@ -44,7 +44,16 @@ export class ConsoleWebviews {
     if (binding.expiresAt <= this.now()) throw new HttpError(403, 'console_webview_expired');
     const user = this.parent(binding);
     if (!user) throw new HttpError(401, 'authentication_required');
-    this.prune(); if (this.children.size >= 128) throw new HttpError(429, 'console_webview_limit');
+    this.prune();
+    // One sign-in keeps at most 4 Console views and one account 16; past that
+    // the oldest of them goes (a view opened again takes its place). Without
+    // this one account could fill the server-wide 128 and keep Console from
+    // everyone else for an hour.
+    const mine = [...this.children].filter(([, entry]) => entry.userId === binding.userId);
+    const sameSignIn = mine.filter(([, entry]) => entry.parentHash === binding.parentHash);
+    if (sameSignIn.length >= 4) this.children.delete(sameSignIn[0][0]);
+    else if (mine.length >= 16) this.children.delete(mine[0][0]);
+    if (this.children.size >= 128) throw new HttpError(429, 'console_webview_limit');
     const token = newToken(), childHash = tokenHash(token), expiresAt = Math.min(this.now() + this.childMs, user.expires_at);
     if (!Number.isFinite(expiresAt) || expiresAt <= this.now()) throw new HttpError(401, 'authentication_required');
     this.children.set(childHash, { ...binding, expiresAt });

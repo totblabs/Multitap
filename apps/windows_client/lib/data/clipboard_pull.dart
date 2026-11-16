@@ -286,7 +286,10 @@ class ClipboardPulls {
       (_operationWaiting ||
           _active != null ||
           _queue.isNotEmpty ||
-          _lingering ||
+          // Between two files of a paste in the VM only while the Host says it waits: its Explorer may be asking "replace or skip",
+          // which the user answers in the remote view.
+          (_lingering &&
+              !(onPaste != null && (_between?.served ?? false) && !_pasteWaiting)) ||
           // A paste here waits for the list of a deferred copy; the VM's paste waits for this side's list.
           _manifestIn != null ||
           (_manifestServe != null && (onPaste == null || _pasteWaiting)) ||
@@ -434,15 +437,44 @@ class ClipboardPulls {
     _receivingObservation.waiting(_operations.isNotEmpty);
   }
 
+  /// The peer's paste is reading this side's own offer [offerId]: a range served or queued now, or one that ended moments ago (the
+  /// next file is asked for right away; the VM's Explorer may also wait on its "replace or skip" question between two files).
+  bool _servedNow(String offerId) {
+    if (_closed) return false;
+    if (_serve != null && _lastServedOfferId == offerId) return true;
+    if (_serveQueue.any((pull) => pull['offerId'] == offerId)) return true;
+    final ended = _servedEndedAt[offerId];
+    return ended != null &&
+        DateTime.now().difference(ended) < const Duration(seconds: 5);
+  }
+
+  /// When a range of each own offer last ended (served to the peer), for [_servedNow].
+  final _servedEndedAt = <String, DateTime>{};
+
+  /// Received offers and this side's own offers are kept apart, the latest two of each (as the relay keeps two per source): a copy
+  /// on one side never pushes out the other side's offer. Within a kind the oldest offer no paste is reading goes first, and the
+  /// newest stays. An own offer the peer is pulling is such a paste too: dropping it here would refuse the next file of a long paste
+  /// into the VM (clipboard_offer_expired) when the user copies twice more meanwhile.
   void _trimOffers() {
-    while (_offers.length > 2) {
-      // The oldest offer no paste is reading goes first (the newest stays).
-      final keys = _offers.keys.toList();
-      final id = keys
-              .take(keys.length - 1)
-              .where((key) => !pasting(key))
-              .firstOrNull ??
-          keys.first;
+    for (final received in const [true, false]) {
+      while (true) {
+        final keys = [
+          for (final key in _offers.keys)
+            if (_receivedOffers.contains(key) == received) key,
+        ];
+        if (keys.length <= 2) break;
+        final id = keys
+                .take(keys.length - 1)
+                .where((key) => received ? !pasting(key) : !_servedNow(key))
+                .firstOrNull ??
+            keys.first;
+        _forgetOffer(id);
+      }
+    }
+  }
+
+  void _forgetOffer(String id) {
+      _servedEndedAt.remove(id);
       _rangeEndedAt.remove(id);
       _offers.remove(id);
       _deferredOffers.remove(id);
@@ -451,7 +483,13 @@ class ClipboardPulls {
       _operationFloors.remove(id);
       _lastObservation.remove(id);
       _operationRevisions.remove(id);
-    }
+  }
+
+  /// This side withdrew its own idle offer [offerId] (dropped natively, withdrawn at the relay): it is not served any more.
+  void ownOfferWithdrawn(String offerId) {
+    if (_closed || _receivedOffers.contains(offerId) || _servedNow(offerId)) return;
+    _offers.remove(offerId);
+    _servedEndedAt.remove(offerId);
   }
 
   Future<void> _operation(ClipboardPullOperation event) async {
@@ -860,8 +898,13 @@ class ClipboardPulls {
       final pull = _queue.removeAt(0);
       final offer = _offers[pull.offerId];
       if (offer != null && pull.index == 0 && pull.offset == 0) {
-        // The first file of a paste: a new paste of the same offer counts from zero.
-        if (offer.finished >= offer.sizes.length) {
+        // The first file of a paste: a new paste of the same offer counts from zero (also after one that was cancelled or failed:
+        // nothing of this offer ended moments ago and nothing else of it is queued).
+        final ended = _rangeEndedAt[pull.offerId];
+        final idle = (ended == null ||
+                DateTime.now().difference(ended) >= const Duration(seconds: 5)) &&
+            !_queue.any((queued) => queued.offerId == pull.offerId);
+        if (offer.finished >= offer.sizes.length || idle) {
           offer.pulled = 0;
           offer.finished = 0;
         }
@@ -1346,10 +1389,20 @@ class ClipboardPulls {
           : ClipboardSendWindow.forLimits(limits()),
     );
     serve.observation = observation;
+    final served = _offers[offerId];
+    // The first file of a new paste of this offer (the last one finished, or nothing of it was served moments ago): its progress
+    // counts from zero, as a paste here does.
+    if (served != null &&
+        index == 0 &&
+        offset == 0 &&
+        (served.finished >= served.sizes.length || !_servedNow(offerId))) {
+      served.pulled = 0;
+      served.finished = 0;
+    }
     _serve = serve;
     _lastServedOfferId = offerId;
     _serving = true;
-    _servedOffer = _offers[offerId];
+    _servedOffer = served;
     started();
     changed();
     await _pumpServe(serve);
@@ -1507,6 +1560,8 @@ class ClipboardPulls {
     }
     final offer = _servedOffer;
     if (offer != null && serve.sent == serve.size) offer.finished++;
+    final servedId = _lastServedOfferId;
+    if (servedId != null) _servedEndedAt[servedId] = DateTime.now();
     _servedOffer = null;
     _settled(ended: fileEnded ? offer : null, served: true);
     changed();
