@@ -204,6 +204,18 @@ class UdpPathGateTest {
         assertEquals(dropped, offerUdp(r.gate, mediaPacket(1, true, 1, 20), leg = TEST_LEG + 1))
     }
 
+    @Test fun theKeyFrameMarkEndsWithItsConnection() {
+        val r = Rig()
+        assertEquals(accepted, r.over(mediaPacket(1, true, 1, 10)))
+        val mark = r.gate.view().keyedStream
+        assertEquals("A key frame over UDP left no mark", 1L, mark)
+        r.gate.disengage()
+        assertEquals("The key-frame mark outlived its connection", 0L, r.gate.view().keyedStream)
+        // The next connection counts its stream runs from 1 again.
+        r.gate.disengage(TEST_LEG + 1); r.gate.stream(1, mark)
+        assertEquals("A new connection's stream run read the old key-frame mark", 0L, r.gate.view().keyedStream)
+    }
+
     @Test fun decoderInputIsTheWssInput() {
         // Only video is watched on UDP, and the epoch never reaches the decoder.
         val r = Rig()

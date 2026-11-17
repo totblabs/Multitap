@@ -342,6 +342,59 @@ void main() {
     }
   });
 
+  test('A window reports the slowest Host leg of the ping the relay measured', () {
+    // rttMaxMs is this PC -> relay -> Host and back; rttHostMaxMs is the
+    // relay's own relay -> Host -> relay share of it.
+    final window = StreamStatsWindow(firstPeriod: const Duration(seconds: 10));
+    StreamStatsSample tick(double rtt, [int? hostRtt]) => StreamStatsSample(
+      width: 1920,
+      height: 1080,
+      decodedFps: 60,
+      rttMs: rtt,
+      rttHostMaxMs: hostRtt,
+    );
+    window.add(tick(21, 4), 0);
+    window.add(tick(3214, 3190), 1000000);
+    window.add(tick(22), 2000000);
+    window.add(tick(25, 6), 3000000);
+    final report = window.take(10000000)!;
+    expect(report['rttMaxMs'], 3214);
+    expect(report['rttHostMaxMs'], 3190);
+    expect(streamStatsFields, contains('rttHostMaxMs'));
+    expect(report.keys.every(streamStatsFields.contains), isTrue);
+    // Nothing measured in the next window (an older broker, or no pong).
+    window.add(tick(20), 11000000);
+    window.add(tick(1300), 12000000);
+    final next = window.take(21000000)!;
+    expect(next['rttMaxMs'], 1300);
+    expect(next.containsKey('rttHostMaxMs'), isFalse);
+    // Zero is a measurement.
+    window.add(tick(20, 0), 22000000);
+    expect(window.take(52000000)!['rttHostMaxMs'], 0);
+  });
+
+  test('stream.stats carries the relay Host leg only as a bounded integer', () {
+    const stats = {'capturedFps': 60, 'encodedFps': 60, 'bitrateKbps': 9000};
+    expect(HostStreamTelemetry.parse(stats)!.relayHostRttMaxMs, isNull);
+    for (final value in [0, 1300, 60000]) {
+      expect(
+        HostStreamTelemetry.parse({
+          ...stats,
+          'relayHostRttMaxMs': value,
+        })!.relayHostRttMaxMs,
+        value,
+      );
+    }
+    for (final Object? bad in [-1, 60001, 12.5, '1300', null, true]) {
+      final parsed = HostStreamTelemetry.parse({
+        ...stats,
+        'relayHostRttMaxMs': bad,
+      });
+      expect(parsed, isNotNull, reason: 'the statistics themselves stay');
+      expect(parsed!.relayHostRttMaxMs, isNull, reason: '$bad');
+    }
+  });
+
   test('A window reports backpressure that no longer ends the stream', () {
     final window = StreamStatsWindow(firstPeriod: const Duration(seconds: 10));
     StreamStatsSample tick({int? waits, int? dropped}) => StreamStatsSample(
@@ -477,6 +530,80 @@ void main() {
       expect(reports, hasLength(3), reason: 'nothing new to report');
       await current.close();
       expect(reports, hasLength(3));
+      await media.events.close();
+    },
+  );
+
+  testWidgets(
+    'A session keeps the largest relay Host leg of every stream.stats in the window',
+    (t) async {
+      final socket = SessionSocket(), media = RecoveryMedia();
+      final clock = ManualClock();
+      final reports = <Map<String, Object>>[];
+      final current = RemoteSession(
+        connection: BrokerConnection(
+          sessionId: 'qa-session',
+          webSocketUrl: Uri.parse(
+            'wss://cloud.example.com/api/v1/sessions/qa-session',
+          ),
+          options: selectedOptions,
+        ),
+        token: 'fixture-only-token',
+        media: media,
+        clock: clock,
+        dialer: (_, _) async => socket,
+        statsSink: reports.add,
+      );
+      unawaited(current.start());
+      await t.pump();
+      socket.incoming.add(jsonEncode(info));
+      await t.pump();
+      var answered = 0, second = 0;
+      // One second of streaming; `hostLegs` are the relay's values of the
+      // stream.stats that arrive within it (null: a message without one).
+      Future<void> advance(int seconds, {List<int?> hostLegs = const []}) async {
+        for (var i = 0; i < seconds; i++) {
+          clock.now = ++second * 1000000;
+          expect(current.closed, isFalse, reason: current.error);
+          for (; answered < socket.sent.length; answered++) {
+            final sent = socket.sent[answered];
+            if (sent['type'] == 'ping') {
+              socket.incoming.add(
+                jsonEncode({'type': 'pong', 'id': sent['id']}),
+              );
+            }
+          }
+          for (final leg in i == 0 ? hostLegs : const <int?>[]) {
+            socket.incoming.add(
+              jsonEncode({
+                'type': 'stream.stats',
+                'capturedFps': 60,
+                'encodedFps': 60,
+                'bitrateKbps': 9000,
+                'relayHostRttMaxMs': ?leg,
+              }),
+            );
+          }
+          socket.incoming.add(packet());
+          await t.pump(const Duration(seconds: 1));
+        }
+      }
+
+      await advance(5);
+      // Three statistics within one second: the middle one is not lost, and
+      // a later message without the member does not clear it.
+      await advance(1, hostLegs: [12, 3190, 40, null]);
+      await advance(8);
+      expect(reports, hasLength(1));
+      expect(reports.first['rttHostMaxMs'], 3190);
+      expect(reports.first.keys.every(streamStatsFields.contains), isTrue);
+      // The next window: statistics without the member (no pong was timed).
+      await advance(1, hostLegs: [null]);
+      await advance(29);
+      expect(reports, hasLength(2));
+      expect(reports[1].containsKey('rttHostMaxMs'), isFalse);
+      expect(reports[1]['captureFps10'], 600, reason: 'the statistics arrived');
+      await current.close();
       await media.events.close();
     },
   );

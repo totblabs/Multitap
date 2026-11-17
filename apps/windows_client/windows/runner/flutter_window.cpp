@@ -1379,6 +1379,13 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->messenger(), "multitap/input",
       &flutter::StandardMethodCodec::GetInstance());
   input_channel_->SetMethodCallHandler([this](const auto& call, auto result) {
+    if (call.method_name() == "inputMethodState") {
+      // Asked when the sign-in ID field gets the focus: the bits of
+      // PasswordIme::Observe, which also puts a missing input context back.
+      result->Success(flutter::EncodableValue(
+          password_ime_.Observe(flutter_controller_->view()->GetNativeWindow())));
+      return;
+    }
     if (call.method_name() != "passwordMode") { result->NotImplemented(); return; }
     const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
     if (!args) { result->Error("invalid_arguments", "Expected password focus state."); return; }

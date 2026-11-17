@@ -108,3 +108,26 @@ export function observabilityStats(session, value, now = performance.now()) {
   if (sent && sent.epoch === epoch && now >= sent.at && now - sent.at <= 3000) metrics.relayForwardUs = sent.us;
   return Object.keys(metrics).length ? { ...base, observability: { protocol: observabilityProtocol, metrics } } : base;
 }
+
+// Not negotiated (clients read stream.stats by key): the relay's own measurement
+// of the Host leg of the client's ping (relay -> Host -> relay), so a slow round
+// trip can be placed on one side of the relay. At most 8 ids wait per session
+// (the oldest goes first); the largest value since the last stream.stats leaves
+// with it as relayHostRttMaxMs (integer ms, 0..60000) and only ever from here.
+export function hostPingSent(session, id, now = performance.now()) {
+  const pending = session.hostPings ??= new Map();
+  pending.delete(id); pending.set(id, now);
+  if (pending.size > 8) pending.delete(pending.keys().next().value);
+}
+export function hostPongReceived(session, id, now = performance.now()) {
+  const sent = session.hostPings?.get(id);
+  if (sent === undefined) return;
+  session.hostPings.delete(id);
+  const ms = Math.min(Math.round(now - sent), 60000);
+  if (ms >= 0 && !(ms <= session.hostRttMaxMs)) session.hostRttMaxMs = ms;
+}
+export function withHostRtt(session, stats) {
+  const { relayHostRttMaxMs: _host, ...base } = stats, ms = session.hostRttMaxMs;
+  session.hostRttMaxMs = undefined;
+  return ms === undefined ? (Object.hasOwn(stats, 'relayHostRttMaxMs') ? base : stats) : { ...base, relayHostRttMaxMs: ms };
+}

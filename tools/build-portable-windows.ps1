@@ -94,6 +94,18 @@ try {
     $env:CMAKE_BUILD_PARALLEL_LEVEL = [string]$Parallel
     $env:MULTITAP_WINDOWS_VARIANT = $Variant
     New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
+    if ($Variant -eq 'Client') {
+        # The UDP leg's own test (the relay's reference bytes, both paths over loopback). flutter test
+        # does not run it, which is how a wrong BIND proof shipped until 1.1.23: no client build without it.
+        $nativeTests = Join-Path $ArtifactRoot 'native-tests'
+        $runner = Join-Path $app 'windows/runner'
+        New-Item -ItemType Directory -Force -Path $nativeTests | Out-Null
+        Push-Location $nativeTests
+        try {
+            Invoke-LoggedNative 'cl.exe' @('/nologo','/std:c++17','/EHsc','/W4','/WX','/permissive-','/utf-8','/DNOMINMAX','/O1',"/I$runner",'/Fe:udp_media_leg_test.exe',(Join-Path $app 'test/native/udp_media_leg_test.cpp'),(Join-Path $runner 'udp_media_leg.cpp'),'ws2_32.lib','bcrypt.lib') "$logPrefix-udp-leg-test-build.log" | Out-Null
+            Invoke-LoggedNative (Join-Path $nativeTests 'udp_media_leg_test.exe') @() "$logPrefix-udp-leg-test.log" | Out-Null
+        } finally { Pop-Location }
+    }
     Push-Location $app
     $pushed = $true
     $inputFiles = @('pubspec.yaml','windows/CMakeLists.txt','windows/flutter/CMakeLists.txt','windows/runner/CMakeLists.txt','windows/runner/main.cpp','windows/runner/Runner.rc','../../native/windows_admin/release_signature.hpp')

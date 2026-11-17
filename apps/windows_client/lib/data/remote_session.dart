@@ -736,6 +736,11 @@ class RemoteSession extends ChangeNotifier {
 
   /// Host capture loop readings since the last statistics sample (host_loop_stats.dart).
   final _hostLoop = HostLoopTally();
+
+  /// The relay's measurement of the Host leg of the ping (relay -> Host ->
+  /// relay, HostStreamTelemetry.relayHostRttMaxMs): the largest since the
+  /// last statistics sample, so no stream.stats between two samples is lost.
+  int? _hostRttMaxMs;
   int? hostFpsTarget;
   bool _observabilityEnabled;
   bool get observabilityEnabled => _observabilityEnabled;
@@ -3113,6 +3118,10 @@ class RemoteSession extends ChangeNotifier {
         _audioStats.host(event, nowUs: _clock.elapsedMicroseconds);
         _stallWatch.host(event, _clock.elapsedMicroseconds);
         _hostLoop.add(HostLoopTally.reading(event));
+        final hostRtt = telemetry.relayHostRttMaxMs;
+        if (hostRtt != null && hostRtt > (_hostRttMaxMs ?? -1)) {
+          _hostRttMaxMs = hostRtt;
+        }
         final fpsTarget = event['fpsTarget'];
         hostFpsTarget = fpsTarget is int && fpsTarget > 0 && fpsTarget <= 240
             ? fpsTarget
@@ -3963,6 +3972,8 @@ class RemoteSession extends ChangeNotifier {
     final stalls = _stallWatch.takeWindow();
     final size = _statsWindow.size;
     if (size != null && size != (width, height)) _flushStats(nowUs);
+    final hostRtt = _hostRttMaxMs;
+    _hostRttMaxMs = null;
     _statsWindow.add(
       StreamStatsSample(
         observability: _observabilityEnabled ? _observationValues(nowUs) : null,
@@ -3975,6 +3986,7 @@ class RemoteSession extends ChangeNotifier {
         textureFps: textureFps,
         receivedMbps: receivedMbps,
         rttMs: rttMs,
+        rttHostMaxMs: hostRtt,
         clientDecodeMs: clientDecodeMs,
         clientDecodeMaxMs: clientDecodeMaxMs,
         clientQueueMs: clientQueueMs,

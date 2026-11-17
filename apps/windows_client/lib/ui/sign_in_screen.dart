@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'appearance_switch.dart';
 
 import '../data/login_memory.dart';
+import '../data/input_method_state.dart';
 import '../data/client_build_version.dart';
 import 'app_dialog.dart';
 import 'app_form.dart';
@@ -44,6 +45,7 @@ class SignInScreen extends StatefulWidget {
     this.onEdited,
     this.restorePassword = true,
     this.onInitialPassword,
+    this.onInputMethodState,
   });
   final Future<SignInResult> Function(String, String) onLogin;
 
@@ -63,6 +65,11 @@ class SignInScreen extends StatefulWidget {
   /// about the attempt before the edit.
   final VoidCallback? onEdited;
   final bool restorePassword;
+
+  /// The Windows IME state each time the ID field got the focus, as the bits
+  /// of [InputMethodState], for the diagnostics. Never called where the
+  /// runner gave no answer.
+  final ValueChanged<int>? onInputMethodState;
   @override
   State<SignInScreen> createState() => _SignInScreenState();
 }
@@ -70,6 +77,8 @@ class SignInScreen extends StatefulWidget {
 class _SignInScreenState extends State<SignInScreen> {
   final _id = TextEditingController();
   final _password = TextEditingController();
+  final _idFocus = FocusNode();
+  bool _idFocused = false;
   bool _rememberPassword = false;
   bool _submitting = false;
   // With no server yet, the address form is the first thing to fill in, so
@@ -88,7 +97,29 @@ class _SignInScreenState extends State<SignInScreen> {
   @override
   void initState() {
     super.initState();
+    _idFocus.addListener(_idFocusChanged);
     unawaited(_restoreRemembered());
+  }
+
+  /// Once per focus gain of the ID field: what the IME state is there (after
+  /// a forced sign-out the field was reported to type Latin letters only).
+  /// Asking is also the repair: the runner puts a missing input context back.
+  void _idFocusChanged() {
+    final focused = _idFocus.hasFocus;
+    if (focused == _idFocused) return;
+    _idFocused = focused;
+    if (!focused) return;
+    final report = widget.onInputMethodState;
+    // The line of a forced sign-out is still shown when the field is entered.
+    final marks = widget.error != null ? InputMethodState.afterSignOut : 0;
+    // A turn later: a node hears of the focus before the focus manager's
+    // listeners do, and the password field leaving password mode is one of
+    // those. Asked first, the runner would still answer "password mode".
+    unawaited(
+      Future.microtask(readInputMethodState).then((bits) {
+        if (bits != null) report?.call(bits | marks);
+      }),
+    );
   }
 
   @override
@@ -281,6 +312,7 @@ class _SignInScreenState extends State<SignInScreen> {
   @override
   void dispose() {
     _editRevision++;
+    _idFocus.dispose();
     _id.dispose();
     _password.dispose();
     super.dispose();
@@ -598,6 +630,7 @@ class _SignInScreenState extends State<SignInScreen> {
     return [
       TextField(
         key: const Key('sign-in-id'),
+        focusNode: _idFocus,
         controller: _id,
         enabled: !working && configured,
         maxLength: 64,

@@ -1,5 +1,5 @@
 import { brokerWebSocketOrigin } from './transport-policy.mjs';
-import { observabilityProtocol, requestedObservability, observabilityCapability, observabilityStats, withoutObservability, beginObservabilityForward, completeObservabilityForward, clearObservability, observabilityTls, safeObservabilityTls, safeObservabilityVersion } from './stream-observability.mjs';
+import { observabilityProtocol, requestedObservability, observabilityCapability, observabilityStats, withoutObservability, beginObservabilityForward, completeObservabilityForward, clearObservability, observabilityTls, safeObservabilityTls, safeObservabilityVersion, hostPingSent, hostPongReceived, withHostRtt } from './stream-observability.mjs';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { TakeoverContexts } from './session-context.mjs';
 import { isDeepStrictEqual } from 'node:util';
@@ -760,7 +760,7 @@ export class Relay {
       if (!this.send(session.host.ws, value)) this.dropHost(session.host, 'host_backpressure'); return;
     }
     if (value.type === 'session.stop') return this.stop(session, 'client_stopped');
-    if (value.type === 'ping' && validClientControl(value)) { this.send(session.host.ws, { ...value, sessionId: session.id }); return; }
+    if (value.type === 'ping' && validClientControl(value)) { hostPingSent(session, value.id); this.send(session.host.ws, { ...value, sessionId: session.id }); return; }
     if (value.type === 'stream.feedback') return; // no alternate input/permission path
     if (value.type === 'stream.resize') return this.signinResize(session, value);
     this.stop(session, 'invalid_input');
@@ -1496,11 +1496,12 @@ export class Relay {
         const forward = session.inputLatency ? inputLatencyForwardStats(session.inputLatency) : null;
         if (session.mode === 'stream') {
           const stats = observabilityStats(session, value);
-          this.send(session.ws, forward ? { ...stats, relayForward: forward } : stats);
+          // relayHostRttMaxMs: the slowest Host leg of the client's pings since the last statistics.
+          this.send(session.ws, withHostRtt(session, forward ? { ...stats, relayForward: forward } : stats));
         }
         return;
       }
-      if (value.type === 'pong' && typeof value.id === 'string' && value.id.length <= 64) { this.send(session.ws, value); return; }
+      if (value.type === 'pong' && typeof value.id === 'string' && value.id.length <= 64) { hostPongReceived(session, value.id); this.send(session.ws, value); return; }
       this.dropHost(host, 'invalid_control');
     });
   }
@@ -1692,6 +1693,8 @@ export class Relay {
       // A changing monitor has no stable input coordinate space. Keep reset,
       // heartbeat and cancellation available while denying pointer/key injection.
       if ((session.resize || (session.initialViewport && (!session.streamReady || session.awaitingKeyFrame))) && value.type === 'input') return;
+      // The Host leg of this ping is timed here (stream-observability.mjs hostPingSent).
+      if (value.type === 'ping') hostPingSent(session, value.id);
       if (!forwardControl(forwarded)) this.dropHost(session.host, 'host_backpressure');
     });
     if (session.resume) this.resume.attached(session, resumed);

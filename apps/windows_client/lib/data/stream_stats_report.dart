@@ -50,6 +50,11 @@ const streamStatsFields = <String>{
   'networkDelayMs',
   'rttMs',
   'rttMaxMs',
+  // The relay's own measurement of the Host leg of this PC's ping (relay ->
+  // Host -> relay; the largest in the window, ms), so a slow round trip can
+  // be placed on one side of the relay. Absent with older brokers, which also
+  // drop the field; the row itself stays valid.
+  'rttHostMaxMs',
   'videoGapMaxMs',
   'hostWorkUs',
   'hostP95Us',
@@ -262,6 +267,7 @@ class StreamStatsSample {
     this.textureFps,
     this.receivedMbps,
     this.rttMs,
+    this.rttHostMaxMs,
     this.clientDecodeMs,
     this.clientDecodeMaxMs,
     this.clientQueueMs,
@@ -388,6 +394,11 @@ class StreamStatsSample {
   final int? losslessTiles;
   final double? decodedFps, textureFps, receivedMbps, rttMs;
 
+  /// The relay's own measurement of the Host leg of the ping (relay -> Host
+  /// -> relay), the largest since the previous reading (ms); null when the
+  /// relay reported none (HostStreamTelemetry.relayHostRttMaxMs).
+  final int? rttHostMaxMs;
+
   /// Independent outputs: the slowest output's decoded rate (decodedFps sums them).
   final double? decodedFpsLowest;
   final double? clientDecodeMs, clientDecodeMaxMs, clientQueueMs;
@@ -466,7 +477,7 @@ class StreamStatsWindow {
   var _decodeMin = _Min();
   var _decodeLow = _Mean(), _captureLow = _Mean(), _encodeLow = _Mean();
   var _rttMax = _Max(), _p95 = _Max(), _hostMax = _Max(), _decodeMax = _Max();
-  var _videoGapMax = _Max();
+  var _videoGapMax = _Max(), _rttHostMax = _Max();
   var _queue = _Max(), _tiles = _Max();
   var _topologyMax = _Max(), _captureMax = _Max();
   var _convertMax = _Max(), _encodeMax = _Max();
@@ -505,6 +516,7 @@ class StreamStatsWindow {
     _receive.add(sample.receivedMbps);
     _rtt.add(sample.rttMs);
     _rttMax.add(sample.rttMs);
+    _rttHostMax.add(sample.rttHostMaxMs?.toDouble());
     _videoGapMax.add(sample.videoGapMaxMs);
     _clientDecode.add(sample.clientDecodeMs);
     _decodeMax.add(sample.clientDecodeMaxMs);
@@ -608,6 +620,7 @@ class StreamStatsWindow {
       'networkDelayMs': _delay.scaled(1),
       'rttMs': _rtt.scaled(1),
       'rttMaxMs': _rttMax.scaled(1),
+      'rttHostMaxMs': _rttHostMax.scaled(1),
       'videoGapMaxMs': _videoGapMax.scaled(1),
       'hostWorkUs': _work.scaled(1000),
       'hostP95Us': _p95.scaled(1000),
@@ -719,6 +732,7 @@ class StreamStatsWindow {
     _captureLow = _Mean();
     _encodeLow = _Mean();
     _rttMax = _Max();
+    _rttHostMax = _Max();
     _videoGapMax = _Max();
     _p95 = _Max();
     _hostMax = _Max();

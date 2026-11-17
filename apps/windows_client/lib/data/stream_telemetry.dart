@@ -208,12 +208,19 @@ class HostStreamTelemetry {
     this.inputFrame,
     this.inputSend,
     this.relayForward,
+    this.relayHostRttMaxMs,
     this.encoder,
     this.legacyEncoder,
     this.lowestCapturedFps,
     this.lowestEncodedFps,
   });
   final double capturedFps, encodedFps, bitrateKbps;
+
+  /// The relay's own measurement of the Host leg of this PC's ping (relay ->
+  /// Host -> relay), so a slow round trip can be placed on one side of the
+  /// relay: the largest since its previous statistics (ms). Null from older
+  /// brokers or when no pong passed the relay meanwhile.
+  final int? relayHostRttMaxMs;
 
   /// tracks-v1 only: the output with the fewest captured / encoded frames
   /// (the rates above sum the outputs). Null for a single stream.
@@ -245,11 +252,15 @@ class HostStreamTelemetry {
     if (capture == null || encode == null || bitrate == null) return null;
     final duration = metricNumber(value['measuredMs'], 120000);
     final target = value['bitrateTarget'], ceiling = value['bitrateMax'];
+    final hostRtt = value['relayHostRttMaxMs'];
     return HostStreamTelemetry(
       capturedFps: capture,
       encodedFps: encode,
       bitrateKbps: bitrate,
       measuredMs: duration,
+      relayHostRttMaxMs: hostRtt is int && hostRtt >= 0 && hostRtt <= 60000
+          ? hostRtt
+          : null,
       pipeline: duration != null && duration > 0
           ? HostPipelineMetrics.parse(value['pipeline'])
           : null,

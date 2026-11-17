@@ -91,8 +91,13 @@ internal class UdpPathGate {
         synchronized(lock) { rule.stream(epoch); this.generation = generation; this.epoch = epoch }
     }
     fun engage(keyed: Boolean) { synchronized(lock) { rule.engage(keyed) } }
-    /** The rule is off; from now on only leg [leg]'s messages may pass (0: none). */
-    fun disengage(leg: Long = 0) { synchronized(lock) { rule.disengage(); this.leg = leg } }
+    /**
+     * The rule is off; from now on only leg [leg]'s messages may pass (0: none).
+     * The gate outlives a connection and the next one counts its stream runs from 1
+     * again, so the "key frame over UDP" mark goes too: a reconnect must not read the
+     * ended connection's mark as its own key frame.
+     */
+    fun disengage(leg: Long = 0) { synchronized(lock) { rule.disengage(); this.leg = leg; generation = 0; keyedStream = 0 } }
 
     /**
      * Media queue, WSS, a packet whose first bytes are [head] ([length] in all):

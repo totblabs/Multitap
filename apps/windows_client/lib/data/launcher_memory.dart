@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../models/session_display_mode.dart';
+import 'input_method_state.dart';
 import 'user_data_path.dart';
 import 'session_guide_memory.dart';
 
@@ -162,12 +163,26 @@ abstract class LauncherMemory {
 
 /// Keeps preferences for this process only (tests and previews).
 class SessionLauncherMemory
-    implements LauncherMemory, SessionGuideStoreProvider {
+    implements
+        LauncherMemory,
+        SessionGuideStoreProvider,
+        InputMethodObservationStore {
   SessionLauncherMemory();
   @override
   final SessionGuideStore sessionGuideStore = MemorySessionGuideStore();
   final _values = <String, LauncherPreferences>{};
   bool _trayNoticeShown = false;
+  var _inputMethods = const <InputMethodObservation>[];
+  @override
+  Future<List<InputMethodObservation>> loadInputMethodObservations() async =>
+      List.of(_inputMethods);
+  @override
+  Future<void> saveInputMethodObservations(
+    List<InputMethodObservation> seen,
+  ) async {
+    _inputMethods = List.of(seen);
+  }
+
   @override
   Future<LauncherPreferences> load(String server) async =>
       _values[server] ?? const LauncherPreferences();
@@ -190,7 +205,11 @@ class SessionLauncherMemory
 /// `%LOCALAPPDATA%\Multitap\Client\launcher.json`, keyed by server origin.
 /// Earlier clients kept session-window choices beside it in [sessionFile]
 /// (`session.json`); none is kept there any more.
-class FileLauncherMemory implements LauncherMemory, SessionGuideStoreProvider {
+class FileLauncherMemory
+    implements
+        LauncherMemory,
+        SessionGuideStoreProvider,
+        InputMethodObservationStore {
   FileLauncherMemory(this.file, {File? sessionFile})
     : sessionFile = sessionFile ?? File('${file.parent.path}/session.json');
   final File file, sessionFile;
@@ -249,6 +268,39 @@ class FileLauncherMemory implements LauncherMemory, SessionGuideStoreProvider {
     final all = await _read();
     final entry = all[_clientKey];
     all[_clientKey] = {if (entry is Map) ...entry, 'trayNoticeShown': true};
+    await writeUserDataFile(file, jsonEncode(all));
+  }
+
+  /// The IME observations waiting for a sign-in, beside the client-wide flags.
+  static const _inputMethodKey = 'inputMethod';
+
+  @override
+  Future<List<InputMethodObservation>> loadInputMethodObservations() async {
+    final entry = (await _read())[_clientKey];
+    return InputMethodObservation.listFrom(
+      entry is Map ? entry[_inputMethodKey] : null,
+    );
+  }
+
+  @override
+  Future<void> saveInputMethodObservations(
+    List<InputMethodObservation> seen,
+  ) async {
+    final all = await _read();
+    final entry = all[_clientKey];
+    final kept = entry is Map && entry.containsKey(_inputMethodKey);
+    // Nothing kept and nothing to keep: the file is not written.
+    if (seen.isEmpty && !kept) return;
+    final next = <Object?, Object?>{if (entry is Map) ...entry}
+      ..remove(_inputMethodKey);
+    if (seen.isNotEmpty) {
+      next[_inputMethodKey] = [for (final item in seen) item.toJson()];
+    }
+    if (next.isEmpty) {
+      all.remove(_clientKey);
+    } else {
+      all[_clientKey] = next;
+    }
     await writeUserDataFile(file, jsonEncode(all));
   }
 

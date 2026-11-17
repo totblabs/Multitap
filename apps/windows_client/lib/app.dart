@@ -32,6 +32,7 @@ import 'data/update_handoff.dart';
 import 'data/client_tray.dart';
 import 'data/desktop_mapping.dart';
 import 'data/launcher_memory.dart';
+import 'data/input_method_state.dart';
 import 'data/session_guide_memory.dart';
 import 'data/desktop_thumbnails.dart';
 import 'data/desktop_previews.dart';
@@ -865,6 +866,8 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
       _keepAlive(session);
       await _refresh();
       if (_session == session) _startDesktopUpdates();
+      // After the list read: that request started this token's diagnostics.
+      if (_session == session) _reportInputMethods(api, session.token);
       return _session == session ? SignInResult.success : SignInResult.failed;
     } on BrokerException catch (error) {
       if (mounted && revision == _authenticationRevision) {
@@ -891,6 +894,63 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
         setState(() => _busy = false);
       }
     }
+  }
+
+  /// IME observations of the sign-in screen's ID field that no sign-in has
+  /// uploaded yet, oldest first (input_method_state.dart). They are saved as
+  /// they are made: when Korean cannot be typed the app is restarted, and the
+  /// next run's sign-in uploads what that run saw.
+  final _inputMethods = <InputMethodObservation>[];
+  bool _inputMethodsLoaded = false;
+  Future<void> _inputMethodWork = Future<void>.value();
+
+  /// One at a time, in order; a failed read or write only loses the saved copy.
+  void _queueInputMethods(
+    Future<void> Function(InputMethodObservationStore? store) work,
+  ) {
+    final memory = _launcherMemory;
+    final store = memory is InputMethodObservationStore
+        ? memory as InputMethodObservationStore
+        : null;
+    _inputMethodWork = _inputMethodWork.then((_) async {
+      if (!_inputMethodsLoaded) {
+        _inputMethodsLoaded = true;
+        final saved = await store?.loadInputMethodObservations();
+        _inputMethods.insertAll(0, saved ?? const []);
+      }
+      await work(store);
+    }).catchError((Object _) {});
+  }
+
+  void _observedInputMethod(int bits) {
+    final seen = InputMethodObservation(bits, DateTime.now());
+    _queueInputMethods((store) async {
+      if (_inputMethods.length >= InputMethodObservation.kept) {
+        _inputMethods.removeLast();
+      }
+      _inputMethods.add(seen);
+      await store?.saveInputMethodObservations(_inputMethods);
+    });
+  }
+
+  /// Hands every waiting observation to the diagnostics of [token], each as
+  /// its own row, and forgets what was taken.
+  void _reportInputMethods(BrokerApi api, String token) {
+    if (api is! InputMethodDiagnosticsBrokerApi) return;
+    final diagnostics = api as InputMethodDiagnosticsBrokerApi;
+    _queueInputMethods((store) async {
+      var taken = false;
+      while (_inputMethods.isNotEmpty &&
+          diagnostics.recordInputMethodState(
+            token,
+            _inputMethods.first.bits,
+            _inputMethods.first.time,
+          )) {
+        _inputMethods.removeAt(0);
+        taken = true;
+      }
+      if (taken) await store?.saveInputMethodObservations(_inputMethods);
+    });
   }
 
   /// 첫 로그인 비밀번호: the new password of an account an administrator set
@@ -2678,6 +2738,7 @@ class _MultitapAppState extends State<MultitapApp> with WidgetsBindingObserver {
             builder: (loginContext) => SignInScreen(
               onLogin: (name, password) => _login(loginContext, name, password),
               onInitialPassword: _setInitialPassword,
+              onInputMethodState: _observedInputMethod,
               serverOrigin: _origin,
               onServerChanged: _changeServer,
               loginMemory: widget.loginMemory,

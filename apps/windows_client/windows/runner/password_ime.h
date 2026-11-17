@@ -19,6 +19,45 @@ class PasswordIme {
     if (!active) Restore();
     else if (requested_) Apply(window);
   }
+  // The IME state of the view as a bit mask. A wire format (multitap/input
+  // inputMethodState, then the `error` of a signIn stage 3 diagnostics row):
+  //     1  the view had an input context when asked
+  //     2  IME open                    (0 without a context)
+  //     4  Hangul / native mode        (0 without a context)
+  //     8  the view has the Win32 keyboard focus
+  //    16  the view's top-level window is the foreground window
+  //    32  password mode requested
+  //    64  the context is held away by password mode
+  //   128  the thread's keyboard layout is Korean
+  //   256  repaired: the context was missing and is back
+  // Outside password mode the view must have its context, so one found missing
+  // there is associated again (the thread's default one). A password field
+  // has none on purpose: never repaired while requested or held.
+  int Observe(HWND view) {
+    int bits = (requested_ ? 32 : 0) | (held_ ? 64 : 0);
+    if (!IsWindow(view)) return bits;
+    if (HIMC context = ImmGetContext(view)) {
+      DWORD conversion = 0, sentence = 0;
+      bits |= 1;
+      if (ImmGetOpenStatus(context)) bits |= 2;
+      if (ImmGetConversionStatus(context, &conversion, &sentence) &&
+          (conversion & IME_CMODE_NATIVE)) bits |= 4;
+      ImmReleaseContext(view, context);
+    } else if (!requested_ && !held_) {
+      ImmAssociateContextEx(view, nullptr, IACE_DEFAULT);
+      if (HIMC repaired = ImmGetContext(view)) {
+        bits |= 256;
+        ImmReleaseContext(view, repaired);
+      }
+    }
+    if (GetFocus() == view) bits |= 8;
+    HWND foreground = GetForegroundWindow();
+    if (foreground &&
+        GetAncestor(foreground, GA_ROOT) == GetAncestor(view, GA_ROOT)) bits |= 16;
+    if (PRIMARYLANGID(LOWORD(reinterpret_cast<UINT_PTR>(GetKeyboardLayout(0)))) ==
+        LANG_KOREAN) bits |= 128;
+    return bits;
+  }
  private:
   void Apply(HWND window) {
     if (held_ || !IsWindow(window)) return;

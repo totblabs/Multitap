@@ -50,9 +50,44 @@ int main() {
     ok = ok && released == context;
     if (released) ImmReleaseContext(window, released);
   }
+  {
+    // Observe reports what the window has and repairs only outside password mode.
+    multitap::PasswordIme scope;
+    HIMC present = ImmGetContext(window);
+    DWORD conversion = 0, sentence = 0;
+    const bool was_open = present && ImmGetOpenStatus(present);
+    if (present) {
+      ImmGetConversionStatus(present, &conversion, &sentence);
+      ImmReleaseContext(window, present);
+    }
+    const int healthy = scope.Observe(window);
+    ok = ok && present && (healthy & 1) && !(healthy & (32 | 64 | 256)) &&
+        ((healthy & 2) != 0) == was_open &&
+        ((healthy & 4) != 0) == ((conversion & IME_CMODE_NATIVE) != 0);
+    // Taken away from outside (not by the scope): reported missing, put back.
+    // The repair associates the thread's default context, not `context`.
+    ImmAssociateContext(window, nullptr);
+    const int repaired = scope.Observe(window);
+    ok = ok && !(repaired & 1) && (repaired & 256) && !(repaired & (2 | 4 | 32 | 64));
+    HIMC back = ImmGetContext(window);
+    ok = ok && back != nullptr;
+    if (back) ImmReleaseContext(window, back);
+    const int settled = scope.Observe(window);
+    ok = ok && (settled & 1) && !(settled & 256);
+    // A password field has no context on purpose: missing, but not repaired.
+    scope.Set(window, true);
+    const int password = scope.Observe(window);
+    ok = ok && !(password & 1) && (password & 32) && (password & 64) && !(password & 256);
+    HIMC held = ImmGetContext(window);
+    ok = ok && held == nullptr;
+    if (held) ImmReleaseContext(window, held);
+    scope.Set(window, false);
+    const int after = scope.Observe(window);
+    ok = ok && (after & 1) && !(after & (32 | 64 | 256));
+  }
   ImmAssociateContext(window, original);
   ImmDestroyContext(context);
   DestroyWindow(window);
-  std::cout << (ok ? "Native IMM scope: disabled during password focus; restored on blur/background and after release.\n" : "Native IMM scope failed.\n");
+  std::cout << (ok ? "Native IMM scope: disabled during password focus; restored on blur/background and after release; a context missing outside password mode is reported and put back.\n" : "Native IMM scope failed.\n");
   return ok ? 0 : 3;
 }

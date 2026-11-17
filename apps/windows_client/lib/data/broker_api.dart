@@ -1924,12 +1924,22 @@ abstract interface class SessionRenewalBrokerApi {
 
   /// Diagnostics (event signIn): [stage] 1 = renewal, 2 = silent sign-in with
   /// the remembered password; failures carry a fixed code, never a message.
+  /// Stage 3 is not a renewal: [InputMethodDiagnosticsBrokerApi].
   void recordSessionRenewal(
     String token, {
     required int stage,
     required bool ok,
     String? code,
   });
+}
+
+/// Diagnostics (event signIn, stage 3, ok true): the Windows IME state seen
+/// when the sign-in screen's ID field got the focus. `error` carries [bits]
+/// (input_method_state.dart; a state, not a failure) and the row's time is
+/// [time], when it was seen, which can be before this sign-in or this run.
+abstract interface class InputMethodDiagnosticsBrokerApi {
+  /// False when no reporter of [token] took the row (it is offered again).
+  bool recordInputMethodState(String token, int bits, DateTime time);
 }
 
 class BrokerConsoleWebViewGrant {
@@ -2054,6 +2064,7 @@ class HttpBrokerApi
         ConsoleWebViewBrokerApi,
         ConsoleTakeoverBrokerApi,
         SessionRenewalBrokerApi,
+        InputMethodDiagnosticsBrokerApi,
         ConsoleRecoveryApi,
         HostUpdateBrokerApi,
         FavoriteBrokerApi,
@@ -3805,6 +3816,21 @@ class HttpBrokerApi
       code: ok ? null : code,
       values: {'ok': ok, 'stage': stage},
     );
+  }
+
+  @override
+  bool recordInputMethodState(String token, int bits, DateTime time) {
+    // The reporter starts with a token's first request (a sign-in's list
+    // read) and ends with its sign-out; none is started for a row.
+    final logger = _diagnosticToken == token ? _diagnostics : null;
+    if (logger == null) return false;
+    logger.record(
+      'signIn',
+      time: time,
+      values: {'ok': true, 'stage': 3, 'error': bits},
+    );
+    // A reporter the broker turned away is closed and keeps nothing.
+    return logger.pending;
   }
 
   @override

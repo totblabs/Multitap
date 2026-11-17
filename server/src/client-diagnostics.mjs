@@ -38,7 +38,10 @@ const hostLoopNumeric = ['hostBackgroundTicks', 'hostBackgroundMs', 'hostSecureH
   'hostSecureHelperTicks', 'hostSecureHelperMs', 'hostFollows', 'hostFollowMs', 'hostOvershootMaxUs', 'hostTailMaxUs', 'hostPipeWriteMaxUs'];
 const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samples', 'windowMs', 'srcWidth', 'srcHeight', 'decodeFps10', 'decodeFpsMin10', 'textureFps10', 'captureFps10', 'encodeFps10',
   // tracks-v1 clients: the slowest output's rates (the others are summed over outputs).
-  'decodeFpsLow10', 'captureFpsLow10', 'encodeFpsLow10', 'receiveKbps', 'bitrateKbps', 'targetKbps', 'networkDelayMs', 'rttMs', 'rttMaxMs', 'hostWorkUs', 'hostP95Us', 'hostMaxUs', 'captureUs', 'convertUs', 'encodeUs', 'decodeUs', 'decodeMaxUs', 'queueMaxMs', 'skipped', 'losslessTiles', 'losslessKbps', 'inputHostP50Us', 'inputHostP95Us', 'inputFrameP50Us', 'inputFrameP95Us',
+  'decodeFpsLow10', 'captureFpsLow10', 'encodeFpsLow10', 'receiveKbps', 'bitrateKbps', 'targetKbps', 'networkDelayMs', 'rttMs', 'rttMaxMs',
+  // The relay's own measurement of the Host leg of the client's ping (relay -> Host -> relay; the largest in the
+  // window, ms), so a slow round trip (rttMaxMs) can be placed on one side of the relay.
+  'rttHostMaxMs', 'hostWorkUs', 'hostP95Us', 'hostMaxUs', 'captureUs', 'convertUs', 'encodeUs', 'decodeUs', 'decodeMaxUs', 'queueMaxMs', 'skipped', 'losslessTiles', 'losslessKbps', 'inputHostP50Us', 'inputHostP95Us', 'inputFrameP50Us', 'inputFrameP95Us',
   // texture-pacing-v1 clients: decoded -> taken by Flutter wait and
   // Flutter's texture upload (us), frames queued/skipped in the window, the
   // texture path (0 = CPU pixel buffer, 1 = GPU surface) and the composition
