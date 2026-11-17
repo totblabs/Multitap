@@ -269,6 +269,93 @@ timings vary.
 `stream.stats.lossless` (single output) and the native `lossless*` counters
 report what a real session does.
 
+## Moves: text stays exact while it scrolls (design, 2026-11-18)
+
+Owner decision 2026-11-18 (docs/user-decisions.md): text must stay sharp while the
+screen scrolls. Today a scroll changes every tile of the pane on every tick, so
+all of them are dropped and the pane is plain video until it stops (scroll scene
+above: 26.0 -> 26.8 dB, exactShare 0.00).
+
+Idea: a scroll does not change the content, it moves it. The client already has
+the pane in its lossless layer, so the Host sends "these rows moved by dy" and
+only the newly exposed strip as pixels.
+
+- **Detection (Host, built):** `ScrollDetector` (`apps/windows_host/src/scroll_detect.hpp`)
+  compares the previous composed BGRA (the mirror) with the current one inside the
+  changed area. 32-column bands vote for one vertical offset from row signatures;
+  the rectangle is then established exactly: rows by `memcmp` at that offset,
+  left and right edges column by column. Nothing is guessed, so a move replayed
+  on the previous frame plus the strip from the current frame equals the current
+  frame inside the rectangle (the test asserts this for every case). Edges need
+  not lie on the tile grid. Cost about 3 ms for a full 1080p frame on the test VM,
+  on the helper thread.
+- **Host pipeline (built, `LosslessSettings::moves`, off until a client asks):**
+  in `beforeEncode`, before `compare`. The detector reads the changed box of the
+  frame where it lies (no copy when it is one surface). What it returns is cut to
+  the longest run of tile rows the client shows losslessly across the pane; the
+  mirror is shifted there, and everything the move does not give goes as
+  rectangles of at most 64 x 64: the exposed strip, and rows where something else
+  changed (the line under the pointer, the edge of a scroll bar thumb), only the
+  blocks that really differ. Moved tiles then compare equal and stay present; the
+  picture-anchor rule exempts them from "the picture changed without the pixels",
+  and each one is still checked against the encoder's picture. Move and rectangles
+  are charged to the token bucket and bounded by `movePacketBytes`; more than
+  that (a fling) leaves the tick as before: drops.
+  - **Rows that are not lossless** (dropped by an earlier fling, or never added):
+    while the pane scrolls by at most a tile per tick they come back with the
+    tick's video, in whole tile rows, nearest the lossless rows first, as far as
+    the bucket allows after a reserve for the next moves. A partial row would be
+    dropped on the next tick, so a row that does not fit is taken back.
+  - **Something else moves** (a video, a map): after two misses the detector is
+    asked less and less often (every 2, 4, ... 30 ticks) until the picture rests
+    for six ticks.
+  - **Detector:** a scroll that goes on in the same pane votes with four of its
+    bands and every third row (0.4 ms at 1080p instead of 2.2 ms for a first look);
+    rows that moved together but are parted by at most 96 other rows stay one
+    rectangle when each part has rows that really changed.
+  - **Measured** (`MultitapHostLosslessTilesEncoderTest --moves`, 1920 x 1080, 4 px
+    per tick with a 296 px jump back every 75 ticks): ticks of the scroll that are
+    pixel-identical 0 % -> 87 % (the rest are the two jumps and the rows coming
+    back after them), the last tick exact, video bytes unchanged, tile bytes
+    696 -> 1.70 MB in three seconds, 178 moves, 2 not sent, no tile that differs
+    from the encoder's picture, no stale pixel. Tile work beyond the encode
+    (it runs beside it) 41 -> 252 ms in total, at most 2.6 ms on a tick. A map
+    pan costs 364 -> 384 ms of tile work in 180 ticks. Without `--moves` every
+    number equals the release. `MultitapHostLosslessTilesTest` holds the rules:
+    every tick of a 60-step scroll with a tinted line and a creeping thumb is
+    exact, a page down inside the budget is exact at once, one beyond it is video,
+    and the pane is exact again while it still scrolls.
+  - **Real screen** (`MultitapHostLosslessTilesTest --screen 720 moves`, 2026-11-18, a test VM at
+    1280 x 800, Edge scrolling a Korean and English page with a sticky header, a
+    fixed tinted bar and gradient blocks: reading speed, wheel steps, a fling):
+    of 574 ticks on which the picture changed 520 were pixel-identical on the
+    client, against 0 of 583 without moves; 522 moves, 51 not sent (the fling),
+    935 tiles came back while scrolling, no stale pixel on any tick, tile bytes
+    4.5 MB against 3.2 MB in 12 s. The probe reads the screen with BitBlt, so it
+    says nothing about the capture path or a real session.
+- **Opt-in (built):** the client's ping nonce `lt1-m<n>`; a Host without moves
+  reads the tiles-v1 opt-in in it. The Host's `stream.stats` lossless block gains
+  `moves` (scrolls sent as a move), which the apps report as `losslessMoves`.
+- **Wire (built):** the `TSL1` magic stays (many places recognise it). Two new add
+  codecs inside it: 2 = move {x, y, width, height, dy}, 3 = rectangle pixels
+  {x, y, width, height, TQ1 bytes}. Both apply with the packet's `dropPts`, like
+  drops: on the decoded frame that carries the scrolled picture, never earlier.
+  An older client would poison on an unknown codec, so the Host sends them only
+  to a client that asked (`lt1-m`).
+- **Windows client (built):** `lossless::Compositor` queues the two ops with the
+  drops, shifts rows of `layer_` in place and decodes the strip when a decoded
+  frame reaches `dropPts`; the GPU overlay uploads the tiles they touched again,
+  one upload per run of tiles in a row (`gpu::UploadMovedTiles`; WARP smoke test).
+- **Android (built):** the Kotlin compositor keeps the pixels of every tile when
+  its engine takes moves (one RGBA layer of the source size), applies the queue at
+  the latch that maps to `dropPts` and sends the touched tiles to the tile texture
+  again with the existing upload, one call per run of tiles in a row. Checked
+  against vectors from the shared C++ (`lossless_moves_vectors.txt`). A copy
+  inside the GL texture (FBO + `glCopyTexSubImage2D`) would spare the upload; it
+  waits for a measurement on a device.
+- **Not measured yet:** a real session (capture path, relay, a real GPU, a
+  phone); the upload cost per scrolled frame on the clients.
+
 ## Limits
 
 - Photographic content compresses poorly in TQ1 (≈ 3–4 B/px); the token bucket

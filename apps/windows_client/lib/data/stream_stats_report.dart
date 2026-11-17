@@ -68,6 +68,7 @@ const streamStatsFields = <String>{
   'skipped',
   'losslessTiles',
   'losslessKbps',
+  'losslessMoves',
   'inputHostP50Us',
   'inputHostP95Us',
   'inputFrameP50Us',
@@ -275,6 +276,7 @@ class StreamStatsSample {
     this.appliedBitrate,
     this.losslessTiles,
     this.losslessKbps,
+    this.losslessMoves,
     this.host,
     this.inputHostP50Ms,
     this.inputHostP95Ms,
@@ -392,6 +394,9 @@ class StreamStatsSample {
   final int width, height;
   final int? sourceWidth, sourceHeight, appliedBitrate, skippedDecodedFrames;
   final int? losslessTiles;
+
+  /// Scrolls the Host sent as a move since the stream began (tiles-v2).
+  final int? losslessMoves;
   final double? decodedFps, textureFps, receivedMbps, rttMs;
 
   /// The relay's own measurement of the Host leg of the ping (relay -> Host
@@ -634,6 +639,7 @@ class StreamStatsWindow {
       'skipped': last.skippedDecodedFrames,
       'losslessTiles': _tiles.scaled(1),
       'losslessKbps': _lossless.scaled(1),
+      'losslessMoves': last.losslessMoves,
       'inputHostP50Us': _latest(_inputHost50),
       'inputHostP95Us': _latest(_inputHost95),
       'inputFrameP50Us': _latest(_inputFrame50),

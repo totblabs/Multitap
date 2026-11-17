@@ -74,6 +74,16 @@ abstract interface class LosslessTileMedia {
 
 const losslessTilesPingPrefix = 'lt1-';
 
+/// tiles-v2 (moves): an engine whose compositor also takes moves and
+/// rectangles, so a pane of text stays exact while it scrolls. Its opt-in
+/// carries this mark after the prefix (`lt1-m<n>`); a Host without moves reads
+/// the plain tiles-v1 opt-in in it.
+abstract interface class LosslessMoveMedia {
+  bool get losslessMoves;
+}
+
+const losslessTilesMovesMark = 'm';
+
 /// The same session asks for no tiles now (게임 마우스 holds the mouse).
 /// Hosts without it read a plain ping and keep their tiles.
 const losslessTilesPausePrefix = 'lt0-';
@@ -151,6 +161,7 @@ class NativeRemoteMedia
     implements
         RemoteTrackMedia,
         LosslessTileMedia,
+        LosslessMoveMedia,
         InputFrameWatchMedia,
         RemoteCursorMedia,
         RemoteThumbnailPrivacy,
@@ -199,6 +210,10 @@ class NativeRemoteMedia
 
   @override
   final bool losslessTiles;
+  // The Windows runner's compositor applies moves on both of its paths
+  // (lossless_tiles.hpp, gpu_lossless.h).
+  @override
+  bool get losslessMoves => losslessTiles;
   @override
   bool udpPathRule = false;
   int _generation = 0;
@@ -1173,6 +1188,10 @@ class RemoteSession extends ChangeNotifier {
   int? losslessTiles;
   double? losslessKbps;
 
+  /// tiles-v2: scrolls the Host sent as a move since the stream began (null
+  /// from a Host without moves).
+  int? losslessMoves;
+
   /// The host reported no playback device in the VM, so no sound can play.
   bool remoteAudioMissing = false;
   static String get remoteAudioMissingStatus => l10n.desktopHasNoSoundDevice;
@@ -1349,7 +1368,12 @@ class RemoteSession extends ChangeNotifier {
     final prefix = tiles
         ? (_losslessPaused ? losslessTilesPausePrefix : losslessTilesPingPrefix)
         : (_losslessOffered ? losslessTilesPausePrefix : '');
-    _ping = '$prefix${++_nonce}';
+    final moves =
+        tiles &&
+        !_losslessPaused &&
+        _media is LosslessMoveMedia &&
+        (_media as LosslessMoveMedia).losslessMoves;
+    _ping = '$prefix${moves ? losslessTilesMovesMark : ''}${++_nonce}';
     _pingUs = now;
     _send({'type': 'ping', 'id': _ping!});
   }
@@ -3148,12 +3172,15 @@ class RemoteSession extends ChangeNotifier {
         final lossless = event['lossless'];
         if (lossless is Map && lossless['protocol'] == 'tiles-v1') {
           final tiles = lossless['presentTiles'], kbps = lossless['kbps'];
+          final moves = lossless['moves'];
+          losslessMoves = moves is int && moves >= 0 ? moves : null;
           losslessTiles = tiles is int && tiles >= 0 ? tiles : null;
           losslessKbps = kbps is num && kbps.isFinite && kbps >= 0
               ? kbps.toDouble()
               : null;
         } else {
           losslessTiles = losslessKbps = null;
+          losslessMoves = null;
         }
         notifyListeners();
       case 'pong':
@@ -3993,6 +4020,7 @@ class RemoteSession extends ChangeNotifier {
         skippedDecodedFrames: skippedDecodedFrames,
         appliedBitrate: appliedBitrate,
         losslessTiles: losslessTiles,
+        losslessMoves: losslessMoves,
         losslessKbps: losslessKbps,
         host: hostTelemetryFresh ? hostTelemetry : null,
         inputHostP50Ms: inputToHostP50Ms,

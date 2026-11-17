@@ -1,10 +1,11 @@
 // GPU presentation plumbing on the WARP software rasterizer: the D3D11 video
 // processor NV12 -> BGRA conversion against the CPU reference, the pooled
 // shared textures (opened by a second device the way Flutter's renderer opens
-// them), scaling, the lossless overlay copy and the adapter selection
+// them), scaling, the lossless overlay copy, moves on the overlay and the adapter selection
 // fallbacks. WARP stands in for a GPU; it proves the plumbing and the colour
 // maths, not a real GPU's speed or driver behaviour.
 #include "gpu_video.h"
+#include "gpu_lossless.h"
 #include "../../../../native/windows_video/color.hpp"
 #include <cmath>
 #include <iostream>
@@ -184,6 +185,70 @@ std::string scalingAndOverlay(const std::shared_ptr<gpu::Device>& device) {
   return "{\"case\":\"scalingAndOverlay\",\"tilesExact\":true}";
 }
 
+// tiles-v2 on the GPU path: after a move with its rectangles, and a tile that
+// came back behind them, the frame the overlay gives equals the CPU
+// compositor's, pixel for pixel, on the frame they belong to and not before.
+std::string movesOnOverlay(const std::shared_ptr<gpu::Device>& device) {
+  constexpr uint32_t w = 256, h = 192;  // 4 x 3 tiles
+  constexpr int paneX = 30, paneY = 20, paneW = 196, paneH = 150, dy = 17;
+  const auto mix = [](uint32_t a, uint32_t b) { uint32_t v = a * 0x9e3779b1u ^ (b + 0x85ebca6bu); v ^= v >> 15; v *= 0x2c1b3c6du; v ^= v >> 12; return v; };
+  const auto desktop = [&](int offset, uint32_t stamp) {  // BGRA: chrome, a pane showing document rows from `offset`
+    std::vector<uint8_t> bgra(size_t(w) * h * 4);
+    for (int y = 0; y < int(h); ++y) for (int x = 0; x < int(w); ++x) {
+      const bool inside = x >= paneX && x < paneX + paneW && y >= paneY && y < paneY + paneH;
+      uint32_t colour = inside ? mix(uint32_t(x), uint32_t(y - paneY + offset)) : mix(uint32_t(x) + 7777u, uint32_t(y));
+      if (stamp && x >= 232 && x < 248 && y >= 4 && y < 12) colour = stamp;  // a change in the chrome (tile 3)
+      uint8_t* p = &bgra[(size_t(y) * w + size_t(x)) * 4]; p[0] = uint8_t(colour); p[1] = uint8_t(colour >> 8); p[2] = uint8_t(colour >> 16); p[3] = 255;
+    }
+    return bgra;
+  };
+  const auto rgbaOf = [](std::vector<uint8_t> pixels) { for (size_t n = 0; n < pixels.size(); n += 4) std::swap(pixels[n], pixels[n + 2]); return pixels; };
+  const auto before = desktop(500, 0), after = desktop(500 + dy, 0xff00ff00u);
+  gpu::Converter converter(device); gpu::Overlay overlay(device);
+  lossless::Compositor onGpu, onCpu;
+  require(onGpu.Configure(w, h) && onCpu.Configure(w, h), "Compositors");
+  uint32_t sequence = 0;
+  const auto offer = [&](std::vector<uint8_t> bytes) {
+    const size_t had = onGpu.addedTiles().size();
+    require(onGpu.Accept(bytes.data(), bytes.size()) == lossless::Compositor::Outcome::accepted && onCpu.Accept(bytes.data(), bytes.size()) == lossless::Compositor::Outcome::accepted, "Tile packet");
+    require(gpu::UploadAddedTiles(onGpu, overlay, had), "Overlay upload");
+  };
+  {
+    lossless::PayloadBuilder builder(w, h, ++sequence, lossless::noDrop, {});
+    for (uint32_t i = 0; i < 12; ++i) { const auto r = lossless::tileRect(i, w, h); builder.add(uint16_t(i), &before[(size_t(r.y) * w + r.x) * 4], size_t(w) * 4); }
+    offer(builder.finish());
+  }
+  std::vector<uint8_t> nv12(size_t(w) * h * 3 / 2, uint8_t(128));
+  // One decoded frame through both paths; the CPU path starts from the same converted video pixels.
+  const auto frameAt = [&](uint64_t pts, std::vector<uint8_t>& cpu) {
+    std::shared_ptr<gpu::Frame> video;
+    require(SUCCEEDED(converter.FromSystem(nv12.data(), w, h, w, h, w, h, gpu::Colour{}, video)) && video->ReadRgba(cpu), "Video frame");
+    onCpu.ComposeDecoded(cpu.data(), size_t(w) * 4, pts);
+    DecodedFrame frame; frame.width = w; frame.height = h; frame.pts_us = pts; frame.gpu = video;
+    require(SUCCEEDED(gpu::ComposeDecoded(onGpu, converter, overlay, frame)), "GPU composition");
+    std::vector<uint8_t> got; require(frame.gpu->ReadRgba(got), "Readback");
+    return got;
+  };
+  std::vector<uint8_t> cpu;
+  require(frameAt(10, cpu) == cpu && cpu == rgbaOf(before), "The settled desktop is not exact on the GPU path");
+  {
+    // The scroll, due with frame 20: tile 3 dropped, the move, its strip, tile 3 back with its change.
+    lossless::PayloadBuilder builder(w, h, ++sequence, 20, {3});
+    builder.move(uint16_t(paneX), uint16_t(paneY), uint16_t(paneW), uint16_t(paneH), int16_t(dy));
+    for (int x = paneX; x < paneX + paneW; x += 64) {
+      const int width = std::min(64, paneX + paneW - x), top = paneY + paneH - dy;
+      builder.rect(uint16_t(x), uint16_t(top), uint16_t(width), uint16_t(dy), &after[(size_t(top) * w + size_t(x)) * 4], size_t(w) * 4);
+    }
+    const auto r = lossless::tileRect(3, w, h);
+    builder.add(3, &after[(size_t(r.y) * w + r.x) * 4], size_t(w) * 4);
+    offer(builder.finish());
+  }
+  require(frameAt(19, cpu) == cpu && cpu == rgbaOf(before), "A move showed before its frame on the GPU path");
+  require(frameAt(20, cpu) == cpu && cpu == rgbaOf(after), "The scrolled pane is not exact on the GPU path");
+  require(frameAt(21, cpu) == cpu && cpu == rgbaOf(after) && !onGpu.poisoned() && onGpu.stats().moves == 1 && onGpu.movedTiles().empty(), "The scrolled pane did not stay exact on the GPU path");
+  return "{\"case\":\"movesOnOverlay\",\"exactOnItsFrame\":true}";
+}
+
 std::string selection() {
   gpu::SelectionOptions options; options.warp_render = true; options.allow_software_render = true;
   auto result = gpu::Select(nullptr, 1920, 1080, options);
@@ -254,8 +319,8 @@ int main() {
     HRESULT failure = S_OK;
     const auto device = gpu::Device::Create(nullptr, true, &failure);
     if (!device) { std::cout << "{\"kind\":\"gpu-video-smoke\",\"skipped\":\"no D3D11 WARP device\",\"hr\":" << failure << "}\n"; return 0; }
-    const auto a = conversion(device), b = sharing(device), c = scalingAndOverlay(device), t = textureInput(device), d = selection(), e = trackSelection(device);
-    std::cout << "{\"kind\":\"gpu-video-smoke\",\"checks\":" << checks << ",\"adapter\":\"warp\",\"cases\":[" << a << ',' << b << ',' << c << ',' << t << ',' << d << ',' << e << "],\"realGpu\":false}\n";
+    const auto a = conversion(device), b = sharing(device), c = scalingAndOverlay(device), m = movesOnOverlay(device), t = textureInput(device), d = selection(), e = trackSelection(device);
+    std::cout << "{\"kind\":\"gpu-video-smoke\",\"checks\":" << checks << ",\"adapter\":\"warp\",\"cases\":[" << a << ',' << b << ',' << c << ',' << m << ',' << t << ',' << d << ',' << e << "],\"realGpu\":false}\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << "gpu video smoke: " << error.what() << '\n'; return 1; }
 }

@@ -98,6 +98,64 @@ class LosslessTilesTest {
         assertEquals("only tiles over a smaller video are scaled", listOf(false, true, false, false), scaled)
     }
 
+    // tiles-v2: a move, its rectangles and whatever arrives behind them apply on
+    // their frame, in order, and the sink gets the tiles they changed
+    // (lossless_moves_vectors.txt, the same generator with "moves").
+    private fun moveSteps(): List<List<String>> {
+        val text = javaClass.classLoader!!.getResourceAsStream("lossless_moves_vectors.txt")!!.bufferedReader().readText()
+        val lines = text.lines().filter { it.isNotBlank() && !it.startsWith("#") }.map { it.trim().split(' ') }
+        assertEquals(listOf("frame", "144", "80"), lines.first())
+        return lines.drop(1)
+    }
+
+    @Test
+    fun movesAndRectanglesWaitForTheirFrameLikeTheSharedCpp() {
+        val compositor = LosslessCompositor(144, 80, moves = true)
+        val layer = Layer(144, 80)
+        var states = 0
+        val waiting = ArrayList<Boolean>()
+        for (step in moveSteps()) when (step[0]) {
+            "packet" -> {
+                val payload = hex(step[1])
+                assertEquals(if (step[2] == "1") LosslessCompositor.Outcome.ACCEPTED else LosslessCompositor.Outcome.IGNORED, compositor.accept(payload, 0, payload.size, layer))
+                waiting.add(compositor.waiting)
+            }
+            "state" -> {
+                compositor.applyDecoded(step[1].toLong(), layer)
+                val present = (0 until compositor.count).joinToString("") { if (compositor.present(it)) "1" else "0" }
+                assertEquals("present tiles at pts ${step[1]}", step[2], present)
+                assertEquals("composed picture at pts ${step[1]}", step[3], fnv(layer.compose(compositor)))
+                states++
+            }
+        }
+        assertEquals(9, states)
+        // The plain first and third packets applied at once; the others waited.
+        assertEquals(listOf(false, true, false, true, true, true), waiting)
+        assertEquals(2L, compositor.movesApplied)
+        assertTrue("a move over a tile the client lacks ends the tiles", compositor.poisoned)
+        assertFalse(compositor.waiting)
+    }
+
+    @Test
+    fun aDeviceOnWhichMovesAreSlowStopsAskingForThem() {
+        // A quarter of a window of frames with moves took too long: too slow here.
+        assertFalse(AndroidMedia.slowMoves(AndroidMedia.MOVE_WINDOW - 1, AndroidMedia.MOVE_WINDOW - 1))
+        assertFalse(AndroidMedia.slowMoves(AndroidMedia.MOVE_WINDOW, AndroidMedia.MOVE_WINDOW / 4 - 1))
+        assertTrue(AndroidMedia.slowMoves(AndroidMedia.MOVE_WINDOW, AndroidMedia.MOVE_WINDOW / 4))
+        assertEquals(6_000_000L, AndroidMedia.MOVE_SLOW_NANOS)
+    }
+
+    @Test
+    fun anEngineThatDidNotAskForMovesRefusesThem() {
+        val compositor = LosslessCompositor(144, 80)
+        val layer = Layer(144, 80)
+        val packets = moveSteps().filter { it[0] == "packet" }.map { hex(it[1]) }
+        assertEquals(LosslessCompositor.Outcome.ACCEPTED, compositor.accept(packets[0], 0, packets[0].size, layer))
+        assertEquals(LosslessCompositor.Outcome.IGNORED, compositor.accept(packets[1], 0, packets[1].size, layer))
+        assertTrue(compositor.poisoned)
+        assertEquals(0, compositor.presentTiles)
+    }
+
     @Test
     fun aTilePacketInsideAMediaPacketIsReadAtItsOffset() {
         val payload = hex(vectors().steps.first { it[0] == "packet" }[1])

@@ -108,10 +108,10 @@ struct Run {
   // exact "tiles never change video submissions" check stays meaningful; x264
   // output timing can start one more refinement round run to run (its own
   // behaviour is covered by MultitapHostX264EncoderTest).
-  explicit Run(bool tiles) : encoder(width, height, fps, bitrate, {}, host::EncoderBackend::mft), policy(size_t(width) * height * 3 / 2, host::FrameRefinement::forCbr(bitrate, fps)) {
+  explicit Run(bool tiles, bool moves = false) : encoder(width, height, fps, bitrate, {}, host::EncoderBackend::mft), policy(size_t(width) * height * 3 / 2, host::FrameRefinement::forCbr(bitrate, fps)) {
     host::check(decoder.Initialize(width, height), "Decoder");
     require(compositor.Configure(width, height), "Compositor");
-    if (tiles) source = std::make_unique<host::LosslessTileSource>(width, height, host::LosslessSettings::forBitrate(bitrate));
+    if (tiles) { auto settings = host::LosslessSettings::forBitrate(bitrate); settings.moves = moves; source = std::make_unique<host::LosslessTileSource>(width, height, settings); }
   }
   host::Encoder encoder; host::FrameEncodePolicy policy; multitap::RemoteDecoder decoder; multitap::lossless::Compositor compositor;
   std::unique_ptr<host::LosslessTileSource> source; host::ParallelWork helper;
@@ -171,11 +171,13 @@ struct Run {
 };
 }
 
-int main() {
+int main(int argc, char** argv) {
   try {
+    // --moves: tiles-v2 (a scrolled pane stays lossless); without it, exactly the released behaviour.
+    const bool moves = argc == 2 && std::string(argv[1]) == "--moves";
     host::Runtime runtime;
     const auto desktop = desktopPage(), document = documentPage(2), map = mapTexture(2000, 1000);
-    Run plain(false), tiles(true);
+    Run plain(false), tiles(true, moves);
     // Scenes (60 Hz ticks): 0 desktop (static) | 180 page switch (static) |
     // 360 scroll | 540 map pan | 720 typing | 900 cursor moving | 1020 all static to 1260.
     struct Phase { const char* name; int from, to; };
@@ -229,7 +231,8 @@ int main() {
         << ",\"tilePhasesTotalMs\":" << tiles.tileMs << ",\"encodeTotalMs\":{\"original\":" << plain.encodeMs << ",\"tiles\":" << tiles.encodeMs << '}'
         << ",\"videoPathExtensionMs\":{\"total\":" << tiles.extensionMs << ",\"max\":" << tiles.extensionMaxMs << '}'
         << ",\"tilePhasesWithoutVideoMs\":{\"total\":" << tiles.serialTileMs << ",\"max\":" << tiles.serialTileMaxMs << '}'
-        << ",\"pendingInputsAfterEncode\":" << tiles.pendingAfterEncode << '}'
+        << ",\"pendingInputsAfterEncode\":" << tiles.pendingAfterEncode
+        << ",\"moves\":" << stats.moves << ",\"moveBytes\":" << stats.moveBytes << ",\"moveRefusals\":" << stats.moveRefusals << ",\"growTiles\":" << stats.growTiles << ",\"moveMs\":" << stats.moveMs << ",\"moveCopyMs\":" << stats.moveCopyMs << ",\"moveDetectMs\":" << stats.moveDetectMs << ",\"moveAnchorMs\":" << stats.moveAnchorMs << ",\"mismatchTiles\":" << stats.mismatchTiles << '}'
         << ",\"client\":{\"decodedFrames\":" << tiles.decodedFrames << ",\"composeTotalMs\":" << tiles.composeMs << ",\"composeMaxMs\":" << tiles.composeMaxMs
         << ",\"republishes\":" << tiles.republishes << ",\"republishTotalMs\":" << tiles.republishMs << '}'
         << ",\"syntheticPixels\":true,\"actualMicrosoftCpuEncoder\":true,\"actualClientDecoder\":true,\"desktopCaptured\":false,\"relay\":false,\"realSessionAcceptance\":false}\n";

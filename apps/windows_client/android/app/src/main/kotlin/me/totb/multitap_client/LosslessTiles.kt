@@ -32,6 +32,12 @@ internal object LosslessTiles {
     /** Both media envelopes (12-byte legacy, 28-byte tracks) stay <= 4 MiB. */
     const val MAX_PAYLOAD = 4 * 1024 * 1024 - 28
     const val CODEC_TQ1 = 1
+    /** tiles-v2: rows of a rectangle moved by dy, and the exact pixels of a block (each side 1..64). */
+    const val CODEC_MOVE = 2
+    const val CODEC_RECT = 3
+    const val NO_TILE = 0xffff
+    const val MOVE_BYTES = 10
+    const val RECT_HEADER = 8
     /** u64 max: no drop pending. Compared unsigned, as the C++ does. */
     const val NO_DROP = -1L
 
@@ -152,9 +158,27 @@ internal fun interface TileSink {
  * then live in source coordinates ([width] x [height]) and the picture is
  * drawn at the source size, video upscaled where no tile is present
  * (AndroidTileRenderer). Until that packet [width], [height] and [count] are 0.
+ *
+ * tiles-v2 ([moves], an engine whose session asked with "lt1-m"): a packet with
+ * a move or a rectangle waits for the decoded frame it belongs to, and so does
+ * everything that arrives while it waits, in order (Compositor::queue). For
+ * that the pixels of every tile are also kept here (RGBA, [width] x [height]):
+ * a move shifts rows of that layer, and the tiles it touched go to the sink
+ * again when their frame is shown ([applyDecoded]), one call per run of
+ * neighbouring tiles in a row. Without [moves] such a packet is malformed.
  */
-internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, private val allowScaledSource: Boolean = false) {
+internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, private val allowScaledSource: Boolean = false, private val moves: Boolean = false) {
     enum class Outcome { NOT_TILE, ACCEPTED, IGNORED }
+
+    private class Op(val kind: Int, val notBefore: Long, val dropPts: Long, val index: Int, val x: Int, val y: Int, val w: Int, val h: Int, val dy: Int, val pixels: ByteArray?)
+    private val ops = ArrayDeque<Op>()
+    private var layer = ByteArray(0)
+    private var touched = BooleanArray(0)
+    private var run = ByteArray(0)
+    /** Entries wait for their frame: nothing of them shows before it. */
+    val waiting: Boolean get() = ops.isNotEmpty()
+    var movesApplied = 0L
+        private set
 
     private val valid = LosslessTiles.validFrame(videoWidth, videoHeight)
     /** The tiles' (source) size: the video's unless scaled; 0 until a scaled-capable compositor's first packet. */
@@ -216,7 +240,8 @@ internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, pri
      * its due drops apply and the adds so far are part of it (ApplyDecoded;
      * ApplyDecodedScaled makes the same state changes for a scaled source).
      */
-    fun applyDecoded(pts: Long) {
+    fun applyDecoded(pts: Long, sink: TileSink? = null) {
+        advance(pts, sink)
         added.clear()
         if (poisoned || presentTiles == 0) return
         var changed = false
@@ -230,7 +255,7 @@ internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, pri
     /** No tile is shown again in this engine (e.g. the renderer cannot place one). */
     fun poison() {
         poisoned = true
-        added.clear()
+        added.clear(); ops.clear()
         if (presentTiles > 0) { presentMask.fill(0); presentTiles = 0; maskVersion++ }
     }
 
@@ -267,7 +292,25 @@ internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, pri
         val adds = LosslessTiles.u16(p, offset + 22)
         if (size < LosslessTiles.HEADER + drops * 2) return false
         // Allocated on the first tile packet: sessions with released Hosts pay nothing.
-        if (presentMask.size != count) { presentMask = ByteArray(count); dropAt = LongArray(count) { LosslessTiles.NO_DROP } }
+        if (presentMask.size != count) {
+            presentMask = ByteArray(count); dropAt = LongArray(count) { LosslessTiles.NO_DROP }
+            // Without room for the layer the tiles still work; a move then ends them (plain video).
+            if (moves) try { layer = ByteArray(width * height * 4); touched = BooleanArray(count); run = ByteArray(width * LosslessTiles.TILE * 4) } catch (_: OutOfMemoryError) { layer = ByteArray(0) }
+        }
+        // tiles-v2 entries wait for their frame, and everything that arrives while
+        // any of them waits stays behind it, in order.
+        var timed = ops.isNotEmpty()
+        var scan = LosslessTiles.HEADER + drops * 2
+        var scanned = 0
+        while (scanned < adds && !timed) {
+            if (size - scan < LosslessTiles.ADD_HEADER) return false
+            val length = LosslessTiles.u32(p, offset + scan + 4)
+            if (length > (size - scan - LosslessTiles.ADD_HEADER).toLong()) return false
+            val codec = p[offset + scan + 2].toInt()
+            timed = codec == LosslessTiles.CODEC_MOVE || codec == LosslessTiles.CODEC_RECT
+            scan += LosslessTiles.ADD_HEADER + length.toInt(); scanned++
+        }
+        if (timed) return queue(p, offset, size, dropPts, drops, adds, next)
         for (n in 0 until drops) {
             val index = LosslessTiles.u16(p, offset + LosslessTiles.HEADER + n * 2)
             if (index >= count) return false
@@ -287,6 +330,7 @@ internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, pri
             if (presentMask[index].toInt() != 0) { presentMask[index] = 0; presentTiles--; maskVersion++ }
             if (!LosslessTiles.decodeTq1(p, offset + at + LosslessTiles.ADD_HEADER, tileBytes.toInt(), w, h, scratch, 0, w * 4)) return false
             sink.tile(index, x, y, w, h, scratch)
+            if (layer.isNotEmpty()) for (row in 0 until h) System.arraycopy(scratch, row * w * 4, layer, ((y + row) * width + x) * 4, w * 4)
             // Newer content than any pending drop for this tile: it replaces it.
             presentMask[index] = -1; dropAt[index] = LosslessTiles.NO_DROP; presentTiles++; maskVersion++
             added.add(index); addedTiles++
@@ -296,4 +340,131 @@ internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, pri
         sequence = next; packets++; bytes += size
         return true
     }
+
+    private fun queue(p: ByteArray, offset: Int, size: Int, dropPts: Long, drops: Int, adds: Int, next: Long): Boolean {
+        if (layer.isEmpty()) return false
+        val staged = ArrayList<Op>()
+        var last = if (ops.isEmpty()) 0L else ops.last().notBefore
+        // Never earlier than the entry queued before it.
+        fun notBefore(own: Long): Long { if (java.lang.Long.compareUnsigned(own, last) > 0) last = own; return last }
+        for (n in 0 until drops) {
+            val index = LosslessTiles.u16(p, offset + LosslessTiles.HEADER + n * 2)
+            if (index >= count) return false
+            staged.add(Op(OP_DROP, notBefore(dropPts), dropPts, index, 0, 0, 0, 0, 0, null))
+        }
+        var at = LosslessTiles.HEADER + drops * 2
+        for (n in 0 until adds) {
+            if (size - at < LosslessTiles.ADD_HEADER) return false
+            val index = LosslessTiles.u16(p, offset + at)
+            val length = LosslessTiles.u32(p, offset + at + 4)
+            val codec = p[offset + at + 2].toInt()
+            if (p[offset + at + 3].toInt() != 0 || length > (size - at - LosslessTiles.ADD_HEADER).toLong()) return false
+            val body = offset + at + LosslessTiles.ADD_HEADER
+            when (codec) {
+                LosslessTiles.CODEC_TQ1 -> {
+                    if (index >= count) return false
+                    val x = (index % columns) * LosslessTiles.TILE
+                    val y = (index / columns) * LosslessTiles.TILE
+                    val w = minOf(LosslessTiles.TILE, width - x)
+                    val h = minOf(LosslessTiles.TILE, height - y)
+                    val pixels = ByteArray(w * h * 4)
+                    if (!LosslessTiles.decodeTq1(p, body, length.toInt(), w, h, pixels, 0, w * 4)) return false
+                    staged.add(Op(OP_ADD, notBefore(0L), LosslessTiles.NO_DROP, index, x, y, w, h, 0, pixels))
+                }
+                LosslessTiles.CODEC_MOVE, LosslessTiles.CODEC_RECT -> {
+                    // Without a frame to wait for there is no moment to apply it.
+                    val least = if (codec == LosslessTiles.CODEC_MOVE) LosslessTiles.MOVE_BYTES else LosslessTiles.RECT_HEADER
+                    if (index != LosslessTiles.NO_TILE || dropPts == LosslessTiles.NO_DROP || length < least) return false
+                    val x = LosslessTiles.u16(p, body)
+                    val y = LosslessTiles.u16(p, body + 2)
+                    val w = LosslessTiles.u16(p, body + 4)
+                    val h = LosslessTiles.u16(p, body + 6)
+                    if (w == 0 || h == 0 || x + w > width || y + h > height) return false
+                    if (codec == LosslessTiles.CODEC_MOVE) {
+                        val dy = LosslessTiles.u16(p, body + 8).toShort().toInt()
+                        if (length != LosslessTiles.MOVE_BYTES.toLong() || dy == 0 || kotlin.math.abs(dy) >= h) return false
+                        staged.add(Op(OP_MOVE, notBefore(dropPts), dropPts, 0, x, y, w, h, dy, null))
+                    } else {
+                        if (w > LosslessTiles.TILE || h > LosslessTiles.TILE) return false
+                        val pixels = ByteArray(w * h * 4)
+                        if (!LosslessTiles.decodeTq1(p, body + LosslessTiles.RECT_HEADER, (length - LosslessTiles.RECT_HEADER).toInt(), w, h, pixels, 0, w * 4)) return false
+                        staged.add(Op(OP_RECT, notBefore(dropPts), dropPts, 0, x, y, w, h, 0, pixels))
+                    }
+                }
+                else -> return false
+            }
+            at += LosslessTiles.ADD_HEADER + length.toInt()
+        }
+        if (at != size) return false
+        ops.addAll(staged)
+        sequence = next; packets++; bytes += size
+        return true
+    }
+
+    /** Applies, in order, every waiting entry whose frame has come; what they changed goes to [sink]. */
+    private fun advance(pts: Long, sink: TileSink?) {
+        if (poisoned || ops.isEmpty()) return
+        var any = false
+        while (ops.isNotEmpty() && java.lang.Long.compareUnsigned(ops.first().notBefore, pts) <= 0) {
+            if (!apply(ops.removeFirst())) { poison(); return }
+            any = true
+        }
+        if (!any) return
+        // The tile texture follows the layer: one upload per run of touched tiles in a row.
+        try {
+            var index = 0
+            while (index < count) {
+                if (!touched[index]) { index++; continue }
+                val row = index / columns
+                var end = index
+                while (end < count && end / columns == row && touched[end]) { touched[end] = false; end++ }
+                val x = (index % columns) * LosslessTiles.TILE
+                val y = row * LosslessTiles.TILE
+                val w = minOf(width, ((end - 1) % columns + 1) * LosslessTiles.TILE) - x
+                val h = minOf(LosslessTiles.TILE, height - y)
+                for (line in 0 until h) System.arraycopy(layer, ((y + line) * width + x) * 4, run, line * w * 4, w * 4)
+                (sink ?: throw IllegalStateException("no tile sink")).tile(index, x, y, w, h, run)
+                index = end
+            }
+        } catch (_: RuntimeException) { poison() }
+    }
+
+    private fun touch(x: Int, y: Int, w: Int, h: Int) {
+        for (r in y / LosslessTiles.TILE..(y + h - 1) / LosslessTiles.TILE) for (c in x / LosslessTiles.TILE..(x + w - 1) / LosslessTiles.TILE) touched[r * columns + c] = true
+    }
+
+    /** Every tile the rectangle touches is present: what the Host required before it sent the entry. */
+    private fun covered(x: Int, y: Int, w: Int, h: Int): Boolean {
+        for (r in y / LosslessTiles.TILE..(y + h - 1) / LosslessTiles.TILE) for (c in x / LosslessTiles.TILE..(x + w - 1) / LosslessTiles.TILE) if (presentMask[r * columns + c].toInt() == 0) return false
+        return true
+    }
+
+    private fun apply(op: Op): Boolean {
+        when (op.kind) {
+            OP_DROP -> if (presentMask[op.index].toInt() != 0 && java.lang.Long.compareUnsigned(op.dropPts, dropAt[op.index]) < 0) dropAt[op.index] = op.dropPts
+            OP_ADD -> {
+                for (row in 0 until op.h) System.arraycopy(op.pixels!!, row * op.w * 4, layer, ((op.y + row) * width + op.x) * 4, op.w * 4)
+                if (presentMask[op.index].toInt() == 0) { presentMask[op.index] = -1; presentTiles++; maskVersion++ }
+                dropAt[op.index] = LosslessTiles.NO_DROP; addedTiles++
+                touched[op.index] = true
+            }
+            OP_MOVE -> {
+                if (!covered(op.x, op.y, op.w, op.h)) return false
+                val rows = op.h - kotlin.math.abs(op.dy)
+                val bytes = op.w * 4
+                if (op.dy > 0) for (n in 0 until rows) { val y = op.y + n; System.arraycopy(layer, ((y + op.dy) * width + op.x) * 4, layer, (y * width + op.x) * 4, bytes) }
+                else for (n in rows - 1 downTo 0) { val y = op.y - op.dy + n; System.arraycopy(layer, ((y + op.dy) * width + op.x) * 4, layer, (y * width + op.x) * 4, bytes) }
+                movesApplied++
+                touch(op.x, op.y, op.w, op.h)
+            }
+            else -> {
+                if (!covered(op.x, op.y, op.w, op.h)) return false
+                for (row in 0 until op.h) System.arraycopy(op.pixels!!, row * op.w * 4, layer, ((op.y + row) * width + op.x) * 4, op.w * 4)
+                touch(op.x, op.y, op.w, op.h)
+            }
+        }
+        return true
+    }
+
+    private companion object { const val OP_DROP = 0; const val OP_ADD = 1; const val OP_MOVE = 2; const val OP_RECT = 3 }
 }

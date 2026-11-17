@@ -113,6 +113,15 @@ class AndroidRemoteMedia extends NativeRemoteMedia
   bool get losslessTiles => _losslessComposite;
   bool _losslessComposite = false;
 
+  /// tiles-v2: the Kotlin compositor takes moves whenever it composites
+  /// (LosslessTiles.kt), so the opt-in carries the moves mark then.
+  /// Not on a device where applying them takes too much of a frame (stats
+  /// `losslessMovesSlow`, AndroidMedia.kt): the opt-in then goes back to plain
+  /// tiles for the rest of the start and a scroll is video until it rests.
+  @override
+  bool get losslessMoves => _losslessComposite && !_losslessMovesSlow;
+  bool _losslessMovesSlow = false;
+
   /// The pixel size of [texture] when the engine draws it at the source size
   /// of a downscaled start (stats `losslessTexture*`), else null: the
   /// texture then has the video's size. The picture's place on screen and the
@@ -130,6 +139,7 @@ class AndroidRemoteMedia extends NativeRemoteMedia
     diagnostics = result;
     observeAudio(result);
     _losslessComposite = result['losslessComposite'] == true;
+    _losslessMovesSlow = result['losslessMovesSlow'] == true;
     final id = result['losslessTextureId'];
     final width = result['losslessTextureWidth'];
     final height = result['losslessTextureHeight'];
@@ -210,6 +220,7 @@ class AndroidRemoteMedia extends NativeRemoteMedia
   Future<void> stop() {
     cursorState.reset();
     _losslessComposite = false;
+    _losslessMovesSlow = false;
     _sourceSizedTexture = null;
     return super.stop();
   }

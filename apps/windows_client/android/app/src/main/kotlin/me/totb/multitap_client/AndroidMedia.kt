@@ -211,6 +211,16 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     private var losslessIgnored = 0L
     private var losslessTimestampMismatches = 0L
     private var losslessPacketNanos = 0L
+    /**
+     * tiles-v2: what applying the moves of a frame costs here (the layer shift
+     * and the uploads to the tile texture). When a quarter of 120 such frames
+     * took longer than [MOVE_SLOW_NANOS], this start stops asking for moves
+     * (stats `losslessMovesSlow`; the pings then say "lt1-" and the Host sends a
+     * scroll as it did before moves: video until it rests).
+     */
+    private var moveFrames = 0
+    private var slowMoveFrames = 0
+    @Volatile private var losslessMovesSlow = false
     /** stats `losslessComposite`: this start's engine shows tiles (the session opts in only then). */
     @Volatile private var losslessComposite = false
     private val republishCheck = Runnable { checkRepublish() }
@@ -553,6 +563,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
                 // tiles-v1: the session opts in only while every output's engine draws tiles.
                 value["losslessComposite"] = readings.values.all { it["losslessComposite"] == true }
                 value["losslessPoisoned"] = readings.values.any { it["losslessPoisoned"] == true }
+                value["losslessMovesSlow"] = readings.values.any { it["losslessMovesSlow"] == true }
                 for (key in listOf("decodedFrames", "textureFrames", "decodeCalls", "queuedPackets", "queuedBytes", "skippedDecodedFrames",
                     "losslessPackets", "losslessIgnoredPackets", "losslessRepublishes", "losslessPresentTiles", "losslessTimestampMismatches")) {
                     value[key] = readings.values.sumOf { (it[key] as? Number)?.toLong() ?: 0L }
@@ -667,9 +678,11 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             } catch (_: Exception) { null }
             // Without the renderer the decoder renders into the texture at the video size.
             if (renderer == null && output?.scaled == true) try { entry.surfaceTexture().setDefaultBufferSize(w, h) } catch (_: Exception) {}
-            tiles = renderer?.let { LosslessCompositor(w, h, allowScaledSource = output!!.scaled) }
+            // tiles-v2: this engine takes moves (the session's pings then say "lt1-m").
+            tiles = renderer?.let { LosslessCompositor(w, h, allowScaledSource = output!!.scaled, moves = true) }
             losslessComposite = renderer != null
             losslessPackets = 0; losslessIgnored = 0; losslessTimestampMismatches = 0; losslessPacketNanos = 0
+            moveFrames = 0; slowMoveFrames = 0; losslessMovesSlow = false
             decoded = 0; droppedPackets = 0
             error = 0; decodeCalls = 0; decodeMs = 0.0; decodeMaxMs = 0.0; clock.resetBusy()
             decodeRecent.reset(); arrivalRecent.reset(); presentRecent.reset()
@@ -744,6 +757,8 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             "losslessRepublishes" to pacer.republishes,
             "losslessPresentTiles" to (tiles?.presentTiles ?: 0),
             "losslessPoisoned" to (tiles?.poisoned == true),
+            "losslessMoves" to (tiles?.movesApplied ?: 0L),
+            "losslessMovesSlow" to losslessMovesSlow,
             "losslessTimestampMismatches" to losslessTimestampMismatches,
             "losslessPacketMs" to losslessPacketNanos / 1e6,
             // The tiles describe a larger source than the video (the Windows key).
@@ -1155,7 +1170,16 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             val compositor = tiles
             val pts = tileOrder.latched(timestamp)
             if (compositor != null) {
-                if (pts != null) compositor.applyDecoded(pts)
+                // What a move due with this frame changed goes to the tile texture first.
+                if (pts != null) {
+                    val applied = compositor.movesApplied
+                    val began = System.nanoTime()
+                    compositor.applyDecoded(pts) { _, x, y, w, h, rgba ->
+                        if (compositor.width != output.width || compositor.height != output.height) throw IllegalStateException("tile source size")
+                        output.upload(x, y, w, h, rgba)
+                    }
+                    if (compositor.movesApplied != applied && moveCost(System.nanoTime() - began)) losslessMovesSlow = true
+                }
                 else if (!compositor.poisoned) { losslessTimestampMismatches++; compositor.poison() }
             }
             // This frame carries every tile added so far.
@@ -1164,6 +1188,15 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         } catch (_: Exception) {
             fail(lease)
         }
+    }
+
+    /** Worker. One frame's moves took [nanos]: true once they are too slow for this device ([slowMoves]). */
+    private fun moveCost(nanos: Long): Boolean {
+        moveFrames++
+        if (nanos > MOVE_SLOW_NANOS) slowMoveFrames++
+        val slow = slowMoves(moveFrames, slowMoveFrames)
+        if (moveFrames >= MOVE_WINDOW) { moveFrames = 0; slowMoveFrames = 0 }
+        return slow
     }
 
     /** Worker. Flutter took a frame from [entry] at [at]. */
@@ -1440,6 +1473,11 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         private const val TEXTURE_PATH_SURFACE = 1
         /** tiles-v1: how long added tiles wait for the video frame of their tick before a republish, and how often. */
         private const val REPUBLISH_WAIT_MS = 16L
+        /** A frame whose moves took longer than this is slow: 6 ms of a 16.7 ms frame. */
+        const val MOVE_SLOW_NANOS = 6_000_000L
+        const val MOVE_WINDOW = 120
+        /** Too slow for this device: a quarter of a window of frames with moves were slow. */
+        fun slowMoves(frames: Int, slow: Int): Boolean = frames >= MOVE_WINDOW && slow * 4 >= frames
         private const val REPUBLISH_CHECKS = 3
     }
 }

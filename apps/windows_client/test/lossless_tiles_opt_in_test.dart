@@ -19,6 +19,12 @@ class TileMedia extends SessionMedia implements LosslessTileMedia {
   bool get losslessTiles => true;
 }
 
+/// The Windows engine: its compositor also takes moves (tiles-v2).
+class MoveMedia extends TileMedia implements LosslessMoveMedia {
+  @override
+  bool get losslessMoves => true;
+}
+
 /// Android's engine: composites tiles only while its current start can.
 class SwitchingTileMedia extends SessionMedia implements LosslessTileMedia {
   bool composite = true;
@@ -301,6 +307,37 @@ void main() {
     expect(pings().last.startsWith(losslessTilesPingPrefix), isTrue);
     await remote.close();
     await media.events.close();
+  });
+
+  test('An engine that takes moves marks its opt-in (lt1-m); the others keep lt1-', () async {
+    for (final moves in [true, false]) {
+      final socket = SessionSocket();
+      final media = moves ? MoveMedia() : TileMedia();
+      final remote = session(socket, media);
+      unawaited(remote.start());
+      await flush();
+      socket.incoming.add(jsonEncode(info));
+      await flush();
+      socket.incoming.add(idr());
+      await flush();
+      final id =
+          socket.sent.firstWhere((event) => event['type'] == 'ping')['id']
+              as String;
+      // A Host without moves reads the tiles-v1 opt-in in either.
+      expect(id.startsWith(losslessTilesPingPrefix), isTrue);
+      expect(
+        RegExp(
+          moves ? r'^lt1-m\d+$' : r'^lt1-\d+$',
+        ).hasMatch(id),
+        isTrue,
+        reason: id,
+      );
+      // The pong still matches: the round trip is measured.
+      socket.incoming.add(jsonEncode({'type': 'pong', 'id': id}));
+      await flush();
+      await remote.close();
+      await media.events.close();
+    }
   });
 
   test('A media that never composited sends plain pings', () async {

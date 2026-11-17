@@ -370,6 +370,7 @@ class Agent {
   void publicationTestOpen(){std::lock_guard lock(queueMutex_);queueClosed_=false;stopped_=false;}
   // A worker's tiles opt-in state for a session (what its capture loop reads).
   bool losslessTestRequested(const std::string& session)const{return losslessRequested(session);}
+  bool losslessMovesTestRequested(const std::string& session)const{return losslessMoves(session);}
   // The send loop's diagnostics step, and the wait the connection end does.
   void diagnosticsTestTick(){collectDiagnostics();}
   void diagnosticsTestJoin(){joinDiagnostics();}
@@ -515,7 +516,7 @@ class Agent {
           if(local_&&pointerAsk.due(hostMonotonicUs()))text("{\"type\":\"worker.pointer.absent\",\"sessionId\":"+jsonQuote(plan.sessionId)+'}');
           // tracks-resume-v1: the relay restarts every output at an IDR after a resume.
           if(keyFrameRequested_.exchange(false))pipeline->keyFrame();
-          pipeline->lossless(losslessRequested(plan.sessionId));pipeline->composeRequested(cursorCompose_.wanted());
+          pipeline->lossless(losslessRequested(plan.sessionId),losslessMoves(plan.sessionId));pipeline->composeRequested(cursorCompose_.wanted());
           auto packets=pipeline->step();if(pipeline->keysReady())input->encodedReady();
           if(!packets.empty())lastWork=began;
           for(auto& packet:packets){if(streamStop_||stopped_)break;enqueue({false,std::move(packet)});}
@@ -716,12 +717,17 @@ class Agent {
   // Lossless tiles are sent only for the session whose client opted in (ping
   // nonce prefix "lt1-") and did not pause them since ("lt0-": 게임 마우스
   // holds the mouse). Both survive the legacy resize restart of the same session.
-  mutable std::mutex losslessMutex_; std::string losslessSession_; bool losslessOn_ = false;
+  // losslessMoves_: that client also takes moves and rectangles ("lt1-m", tiles-v2).
+  mutable std::mutex losslessMutex_; std::string losslessSession_; bool losslessOn_ = false, losslessMoves_ = false;
   bool losslessRequested(const std::string& session) const { std::lock_guard lock(losslessMutex_); return !session.empty() && session == losslessSession_ && losslessOn_; }
-  void requestLossless(bool on = true) {
+  bool losslessMoves(const std::string& session) const { std::lock_guard lock(losslessMutex_); return !session.empty() && session == losslessSession_ && losslessMoves_; }
+  void requestLossless(bool on = true, bool moves = false) {
     // Session0 answers pings itself; the worker owning the encoder needs the opt-in.
-    if (bridge_) { bridge_->control(JsonParser::parse(on ? R"({"type":"stream.lossless","protocol":"tiles-v1"})" : R"({"type":"stream.lossless","protocol":"tiles-v1","on":false})")); return; }
-    std::lock_guard lock(losslessMutex_); losslessSession_ = sessionId_; losslessOn_ = on;
+    if (bridge_) { bridge_->control(JsonParser::parse(!on ? R"({"type":"stream.lossless","protocol":"tiles-v1","on":false})" : moves ? R"({"type":"stream.lossless","protocol":"tiles-v1","moves":true})" : R"({"type":"stream.lossless","protocol":"tiles-v1"})")); return; }
+    std::lock_guard lock(losslessMutex_);
+    // A pause says nothing about moves; an opt-in says which entries the client takes.
+    if (losslessSession_ != sessionId_) losslessMoves_ = false;
+    losslessSession_ = sessionId_; losslessOn_ = on; if (on) losslessMoves_ = moves;
   }
 #ifdef MULTITAP_TRACK_SOURCE_TEST
   TrackSourcePipeline::Monitors trackMonitors_;TrackSourcePipeline::CaptureFactory trackCapture_;std::optional<TrackDesktop> trackDesktop_;
@@ -1428,6 +1434,7 @@ class Agent {
             auto settings=LosslessSettings::forBitrate(applied);
             // Auto: tiles and video share the adaptive target (read every tick).
             if(rate.adaptive){settings=LosslessSettings::forTargetRate([&tileShare]{return tileShare.load();});settings.minimumRateBytesPerSecond=62500;}
+            settings.moves=losslessMoves(session);
             // The encoder's picture (width x height) anchors the tiles (lossless_tile_source.hpp).
             lossless=std::make_unique<LosslessTileSource>(uint32_t(sourceWidth),uint32_t(sourceHeight),settings,uint32_t(width),uint32_t(height));losslessHelper=std::make_unique<ParallelWork>();losslessRetired=false;}
           bool submitted=false,changedTick=false;
@@ -1436,6 +1443,7 @@ class Agent {
           std::vector<Frame> outputs;std::optional<LosslessTick> tiled;
           const auto collect=[&]{encoder.encode(encoderInput,uint64_t(pts),[&](Frame output){outputs.push_back(std::move(output));});};
           // A GPU tick never has tiles wanted; it can only retire them.
+          if(lossless)lossless->moves(losslessMoves(session));
           if(lossless&&!gpuPicture)tiled=losslessStreamTick(*lossless,losslessRetired,tilesWanted,*losslessHelper,composed,encodePolicy,frame,uint64_t(pts),collect,force);
           else if(lossless)tiled=losslessRetireTick(*lossless,losslessRetired,[&](bool forced){return encodePolicy.prepareChanged(capture.gpuPictureChanged(),uint64_t(pts),forced);},uint64_t(pts),collect,force);
           if(tiled){
@@ -1489,7 +1497,7 @@ class Agent {
             stats << inputLatency_.frameTimingJson(hostMonotonicUs());
             // Only with tiles active (an opted-in client): observational, outside bitrateKbps.
             // mismatches: tiles whose capture BGRA was not the encoder's picture since the source began (0 when consistent).
-            if(lossless&&!losslessRetired)stats<<",\"lossless\":{\"protocol\":\"tiles-v1\",\"presentTiles\":"<<lossless->presentTiles()<<",\"packets\":"<<losslessPackets<<",\"kbps\":"<<double(losslessBytes)*8/seconds/1000<<",\"tileMs\":"<<losslessMs<<",\"mismatches\":"<<lossless->stats().mismatchTiles<<'}';
+            if(lossless&&!losslessRetired)stats<<",\"lossless\":{\"protocol\":\"tiles-v1\",\"presentTiles\":"<<lossless->presentTiles()<<",\"packets\":"<<losslessPackets<<",\"kbps\":"<<double(losslessBytes)*8/seconds/1000<<",\"tileMs\":"<<losslessMs<<",\"mismatches\":"<<lossless->stats().mismatchTiles<<",\"moves\":"<<lossless->stats().moves<<'}';
             // Only in a separated session: records sent and ticks composed as
             // fallback; with cursor-echo-v1 also the echoed positions.
             if(cursorChannel){const auto counted=cursorChannel->takeCounters();stats<<",\"cursor\":{\"protocol\":\"cursor-v1\",\"shapes\":"<<counted.shapes<<",\"states\":"<<counted.states<<",\"warps\":"<<counted.warps<<",\"composed\":"<<counted.composed;if(cursorEcho)stats<<",\"echoes\":"<<counted.echoes;stats<<'}';}
@@ -1680,8 +1688,8 @@ class Agent {
         if (local_) if (const auto report = inputLatency_.injected(message, injected, hostMonotonicUs(), frameCandidate)) text(*report);
       }
     }
-    else if (type == "ping") { const auto nonce = message.get("id").string(); if (nonce.size() <= 128) { if (losslessTilesOptIn(nonce)) requestLossless(); else if (losslessTilesPause(nonce)) requestLossless(false); text("{\"type\":\"pong\",\"id\":" + jsonQuote(nonce) + '}'); } }
-    else if (type == "stream.lossless") { if (!bridge_ && message.get("protocol").string() == "tiles-v1") { const auto* on = std::get_if<bool>(&message.get("on").value); requestLossless(!on || *on); } }
+    else if (type == "ping") { const auto nonce = message.get("id").string(); if (nonce.size() <= 128) { if (losslessTilesOptIn(nonce)) requestLossless(true, losslessTilesMoves(nonce)); else if (losslessTilesPause(nonce)) requestLossless(false); text("{\"type\":\"pong\",\"id\":" + jsonQuote(nonce) + '}'); } }
+    else if (type == "stream.lossless") { if (!bridge_ && message.get("protocol").string() == "tiles-v1") { const auto* on = std::get_if<bool>(&message.get("on").value); const auto* moves = std::get_if<bool>(&message.get("moves").value); requestLossless(!on || *on, moves && *moves); } }
     // display-scale-v1: the worker owning the output applies it (service.hpp).
     else if (type == "display.scale") { if (bridge_) bridge_->control(message); }
     // caret-v1: the service hands it to the worker, which owns the user session.

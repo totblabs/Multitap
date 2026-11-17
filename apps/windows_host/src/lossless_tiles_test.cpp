@@ -1,13 +1,19 @@
 // Pure checks of ToTBSeamless lossless tiles: TQ1 bit-exact round trip and
 // malformed-input rejection, host tile diffing/budgets, and the client
 // compositor's invalidation rules. Synthetic pixels only; no capture, encoder,
-// relay or real session is involved.
+// relay or real session is involved. (`--screen`, at the end, is a manual probe
+// that reads the real screen instead; the fixture run never uses it.)
 #include "lossless_tile_source.hpp"
 #include "capture_scale.hpp"
 #include "frame_encode_policy.hpp"
 #include "media.hpp"
 #include <array>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <string>
+#include <thread>
 #include <map>
 #include <random>
 #include <tuple>
@@ -145,7 +151,10 @@ struct Loop {
       if (client.havePublished) {  // every tile added by this packet is exactly the current frame
         const uint8_t* p = payload->data(); size_t at = lossless::headerBytes + size_t(lossless::read16(p + 20)) * 2;
         for (uint32_t n = 0; n < lossless::read16(p + 22); ++n) {
-          const uint32_t index = lossless::read16(p + at); const auto r = lossless::tileRect(index, uint32_t(canvas.width), uint32_t(canvas.height));
+          const uint32_t index = lossless::read16(p + at);
+          // A move and its rectangles wait for this tick's frame (checked after it, by exact()).
+          if (index == lossless::noTile || client.compositor.waiting()) { at += lossless::addHeaderBytes + lossless::read32(p + at + 4); continue; }
+          const auto r = lossless::tileRect(index, uint32_t(canvas.width), uint32_t(canvas.height));
           require(sameRgb(&canvas.bgra[(size_t(r.y) * canvas.width + r.x) * 4], size_t(canvas.width) * 4, &client.published[(size_t(r.y) * canvas.width + r.x) * 4], size_t(canvas.width) * 4, r.width, r.height), "An added tile did not carry the current pixels");
           at += lossless::addHeaderBytes + lossless::read32(p + at + 4);
         }
@@ -265,6 +274,109 @@ void largeChangeSettlesWhenStill() {
   require(exact(loop.client, loop.canvas), "The large change never became exact");
   const int bound = int(settings.stillTicks) + int((settings.stillSettleUs + 16666) / 16667) + 3;
   require(ticks <= bound, "A stopped large change waited for settleUs instead of the still-screen settle");
+}
+
+// tiles-v2 (moves): a pane of text that scrolls stays pixel-identical on every
+// tick of the scroll, with a tinted line that stays under the pointer and a
+// scroll bar whose thumb creeps; after a jump too large to send it is video,
+// and it becomes exact again while it still scrolls.
+struct ScrollScene {
+  static constexpr int paneX = 70, paneY = 90, paneW = 1060, paneH = 560, barW = 14;  // edges off the tile grid
+  Canvas chrome{1280, 720};
+  ScrollScene() { chrome.texture(9); }
+  static uint32_t mix(uint32_t a, uint32_t b) { uint32_t h = a * 0x9e3779b1u ^ (b + 0x85ebca6bu); h ^= h >> 15; h *= 0x2c1b3c6du; h ^= h >> 12; return h; }
+  void paint(Canvas& canvas, int offset, int thumb) const {
+    canvas.bgra = chrome.bgra;
+    for (int y = paneY; y < paneY + paneH; ++y) for (int x = paneX; x < paneX + paneW; ++x) {
+      auto* p = &canvas.bgra[(size_t(y) * canvas.width + x) * 4];
+      if (x >= paneX + paneW - barW) { const bool on = y - paneY >= thumb && y - paneY < thumb + 80; p[0] = p[1] = p[2] = on ? 120 : 205; continue; }
+      const int row = y - paneY + offset;
+      const bool ink = row % 20 < 12 && mix(uint32_t(x / 2), uint32_t(row / 2)) % 4 == 0;
+      const bool tinted = y - paneY >= 200 && y - paneY < 224;  // the line under the pointer
+      p[0] = ink ? uint8_t(32 + mix(uint32_t(row / 20), 7) % 3 * 40) : 255; p[1] = ink ? 32 : tinted ? 232 : 255; p[2] = ink ? 32 : tinted ? 204 : 255;
+    }
+  }
+};
+void requireExact(const Loop& loop, const host::LosslessTileSource::Stats& since, const std::string& reason) {
+  if (exact(loop.client, loop.canvas)) { ++checks; return; }
+  int x0 = loop.canvas.width, y0 = loop.canvas.height, x1 = 0, y1 = 0;
+  for (int y = 0; y < loop.canvas.height; ++y) for (int x = 0; x < loop.canvas.width; ++x) {
+    const size_t i = (size_t(y) * loop.canvas.width + x) * 4;
+    if (loop.client.published[i] != loop.canvas.bgra[i + 2] || loop.client.published[i + 1] != loop.canvas.bgra[i + 1]) { x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x + 1); y1 = std::max(y1, y + 1); }
+  }
+  const auto& s = loop.source.stats();
+  throw std::runtime_error(reason + ": pixels " + std::to_string(x0) + "," + std::to_string(y0) + " to " + std::to_string(x1) + "," + std::to_string(y1) + "; moves " + std::to_string(s.moves - since.moves) +
+      ", not sent " + std::to_string(s.moveRefusals - since.moveRefusals) + ", came back " + std::to_string(s.growTiles - since.growTiles) + ", dropped " + std::to_string(s.droppedTiles - since.droppedTiles) +
+      ", mismatched " + std::to_string(s.mismatchTiles - since.mismatchTiles));
+}
+void scrollingStaysExact() {
+  auto settings = deterministic(); settings.moves = true;
+  ScrollScene scene; Loop loop(1280, 720, settings);
+  int offset = 4000, thumb = 100;
+  scene.paint(loop.canvas, offset, thumb);
+  loop.until(400);
+  require(exact(loop.client, loop.canvas), "The page was not exact before the scroll");
+  for (int n = 0; n < 30; ++n) loop.tick();  // the first settle spent the token bucket
+  const auto before = loop.source.stats(); const auto bytes0 = loop.tileBytes; int ticks = 0;
+  const int steps[] = {3, 7, 12, 20, 33, 20, 9, 4, 1, 1, 64, 5, -6, -15, -40, -8, -2, 17, 17, 2};
+  for (int round = 0; round < 3; ++round) for (const int dy : steps) {
+    offset += dy; if (++ticks % 4 == 0) thumb += dy > 0 ? 1 : -1;
+    scene.paint(loop.canvas, offset, thumb);
+    loop.tick();
+    requireExact(loop, before, "A scrolling pane was shown as video, not exact, on tick " + std::to_string(ticks) + " (by " + std::to_string(dy) + ")");
+  }
+  const auto stats = loop.source.stats();
+  require(stats.moves - before.moves == uint64_t(ticks) && stats.moveRefusals == before.moveRefusals, "A tick of the scroll was not sent as a move");
+  require(stats.mismatchTiles == before.mismatchTiles, "A moved tile did not match the encoder's picture");
+  require(loop.client.compositor.stats().moves == stats.moves && !loop.client.compositor.poisoned(), "The client did not apply every move");
+  const double seconds = ticks * 16667 / 1e6;
+  require(double(loop.tileBytes - bytes0) <= double(settings.burstBytes) + double(settings.rateBytesPerSecond) * seconds + double(lossless::maximumTileBytes + 64), "Scroll tiles exceeded the token bucket");
+  // Between two steps of the wheel nothing changes and nothing is sent.
+  const auto packets = loop.packets; for (int n = 0; n < 5; ++n) loop.tick();
+  require(loop.packets == packets && exact(loop.client, loop.canvas), "A resting page after a scroll was not left alone");
+  // A page down whose new rows fit the budget: one move, exact at once.
+  offset += 430; scene.paint(loop.canvas, offset, thumb); loop.tick();
+  require(loop.source.stats().moves == stats.moves + 1 && exact(loop.client, loop.canvas), "A jump inside the budget was not exact on its tick");
+  require(!loop.client.compositor.poisoned(), "The client stopped compositing during the scroll");
+  // The same jump with more new pixels than a move may carry: video, as before moves.
+  auto narrow = settings; narrow.movePacketBytes = 16 * 1024;
+  Loop tight(1280, 720, narrow); offset = 4000;
+  scene.paint(tight.canvas, offset, thumb); tight.until(400);
+  for (int n = 0; n < 30; ++n) tight.tick();
+  offset += 430; scene.paint(tight.canvas, offset, thumb); tight.tick();
+  require(tight.source.stats().moves == 0 && tight.source.stats().moveRefusals == 1 && !exact(tight.client, tight.canvas), "A jump beyond the budget was sent as a move");
+  // It goes on slowly: the pane comes back tile row by tile row while it scrolls, then stays.
+  int waited = 0;
+  for (; waited < 240; ++waited) { offset += 2; scene.paint(tight.canvas, offset, thumb); tight.tick(); if (exact(tight.client, tight.canvas)) break; }
+  requireExact(tight, host::LosslessTileSource::Stats{}, "A pane that kept scrolling never became exact again");
+  require(waited < 240 && tight.source.stats().growTiles > 0, "A pane that kept scrolling never became exact again");
+  const auto back = tight.source.stats();
+  for (int n = 0; n < 20; ++n) {
+    offset += 2; scene.paint(tight.canvas, offset, thumb); tight.tick();
+    requireExact(tight, back, "A pane that came back while scrolling did not stay exact (tick " + std::to_string(n) + " after " + std::to_string(waited) + ")");
+  }
+  require(tight.source.stats().moves == back.moves + 20 && tight.source.stats().droppedTiles - back.droppedTiles <= 20 * 4, "A pane that came back was dropped again while it scrolled");
+  require(!tight.client.compositor.poisoned(), "The client stopped compositing while the pane came back");
+  // The client stops asking during the session (an app that found moves too slow):
+  // from the next tick a scroll is video again, and tiles come back when it rests.
+  {
+    const auto asked = loop.source.stats();
+    loop.source.moves(false);
+    offset += 5; scene.paint(loop.canvas, offset, thumb); loop.tick();
+    require(loop.source.stats().moves == asked.moves && !exact(loop.client, loop.canvas), "A move was sent after the client stopped asking");
+    loop.until(400);
+    require(exact(loop.client, loop.canvas) && !loop.client.compositor.poisoned(), "The page did not settle after moves were turned off");
+    loop.source.moves(true);
+    for (int n = 0; n < 30; ++n) loop.tick();
+    offset += 5; scene.paint(loop.canvas, offset, thumb); loop.tick();
+    require(loop.source.stats().moves == asked.moves + 1 && exact(loop.client, loop.canvas), "Moves did not come back when the client asked again");
+  }
+  // Off (a client that did not ask): the same scroll is video on every tick, as released.
+  Loop plain(1280, 720, deterministic()); offset = 4000;
+  scene.paint(plain.canvas, offset, thumb); plain.until(400);
+  for (int n = 0; n < 30; ++n) plain.tick();
+  for (const int dy : steps) { offset += dy; scene.paint(plain.canvas, offset, thumb); plain.tick(); require(!exact(plain.client, plain.canvas), "A scroll was exact without moves"); }
+  require(plain.source.stats().moves == 0 && plain.client.compositor.stats().moves == 0, "A move was sent to a client that did not ask");
 }
 
 // SSE2 bilinear upscaling equals its scalar definition byte for byte and only
@@ -574,12 +686,50 @@ void compositorRules() {
     require(c.compositor.Accept(bad.data(), bad.size()) == lossless::Compositor::Outcome::ignored && c.compositor.poisoned(), "Out-of-range drop accepted");
   }
 }
+// A manual probe, not part of the fixture run: `--screen <ticks> [moves]` feeds
+// what is on the real primary screen through the same loop (source, policy,
+// compositor and every invariant of Loop::tick), one tick per 1/60 s. Run it
+// while an application scrolls real text to see how many of the ticks on which
+// the picture changed were pixel-identical on the client.
+int screenProbe(int ticks, bool moves) {
+  const int w = GetSystemMetrics(SM_CXSCREEN) & ~1, h = GetSystemMetrics(SM_CYSCREEN) & ~1;
+  const HDC screen = GetDC(nullptr); const HDC memory = CreateCompatibleDC(screen);
+  BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER); info.bmiHeader.biWidth = w; info.bmiHeader.biHeight = -h; info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
+  void* bits = nullptr; const HBITMAP bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+  if (!screen || !memory || !bitmap || !bits) throw std::runtime_error("No screen to read");
+  SelectObject(memory, bitmap);
+  auto settings = host::LosslessSettings::forBitrate(12000000); settings.moves = moves;
+  Loop loop(w, h, settings);
+  using Clock = std::chrono::steady_clock;
+  uint64_t exactTicks = 0, changing = 0, exactChanging = 0; double worstMs = 0, totalMs = 0;
+  for (int n = 0; n < ticks; ++n) {
+    const auto began = Clock::now();
+    if (!BitBlt(memory, 0, 0, w, h, screen, 0, 0, SRCCOPY)) throw std::runtime_error("The screen could not be read");
+    GdiFlush();
+    std::memcpy(loop.canvas.bgra.data(), bits, loop.canvas.bgra.size());
+    const auto videos = loop.videos; const auto ticking = Clock::now();
+    loop.tick();
+    const double ms = std::chrono::duration<double, std::milli>(Clock::now() - ticking).count(); worstMs = std::max(worstMs, ms); totalMs += ms;
+    const bool same = exact(loop.client, loop.canvas), changed = loop.videos != videos;
+    exactTicks += same ? 1 : 0; changing += changed ? 1 : 0; exactChanging += changed && same ? 1 : 0;
+    std::this_thread::sleep_until(began + std::chrono::microseconds(16667));
+  }
+  const auto& s = loop.source.stats();
+  std::cout << "{\"kind\":\"lossless-screen-probe\",\"moves\":" << (moves ? "true" : "false") << ",\"size\":\"" << w << "x" << h << "\",\"ticks\":" << ticks << ",\"exactTicks\":" << exactTicks
+            << ",\"changingTicks\":" << changing << ",\"exactWhileChanging\":" << exactChanging << ",\"movesSent\":" << s.moves << ",\"movesNotSent\":" << s.moveRefusals << ",\"moveBytes\":" << s.moveBytes
+            << ",\"cameBackTiles\":" << s.growTiles << ",\"addedTiles\":" << s.addedTiles << ",\"droppedTiles\":" << s.droppedTiles << ",\"mismatchTiles\":" << s.mismatchTiles << ",\"tileBytes\":" << loop.tileBytes
+            << ",\"moveMs\":" << s.moveMs << ",\"tickMsMean\":" << totalMs / ticks << ",\"tickMsMax\":" << worstMs << ",\"clientMoves\":" << loop.client.compositor.stats().moves
+            << ",\"poisoned\":" << (loop.client.compositor.poisoned() ? "true" : "false") << "}\n";
+  DeleteObject(bitmap); DeleteDC(memory); ReleaseDC(nullptr, screen);
+  return 0;
+}
 }
 
-int main() {
+int main(int argc, char** argv) {
   try {
+    if (argc >= 3 && std::string(argv[1]) == "--screen") return screenProbe(std::atoi(argv[2]), argc >= 4 && std::string(argv[3]) == "moves");
     codecRoundTrip(); compositorRules(); upscalerMatchesReference(); scaledCompositorRules(); tileSourceDiffing(); smallChangesAreExactAtOnce(); largeChangeSettlesWhenStill(); candidateVerification(); budgetsAndMotion(); retirement();
-    pictureAnchorsTiles(); pictureAnchorsScaledTiles();
+    pictureAnchorsTiles(); pictureAnchorsScaledTiles(); scrollingStaysExact();
     std::cout << "{\"kind\":\"lossless-tiles-unit\",\"checks\":" << checks << ",\"syntheticPixels\":true,\"encoder\":false,\"realSessionAcceptance\":false}\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << "lossless tiles: " << error.what() << '\n'; return 1; }

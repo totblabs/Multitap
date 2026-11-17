@@ -71,7 +71,7 @@ if (-not $SkipTests) {
     # A registration copied with the disk (full clone) is not used on another machine (host-machine-v1).
     'MultitapHostCredentialBindingTest','MultitapHostPendingConnectionTest',
     # The server connection Host settings shows: acknowledgement age, a reload that says connecting, a dial that turns stale.
-    'MultitapHostBrokerStatusTest','MultitapHostAgentPublicationTest','MultitapHostCaptureLoopStatsTest')
+    'MultitapHostBrokerStatusTest','MultitapHostAgentPublicationTest','MultitapHostCaptureLoopStatsTest','MultitapHostScrollDetectTest','MultitapHostLosslessMovesTest')
   & $cmake --build $tree --config Release --parallel $Parallel --target @tests; if ($LASTEXITCODE) { throw 'test build failed' }
   foreach ($t in $tests) { & (Join-Path $tree "$t.exe") | Out-Null; if ($LASTEXITCODE) { throw "test failed: $t" }; "ok $t" }
 }

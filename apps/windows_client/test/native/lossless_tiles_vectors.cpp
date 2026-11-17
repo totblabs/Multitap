@@ -4,8 +4,12 @@
 // same composed pixels. Regenerate after any change to lossless_tiles.hpp:
 //   zig c++ -std=c++17 -O1 -I native/windows_video apps/windows_client/test/native/lossless_tiles_vectors.cpp -o vectors.exe
 //   vectors.exe > apps/windows_client/android/app/src/test/resources/lossless_tiles_vectors.txt
+//   vectors.exe moves > apps/windows_client/android/app/src/test/resources/lossless_moves_vectors.txt
+// "moves": tiles-v2 entries (a move, rectangles, packets that wait behind them).
 #include <lossless_tiles.hpp>
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 using namespace multitap;
@@ -69,9 +73,55 @@ void emitState(lossless::Compositor& compositor, uint64_t pts) {
   for (uint32_t i = 0; i < tiles; ++i) std::printf("%d", compositor.present(i) ? 1 : 0);
   std::printf(" %016llx\n", static_cast<unsigned long long>(fnv(frame)));
 }
+// tiles-v2: entries that wait for their frame, a later packet that waits behind
+// them, and a move over a tile the client no longer has (poisons on its frame).
+int moves() {
+  const auto a = picture(1), b = picture(2);
+  lossless::Compositor compositor;
+  if (!compositor.Configure(W, H, false)) return 1;
+  std::printf("# lossless_tiles_vectors.cpp moves, from native/windows_video/lossless_tiles.hpp\n");
+  std::printf("frame %u %u\n", W, H);
+  emitPacket(packet(1, 1000, {}, {0, 1, 2, 3, 4, 5}, a), compositor);
+  emitState(compositor, 999);
+  {
+    // Due with frame 2000: tile 5 dropped, a pane moved up by 9, its strip, tile 5 back.
+    lossless::PayloadBuilder builder(W, H, 2, 2000, {5});
+    builder.move(10, 6, 120, 70, 9);
+    for (int x = 10; x < 130; x += 64) builder.rect(uint16_t(x), 67, uint16_t(std::min(64, 130 - x)), 9, b.data() + (size_t(67) * W + size_t(x)) * 4, size_t(W) * 4);
+    const auto r = lossless::tileRect(5, W, H);
+    builder.add(5, b.data() + (size_t(r.y) * W + r.x) * 4, size_t(W) * 4);
+    emitPacket(builder.finish(), compositor);
+  }
+  emitState(compositor, 1999);
+  emitState(compositor, 2000);
+  // Nothing waits: a plain packet applies at once, as in tiles-v1.
+  emitPacket(packet(3, 2500, {}, {1}, b), compositor);
+  emitState(compositor, 2400);
+  {
+    // The whole frame moves down by 5, due with frame 3000.
+    lossless::PayloadBuilder builder(W, H, 4, 3000, {});
+    builder.move(0, 0, uint16_t(W), uint16_t(H), -5);
+    for (int x = 0; x < int(W); x += 64) builder.rect(uint16_t(x), 0, uint16_t(std::min(64, int(W) - x)), 5, a.data() + size_t(x) * 4, size_t(W) * 4);
+    emitPacket(builder.finish(), compositor);
+  }
+  // A plain packet behind it: its drop is due at 3100 and its add waits for that.
+  emitPacket(packet(5, 3100, {2}, {0}, b), compositor);
+  emitState(compositor, 2999);
+  emitState(compositor, 3000);
+  emitState(compositor, 3100);
+  {
+    lossless::PayloadBuilder builder(W, H, 6, 4000, {});
+    builder.move(100, 0, 44, 64, 3);  // touches tile 2, dropped at 3100
+    emitPacket(builder.finish(), compositor);
+  }
+  emitState(compositor, 3999);
+  emitState(compositor, 4000);
+  return 0;
+}
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  if (argc > 1 && !std::strcmp(argv[1], "moves")) return moves();
   const auto a = picture(1), b = picture(2);
   lossless::Compositor compositor;
   if (!compositor.Configure(W, H, false)) return 1;

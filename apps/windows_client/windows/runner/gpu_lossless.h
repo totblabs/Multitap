@@ -27,6 +27,25 @@ inline void CopyPresentTiles(Overlay& overlay, const lossless::Compositor& compo
   }
 }
 
+// tiles-v2: what a move, a rectangle or a waiting add changed in the compositor's
+// layer when this frame came goes to the overlay texture again, one upload per
+// run of neighbouring tiles in a row.
+inline void UploadMovedTiles(lossless::Compositor& compositor, Overlay& overlay) {
+  if (compositor.movedTiles().empty()) return;
+  auto moved = compositor.movedTiles();
+  compositor.clearMoved();
+  if (!compositor.width() || FAILED(overlay.Configure(compositor.width(), compositor.height()))) return;
+  std::sort(moved.begin(), moved.end()); moved.erase(std::unique(moved.begin(), moved.end()), moved.end());
+  const uint32_t columns = lossless::tileColumns(compositor.width());
+  for (size_t n = 0; n < moved.size();) {
+    size_t end = n + 1;
+    while (end < moved.size() && moved[end] == moved[end - 1] + 1 && moved[end] / columns == moved[n] / columns) ++end;
+    const auto first = lossless::tileRect(moved[n], compositor.width(), compositor.height()), last = lossless::tileRect(moved[end - 1], compositor.width(), compositor.height());
+    overlay.UploadTile(first.x, first.y, last.x + last.width - first.x, first.height, compositor.tilePixels(moved[n]), size_t(compositor.width()) * 4);
+    n = end;
+  }
+}
+
 // Due drops first, then every present tile over the decoded GPU frame. A frame
 // of another size than the compositor's (tiles describe a different picture) is
 // left alone; a scaled source is upscaled to the source size first.
@@ -43,6 +62,7 @@ inline HRESULT ComposeDecoded(lossless::Compositor& compositor, Converter& conve
       frame.gpu = std::move(upscaled); frame.width = compositor.width(); frame.height = compositor.height();
     }
   } else compositor.ApplyDecoded(frame.pts_us);
+  UploadMovedTiles(compositor, overlay);
   if (!compositor.presentTiles() || frame.width != compositor.width() || frame.height != compositor.height()) return S_OK;
   CopyPresentTiles(overlay, compositor, *frame.gpu);
   return converter.Finish();

@@ -110,6 +110,13 @@ int main(){try{
     worker.localControl(R"({"type":"ping","id":"lt1-3"})");require(worker.losslessTestRequested(session),"Track-tunnel opt-in did not resume tiles");
     worker.localControl(R"({"type":"ping","id":"lt0-4"})");require(!worker.losslessTestRequested(session),"Track-tunnel pause kept tiles");
     worker.localControl(R"({"type":"ping","id":"5"})");require(!worker.losslessTestRequested(session),"A plain ping changed the tiles state");
+    // tiles-v2: moves only for a client whose opt-in says so ("lt1-m", or the forwarded "moves").
+    worker.localControl(R"({"type":"ping","id":"lt1-6"})");require(worker.losslessTestRequested(session)&&!worker.losslessMovesTestRequested(session),"A tiles-v1 opt-in turned moves on");
+    worker.localControl(R"({"type":"ping","id":"lt1-m7"})");require(worker.losslessTestRequested(session)&&worker.losslessMovesTestRequested(session)&&!worker.losslessMovesTestRequested("00000000-0000-0000-0000-000000000002"),"A moves opt-in was not taken");
+    worker.localControl(R"({"type":"ping","id":"lt0-8"})");worker.localControl(R"({"type":"stream.lossless","protocol":"tiles-v1"})");require(worker.losslessTestRequested(session)&&!worker.losslessMovesTestRequested(session),"A forwarded tiles-v1 opt-in kept moves on");
+    worker.localControl(R"({"type":"stream.lossless","protocol":"tiles-v1","moves":true})");require(worker.losslessMovesTestRequested(session),"A forwarded moves opt-in was not taken");
+    {Fixture f;f.agent.localControl(R"({"type":"ping","id":"lt1-m9"})");
+      require(f.drain()&&f.sent.size()==1&&f.sent[0].get("id").string()=="lt1-m9"&&f.bridge.controls.size()==1&&f.bridge.controls[0].get("protocol").string()=="tiles-v1"&&std::holds_alternative<bool>(f.bridge.controls[0].get("moves").value)&&f.bridge.controls[0].get("moves").boolean(),"Session0 did not forward the moves opt-in");}
     worker.localControl(R"({"type":"stream.lossless","protocol":"tiles-v1","on":true})");require(worker.losslessTestRequested(session),"Explicit opt-in was not applied");++checks;}
   // Adaptive bitrate (bitrate-adaptive-v1) in the socket-owning Agent: the
   // relay's arrival feedback drives the controller and its target reaches the

@@ -288,11 +288,14 @@ class TrackSourcePipeline {
   // composed frame and was never followed gets a tile source from its next
   // tick on. Not wanted (or followed): the output's tiles retire with its next
   // video frame, as in Agent::stream (losslessStreamTick).
-  void lossless(bool wanted){
+  // 'moves': that client also takes tiles-v2 moves; it holds for the sources made from now on.
+  void lossless(bool wanted,bool moves=false){
     losslessWanted_=wanted;if(!wanted)return;
+    for(auto& state:states_)if(state->lossless)state->lossless->moves(moves);
     for(auto& state:states_)if(!state->lossless&&state->tilesAllowed&&state->capture&&state->capture->composed()&&state->output.media.width==state->output.media.sourceWidth&&state->output.media.height==state->output.media.sourceHeight){
       const auto& t=state->output.media;
-      state->lossless=std::make_unique<LosslessTileSource>(t.width,t.height,LosslessSettings::forBitrate(state->output.bitrate));state->helper=std::make_unique<ParallelWork>();
+      auto settings=LosslessSettings::forBitrate(state->output.bitrate);settings.moves=moves;
+      state->lossless=std::make_unique<LosslessTileSource>(t.width,t.height,settings);state->helper=std::make_unique<ParallelWork>();
     }
   }
   // capture_follow.hpp: told (on the stepping thread) where an output's capture

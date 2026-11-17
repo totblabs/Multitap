@@ -5,7 +5,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <vector>
 
 // ToTBSeamless lossless tiles ("build to lossless"), wire format tiles-v1.
@@ -30,6 +32,15 @@ constexpr size_t maximumPayloadBytes = 4 * 1024 * 1024 - 28;
 // TQ1 worst case: one 4-byte RGB op per pixel.
 constexpr size_t maximumTileBytes = size_t(tileSize) * tileSize * 4;
 constexpr uint8_t codecTq1 = 1;
+// tiles-v2 entries, sent only to a client that asked for them (docs/lossless-tiles-design.md,
+// "Moves"). They ride as add entries with index noTile and apply with the packet's dropPts,
+// like drops: on the decoded frame that carries the scrolled picture.
+//   codecMove: u16 x, y, width, height, i16 dy. Each row of the rectangle takes the pixels
+//              dy rows below it (dy > 0: the content moved up); |dy| rows keep stale pixels.
+//   codecRect: u16 x, y, width, height (each side 1..64), then the TQ1 coding of that block.
+constexpr uint8_t codecMove = 2, codecRect = 3;
+constexpr uint16_t noTile = 0xffff;
+constexpr size_t moveBytes = 10, rectHeaderBytes = 8;
 constexpr uint64_t noDrop = ~uint64_t(0);
 
 // tiles-v1 has uint16 dimensions and uint16 tile indices. Preserve those real
@@ -169,8 +180,39 @@ class PayloadBuilder {
     ++adds_;
     return bytes_.size() - start;
   }
+  // tiles-v2: the rows of the rectangle moved by dy (codecMove).
+  size_t move(uint16_t x, uint16_t y, uint16_t width, uint16_t height, int16_t dy) {
+    const size_t start = bytes_.size();
+    bytes_.resize(start + addHeaderBytes + moveBytes);
+    uint8_t* p = bytes_.data() + start;
+    write16(p, noTile); p[2] = codecMove; p[3] = 0; write32(p + 4, uint32_t(moveBytes));
+    write16(p + 8, x); write16(p + 10, y); write16(p + 12, width); write16(p + 14, height); write16(p + 16, uint16_t(dy));
+    ++adds_;
+    return bytes_.size() - start;
+  }
+  // tiles-v2: the exact pixels of a block (each side 1..64) from its BGRA origin (codecRect).
+  size_t rect(uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint8_t* bgra, size_t pitch) {
+    const size_t start = bytes_.size();
+    bytes_.resize(start + addHeaderBytes + rectHeaderBytes);
+    { uint8_t* p = bytes_.data() + start; write16(p, noTile); p[2] = codecRect; p[3] = 0; write16(p + 8, x); write16(p + 10, y); write16(p + 12, width); write16(p + 14, height); }
+    encodeTq1(bgra, pitch, width, height, bytes_);
+    write32(bytes_.data() + start + 4, uint32_t(bytes_.size() - start - addHeaderBytes));
+    ++adds_;
+    return bytes_.size() - start;
+  }
+  // The same with the block already coded (the host codes the strip before it decides).
+  size_t rectCoded(uint16_t x, uint16_t y, uint16_t width, uint16_t height, const std::vector<uint8_t>& tq1) {
+    const size_t start = bytes_.size();
+    bytes_.resize(start + addHeaderBytes + rectHeaderBytes);
+    { uint8_t* p = bytes_.data() + start; write16(p, noTile); p[2] = codecRect; p[3] = 0; write32(p + 4, uint32_t(rectHeaderBytes + tq1.size())); write16(p + 8, x); write16(p + 10, y); write16(p + 12, width); write16(p + 14, height); }
+    bytes_.insert(bytes_.end(), tq1.begin(), tq1.end());
+    ++adds_;
+    return bytes_.size() - start;
+  }
   size_t size() const { return bytes_.size(); }
   uint16_t adds() const { return adds_; }
+  // Takes back the entries after an earlier size() and adds() (a tile row that did not fit).
+  void rewind(size_t size, uint16_t adds) { bytes_.resize(size); adds_ = adds; }
   std::vector<uint8_t> finish() { write16(bytes_.data() + 22, adds_); return std::move(bytes_); }
  private:
   uint32_t width_, height_;
@@ -190,7 +232,7 @@ class PayloadBuilder {
 class Compositor {
  public:
   enum class Outcome { notTile, accepted, ignored };
-  struct Stats { uint64_t packets = 0, addedTiles = 0, droppedTiles = 0, bytes = 0; uint32_t presentTiles = 0; bool poisoned = false; };
+  struct Stats { uint64_t packets = 0, addedTiles = 0, droppedTiles = 0, bytes = 0; uint32_t presentTiles = 0; bool poisoned = false; uint64_t moves = 0; };
   // `width` x `height` is the decoded video. With `allowScaledSource` (legacy
   // single output only) the first tile packet may declare a larger unscaled
   // source; tiles then live in source coordinates and every composition
@@ -211,11 +253,14 @@ class Compositor {
   // Adds received since the last composition wait to be republished.
   bool republishPending() const { return !poisoned_ && !added_.empty(); }
   // True when a decoded frame needs composition (tiles present or a poison to apply).
-  bool active() const { return present_count_ > 0 || !added_.empty(); }
+  bool active() const { return present_count_ > 0 || !added_.empty() || !ops_.empty(); }
+  // Entries wait for their frame (tiles-v2): nothing of them shows before it.
+  bool waiting() const { return !ops_.empty(); }
   // Tiles describe a source larger than the video: use the *Scaled/Upscaled calls.
   bool scaled() const { return count_ && (width_ != video_width_ || height_ != video_height_); }
   // A freshly decoded, exclusively owned RGBA frame of the configured size.
   void ComposeDecoded(uint8_t* rgba, size_t pitch, uint64_t pts) {
+    advance(pts); moved_.clear();
     added_.clear();
     if (poisoned_ || !present_count_) { if (poisoned_) clearPresent(); return; }
     for (uint32_t i = 0; i < count_; ++i) {
@@ -226,6 +271,7 @@ class Compositor {
   // Scaled source: the published source-size frame for a decoded video frame:
   // due drops applied, present tiles exact, everything else upscaled video.
   void ComposeDecodedScaled(const uint8_t* video, size_t videoPitch, uint8_t* frame, size_t framePitch, uint64_t pts) {
+    advance(pts); moved_.clear();
     if (poisoned_) clearPresent();
     else for (uint32_t i = 0; i < count_; ++i) if (present_[i]) due(i, pts);
     ComposeUpscaled(video, videoPitch, frame, framePitch);
@@ -258,12 +304,14 @@ class Compositor {
   // ComposeDecoded without the pixel copy: due drops are applied and the added
   // list is consumed; present(i) then says which tiles go over the picture.
   void ApplyDecoded(uint64_t pts) {
+    advance(pts);
     added_.clear();
     if (poisoned_ || !present_count_) { if (poisoned_) clearPresent(); return; }
     for (uint32_t i = 0; i < count_; ++i) if (present_[i]) due(i, pts);
   }
   // Scaled source: same, for a source-size frame (ComposeDecodedScaled minus pixels).
   void ApplyDecodedScaled(uint64_t pts) {
+    advance(pts);
     added_.clear();
     if (poisoned_) clearPresent();
     else for (uint32_t i = 0; i < count_; ++i) if (present_[i]) due(i, pts);
@@ -272,6 +320,10 @@ class Compositor {
   // compositor's layer (the channel order of the frames, `width() * 4` bytes per row).
   const std::vector<uint32_t>& addedTiles() const { return added_; }
   void clearAdded() { added_.clear(); }
+  // tiles-v2: tiles whose layer pixels a move, a rectangle or a waiting add changed in the
+  // last ApplyDecoded*: a GPU presentation uploads them again, then clears the list.
+  const std::vector<uint32_t>& movedTiles() const { return moved_; }
+  void clearMoved() { moved_.clear(); }
   const uint8_t* tilePixels(uint32_t index) const {
     const auto rect = tileRect(index, width_, height_);
     return layer_.data() + size_t(rect.y) * width_ * 4 + size_t(rect.x) * 4;
@@ -310,6 +362,22 @@ class Compositor {
     if (size < headerBytes + size_t(drops) * 2) return false;
     // Allocated on the first tile packet: sessions with released hosts pay nothing.
     if (layer_.empty()) { layer_.assign(size_t(width_) * height_ * 4, 0); present_.assign(count_, 0); drop_at_.assign(count_, noDrop); }
+    // tiles-v2 entries wait for their frame. Everything that arrives while any of
+    // them waits has to stay behind it, in order: a later add decoded at once would
+    // be shifted by the earlier move, and a later drop would miss a tile whose add
+    // still waits. A stream without such entries never enters this path.
+    bool timed = !ops_.empty();
+    {
+      size_t scan = headerBytes + size_t(drops) * 2;
+      for (uint32_t n = 0; n < adds && !timed; ++n) {
+        if (size - scan < addHeaderBytes) return false;
+        const uint32_t length = read32(p + scan + 4);
+        if (length > size - scan - addHeaderBytes) return false;
+        timed = p[scan + 2] == codecMove || p[scan + 2] == codecRect;
+        scan += addHeaderBytes + length;
+      }
+    }
+    if (timed) return queue(p, size, dropPts, drops, adds, sequence);
     for (uint32_t n = 0; n < drops; ++n) {
       const uint32_t index = read16(p + headerBytes + n * 2);
       if (index >= count_) return false;
@@ -331,6 +399,95 @@ class Compositor {
     sequence_ = sequence; ++stats_.packets; stats_.bytes += size;
     return true;
   }
+  // tiles-v2. One entry of a packet that has to wait: notBefore is the decoded pts at
+  // which it may be applied, never earlier than the entry queued before it.
+  struct Op { uint64_t notBefore = 0, dropPts = noDrop; uint8_t kind = 0; uint32_t index = 0; uint16_t x = 0, y = 0, width = 0, height = 0; int16_t dy = 0; std::vector<uint8_t> pixels; };
+  enum : uint8_t { opDrop, opAdd, opMove, opRect };
+  bool queue(const uint8_t* p, size_t size, uint64_t dropPts, uint32_t drops, uint32_t adds, uint32_t sequence) {
+    std::vector<Op> staged;
+    uint64_t last = ops_.empty() ? 0 : ops_.back().notBefore;
+    const auto push = [&](Op&& op, uint64_t own) { last = std::max(last, own); op.notBefore = last; staged.push_back(std::move(op)); };
+    for (uint32_t n = 0; n < drops; ++n) {
+      Op op; op.kind = opDrop; op.index = read16(p + headerBytes + n * 2); op.dropPts = dropPts;
+      if (op.index >= count_) return false;
+      push(std::move(op), dropPts);
+    }
+    size_t at = headerBytes + size_t(drops) * 2;
+    for (uint32_t n = 0; n < adds; ++n) {
+      if (size - at < addHeaderBytes) return false;
+      const uint32_t index = read16(p + at), length = read32(p + at + 4);
+      const uint8_t codec = p[at + 2];
+      if (p[at + 3] || length > size - at - addHeaderBytes) return false;
+      const uint8_t* body = p + at + addHeaderBytes;
+      Op op;
+      if (codec == codecTq1) {
+        if (index >= count_) return false;
+        const auto rect = tileRect(index, width_, height_);
+        op.kind = opAdd; op.index = index; op.pixels.resize(size_t(rect.width) * rect.height * 4);
+        if (!decodeTq1(body, length, rect.width, rect.height, op.pixels.data(), size_t(rect.width) * 4)) return false;
+        push(std::move(op), 0);
+      } else if (codec == codecMove || codec == codecRect) {
+        // Without a frame to wait for there is no moment to apply it.
+        if (index != noTile || dropPts == noDrop || length < (codec == codecMove ? moveBytes : rectHeaderBytes)) return false;
+        op.x = read16(body); op.y = read16(body + 2); op.width = read16(body + 4); op.height = read16(body + 6);
+        if (!op.width || !op.height || uint32_t(op.x) + op.width > width_ || uint32_t(op.y) + op.height > height_) return false;
+        if (codec == codecMove) {
+          op.kind = opMove; op.dy = int16_t(read16(body + 8));
+          if (length != moveBytes || !op.dy || std::abs(int(op.dy)) >= int(op.height)) return false;
+        } else {
+          if (op.width > tileSize || op.height > tileSize) return false;
+          op.kind = opRect; op.pixels.resize(size_t(op.width) * op.height * 4);
+          if (!decodeTq1(body + rectHeaderBytes, length - rectHeaderBytes, op.width, op.height, op.pixels.data(), size_t(op.width) * 4)) return false;
+        }
+        push(std::move(op), dropPts);
+      } else return false;
+      at += addHeaderBytes + length;
+    }
+    if (at != size) return false;
+    for (auto& op : staged) ops_.push_back(std::move(op));
+    sequence_ = sequence; ++stats_.packets; stats_.bytes += size;
+    return true;
+  }
+  // Applies, in order, every waiting entry whose frame has come.
+  void advance(uint64_t pts) {
+    while (!poisoned_ && !ops_.empty() && ops_.front().notBefore <= pts) {
+      if (!apply(ops_.front())) { poison(); return; }
+      ops_.pop_front();
+    }
+  }
+  // Every tile the rectangle touches is present: what the host required before it sent the entry.
+  bool covered(const Op& op) const {
+    const uint32_t columns = tileColumns(width_);
+    for (uint32_t r = op.y / tileSize; r <= (uint32_t(op.y) + op.height - 1) / tileSize; ++r)
+      for (uint32_t c = op.x / tileSize; c <= (uint32_t(op.x) + op.width - 1) / tileSize; ++c) if (!present_[r * columns + c]) return false;
+    return true;
+  }
+  void touch(const Op& op) {
+    const uint32_t columns = tileColumns(width_);
+    for (uint32_t r = op.y / tileSize; r <= (uint32_t(op.y) + op.height - 1) / tileSize; ++r)
+      for (uint32_t c = op.x / tileSize; c <= (uint32_t(op.x) + op.width - 1) / tileSize; ++c) moved_.push_back(r * columns + c);
+  }
+  bool apply(const Op& op) {
+    const size_t stride = size_t(width_) * 4;
+    if (op.kind == opDrop) { if (present_[op.index]) drop_at_[op.index] = std::min(drop_at_[op.index], op.dropPts); return true; }
+    if (op.kind == opAdd) {
+      const auto rect = tileRect(op.index, width_, height_);
+      for (uint32_t row = 0; row < rect.height; ++row) std::memcpy(layer_.data() + size_t(rect.y + row) * stride + size_t(rect.x) * 4, op.pixels.data() + size_t(row) * rect.width * 4, size_t(rect.width) * 4);
+      if (!present_[op.index]) { present_[op.index] = 1; ++present_count_; }
+      drop_at_[op.index] = noDrop; ++stats_.addedTiles; moved_.push_back(op.index);
+      return true;
+    }
+    if (!covered(op)) return false;
+    if (op.kind == opMove) {
+      const size_t bytes = size_t(op.width) * 4, left = size_t(op.x) * 4;
+      const int rows = int(op.height) - std::abs(int(op.dy));
+      if (op.dy > 0) for (int n = 0; n < rows; ++n) { const size_t y = size_t(op.y) + size_t(n); std::memcpy(layer_.data() + y * stride + left, layer_.data() + (y + size_t(op.dy)) * stride + left, bytes); }
+      else for (int n = rows - 1; n >= 0; --n) { const size_t y = size_t(op.y) + size_t(-op.dy) + size_t(n); std::memcpy(layer_.data() + y * stride + left, layer_.data() + (y - size_t(-op.dy)) * stride + left, bytes); }
+      ++stats_.moves;
+    } else for (uint32_t row = 0; row < op.height; ++row) std::memcpy(layer_.data() + size_t(op.y + row) * stride + size_t(op.x) * 4, op.pixels.data() + size_t(row) * op.width * 4, size_t(op.width) * 4);
+    touch(op);
+    return true;
+  }
   void copyTile(uint32_t index, uint8_t* rgba, size_t pitch) const {
     const auto rect = tileRect(index, width_, height_);
     const size_t stride = size_t(width_) * 4, bytes = size_t(rect.width) * 4;
@@ -339,12 +496,13 @@ class Compositor {
     for (uint32_t row = 0; row < rect.height; ++row) std::memcpy(target + row * pitch, source + row * stride, bytes);
   }
   void clearPresent() { std::fill(present_.begin(), present_.end(), uint8_t(0)); present_count_ = 0; }
-  void poison() { poisoned_ = true; added_.clear(); }
+  void poison() { poisoned_ = true; added_.clear(); ops_.clear(); moved_.clear(); }
   uint32_t width_ = 0, height_ = 0, count_ = 0, sequence_ = 0, present_count_ = 0, video_width_ = 0, video_height_ = 0;
   bool poisoned_ = false, allow_scaled_ = false;
   std::vector<uint8_t> layer_, present_;
   std::vector<uint64_t> drop_at_;
-  std::vector<uint32_t> added_;
+  std::vector<uint32_t> added_, moved_;
+  std::deque<Op> ops_;
   video::BilinearUpscaler upscaler_;
   Stats stats_;
 };

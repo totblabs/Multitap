@@ -41,7 +41,9 @@ const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samp
   'decodeFpsLow10', 'captureFpsLow10', 'encodeFpsLow10', 'receiveKbps', 'bitrateKbps', 'targetKbps', 'networkDelayMs', 'rttMs', 'rttMaxMs',
   // The relay's own measurement of the Host leg of the client's ping (relay -> Host -> relay; the largest in the
   // window, ms), so a slow round trip (rttMaxMs) can be placed on one side of the relay.
-  'rttHostMaxMs', 'hostWorkUs', 'hostP95Us', 'hostMaxUs', 'captureUs', 'convertUs', 'encodeUs', 'decodeUs', 'decodeMaxUs', 'queueMaxMs', 'skipped', 'losslessTiles', 'losslessKbps', 'inputHostP50Us', 'inputHostP95Us', 'inputFrameP50Us', 'inputFrameP95Us',
+  'rttHostMaxMs', 'hostWorkUs', 'hostP95Us', 'hostMaxUs', 'captureUs', 'convertUs', 'encodeUs', 'decodeUs', 'decodeMaxUs', 'queueMaxMs', 'skipped', 'losslessTiles', 'losslessKbps',
+  // tiles-v2: scrolls the Host sent as a move since the stream began (a count; absent from a Host without moves).
+  'losslessMoves', 'inputHostP50Us', 'inputHostP95Us', 'inputFrameP50Us', 'inputFrameP95Us',
   // texture-pacing-v1 clients: decoded -> taken by Flutter wait and
   // Flutter's texture upload (us), frames queued/skipped in the window, the
   // texture path (0 = CPU pixel buffer, 1 = GPU surface) and the composition

@@ -553,7 +553,8 @@ class Overlay {
     scratch_.resize(size_t(width) * height * 4);
     for (uint32_t row = 0; row < height; ++row) {
       const uint8_t* s = rgba + size_t(row) * pitch; uint8_t* t = scratch_.data() + size_t(row) * width * 4;
-      for (uint32_t col = 0; col < width; ++col) { t[col * 4] = s[col * 4 + 2]; t[col * 4 + 1] = s[col * 4 + 1]; t[col * 4 + 2] = s[col * 4]; t[col * 4 + 3] = s[col * 4 + 3]; }
+      // Red and blue change places, a pixel at a time (a scrolled pane uploads a run of tiles per row).
+      for (uint32_t col = 0; col < width; ++col) { uint32_t pixel; std::memcpy(&pixel, s + col * 4, 4); pixel = (pixel & 0xff00ff00u) | ((pixel >> 16) & 0xffu) | ((pixel & 0xffu) << 16); std::memcpy(t + col * 4, &pixel, 4); }
     }
     const D3D11_BOX box{x, y, 0, x + width, y + height, 1};
     device_->context->UpdateSubresource(texture_.Get(), 0, &box, scratch_.data(), width * 4, 0);

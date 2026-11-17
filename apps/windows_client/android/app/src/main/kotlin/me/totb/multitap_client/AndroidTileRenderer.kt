@@ -56,7 +56,7 @@ internal class AndroidTileRenderer private constructor(
     private val transform = FloatArray(16)
     private var maskShown = -1
     private val maskBuffer = ByteBuffer.allocateDirect(columns * rows).order(ByteOrder.nativeOrder())
-    private val tileBuffer = ByteBuffer.allocateDirect(LosslessTiles.TILE * LosslessTiles.TILE * 4).order(ByteOrder.nativeOrder())
+    private var tileBuffer = ByteBuffer.allocateDirect(LosslessTiles.TILE * LosslessTiles.TILE * 4).order(ByteOrder.nativeOrder())
     private val quad: FloatBuffer = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
         // x, y (clip), u, v (v = 0 at the picture's top row)
         put(floatArrayOf(-1f, -1f, 0f, 1f, 1f, -1f, 1f, 1f, -1f, 1f, 0f, 0f, 1f, 1f, 1f, 0f)); position(0)
@@ -230,9 +230,10 @@ void main() {
         return texture.timestamp
     }
 
-    /** One decoded tile (a [TileSink] call) into the tile texture. */
+    /** One decoded tile, or after a move a run of tiles of one row (a [TileSink] call), into the tile texture. */
     fun upload(x: Int, y: Int, width: Int, height: Int, rgba: ByteArray) {
         if (released) return
+        if (width * height * 4 > tileBuffer.capacity()) tileBuffer = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
         tileBuffer.clear(); tileBuffer.put(rgba, 0, width * height * 4); tileBuffer.flip()
         GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tileTexture)

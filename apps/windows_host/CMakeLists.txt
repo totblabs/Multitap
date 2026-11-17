@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.29 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.30 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -798,6 +798,12 @@ target_compile_definitions(MultitapHostCapturePacingTest PRIVATE UNICODE _UNICOD
 target_link_libraries(MultitapHostCapturePacingTest PRIVATE d3d11 dxgi windowsapp user32 gdi32)
 target_compile_options(MultitapHostCapturePacingTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # The capture loop's window diagnostics (skipped ticks by reason, pacing lateness, tail, pipe write maximum).
+add_executable(MultitapHostLosslessMovesTest EXCLUDE_FROM_ALL src/lossless_moves_test.cpp)
+target_compile_features(MultitapHostLosslessMovesTest PRIVATE cxx_std_20)
+target_compile_options(MultitapHostLosslessMovesTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+add_executable(MultitapHostScrollDetectTest EXCLUDE_FROM_ALL src/scroll_detect_test.cpp)
+target_compile_features(MultitapHostScrollDetectTest PRIVATE cxx_std_20)
+target_compile_options(MultitapHostScrollDetectTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostCaptureLoopStatsTest EXCLUDE_FROM_ALL src/capture_loop_stats_test.cpp)
 target_compile_options(MultitapHostCaptureLoopStatsTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostCapturePacingBenchmark EXCLUDE_FROM_ALL src/capture_pacing_benchmark.cpp)

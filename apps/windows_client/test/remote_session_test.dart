@@ -295,9 +295,25 @@ void main() {
       await flush();
       expect(session.losslessTiles, 412);
       expect(session.losslessKbps, 2400.5);
+      expect(session.losslessMoves, isNull, reason: 'A Host without moves');
+      // tiles-v2: a Host with moves also says how many scrolls it sent as one.
+      socket.incoming.add(
+        jsonEncode({
+          ...stats,
+          'lossless': {
+            'protocol': 'tiles-v1',
+            'presentTiles': 410,
+            'kbps': 310.0,
+            'moves': 37,
+          },
+        }),
+      );
+      await flush();
+      expect(session.losslessMoves, 37);
       socket.incoming.add(jsonEncode(stats));
       await flush();
       expect(session.losslessTiles, isNull, reason: 'No report means no tiles');
+      expect(session.losslessMoves, isNull);
       await session.close();
       await media.events.close();
     },
