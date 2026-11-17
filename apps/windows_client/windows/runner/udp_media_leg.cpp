@@ -52,8 +52,12 @@ struct Lookups {
   std::vector<Entry> entries;
 };
 
-udp::Probe::Proof ProofOf(uint8_t type, const char* label, size_t labelSize, const UdpMediaLeg::Grant& grant) {
-  std::vector<uint8_t> message(label, label + labelSize);
+// The label's length comes from the literal itself (without its terminator):
+// a hand-counted length one short left the last character out of the proof,
+// and the relay dropped every BIND of this client as bad_proof.
+template <size_t N>
+udp::Probe::Proof ProofOf(uint8_t type, const char (&label)[N], const UdpMediaLeg::Grant& grant) {
+  std::vector<uint8_t> message(label, label + N - 1);
   message.insert(message.end(), grant.id.begin(), grant.id.end());
   udp::Probe::Proof proof{};
   proof[0] = type; std::memcpy(&proof[1], grant.id.data(), grant.id.size());
@@ -147,7 +151,7 @@ struct UdpMediaLeg::Impl {
   }
 
   void Loop() {
-    const auto bindProof = ProofOf(1, "multitap-udp-bind-v1", 19, grant), ackProof = ProofOf(2, "multitap-udp-ack-v1", 18, grant);
+    const auto bindProof = ProofOf(1, "multitap-udp-bind-v1", grant), ackProof = ProofOf(2, "multitap-udp-ack-v1", grant);
     SecureZeroMemory(grant.ticket.data(), grant.ticket.size());
     if (!OpenSocket()) return Finish(udp::probeSocketError);
     relays.assign(grant.relays.size(), sockaddr_in{});
