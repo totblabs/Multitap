@@ -77,6 +77,7 @@ class BitrateController {
     fps_ = std::clamp(fps, 1, 60);
     floor_ = std::min(adaptiveBitrateFloor(width, height, fps_), maximum_);
     target_ = std::clamp(target_, double(floor_), double(maximum_));
+    idleRestore_ = std::min(idleRestore_, double(maximum_));
     return publish(true);
   }
   // A media packet entered the host send queue. `tile` = lossless tile payload
@@ -112,8 +113,7 @@ class BitrateController {
     // sends, and what was written during the stall is no capacity measure
     // (in the field such cuts took 52 Mbps to the 2.7 Mbps floor). A
     // queue filling with bytes still is.
-    const bool limited = rate(video_, nowUs, 500000) < 0.7 * target_;
-    if ((fullBytes || ((full || aged) && !limited)) && nowUs - lastEmergencyUs_ >= 150000) emergency(nowUs, rate(written_, nowUs, 150000));
+    if ((fullBytes || ((full || aged) && !limited(nowUs))) && nowUs - lastEmergencyUs_ >= 150000) emergency(nowUs, rate(written_, nowUs, 150000));
     return publish();
   }
   // A WebSocket write of `bytes` completed: while the queue is backed up this
@@ -180,6 +180,7 @@ class BitrateController {
     if (!lossy) spikeBase_ = 0;  // the spike left the window
     if (given && (fraction >= lossCut || lossy >= 3) && nowUs >= lossHoldUs_ && !encoderLimited_ && !lossStuck_) {
       const auto cut = [&](double base, double lowest) {
+        cutting(true);
         target_ = std::clamp(std::min(target_, base * std::clamp((1 - fraction) * lossDrain, lowest, 0.95)), double(floor_), double(maximum_));
         lastOveruseUs_ = nowUs; congestionVideo_ = target_; congestionAtUs_ = nowUs;  // probing comes back gently around it
         return publish();
@@ -214,7 +215,8 @@ class BitrateController {
     const bool sending = !video_.empty() && nowUs - video_.back().atUs <= staleFeedbackUs;
     const uint64_t silentSince = lastFeedbackUs_ ? lastFeedbackUs_ : firstVideoUs_ ? firstVideoUs_ + 1000000 : 0;
     if (sending && silentSince && nowUs - silentSince > staleFeedbackUs && nowUs - lastStaleUs_ >= 1000000) {
-      lastStaleUs_ = nowUs; target_ = std::max(double(floor_), target_ * 0.85);
+      // Silence measures nothing either way: the rate from before it is kept for a clear report.
+      lastStaleUs_ = nowUs; cutting(false); target_ = std::max(double(floor_), target_ * 0.85);
     }
     overshoot(nowUs);
     return publish();
@@ -259,11 +261,21 @@ class BitrateController {
     else baseline_ = std::min(window, baseline_ + int64_t(double(nowUs - baselineAtUs_) * 0.002));
     baselineValid_ = true; baselineAtUs_ = nowUs;
   }
+  // Application-limited: a mostly idle desktop sends far below the target.
+  bool limited(uint64_t nowUs) const { return rate(video_, nowUs, 500000) < 0.7 * target_; }
+  // Called before every cut. One made while application-limited changes nothing
+  // that is sent and measures no capacity, so the rate from before the first
+  // such cut is kept: a clear path gives it back (decide), also to a desktop
+  // that stays idle and therefore never probes. In the field an idle desktop
+  // that sat through three minutes of stalls came back at 2.4 of 17.5 Mbps.
+  // A cut with evidence (loss, a queue our own sending filled) ends that.
+  void cutting(bool evidence) { idleRestore_ = evidence ? 0 : std::max(idleRestore_, target_); }
   // Overflow guard: at most half, and below what the backed-up leg carries.
   void emergency(uint64_t nowUs, double carried = 0) {
     lastEmergencyUs_ = lastOveruseUs_ = nowUs; holdUntilUs_ = nowUs + 500000;
     // An encoder already emitting far above its target would not follow.
     if (encoderLimited_) return;
+    cutting(!limited(nowUs));
     double next = target_ * 0.5;
     if (carried > 0) next = std::min(next, 0.8 * carried - audioRate(nowUs));
     target_ = std::clamp(next, double(floor_), double(maximum_));
@@ -302,6 +314,7 @@ class BitrateController {
     const bool undo = limitedCut_ ? excess <= overuseExcessUs : recentDelivered() >= 1.1 * (undoTarget_ + audioRate(nowUs));
     if (undoUntilUs_ && !growing && undo) {
       target_ = undoTarget_; congestionVideo_ = undoCongestion_; congestionAtUs_ = undoCongestionAtUs_;
+      if (target_ >= idleRestore_) idleRestore_ = 0;
       undoUntilUs_ = 0; cutDelayUs_ = 0; overuseRuns_ = 0; holdUntilUs_ = nowUs + 200000;
       return publish();
     }
@@ -318,7 +331,8 @@ class BitrateController {
         // one delay spike. Step down instead: a real bottleneck
         // below even this rate keeps cutting until we are no longer limited.
         // A queue that drains anyway restores the rate before the series.
-        limitedCut_ = rate(video_, nowUs, 500000) < 0.7 * target_;
+        limitedCut_ = limited(nowUs);
+        cutting(!limitedCut_);
         if (limitedCut_ && !limitedPending_) limitedRestore_ = target_;
         limitedPending_ = limitedCut_;
         undoTarget_ = limitedCut_ ? limitedRestore_ : target_; undoCongestion_ = congestionVideo_; undoCongestionAtUs_ = congestionAtUs_; undoUntilUs_ = nowUs + (limitedCut_ ? 3000000 : 1000000);
@@ -341,12 +355,16 @@ class BitrateController {
     // UDP: any datagram given up in the last second is no room to probe into.
     const bool lossy = lossSeenUs_ && nowUs - lossSeenUs_ < 1000000;
     if (excess > overuseExcessUs || nowUs < holdUntilUs_ || nowUs - lastOveruseUs_ < stableUs || nowUs < burstUntilUs_ || encoderLimited_ || excess >= probeExcessUs || lossy) return publish();
+    // The path is clear here. Cuts made while application-limited took a rate there was no
+    // evidence against (cutting): it is back at once, before the next picture needs it.
+    if (idleRestore_ > target_) { target_ = idleRestore_; idleRestore_ = 0; return publish(); }
     const double used = rate(video_, nowUs, 500000);
     if (used < 0.7 * target_) return publish();  // application-limited: no evidence above it
     // Gentle only around the last congestion rate; past it the path changed.
     const bool gentle = congestionVideo_ > 0 && nowUs - congestionAtUs_ < 30000000 && target_ >= 0.9 * congestionVideo_ && target_ <= 1.15 * congestionVideo_;
     const double next = target_ * std::pow(gentle ? nearProbeStep : probeStep, double(elapsed) / 100000);
     target_ = std::min({double(maximum_), next, std::max(target_, 1.5 * used)});
+    if (target_ >= idleRestore_) idleRestore_ = 0;
     return publish();
   }  std::optional<int> publish(bool force = false) {
     const int value = int(std::lround(target_));
@@ -362,7 +380,7 @@ class BitrateController {
   struct Loss { uint64_t atUs, received, lost; };
   std::deque<Loss> losses_;  // UDP FEEDBACK of the last lossWindowUs
   uint64_t lossSeenUs_ = 0, lossCutUs_ = 0, lossHoldUs_ = 0; double lossCutFraction_ = 0, spikeBase_ = 0; bool lossStuck_ = false;
-  double undoTarget_ = 0, undoCongestion_ = 0, limitedRestore_ = 0;
+  double undoTarget_ = 0, undoCongestion_ = 0, limitedRestore_ = 0, idleRestore_ = 0;
   int64_t standingDelayUs_ = 0, standingExcessUs_ = 0, relayExcessUs_ = 0, previousExcessUs_ = 0, cutDelayUs_ = 0, baseline_ = 0;
   int overuseRuns_ = 0;
   bool baselineValid_ = false, encoderLimited_ = false, limitedCut_ = false, limitedPending_ = false;

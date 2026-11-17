@@ -42,7 +42,7 @@ struct Scenario {
   int width = 1920, height = 1080, fps = 60, start = 20000000, maximum = 100000000;
   uint64_t stallEveryUs = 0, stallUs = 0;   // periodic link stalls (Wi-Fi scan)
   double spikeProbability = 0; uint64_t spikeUs = 0;  // single delayed packets (head-of-line)
-  uint64_t feedbackStopsAtUs = UINT64_MAX;
+  uint64_t feedbackStopsAtUs = UINT64_MAX, feedbackResumesAtUs = UINT64_MAX;  // the client is silent in between
   int encoderFloor = 0;  // the encoder never emits less (content at its quantiser limit)
   unsigned seed = 7;
 };
@@ -150,7 +150,7 @@ Result simulate(const Scenario& s) {
       inFlight.pop_front();
     }
     if (now - lastReportUs >= 100 * ms) {
-      if (now < s.feedbackStopsAtUs) {
+      if (now < s.feedbackStopsAtUs || now >= s.feedbackResumesAtUs) {
         if (frames.size() > 64) frames.erase(frames.begin(), frames.end() - 64);
         uplink.push_back({now + s.propagationUs + 2 * ms, frames, feedbackBytes, now - lastReportUs, relayBacklog});
       }
@@ -322,6 +322,36 @@ int main(int argc, char** argv) {
       const auto r = simulate(s); print(s, r, 8 * second, 40 * second);
       require(r.hostOverflow == 0, "light host stalls: host queue overflow");
       require(r.targetMin(9 * second, 40 * second) >= int(0.6 * r.targetAt(8 * second)), "light host stalls: a stalled write collapsed the rate while application-limited");
+    }
+    {
+      // Field case (2026-11-17, a phone laid down with the stream open): the app
+      // stopped reporting while the idle desktop still sent its 1 s refresh, the
+      // silence rule took 15 % a second down to the geometry floor (2.4 of
+      // 17.5 Mbps), and an idle desktop never probes: the first picture after
+      // the pause came at the floor. A cut made while application-limited
+      // changes nothing that is sent and measures no capacity, so the rate from
+      // before it is back as soon as reports show a clear path again.
+      Scenario s; s.name = "idle-feedback-pause"; s.durationUs = 60 * second; s.capacity = [](uint64_t) { return 50e6; };
+      s.content = [](uint64_t at) { return at < 10 * second || at >= 45 * second ? Content::motion : Content::idle; };
+      s.feedbackStopsAtUs = 15 * second; s.feedbackResumesAtUs = 38 * second;
+      const auto r = simulate(s); print(s, r, 15 * second, 45 * second);
+      const int before = r.targetAt(14 * second);
+      require(r.targetAt(37 * second) <= int(0.5 * before), "idle pause: the silence no longer lowers the rate (the scenario lost its point)");
+      require(r.targetAt(42 * second) >= int(0.95 * before), "idle pause: the rate from before the silence was not back once reports showed a clear path");
+      require(r.targetMax(15 * second, 45 * second) <= before, "idle pause: an idle desktop went above the rate it had evidence for");
+    }
+    {
+      // The same idle desktop through a path that stalls again and again: the
+      // cuts made there are undone when the queue drains (they measured nothing).
+      Scenario s; s.name = "idle-delay-episode"; s.durationUs = 120 * second;
+      s.capacity = [](uint64_t at) { return at >= 20 * second && at < 50 * second && at % (500 * ms) < 100 * ms ? 3e5 : 50e6; };
+      s.content = [](uint64_t at) { return at < 10 * second || at >= 100 * second ? Content::motion : Content::idle; };
+      const auto r = simulate(s); print(s, r, 20 * second, 50 * second); print(s, r, 50 * second, 100 * second);
+      const int before = r.targetAt(19 * second);
+      require(r.relayOverflow == 0 && r.hostOverflow == 0, "idle episode: the stalls overflowed a queue (cuts with evidence are another case)");
+      require(r.targetMin(20 * second, 50 * second) < int(0.8 * before), "idle episode: the simulated stalls no longer cut the rate (the scenario lost its point)");
+      require(r.targetAt(60 * second) >= int(0.95 * before), "idle episode: the rate from before application-limited cuts did not come back on a clear path");
+      require(r.targetMax(50 * second, 100 * second) <= before, "idle episode: an idle desktop went above the rate it had evidence for");
     }
     {
       // The same light updates on a link slower than they need: a real
