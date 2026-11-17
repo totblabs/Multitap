@@ -51,7 +51,7 @@ test('the server\'s own page in English: product names, one plain line, the same
   const releases = [file('client', 'Multitap-1.0.41-windows-x64.exe'), file('host', 'Multitap-Host-1.0.43-windows-x64.exe'), file('android-client', 'Multitap-1.0.28-arm64-v8a.apk', { abi: 'arm64-v8a' })];
   const { document } = parseHTML(renderLanding({ version: '1.0.51', publicOrigin: 'https://vdi.example', releases, lang: 'en' }));
   assert.deepEqual([...document.querySelectorAll('.dl-card')].map(node => [node.querySelector('.dl-title').textContent, node.querySelector('.dl-text').textContent, node.querySelector('.dl-short-label').textContent]),
-    [['Windows client', 'Install it on the PC you connect from.', 'Short link'], ['Multitap Host', 'Install it on each Windows (VM or PC) you use as a desktop.', 'Short link'], ['Android app', 'Connect to your desktops from phones and tablets.', 'Short link']]);
+    [['Windows client', 'Install it on the PC you connect from.', 'Short link'], ['Android app', 'Connect to your desktops from phones and tablets.', 'Short link']]);
   assert.equal(document.querySelector('.hero-eyebrow,.dl-where,.dl-icon,.dl-card.is-primary,a.dl-button.primary'), null);
   assert.equal(document.querySelector('.hero-inner').firstElementChild.tagName, 'H1', 'the heading is the first line of the band');
   for (const lang of ['ko', 'en']) for (const product of Object.values(productsFor(lang))) {

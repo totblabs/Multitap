@@ -116,7 +116,7 @@ function addressTransport(origin, w) {
 }
 
 function downloadSection(releases, origin, platform, lang = 'ko') {
-  const w = say(lang), choices = downloadChoices(releases, { platform, lang });
+  const w = say(lang), choices = downloadChoices(releases, { platform, lang, apps: true });
   const note = platform === 'android' && !choices.some(choice => choice.key === 'android') ? w.androidMissing : platform === 'apple' || platform === 'other' ? w[platform] : '';
   return `<section id="downloads" class="dl-section" aria-label="${w.download}">
     ${note ? `<p class="dl-platform">${icon('info')}<span>${escapeHtml(note)}</span></p>` : ''}

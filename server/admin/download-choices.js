@@ -62,12 +62,14 @@ export const productsFor = (lang = 'ko') => lang === 'ko' ? products
 
 // The cards in display order. The Windows client and Host always appear (a
 // product without a published file says so); the Android preview only when
-// this server publishes it. An Android visitor sees it first.
-export function downloadChoices(releases, { platform = '', lang = 'ko' } = {}) {
+// this server publishes it. An Android visitor sees it first. With [apps]
+// (the public page the people who connect open) only the apps: Host is for
+// administrators, in the admin console's downloads and at /get/host.
+export function downloadChoices(releases, { platform = '', lang = 'ko', apps = false } = {}) {
   const android = latestAndroid(releases), products = productsFor(lang);
   const choices = [
     { ...products.client, file: latestWindows(releases, 'client'), alternatives: [] },
-    { ...products.host, file: latestWindows(releases, 'host'), alternatives: [] },
+    ...(apps ? [] : [{ ...products.host, file: latestWindows(releases, 'host'), alternatives: [] }]),
     ...(android ? [{ ...products.android, file: android.files[0], alternatives: android.files.slice(1) }] : []),
   ];
   if (platform === 'android' && android) choices.unshift(choices.pop());

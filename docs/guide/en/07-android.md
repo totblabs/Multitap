@@ -110,7 +110,7 @@ Tap a row to open its panel in the same place, and tap **Back** at the top to re
 | Row | What it has |
 | --- | --- |
 | **Connection quality** | Round-trip latency, screen frames, received video, resolution and video path. **Show connection stats** shows Host processing and **Processing on this device** (time spent decoding and so on). |
-| **Screen** | **Whole screen** and **Pan**, Windows **Scale** (five steps from 100 to 200%), **Resolution** (**Auto (recommended)** or **Fit to device**) |
+| **Screen** | **Whole screen** and **Pan**, Windows **Scale** (five steps from 100 to 200%), **Resolution** (**Auto (recommended)**, **Sharp** or a fixed size) |
 | **Shared folder** | Connects a folder on this device to the desktop. It appears only on connections that allow it. See [Shared folders](#shared-folders). |
 | **Settings** | **Picture quality**, **Mouse lock**, **Input mode** (including pointer speed), **Guide** |
 | **Disconnect** | Ends the connection. |
@@ -121,7 +121,9 @@ The Android menu has **Shared folder**, but no USB devices.
 
 The desktop's resolution adjusts automatically to fit the device screen.
 Spreading two fingers enlarges only the picture shown on this device.
-**Scale** changes the size of text and icons in Windows.
+**Scale** changes the size of text and icons in Windows, at once and without reconnecting. New connections start at 100%.
+**Sharp** receives the device screen's own pixels and raises the scale to match, so everything keeps its size and only gets crisper. It uses more data and battery. If the device cannot handle it, the picture shows at the auto size.
+The resolution choice is remembered separately for **Phone**, **Foldable inner screen** and **Tablet**. When you turn the device or unfold a foldable, the size is decided again for the screen.
 
 1. Open **Menu → Settings → Picture quality**.
 2. Choose a quality mode, or the frame rate and bitrate.
@@ -177,6 +179,8 @@ A single tap can reach the desktop slightly late, because the app waits to tell 
 | Three-finger tap | Opens or closes the keyboard. |
 | Four-finger tap | Switches between **Pointer** and **Touch**. |
 
+In **Touch** mode on a connection where the Host accepts Windows touch, two fingers zoom and scroll inside apps instead of enlarging the picture. To zoom the picture itself, switch to **Pointer**.
+
 A mark appears where you touch.
 When you press and hold, a circular progress mark appears, and the device vibrates when it becomes a right-click.
 Depending on your device's support and settings, you may not feel the vibration.
@@ -200,7 +204,7 @@ Checking that you selected the input field helps you avoid typing into another w
 | Press and hold a modifier key | Locks the key. Tap the same key again to release it. |
 | Windows icon | Opens the Start menu on the desktop. |
 | **Han/Eng** (한/영) | Switches the desktop between Korean and English input. |
-| **Esc**, **Tab**, arrow keys, **Del** | Send that PC key to the desktop. |
+| **Esc**, **Tab**, arrow keys, **Del**, **Home**, **End** | Send that PC key to the desktop. |
 | **Fn** | Switches to the **F1–F12**, **Ins**, **Home**, **End**, **PgUp** and **PgDn** keys. |
 
 For example, tap **Ctrl** once and then type `C` to send `Ctrl+C`.
@@ -221,6 +225,21 @@ New connections start with mouse lock off.
 
 If a virtual USB mouse cannot be connected, input may not work in some games.
 Ask your administrator to check your USB sharing permission and the Host's USB status.
+
+## External keyboard, pen and game controller
+
+| Device | What it does |
+| --- | --- |
+| Bluetooth or USB keyboard | Keys go straight to the desktop, including Ctrl, Alt and Windows combinations, F keys, the numeric keypad, and the **Han/Eng** and **Hanja** keys. Android's Back, Home and volume keys stay on the device. While the on-screen keyboard is open, typing goes through it instead. |
+| Pen | Works like a mouse. The tip is a left click and drag, the pen button a right click. Where the device supports it, the cursor follows the pen while it hovers. While the pen touches or is near the screen, finger touches are ignored. Pressure, Windows Ink and the eraser are not sent. |
+| Game controller | On desktops whose Host supports it, it becomes a virtual controller on the desktop. During a connection the controller's B button is not used as Back. |
+
+## Copy and paste, and printing
+
+- **Copy and paste**: while the app is on screen, text goes both ways automatically. Files, folders and pictures are not copied. Use [Shared folders](#shared-folders) for files.
+- **Printing**: choose the **Multitap** printer on the desktop. The device receives the document and opens Android's print screen, where you pick a printer or save as PDF. Documents open one at a time while the app is on screen.
+
+**Menu → Settings → Guide** shows whether the printer, shared folders and copy and paste work on this connection.
 
 ## Shared folders
 
@@ -247,6 +266,12 @@ Change the app settings with **⚙** (Settings) at the top of your desktop list.
 | **Auto sign-out** | Turns auto sign-out on or off for the current sign-in. With no input for 30 minutes you are signed out, with a warning 1 minute before. |
 | **Two-step verification** | Also asks for an authenticator app code when you sign in. |
 | **Change password** | Changes your Multitap sign-in password. |
+
+## Android TV
+
+Install the same app on the TV. Move the pointer with the remote's direction keys and click with **OK**. Hold **OK** for a right-click.
+Press **Menu** or **Back** to open the **Remote screen menu**. There you open the keyboard, **Screen settings** and **Shortcuts** (Windows key, switch apps, Task Manager, copy, paste, select all, undo), and choose pointer, drag or scroll.
+The TV's **Screen settings** have fill, zoom, orientation, scale (auto, 100–300%) and pointer speed.
 
 ## Disconnect and Console
 

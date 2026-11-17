@@ -88,30 +88,32 @@ test('a browser receives the download-first landing page: newest file per produc
   assert.equal(result.headers.get('referrer-policy'), 'no-referrer');
   assert.equal(result.headers.get('vary'), 'Accept, User-Agent, Accept-Language');
   const document = page(result);
-  // Which file for which machine: the PC client, the Host for VMs, then the Android app. Each card is the product's
+  // Only the apps the people who connect install: the PC client, then the Android app. The Host is for
+  // administrators (admin console downloads, /get/host), not on this page. Each card is the product's
   // name and one plain line (no amber eyebrow, no icon tile, no highlighted first card).
-  assert.deepEqual(cards(document), ['client', 'host', 'android']);
+  assert.deepEqual(cards(document), ['client', 'android']);
+  assert.equal(html.includes('Multitap Host'), false); assert.equal(html.includes('/get/host'), false);
   assert.deepEqual([...document.querySelectorAll('.dl-card')].map(node => [node.querySelector('.dl-title').textContent, node.querySelector('.dl-text').textContent]),
-    [['Windows 클라이언트', '데스크톱에 접속할 PC에 설치해요.'], ['Multitap Host', '데스크톱으로 쓸 Windows(VM이나 PC)마다 설치해요.'], ['Android 앱', '휴대폰과 태블릿에서 데스크톱에 접속해요.']]);
+    [['Windows 클라이언트', '데스크톱에 접속할 PC에 설치해요.'], ['Android 앱', '휴대폰과 태블릿에서 데스크톱에 접속해요.']]);
   assert.equal(document.querySelector('.dl-where,.dl-icon,.dl-head,.hero-eyebrow,.dl-card.is-primary,a.dl-button.primary'), null);
   assert.ok([...document.querySelectorAll('a.dl-button')].every(link => link.classList.contains('secondary')), 'every download is the same button');
   assert.deepEqual([...document.querySelectorAll('a.dl-button')].map(link => link.getAttribute('href')),
-    ['/downloads/Multitap-0.4.10-windows-x64.exe', '/downloads/Multitap-Host-0.2.61-windows-x64.exe', '/downloads/Multitap-0.1.0-preview.4-android-arm64-v8a.apk'], 'newest per product, installer preferred, ARM64 first');
+    ['/downloads/Multitap-0.4.10-windows-x64.exe', '/downloads/Multitap-0.1.0-preview.4-android-arm64-v8a.apk'], 'newest per product, installer preferred, ARM64 first');
   assert.ok([...document.querySelectorAll('a.dl-button')].every(link => link.hasAttribute('download')));
   assert.deepEqual([...document.querySelectorAll('.dl-card[data-product=android] .dl-alt a')].map(a => a.getAttribute('href')), ['/downloads/Multitap-0.1.0-preview.4-android-armeabi-v7a.apk', '/downloads/Multitap-0.1.0-preview.4-android-x86_64.apk']);
   // No preview badge: the Android card is an ordinary download.
   assert.equal(document.querySelector('.dl-card[data-product=android] .dl-badge'), null);
   assert.doesNotMatch(document.querySelector('.dl-card[data-product=android]').textContent, /미리보기/);
   // Version, size and date compactly; the SHA-256 behind 검증 값.
-  assert.match(html, /50\.0 MB/); assert.match(html, /17\.9 MB/); assert.match(html, /2026-10-25/);
+  assert.match(html, /50\.0 MB/); assert.equal(html.includes('17.9 MB'), false); assert.match(html, /2026-10-25/);
   assert.equal(html.includes('0.4.9'), false); assert.equal(html.includes('preview.2'), false);
   assert.ok([...document.querySelectorAll('details.dl-verify')].every(node => node.querySelector('summary').textContent === '검증 값' && !node.hasAttribute('open')));
   assert.ok(document.querySelector('.dl-card[data-product=client] details.dl-verify').textContent.includes(sha));
   assert.match(document.querySelector('.dl-card[data-product=client] details.dl-verify').textContent, /52,428,800 바이트/);
   // Short links that always lead to the newest file, with this installation's own origin.
-  assert.deepEqual([...document.querySelectorAll('.dl-short-box code')].map(node => node.textContent), [`${origin}/get/client`, `${origin}/get/host`, `${origin}/get/android`]);
-  assert.deepEqual([...document.querySelectorAll('.dl-short-label')].map(node => node.textContent), ['짧은 주소', '짧은 주소', '짧은 주소']);
-  assert.deepEqual([...document.querySelectorAll('[data-copy]')].map(node => node.getAttribute('data-copy')), [`${origin}/get/client`, `${origin}/get/host`, `${origin}/get/android`, origin]);
+  assert.deepEqual([...document.querySelectorAll('.dl-short-box code')].map(node => node.textContent), [`${origin}/get/client`, `${origin}/get/android`]);
+  assert.deepEqual([...document.querySelectorAll('.dl-short-label')].map(node => node.textContent), ['짧은 주소', '짧은 주소']);
+  assert.deepEqual([...document.querySelectorAll('[data-copy]')].map(node => node.getAttribute('data-copy')), [`${origin}/get/client`, `${origin}/get/android`, origin]);
   assert.ok([...document.querySelectorAll('[data-copy]')].every(node => node.hasAttribute('hidden')), 'copy buttons appear only with a working clipboard (home.js)');
   assert.ok(document.querySelector('.dl-server').textContent.includes(origin), 'the actual server address to type into the client');
   assert.ok(html.includes(VERSION));
@@ -162,18 +164,18 @@ test('the card order and a short note follow the visitor\'s platform (server-sid
   assert.equal(platformOf(undefined), ''); assert.equal(platformOf('x'.repeat(1025)), '');
   const f = await fixture(t, catalog);
   const phone = page(await f.get('/', browser, { agent: agents.android }));
-  assert.deepEqual(cards(phone), ['android', 'client', 'host'], 'an Android visitor sees the app first');
+  assert.deepEqual(cards(phone), ['android', 'client'], 'an Android visitor sees the app first');
   assert.equal(phone.querySelector('a.dl-button').getAttribute('href'), '/downloads/Multitap-0.1.0-preview.4-android-arm64-v8a.apk');
   assert.equal(phone.querySelector('h1').textContent, 'Multitap 앱 받기');
   assert.equal(phone.querySelector('.dl-platform'), null);
   const apple = page(await f.get('/download', browser, { agent: agents.iphone }));
-  assert.deepEqual(cards(apple), ['client', 'host', 'android']);
+  assert.deepEqual(cards(apple), ['client', 'android']);
   assert.match(apple.querySelector('.dl-platform').textContent, /Apple 기기\(iPhone·iPad·Mac\)용 앱은 없어요\. Windows PC나 Android 기기에서 접속하세요\./);
   assert.equal(page(await f.get('/', browser)).querySelector('.dl-platform'), null, 'no User-Agent: the default order without a note');
   // An Android visitor of a server without the preview is told so.
   const windowsOnly = await fixture(t, [release('client', '0.4.10')]);
   const without = page(await windowsOnly.get('/', browser, { agent: agents.android }));
-  assert.deepEqual(cards(without), ['client', 'host']);
+  assert.deepEqual(cards(without), ['client']);
   assert.match(without.querySelector('.dl-platform').textContent, /Android 앱은 아직 이 서버에 게시되지 않았어요/);
 });
 
@@ -220,7 +222,7 @@ test('/download is the download page; /downloads and the JSON catalog stay uncha
     const document = page(result);
     assert.equal(document.querySelector('h1').textContent, 'Multitap 앱 받기', 'the same plain page as the root');
     assert.equal(document.querySelector('title').textContent, '다운로드 · Multitap');
-    assert.deepEqual(cards(document), ['client', 'host', 'android']);
+    assert.deepEqual(cards(document), ['client', 'android']);
     assert.equal(document.querySelector('#features,.home-next'), null, 'only the downloads');
   }
   assert.equal((await f.get('/download', undefined)).status, 200, 'a human page for any caller');
@@ -244,14 +246,16 @@ test('/download is the download page; /downloads and the JSON catalog stay uncha
 test('the landing page lists only what the catalog has and escapes catalog text', async t => {
   const empty = await fixture(t);
   const pageText = (await empty.get('/', browser)).bytes.toString('utf8'), document = parseHTML(pageText).document;
-  assert.deepEqual(cards(document), ['client', 'host']);
-  assert.equal(document.querySelectorAll('.dl-card.is-empty .dl-missing').length, 2);
+  assert.deepEqual(cards(document), ['client']);
+  assert.equal(document.querySelectorAll('.dl-card.is-empty .dl-missing').length, 1);
   assert.match(document.querySelector('.dl-missing').textContent, /아직 게시되지 않았어요/);
   assert.equal(pageText.includes('/downloads/'), false); assert.equal(pageText.includes('/get/'), false);
   assert.equal(document.querySelector('a.dl-button'), null);
   const hostOnly = parseHTML(renderLanding({ version: '1.2.3', publicOrigin: origin, releases: [publishedRelease(release('host', '0.2.61'))] })).document;
-  assert.deepEqual([...hostOnly.querySelectorAll('.dl-card:not(.is-empty) .dl-title')].map(node => node.textContent), ['Multitap Host']);
-  assert.equal(hostOnly.querySelector('a.dl-button').getAttribute('href'), '/downloads/Multitap-Host-0.2.61-windows-x64.exe');
+  // A published Host is not offered here (admin console downloads and /get/host keep it).
+  assert.equal(hostOnly.querySelectorAll('.dl-card:not(.is-empty)').length, 0);
+  assert.equal(hostOnly.querySelector('a.dl-button'), null);
+  assert.deepEqual(downloadChoices([publishedRelease(release('host', '0.2.61'))]).map(choice => choice.key), ['client', 'host'], 'the admin console still lists the Host');
   const hostile = renderLanding({ version: '<b>1</b>', publicOrigin: 'https://x.example"><script>', releases: [], userAgent: '<script>' });
   assert.equal(hostile.includes('<b>1</b>'), false); assert.equal(hostile.includes('"><script>'), false);
   assert.equal(renderDownloadPage({ version: '1', publicOrigin: 'https://x.example"><script>', releases: [] }).includes('"><script>'), false);
@@ -270,7 +274,7 @@ test('The newest Android preview gets one card: ARM64 first, the other ABIs as l
   assert.equal(latestFile(releases, 'android').filename, 'Multitap-0.1.0-preview.4-android-arm64-v8a.apk');
   assert.equal(latestFile(releases, 'host'), null); assert.equal(latestFile(releases, 'admin'), null);
   const document = parseHTML(renderLanding({ version: '1.2.3', publicOrigin: origin, releases })).document;
-  assert.deepEqual(cards(document), ['client', 'host', 'android']);
+  assert.deepEqual(cards(document), ['client', 'android']);
   const card = document.querySelector('.dl-card[data-product=android]');
   assert.equal(card.querySelector('.dl-button').getAttribute('href'), '/downloads/Multitap-0.1.0-preview.4-android-arm64-v8a.apk');
   assert.deepEqual([...card.querySelectorAll('.dl-alt a')].map(a => a.getAttribute('href')), ['/downloads/Multitap-0.1.0-preview.4-android-armeabi-v7a.apk', '/downloads/Multitap-0.1.0-preview.4-android-x86_64.apk']);
@@ -309,10 +313,10 @@ test('the public pages\' copy buttons use a working clipboard or select exact vi
   const written = [];
   const secure = load(true, { writeText: async text => { written.push(text); } });
   const buttons = [...secure.document.querySelectorAll('[data-copy]')];
-  assert.ok(buttons.length === 4 && buttons.every(node => !node.hidden));
+  assert.ok(buttons.length === 3 && buttons.every(node => !node.hidden));
   buttons[1].dispatchEvent(new secure.Event('click', { bubbles: true }));
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(written, [`${origin}/get/host`]);
+  assert.deepEqual(written, [`${origin}/get/android`]);
   assert.equal(buttons[1].textContent, '복사됨');
 });
 

@@ -72,7 +72,7 @@ Write the notes in English first, then Korean, from this release's section of `C
 
 The `.json` files and the `.tar.gz` are for the updater and the server image. You do not need them.
 
-A server you already run offers the same apps and Host on its own download page (`/download`).
+A server you already run offers the same apps on its own download page (`/download`), and the Host at `/get/host`.
 ```
 
 Use each product's own version in the file names when they differ from the release's.

@@ -520,7 +520,7 @@ export default {
   "common.103": "Server address",
   "downloads.15": "The address to enter on the Windows client sign-in screen and in Host settings.",
   "downloads.16": "Download page",
-  "downloads.17": "A public page with the three installers and short links. The server home page shows the same.",
+  "downloads.17": "A public page with the Windows and Android apps people install, and short links. Same as the server home page. The Host is only here and at /get/host.",
   "hosts.8": "It may be off or asleep",
   "hosts.9": " (last response {relative})",
   "hosts.11": "Not registered",

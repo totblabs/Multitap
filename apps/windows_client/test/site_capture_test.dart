@@ -13,6 +13,7 @@
 // from %WINDIR%\Fonts when present. A family that is not loaded draws boxes.
 //
 // Files: <dir>/<lang>/<scene>.png.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -23,18 +24,23 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/android/android_app.dart';
+import 'package:multitap_client/android/android_drive.dart';
 import 'package:multitap_client/android/android_launcher.dart'
     show androidTheme;
 import 'package:multitap_client/android/android_remote.dart';
 import 'package:multitap_client/android/android_session_keepalive.dart';
 import 'package:multitap_client/android/android_store.dart';
+import 'package:multitap_client/android/android_touch.dart';
 import 'package:multitap_client/android/android_updates.dart';
 import 'package:multitap_client/app.dart';
 import 'package:multitap_client/data/appearance_settings.dart';
 import 'package:multitap_client/data/broker_api.dart';
+import 'package:multitap_client/data/broker_probe.dart';
 import 'package:multitap_client/data/desktop_previews.dart';
 import 'package:multitap_client/data/desktop_thumbnails.dart';
+import 'package:multitap_client/data/drive_session.dart';
 import 'package:multitap_client/data/launcher_memory.dart';
+import 'package:multitap_client/data/relative_mouse.dart';
 import 'package:multitap_client/data/remote_session.dart';
 import 'package:multitap_client/l10n/l10n.dart';
 import 'package:multitap_client/models/desktop_machine.dart';
@@ -50,8 +56,12 @@ import 'android/android_launcher_test.dart' show FakeBroker, MemoryStore;
 import 'android/android_session_contract_test.dart' show AndroidNativeFake;
 import 'android/android_updates_test.dart' show FakePlatform, catalog;
 import 'auth_flow_test.dart' show TestBroker;
+import 'drive_session_test.dart'
+    as drive_fixture
+    show DriveSocket, ready, sessionId;
 import 'host_settings_test.dart' show FakeCloseGuard, FakeHostSettings;
 import 'remote_session_test.dart' show SessionSocket;
+import 'helpers/pump_work.dart';
 import 'helpers/session_bar_fixture.dart' show ToolbarV2Bar;
 
 const _dir = String.fromEnvironment('CAPTURE_DIR');
@@ -390,6 +400,62 @@ class _AndroidBroker extends FakeBroker implements DesktopPreviewBrokerApi {
   }
 }
 
+/// The staff guide's server: an account whose first password an
+/// administrator set, and one desktop that is switched on when asked.
+class _StaffBroker extends _AndroidBroker implements InitialPasswordBrokerApi {
+  _StaffBroker(super.inventory, super.pictures, this.running);
+  final List<BrokerDesktop> running;
+  bool changeRequired = true;
+
+  @override
+  Future<BrokerSession> login(String username, String password) async {
+    if (changeRequired) {
+      throw const BrokerException('password_change_required', 428);
+    }
+    return super.login(username, password);
+  }
+
+  @override
+  Future<void> setInitialPassword(
+    String username,
+    String password,
+    String newPassword,
+    String confirmation,
+  ) async => changeRequired = false;
+
+  @override
+  Future<BrokerPowerResult> requestPower(
+    String token,
+    String desktopId,
+    String action,
+  ) async {
+    inventory = running;
+    return super.requestPower(token, desktopId, action);
+  }
+}
+
+/// A phone without a mouse (MainActivity's pointer capture, never engaged).
+class _NoMouse implements MousePresenceNative {
+  @override
+  Future<RelativeMousePath?> engage(
+    Rect? picture, {
+    bool pin = false,
+    bool conceal = false,
+  }) async => RelativeMousePath.injected;
+  @override
+  Future<void> release() async {}
+  @override
+  Future<void> armKey(bool armed) async {}
+  @override
+  void listen(void Function(String event) onEvent) {}
+  @override
+  void dispose() {}
+  @override
+  Future<bool> mousePresent() async => false;
+  @override
+  set onMouse(void Function(bool present)? callback) {}
+}
+
 const _gb = 1024 * 1024 * 1024;
 
 /// The Windows launcher's desktops: names in the page's language.
@@ -574,6 +640,39 @@ List<BrokerDesktop> _androidDesktops(String lang) {
     ),
   ];
 }
+
+/// The staff guide's one desktop, 내 업무 PC, switched off or running.
+BrokerDesktop _staffDesktop({required bool running}) => BrokerDesktop(
+  id: 'pve-201',
+  name: '내 업무 PC',
+  kind: 'vm',
+  description: '',
+  os: 'Windows 11 Pro',
+  status: running ? 'online' : 'powered_off',
+  canConnect: running,
+  canStream: running,
+  hostConnected: running,
+  interactiveSession: running ? true : null,
+  virtualDisplayReady: running ? true : null,
+  powerCanForceStop: true,
+  thumbnailPrivacy: const ThumbnailPrivacy(epoch: _epoch, allowed: true),
+  resources: running
+      ? VmResources(
+          cpuUsagePercent: 12,
+          vcpus: 4,
+          memoryUsedBytes: (8 * _gb * .46).round(),
+          memoryTotalBytes: 8 * _gb,
+          uptimeSeconds: 240,
+          stale: false,
+          checkedAt: DateTime.now(),
+        )
+      : const VmResources(vcpus: 4, memoryTotalBytes: 8 * _gb),
+  power: BrokerPowerSnapshot(
+    state: running ? 'running' : 'stopped',
+    stale: false,
+    checkedAt: DateTime.now(),
+  ),
+);
 
 Uint8List _video(int pts) {
   final bytes = Uint8List(17);
@@ -1059,6 +1158,562 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
     skip: !const bool.fromEnvironment('CAPTURE_UI'),
+    timeout: const Timeout(Duration(minutes: 20)),
+  );
+
+  // The staff manual "Multitap 시작하기 – 휴대폰·태블릿": the Android app from
+  // the first start to the end of a connection, Korean only, with the
+  // rectangles (image pixels) of what the reader taps in <dir>/ko/rects.json.
+  //
+  //   flutter test --no-pub test/site_capture_test.dart --plain-name 'Staff guide'
+  //     --dart-define=STAFF_ANDROID=true --dart-define=CAPTURE_DIR=<folder>
+  testWidgets(
+    'Staff guide: Android screens (ko)',
+    (t) async {
+      if (_dir.isEmpty) throw StateError('CAPTURE_DIR is required');
+      await _fonts(t);
+      debugDisableShadows = false;
+      addTearDown(t.view.reset);
+      const lang = 'ko', ratio = 2.0, id = 'pve-201';
+      const phone = Size(412, 915), landscape = Size(915, 412);
+      // The real server address for a staff guide comes in with
+      // --dart-define=STAFF_SERVER=...; the source keeps an example.
+      const server = String.fromEnvironment(
+        'STAFF_SERVER',
+        defaultValue: 'https://vdi.example.com',
+      );
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final pictures = await t.runAsync(() async => {id: await _picture(0)});
+      _language(lang);
+
+      // Not pumpAndSettle: a signed-in list and a session keep marks
+      // turning; this stops once nothing is scheduled, or after 2 s.
+      Future<void> settle() => pumpWork(t, limit: const Duration(seconds: 2));
+
+      final rects = <String, Map<String, List<int>>>{};
+      void mark(String scene, String label, Finder finder) {
+        if (finder.evaluate().isEmpty) {
+          faults.add('$scene: nothing for $label');
+          return;
+        }
+        // What shows of it: a scrolled panel reaches past the screen.
+        final r = t
+            .getRect(finder.first)
+            .intersect(
+              Offset.zero & t.view.physicalSize / t.view.devicePixelRatio,
+            );
+        // Scrolled out of sight: nothing to point at.
+        if (r.width <= 0 || r.height <= 0) return;
+        rects.putIfAbsent(scene, () => {})[label] = [
+          for (final v in [r.left, r.top, r.width, r.height])
+            (v * ratio).round(),
+        ];
+      }
+
+      Finder key(String value) => find.byKey(Key(value));
+      Finder button(String label) => find
+          .ancestor(
+            of: find.text(label),
+            matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+          )
+          .last;
+      // The card of the dialog on top (Dialog itself fills the screen).
+      Finder dialogCard() => find
+          .descendant(
+            of: find.byType(Dialog).last,
+            matching: find.byType(Material),
+          )
+          .first;
+      Future<void> tapOn(Finder target) async {
+        await t.ensureVisible(target.first);
+        await settle();
+        await t.tap(target.first);
+        await settle();
+      }
+
+      // The backgrounds, and the desktop's picture (a switched-off card
+      // shows its last saved screen).
+      Future<void> precacheBackgrounds() => t.runAsync(() async {
+        final context = boundary.currentContext!;
+        for (final asset in ['alpine-dusk.png', 'alpine-dusk-day.jpg']) {
+          await precacheImage(AssetImage('assets/backgrounds/$asset'), context);
+        }
+        await precacheImage(MemoryImage(pictures![id]!), context);
+      });
+
+      // The Android store channel as MemoryStore keeps it, saying the
+      // published app version (1.1.22) in the sign-in footer.
+      void store({String? origin}) {
+        final prefs = {'appearance.theme': 'dark'};
+        var username = '';
+        messenger.setMockMethodCallHandler(AndroidStore.channel, (call) async {
+          final args = (call.arguments as Map?) ?? const {};
+          switch (call.method) {
+            case 'origin':
+              return origin;
+            case 'saveOrigin':
+              origin = args['origin'] as String;
+            case 'login':
+              return {'username': username, 'password': null};
+            case 'saveLogin':
+              username = args['username'] as String;
+            case 'preferences':
+              return Map<String, String>.of(prefs);
+            case 'savePreference':
+              prefs[args['key'] as String] = args['value'] as String;
+            case 'appVersion':
+              return '1.1.22';
+          }
+          return null;
+        });
+      }
+
+      Future<void> app({String? origin, required BrokerApi broker}) async {
+        size(t, phone);
+        store(origin: origin);
+        await t.pumpWidget(
+          RepaintBoundary(
+            key: boundary,
+            child: AndroidVdiApp(
+              key: UniqueKey(),
+              apiFactory: (_) => broker,
+              updatesFactory: (o) =>
+                  AndroidUpdates(o, transport: catalog(const [])),
+              updatePlatform: FakePlatform(),
+            ),
+          ),
+        );
+        await settle();
+        await precacheBackgrounds();
+        await t.pump();
+        await settle();
+      }
+
+      // ---------------------------------------------- 1, 2: the server
+      final broker = _StaffBroker(
+        [_staffDesktop(running: false)],
+        pictures!,
+        [_staffDesktop(running: true)],
+      );
+      await app(broker: broker);
+      final dialog = find.byType(AndroidServerDialog);
+      if (dialog.evaluate().isEmpty) await tapOn(key('open-server-settings'));
+      Finder inDialog(bool Function(Widget) test) =>
+          find.descendant(of: dialog, matching: find.byWidgetPredicate(test));
+      final field = inDialog((w) => w is TextField);
+      final test = inDialog((w) => w is OutlinedButton);
+      final save = inDialog((w) => w is FilledButton);
+      final cancel = inDialog((w) => w is TextButton).last;
+      final scheme = inDialog(
+        (w) => w.runtimeType.toString() == 'BrokerTransportChoice',
+      );
+      Future<void> typeServer() async {
+        await t.enterText(field, server);
+        await settle();
+        FocusManager.instance.primaryFocus?.unfocus();
+        await settle();
+      }
+
+      void markServer(String scene) {
+        mark(scene, 'dialog', dialogCard());
+        mark(scene, 'scheme', scheme);
+        mark(scene, 'server-field', field);
+        mark(scene, 'test-button', test);
+        mark(scene, 'cancel', cancel);
+        mark(scene, 'save', save);
+      }
+
+      await typeServer();
+      await shot(t, lang, 'a01-server', ratio: ratio);
+      markServer('a01-server');
+      // The app's own dialog would ask the real network; the same dialog
+      // with the broker's answer faked, as the dialog tests do.
+      final signIn = t.element(key('open-server-settings'));
+      Navigator.of(t.element(dialog)).pop();
+      await settle();
+      unawaited(
+        showDialog<Uri>(
+          context: signIn,
+          barrierDismissible: false,
+          builder: (_) => AndroidServerDialog(
+            initial: null,
+            save: (_) async {},
+            probe: (_) async =>
+                const BrokerProbeResult(version: '1.1.40', elapsedMs: 38),
+          ),
+        ),
+      );
+      await settle();
+      await typeServer();
+      await t.tap(test);
+      await settle();
+      await shot(t, lang, 'a02-server-tested', ratio: ratio);
+      markServer('a02-server-tested');
+      mark('a02-server-tested', 'result', key('server-test-result'));
+      await t.pumpWidget(const SizedBox.shrink());
+      await settle();
+
+      // ------------------------------------ 3, 4: sign-in, new password
+      await app(origin: server, broker: broker);
+      await t.enterText(key('sign-in-id'), 'gildong');
+      await t.enterText(key('sign-in-password'), 'first-pass-1');
+      await settle();
+      FocusManager.instance.primaryFocus?.unfocus();
+      await settle();
+      await shot(t, lang, 'a03-login', ratio: ratio);
+      mark('a03-login', 'server', key('open-server-settings'));
+      mark('a03-login', 'server-change', key('login-server-change'));
+      mark('a03-login', 'id', key('sign-in-id'));
+      mark('a03-login', 'password', key('sign-in-password'));
+      mark('a03-login', 'remember', key('remember-password'));
+      mark('a03-login', 'login', key('login-submit'));
+
+      await t.ensureVisible(key('login-submit'));
+      await settle();
+      await t.tap(key('login-submit'));
+      await pumpWork(t);
+      await settle();
+      await t.enterText(key('initial-new-password'), 'My-new-pass-71');
+      await t.enterText(key('initial-confirm-password'), 'My-new-pass-71');
+      await settle();
+      FocusManager.instance.primaryFocus?.unfocus();
+      await settle();
+      await shot(t, lang, 'a04-newpw', ratio: ratio);
+      mark('a04-newpw', 'dialog', dialogCard());
+      mark('a04-newpw', 'new-password', key('initial-new-password'));
+      mark('a04-newpw', 'confirm-password', key('initial-confirm-password'));
+      mark('a04-newpw', 'cancel', key('cancel-initial-password'));
+      mark('a04-newpw', 'save', key('save-initial-password'));
+
+      // ------------------------------------------- 5 to 8: the list
+      await t.tap(key('save-initial-password'));
+      await pumpWork(t);
+      await settle();
+      await shot(t, lang, 'a05-list-off', ratio: ratio);
+      mark('a05-list-off', 'card', key('card-$id'));
+      mark('a05-list-off', 'power', key('power-on-$id'));
+      mark('a05-list-off', 'start-button', key('start-$id'));
+      mark('a05-list-off', 'power-menu', key('desktop-power-$id'));
+      mark('a05-list-off', 'account', key('account-menu'));
+
+      await tapOn(key('power-on-$id'));
+      await shot(t, lang, 'a06-poweron', ratio: ratio);
+      mark('a06-poweron', 'dialog', dialogCard());
+      mark('a06-poweron', 'confirm', key('confirm-power-start-$id'));
+      mark('a06-poweron', 'cancel', key('cancel-power-start-$id'));
+
+      await t.tap(key('confirm-power-start-$id'));
+      await pumpWork(t);
+      await t.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+        await precacheImage(
+          MemoryImage(pictures[id]!),
+          boundary.currentContext!,
+        );
+      });
+      for (var i = 0; i < 4; i++) {
+        await t.pump(const Duration(milliseconds: 200));
+      }
+      await pumpWork(t);
+      await shot(t, lang, 'a07-list-on', ratio: ratio);
+      mark('a07-list-on', 'card', key('card-$id'));
+      mark('a07-list-on', 'connect', key('open-$id'));
+      mark('a07-list-on', 'play', key('play-$id'));
+      mark('a07-list-on', 'power-menu', key('desktop-power-$id'));
+
+      await t.ensureVisible(key('open-$id'));
+      await settle();
+      await t.tap(key('open-$id'));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 300));
+      await settle();
+      await shot(t, lang, 'a08-confirm', ratio: ratio);
+      mark('a08-confirm', 'dialog', dialogCard());
+      mark('a08-confirm', 'confirm', key('confirm-connect-$id'));
+      mark('a08-confirm', 'cancel', key('cancel-connect-$id'));
+      await t.tap(key('cancel-connect-$id'));
+      await settle();
+      await t.pumpWidget(const SizedBox.shrink());
+      await t.pump(const Duration(seconds: 1));
+
+      // ------------------------------------------ 9 to 17: a session
+      // A phone on its side at twice the density, so 해상도 offers what a
+      // phone gets; a connection that allows shared folders, with 화면 배율.
+      t.view.devicePixelRatio = ratio;
+      t.view.physicalSize = landscape * ratio;
+      t.view.padding = FakeViewPadding.zero;
+      t.view.viewPadding = FakeViewPadding.zero;
+      AndroidNativeFake().install();
+      const driveChannel = MethodChannel('multitap/android/drive-staff');
+      messenger.setMockMethodCallHandler(
+        driveChannel,
+        (call) async => call.method == 'storageAccess'
+            ? {'supported': true, 'granted': true}
+            : null,
+      );
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('multitap/pen-input'),
+        (_) async => null,
+      );
+      messenger.setMockMethodCallHandler(
+        AndroidSessionKeepalive.channel,
+        (call) async => call.method == 'start' ? 'started' : true,
+      );
+      final driveFiles = AndroidDriveFileSystem(channel: driveChannel);
+      final sessionUrl =
+          'wss://fixture.invalid/api/v1/sessions/${drive_fixture.sessionId}';
+      final sockets = <SessionSocket>[];
+      final driveSockets = <drive_fixture.DriveSocket>[];
+      final asked = <StreamOptions>[];
+      await t.pumpWidget(
+        RepaintBoundary(
+          key: boundary,
+          child: MaterialApp(
+            key: UniqueKey(),
+            debugShowCheckedModeBanner: false,
+            theme: androidTheme(buildAppTheme(brightness: Brightness.dark)),
+            builder: (context, child) =>
+                TooltipVisibility(visible: false, child: child!),
+            home: AndroidRemoteView(
+              name: '내 업무 PC',
+              token: 'not-persisted',
+              options: const StreamOptions(),
+              density: () async => null,
+              decoderLimits: () async => null,
+              settings: const AndroidSessionSettings(
+                helpSeen: true,
+                touch: AndroidTouchMode.trackpad,
+              ),
+              displayScale: true,
+              driveFiles: driveFiles,
+              relativeMouseNative: _NoMouse(),
+              load: (options, _, scale) async {
+                asked.add(options);
+                return BrokerConnection(
+                  sessionId: drive_fixture.sessionId,
+                  webSocketUrl: Uri.parse(sessionUrl),
+                  options: options,
+                  epochMedia: true,
+                  viewportProvisioning: true,
+                  displayScale: scale,
+                  cursor: true,
+                  relativeMouse: true,
+                  driveWebSocketUrl: Uri.parse('$sessionUrl/drive'),
+                  driveFs: true,
+                );
+              },
+              sessionFactory: (connection, media, stats) => RemoteSession(
+                connection: connection,
+                token: 'not-persisted',
+                media: media,
+                statsSink: stats,
+                dialer: (_, _) async {
+                  final socket = SessionSocket();
+                  sockets.add(socket);
+                  return socket;
+                },
+                driveFactory: (connection, token) => DriveSession(
+                  url: connection.driveWebSocketUrl!,
+                  token: token,
+                  sessionId: connection.sessionId,
+                  files: driveFiles,
+                  fs: connection.driveFs,
+                  dialer: (_, _) async {
+                    final socket = drive_fixture.DriveSocket();
+                    driveSockets.add(socket);
+                    return socket;
+                  },
+                ),
+              ),
+              pictureBuilder: (_) =>
+                  const CustomPaint(painter: DesktopPainter(0)),
+            ),
+          ),
+        ),
+      );
+      for (var i = 0; i < 5; i++) {
+        await t.pump(const Duration(milliseconds: 20));
+      }
+      if (sockets.isEmpty || asked.isEmpty) {
+        throw StateError('no session socket');
+      }
+      final width = asked.last.maxWidth, height = asked.last.maxHeight;
+      sockets.last.incoming.add(
+        jsonEncode({
+          'type': 'stream.info',
+          'codec': 'h264',
+          'width': width,
+          'height': height,
+          'sourceWidth': width,
+          'sourceHeight': height,
+        }),
+      );
+      await t.pump(const Duration(milliseconds: 20));
+      sockets.last.incoming.add(_video(16667));
+      for (var i = 0; i < 6; i++) {
+        await t.pump(const Duration(milliseconds: 40));
+      }
+      // The Host applied the 100 % a new connection asks for.
+      sockets.last.incoming.add(
+        jsonEncode({
+          'type': 'display.scale.applied',
+          'sessionId': drive_fixture.sessionId,
+          'protocol': 'display-scale-v1',
+          'ok': true,
+          'scale': 100,
+          'maximum': 200,
+          'code': 0,
+        }),
+      );
+      await t.pump(const Duration(milliseconds: 40));
+      if (driveSockets.isNotEmpty) {
+        driveSockets.last.emit(drive_fixture.ready);
+        await t.pump(const Duration(milliseconds: 40));
+      } else {
+        faults.add('a14-folder: no shared-folder channel');
+      }
+      await t.pump(const Duration(seconds: 1));
+      final ping = sockets.last.sent.lastWhere(
+        (m) => m['type'] == 'ping',
+        orElse: () => const {},
+      );
+      if (ping.isNotEmpty) {
+        await t.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 23)),
+        );
+        sockets.last.incoming.add(
+          jsonEncode({'type': 'pong', 'id': ping['id']}),
+        );
+        await t.pump(const Duration(milliseconds: 20));
+      }
+      await settle();
+
+      void markCluster(String scene) {
+        mark(scene, 'menu-button', key('expand-session-toolbar'));
+        mark(scene, 'input-button', key('android-remote-touch-mode-button'));
+        mark(scene, 'keyboard-button', key('android-remote-keyboard-button'));
+      }
+
+      final menuCard = key('session-command-bar');
+      // Everything folded, then the menu open on its rows.
+      Future<void> openMenu() async {
+        for (var i = 0; i < 3; i++) {
+          if (key('session-menu-barrier').evaluate().isEmpty) break;
+          await t.tap(key('expand-session-toolbar'));
+          await settle();
+        }
+        await t.tap(key('expand-session-toolbar'));
+        await settle();
+        if (menuCard.evaluate().isEmpty) faults.add('the menu did not open');
+      }
+
+      await shot(t, lang, 'a09-session', ratio: ratio);
+      markCluster('a09-session');
+
+      await openMenu();
+      await shot(t, lang, 'a10-menu', ratio: ratio);
+      markCluster('a10-menu');
+      mark('a10-menu', 'menu', menuCard);
+      mark('a10-menu', 'row-quality', key('session-quality'));
+      mark('a10-menu', 'row-screen', key('android-session-screen'));
+      mark('a10-menu', 'row-folder', key('android-session-share'));
+      mark('a10-menu', 'row-settings', key('android-session-more'));
+      mark('a10-menu', 'row-disconnect', key('session-disconnect'));
+
+      await tapOn(key('android-session-screen'));
+      // The panel scrolls on a phone on its side: 해상도 brought into view,
+      // 배율 above it stays.
+      await t.ensureVisible(key('android-screen-resolution'));
+      await settle();
+      await shot(t, lang, 'a11-screen', ratio: ratio);
+      mark('a11-screen', 'panel', key('android-screen-panel'));
+      mark('a11-screen', 'back', key('session-menu-back'));
+      mark('a11-screen', 'fit', key('android-screen-fit'));
+      mark('a11-screen', 'scale-row', key('android-screen-scale'));
+      mark('a11-screen', 'resolution-row', key('android-screen-resolution'));
+
+      await openMenu();
+      await tapOn(key('android-session-more'));
+      await shot(t, lang, 'a12-settings', ratio: ratio);
+      mark('a12-settings', 'panel', key('android-more-panel'));
+      mark('a12-settings', 'back', key('session-menu-back'));
+      mark('a12-settings', 'row-quality', key('android-session-settings'));
+      mark('a12-settings', 'row-mouse-lock', key('android-session-game-mouse'));
+      mark('a12-settings', 'row-input', key('android-session-input'));
+      mark('a12-settings', 'row-guide', key('android-session-help'));
+
+      await tapOn(key('android-session-settings'));
+      await shot(t, lang, 'a13-quality', ratio: ratio);
+      mark('a13-quality', 'panel', key('android-settings-panel'));
+      mark('a13-quality', 'mode-row', key('stream-preset'));
+      mark('a13-quality', 'fps-60', key('stream-fps-60'));
+      mark('a13-quality', 'cancel', key('cancel-stream-settings'));
+      mark('a13-quality', 'apply', key('apply-stream-settings'));
+
+      await openMenu();
+      await tapOn(key('android-session-share'));
+      await shot(t, lang, 'a14-folder', ratio: ratio);
+      mark('a14-folder', 'panel', key('android-share-panel'));
+      mark('a14-folder', 'back', key('session-menu-back'));
+      mark('a14-folder', 'add', key('drive-add'));
+
+      await openMenu();
+      await tapOn(key('android-session-more'));
+      await tapOn(key('android-session-help'));
+      await shot(t, lang, 'a15-guide', ratio: ratio);
+      mark('a15-guide', 'panel', key('android-touch-help'));
+      mark('a15-guide', 'close', key('android-touch-help-close'));
+
+      await openMenu();
+      await t.tap(key('session-disconnect'));
+      await settle();
+      await shot(t, lang, 'a16-disconnect', ratio: ratio);
+      mark('a16-disconnect', 'dialog', dialogCard());
+      mark('a16-disconnect', 'confirm', button(l10n.disconnect));
+      mark('a16-disconnect', 'cancel', button(l10n.cancel));
+      await t.tap(button(l10n.cancel));
+      await settle();
+
+      // The PC key row above the phone keyboard (the keyboard itself is
+      // Android's and is not drawn here).
+      for (var i = 0; i < 3; i++) {
+        if (key('session-menu-barrier').evaluate().isEmpty) break;
+        await t.tap(key('expand-session-toolbar'));
+        await settle();
+      }
+      await t.tap(key('android-remote-keyboard-button'));
+      await settle();
+      await shot(t, lang, 'a17-keyrow', ratio: ratio);
+      markCluster('a17-keyrow');
+      mark('a17-keyrow', 'key-row', key('android-key-row'));
+      mark('a17-keyrow', 'key-win', key('android-key-win'));
+      mark('a17-keyrow', 'key-hide', key('android-key-hide'));
+
+      await t.pumpWidget(const SizedBox.shrink());
+      await t.pump(const Duration(seconds: 3));
+      AndroidNativeFake.uninstall();
+      await t.pump(const Duration(minutes: 2));
+      for (final channel in [
+        AndroidStore.channel,
+        driveChannel,
+        const MethodChannel('multitap/pen-input'),
+        AndroidSessionKeepalive.channel,
+      ]) {
+        messenger.setMockMethodCallHandler(channel, null);
+      }
+      await t.runAsync(() async {
+        final file = File('$_dir/$lang/rects.json');
+        await file.parent.create(recursive: true);
+        await file.writeAsString(
+          const JsonEncoder.withIndent('  ').convert(rects),
+        );
+      });
+      debugDisableShadows = true;
+      expect(faults, isEmpty);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+    skip: !const bool.fromEnvironment('STAFF_ANDROID'),
     timeout: const Timeout(Duration(minutes: 20)),
   );
 }

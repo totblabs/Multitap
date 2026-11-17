@@ -520,7 +520,7 @@ export default {
   "common.103": "서버 주소",
   "downloads.15": "Windows 클라이언트 로그인 화면과 Host 설정에 입력하는 주소예요.",
   "downloads.16": "다운로드 페이지",
-  "downloads.17": "세 가지 설치 파일과 짧은 주소가 있는 공개 페이지예요. 서버 첫 화면에도 같은 내용이 있어요.",
+  "downloads.17": "사용자가 받는 Windows·Android 앱과 짧은 주소가 있는 공개 페이지예요. 서버 첫 화면과 같아요. Host는 여기와 /get/host에만 있어요.",
   "hosts.8": "꺼져 있거나 절전 중일 수 있어요",
   "hosts.9": " (마지막 응답 {relative})",
   "hosts.11": "미등록",
