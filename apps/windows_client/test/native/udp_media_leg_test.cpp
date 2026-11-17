@@ -337,6 +337,12 @@ void pathRule() {
   // Off again, the rule is gone.
   { Rig r; r.over(media(1, true, 1, 10)); r.gate.Disengage();
     require(r.wss(media(1, false, 1, 1)) == MediaPushResult::accepted && r.engine.count() == 2 && r.gate.view().active == 0 && !r.gate.view().fallbacks, "Disengage left the rule on"); }
+  // The next connection in the same window counts its stream runs from 1 again:
+  // the key-frame mark of the ended one must not read as the new one's key frame.
+  { Rig r; require(r.over(media(1, true, 1, 10)) == Delivery::accepted && r.gate.view().keyedStream != 0, "A key frame over UDP left no mark");
+    const auto mark = r.gate.view().keyedStream;
+    r.gate.Disengage(); require(r.gate.view().keyedStream == 0, "The key-frame mark outlived its connection");
+    r.gate.Stream(1, mark); require(r.gate.view().keyedStream == 0, "A new connection's stream run read the old key-frame mark"); }
   // Attach cannot return while an offer is inside the engine.
   { UdpPathGate gate; std::atomic<bool> entered{false}, release{false}, detached{false};
     gate.Attach([&](const std::vector<uint8_t>&, bool) { entered = true; while (!release) std::this_thread::sleep_for(std::chrono::milliseconds(1)); return MediaPushResult::accepted; });

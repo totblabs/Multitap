@@ -75,7 +75,11 @@ class UdpPathGate {
     rule_.stream(epoch); generation_ = generation; epoch_ = epoch;
   }
   void Engage(bool keyed) { std::lock_guard<std::mutex> lock(mutex_); rule_.engage(keyed); }
-  void Disengage() { std::lock_guard<std::mutex> lock(mutex_); rule_.disengage(); }
+  // A leg ended or a new one starts. The gate outlives the connection (one per
+  // window) and the next connection counts its stream runs from 1 again, so the
+  // "key frame over UDP" mark must not survive: a reconnect would read the old
+  // mark as its own key frame and feed a new decoder P-frames first.
+  void Disengage() { std::lock_guard<std::mutex> lock(mutex_); rule_.disengage(); generation_ = 0; keyed_stream_ = 0; }
 
   // UI thread, WSS: a dropped packet reads as accepted, a dropped frame is no failure.
   // The epoch is the announced one: Dart has already refused any other.
