@@ -110,7 +110,7 @@ Tap a row to open its panel in the same place, and tap **Back** at the top to re
 | Row | What it has |
 | --- | --- |
 | **Connection quality** | Round-trip latency, screen frames, received video, resolution and video path. **Show connection stats** shows Host processing and **Processing on this device** (time spent decoding and so on). |
-| **Screen** | **Whole screen** and **Pan**, Windows **Scale** (five steps from 100 to 200%), **Resolution** (**Auto (recommended)**, **Sharp** or a fixed size) |
+| **Screen** | **Whole screen** and **Pan**, Windows **Scale** (five steps from 100 to 200%), **Resolution** (**Auto (recommended)**, **A bit sharper**, **Sharp** or a fixed size) |
 | **Shared folder** | Connects a folder on this device to the desktop. It appears only on connections that allow it. See [Shared folders](#shared-folders). |
 | **Settings** | **Picture quality**, **Mouse lock**, **Input mode** (including pointer speed), **Guide** |
 | **Disconnect** | Ends the connection. |
@@ -123,6 +123,7 @@ The desktop's resolution adjusts automatically to fit the device screen.
 Spreading two fingers enlarges only the picture shown on this device.
 **Scale** changes the size of text and icons in Windows, at once and without reconnecting. New connections start at 100%.
 **Sharp** receives the device screen's own pixels and raises the scale to match, so everything keeps its size and only gets crisper. It uses more data and battery. If the device cannot handle it, the picture shows at the auto size.
+**A bit sharper** is the step between: it receives up to one and a half times the pixels and raises the scale to 150% at most. It is less crisp than Sharp, uses less data and battery, and fewer programs look odd at that scale.
 The resolution choice is remembered separately for **Phone**, **Foldable inner screen** and **Tablet**. When you turn the device or unfold a foldable, the size is decided again for the screen.
 
 1. Open **Menu → Settings → Picture quality**.

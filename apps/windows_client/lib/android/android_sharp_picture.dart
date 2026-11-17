@@ -18,8 +18,14 @@ import 'package:flutter/services.dart';
 import '../data/stream_size.dart' show streamMaximumPixels, streamMaximumSide;
 import '../l10n/l10n.dart';
 
+/// 조금 선명하게: the same with a ceiling of 150 % ([AndroidResolution.sharpTop]):
+/// one and a half times the automatic size at most.
+///
 /// What the person reads beside the choice (one line).
 String get androidSharpLabel => l10n.sharp;
+String get androidSharpMiddleLabel => l10n.sharpMiddle;
+String get androidSharpMiddleDetail => l10n.usesLittleMoreDataBattery;
+String get androidSharpMiddleHint => l10n.getsOneAndHalfPixels;
 String get androidSharpDetail => l10n.usesMoreDataBattery;
 String get androidSharpHint => l10n.getsScreensExactPixelsSo;
 
@@ -91,19 +97,21 @@ class AndroidSharpPlan {
 
 /// The engine's side of 선명하게 (AndroidMedia.kt, channel `multitap/remote`):
 ///   sharpPicture {panelWidth, panelHeight, baseWidth, baseHeight, fps,
-///                 hardware, limitWidth, limitHeight, limitPixels}
+///                 hardware, limitWidth, limitHeight, limitPixels, topScale}
 ///                             -> {width, height, scale, reason, fallback}
 ///   sharpPictureFallback {reason}   the Host did not give the planned picture
 ///   sharpPictureOff                 the choice is not in use
 abstract interface class AndroidSharpPicture {
   /// The plan for a picture area of [panel] pixels whose automatic size is
   /// [base]; null when the engine cannot say (an older engine, a failed
-  /// query), which is the automatic size.
+  /// query), which is the automatic size. [top]: the most Windows scale
+  /// (percent) to go to, 200 for 선명하게 and 150 for 조금 선명하게.
   Future<AndroidSharpPlan?> plan({
     required Size panel,
     required Size base,
     required int fps,
     required bool portrait,
+    int top = 200,
   });
 
   /// The Host refused the planned size (`host_refused`) or encodes less than
@@ -126,6 +134,7 @@ class NativeAndroidSharpPicture implements AndroidSharpPicture {
     required Size base,
     required int fps,
     required bool portrait,
+    int top = 200,
   }) async {
     if (panel.isEmpty || base.isEmpty || !panel.isFinite || !base.isFinite) {
       return null;
@@ -145,6 +154,7 @@ class NativeAndroidSharpPicture implements AndroidSharpPicture {
             'limitWidth': streamMaximumSide,
             'limitHeight': portrait ? streamMaximumSide : 2160,
             'limitPixels': streamMaximumPixels,
+            'topScale': top,
           })
           .timeout(const Duration(seconds: 3));
       return AndroidSharpPlan.parse(value, base);
@@ -169,6 +179,7 @@ class NativeAndroidSharpPicture implements AndroidSharpPicture {
 /// Why 선명하게 gives less than the panel's own pixels, in a few words.
 String androidSharpReasonLabel(Object? reason) => switch (reason) {
   'scale_limit' => l10n.windowsScale200Limit,
+  'chosen_scale' => l10n.sharpMiddle,
   'host_limit' || 'host_refused' || 'host_reduced' => l10n.desktopLimit,
   'decoder_size' || 'decoder_profile' => l10n.decoderSizeLimitDevice,
   'decoder_rate' => l10n.decoderSpeedLimitDevice,

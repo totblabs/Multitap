@@ -11,7 +11,12 @@ import '../ui/session_menu.dart' show SessionChrome;
 import '../ui/session_tools.dart';
 import 'android_keyboard.dart';
 import 'android_screen.dart';
-import 'android_sharp_picture.dart' show androidSharpDetail, androidSharpHint;
+import 'android_sharp_picture.dart'
+    show
+        androidSharpDetail,
+        androidSharpHint,
+        androidSharpMiddleDetail,
+        androidSharpMiddleHint;
 import 'android_store.dart' show AndroidStreamQuality;
 import 'android_toolbar.dart';
 import 'android_touch.dart';
@@ -496,7 +501,10 @@ class AndroidScreenOptions extends StatelessWidget {
                     AndroidResolutionKind.desktop => size(option.size!),
                     AndroidResolutionKind.workspace => size(option.size!),
                     // What it costs, said before it is chosen.
-                    AndroidResolutionKind.sharp => androidSharpDetail,
+                    AndroidResolutionKind.sharp =>
+                      option.resolution.sharpTop < 200
+                          ? androidSharpMiddleDetail
+                          : androidSharpDetail,
                   },
                   selected:
                       choice.resolution == option.resolution ||
@@ -525,7 +533,10 @@ class AndroidScreenOptions extends StatelessWidget {
                       l10n.remoteWorkspaceSizeCheckApplied,
                     AndroidResolutionKind.workspace =>
                       l10n.remoteWorkspaceFittedDevicesScreen,
-                    AndroidResolutionKind.sharp => androidSharpHint,
+                    AndroidResolutionKind.sharp =>
+                      option.resolution.sharpTop < 200
+                          ? androidSharpMiddleHint
+                          : androidSharpHint,
                   },
                   onPressed: () =>
                       onChoice(choice.copyWith(resolution: option.resolution)),

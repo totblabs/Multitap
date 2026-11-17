@@ -2624,7 +2624,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   String _sharpKeyFor(Size physical, Size automatic, bool portrait) =>
       '${physical.width.floor()}x${physical.height.floor()}:'
       '${automatic.width.round()}x${automatic.height.round()}:'
-      '${_options.fps}:$portrait';
+      '${_options.fps}:$portrait:${_policy.choice.resolution.sharpTop}';
 
   /// The plan in force: 선명하게 is chosen, Windows' scale can follow, the
   /// engine planned something sharper for this very picture area, and the
@@ -2693,6 +2693,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
               base: automatic,
               fps: _options.fps,
               portrait: portrait,
+              top: _policy.choice.resolution.sharpTop,
             )
             .then<void>((plan) {
               if (!mounted || _sharpPendingKey != key) return;
@@ -4114,7 +4115,10 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
                 AndroidResolutionKind.auto => l10n.auto,
                 AndroidResolutionKind.device => l10n.devicePixels,
                 AndroidResolutionKind.half => l10n.half,
-                AndroidResolutionKind.sharp => l10n.sharp,
+                AndroidResolutionKind.sharp =>
+                  _policy.choice.resolution.sharpTop < 200
+                      ? l10n.sharpMiddle
+                      : l10n.sharp,
                 AndroidResolutionKind.preset => l10n.fixed(_policy.choice.resolution.shortSide),
                 AndroidResolutionKind.longEdge => l10n.selected2(_plan?.width ?? 0, _plan?.height ?? 0),
                 AndroidResolutionKind.desktop => l10n.selected3(_policy.choice.resolution.desktopLabel),

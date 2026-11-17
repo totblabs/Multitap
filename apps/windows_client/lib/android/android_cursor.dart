@@ -215,10 +215,20 @@ class AndroidCursorState extends ChangeNotifier {
   }
 }
 
+/// Logical pixels per cursor pixel. [natural] is what the picture has (its
+/// width / the source width); [minimumScale] is the least a 32-pixel cursor
+/// (Windows at 100 %) may get. A taller cursor image is the same pointer drawn
+/// for a higher Windows scale (선명하게 raises it), so it needs proportionally
+/// less: the least height on the screen is the same for both.
+double androidCursorScale(double natural, double minimumScale, int height) {
+  final least = minimumScale * 32 / (height > 32 ? height : 32);
+  return natural < least ? least : natural;
+}
+
 /// Draws the remote cursor over the picture (nearest-neighbour, scaled by
 /// picture width / source width exactly like the Windows presenter, but at
-/// least [minimumScale] logical pixels per cursor pixel: on a phone a
-/// 32-pixel cursor at the device's own pixels is about 10 dp, too small to
+/// least [minimumScale] logical pixels per pixel of a 32-pixel cursor: on a
+/// phone such a cursor at the device's own pixels is about 10 dp, too small to
 /// steer in trackpad mode). The hotspot stays where the remote pointer is.
 class AndroidCursorOverlay extends StatelessWidget {
   const AndroidCursorOverlay({
@@ -256,9 +266,11 @@ class _CursorPainter extends CustomPainter {
     if (image == null || shape == null || at == null || sourceWidth <= 0) {
       return;
     }
-    final scale = size.width / sourceWidth < minimumScale
-        ? minimumScale
-        : size.width / sourceWidth;
+    final scale = androidCursorScale(
+      size.width / sourceWidth,
+      minimumScale,
+      shape.height,
+    );
     final left = at.dx * size.width - shape.hotX * scale;
     final top = at.dy * size.height - shape.hotY * scale;
     canvas.drawImageRect(

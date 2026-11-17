@@ -61,6 +61,24 @@ class SharpPictureTest {
         assertEquals(100, sharpScale(Double.NaN))
     }
 
+    @Test fun aLittleSharperStopsAtOneAndAHalfTimesTheAutomaticSize() {
+        // 조금 선명하게 on the foldable's inner screen: 1.9 panel pixels per automatic pixel,
+        // asked for one and a half, Windows at 150 %.
+        val plan = sharpPicturePlan(SharpPictureRequest(2176, 1642, 1142, 862, 60, topScale = 150), uhd, plenty)
+        assertEquals(SharpPicturePlan(1712, 1292, 150, "chosen_scale", false), plan)
+        // A panel with no more than that gets its own pixels, as 선명하게 would.
+        assertEquals(SharpPicturePlan(1600, 900, 125, null, false),
+            sharpPicturePlan(SharpPictureRequest(1600, 900, 1280, 720, 60, topScale = 150), uhd, plenty))
+        // A decoder that takes less still decides, and says so.
+        val small = sharpPicturePlan(SharpPictureRequest(2176, 1642, 1142, 862, 60, topScale = 150), listOf(decoder(1600, 1200)), plenty)
+        assertEquals("decoder_size", small.reason)
+        assertTrue(small.width in 1144..1600 && small.height in 864..1200 && !small.fallback)
+        // The channel: only a real step above 100 is taken; anything else is 선명하게.
+        val base = mapOf("panelWidth" to 2176, "panelHeight" to 1642, "baseWidth" to 1142, "baseHeight" to 862, "fps" to 60)
+        assertEquals(150, sharpPictureRequest(base + ("topScale" to 150))!!.topScale)
+        for (other in listOf<Any?>(null, 100, 160, 300, "150")) assertEquals(200, sharpPictureRequest(base + ("topScale" to other))!!.topScale)
+    }
+
     @Test fun aPanelDenserThanTwoHundredPercentIsAskedForTwiceTheAutomaticSize() {
         // 1440x3200 with an automatic size of 658x1462: 2.19 to one. More pixels than
         // 200 % can carry would make everything smaller.

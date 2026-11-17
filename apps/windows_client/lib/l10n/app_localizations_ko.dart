@@ -565,6 +565,16 @@ class AppLocalizationsKo extends AppLocalizations {
   String get sharp => '선명하게';
 
   @override
+  String get sharpMiddle => '조금 선명하게';
+
+  @override
+  String get usesLittleMoreDataBattery => '데이터·배터리 조금 더 씀';
+
+  @override
+  String get getsOneAndHalfPixels =>
+      '화소를 1.5배까지 받아요. 선명하게보다 덜 또렷하고, 데이터와 배터리를 덜 써요.';
+
+  @override
   String get wiFiLowLatency => 'Wi-Fi 저지연';
 
   @override

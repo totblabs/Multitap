@@ -588,6 +588,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sharp => 'Sharp';
 
   @override
+  String get sharpMiddle => 'A bit sharper';
+
+  @override
+  String get usesLittleMoreDataBattery => 'Uses a little more data and battery';
+
+  @override
+  String get getsOneAndHalfPixels =>
+      'Gets up to one and a half times the pixels: less crisp than Sharp, and uses less data and battery.';
+
+  @override
   String get wiFiLowLatency => 'Wi-Fi low latency';
 
   @override

@@ -32,6 +32,7 @@ const _pen = MethodChannel('multitap/pen-input');
 /// The engine's side, recorded. [answer] builds the plan (null: cannot say).
 class _Engine implements AndroidSharpPicture {
   final asked = <({Size panel, Size base, int fps, bool portrait})>[];
+  final tops = <int>[];
   final fallbacks = <String>[];
   int offs = 0;
   AndroidSharpPlan? Function(Size panel, Size base) answer = (panel, base) =>
@@ -49,7 +50,9 @@ class _Engine implements AndroidSharpPicture {
     required Size base,
     required int fps,
     required bool portrait,
+    int top = 200,
   }) async {
+    tops.add(top);
     asked.add((panel: panel, base: base, fps: fps, portrait: portrait));
     return answer(panel, base);
   }
@@ -248,6 +251,22 @@ void main() {
   test('선명하게 is a 해상도 choice of its own, remembered per kind of screen', () {
     expect(AndroidResolution.sharp.encode(), 'sharp');
     expect(AndroidResolution.parse('sharp'), AndroidResolution.sharp);
+    // 조금 선명하게: the same kind with a ceiling of 150 %.
+    expect(AndroidResolution.sharpMiddle.encode(), 'sharp150');
+    expect(AndroidResolution.parse('sharp150'), AndroidResolution.sharpMiddle);
+    expect(AndroidResolution.sharpMiddle == AndroidResolution.sharp, isFalse);
+    expect(
+      (AndroidResolution.sharp.sharpTop, AndroidResolution.sharpMiddle.sharpTop),
+      (200, 150),
+    );
+    const middle = AndroidScreenChoice(
+      resolution: AndroidResolution.sharpMiddle,
+    );
+    expect(AndroidScreenChoice.parse(middle.encode()), middle);
+    expect(
+      middle.forDevice(AndroidDeviceClass.phone).resolution,
+      AndroidResolution.sharpMiddle,
+    );
     const choice = AndroidScreenChoice(resolution: AndroidResolution.sharp);
     expect(AndroidScreenChoice.parse(choice.encode()), choice);
     // Kept for a phone, a foldable's inner screen and a tablet.
@@ -284,7 +303,26 @@ void main() {
           devicePixelRatio: dpr,
           sharp: sharp,
         ).map((option) => option.label).toList();
-    expect(labels().take(2), ['자동 (권장)', '선명하게']);
+    // 1.64 panel pixels per automatic pixel: 조금 선명하게 (one and a half) is
+    // a step of its own before 선명하게.
+    expect(labels().take(3), ['자동 (권장)', '조금 선명하게', '선명하게']);
+    expect(labels(sharp: false).contains('조금 선명하게'), isFalse);
+    // Where 선명하게 itself gives no more than about one and a half times,
+    // there is no step between.
+    var without = 0;
+    for (final dpr in [1.75, 1.9, 2.0, 2.1, 2.25, 2.4, 2.625, 3.0]) {
+      final automatic = AndroidScreenPolicy(
+        window: panel / dpr,
+      ).recommendedSize(panel, dpr);
+      final ratio = panel.width / automatic.width < panel.height / automatic.height
+          ? panel.width / automatic.width
+          : panel.height / automatic.height;
+      final offered = labels(dpr: dpr);
+      if (!offered.contains('선명하게')) continue;
+      expect(offered.contains('조금 선명하게'), ratio > 1.5625, reason: '$dpr');
+      if (ratio <= 1.5625) without++;
+    }
+    expect(without, greaterThan(0));
     expect(labels(sharp: false).contains('선명하게'), isFalse);
     // 1.6 pixels per dp or less: the automatic size already is the panel's.
     expect(labels(dpr: 1.5).contains('선명하게'), isFalse);
@@ -302,9 +340,40 @@ void main() {
       policy: AndroidScreenPolicy(window: panel / 2.625),
       devicePixelRatio: 2.625,
       sharp: true,
-    )[1];
+    )[2];
     expect(option.resolution, AndroidResolution.sharp);
     expect(option.size, const Size(1080, 2400));
+    final policy = AndroidScreenPolicy(window: panel / 2.625);
+    final automatic = policy.recommendedSize(panel, 2.625);
+    final middle = androidResolutionOptions(
+      panel,
+      policy: policy,
+      devicePixelRatio: 2.625,
+      sharp: true,
+    )[1];
+    expect(middle.resolution, AndroidResolution.sharpMiddle);
+    expect(
+      middle.size,
+      Size(
+        (automatic.width * 1.5).floor() ~/ 2 * 2.0,
+        (automatic.height * 1.5).floor() ~/ 2 * 2.0,
+      ),
+    );
+    // The planned size shows on the choice in force only.
+    final chosen = androidResolutionOptions(
+      panel,
+      policy: AndroidScreenPolicy(
+        window: panel / 2.625,
+        choice: const AndroidScreenChoice(
+          resolution: AndroidResolution.sharpMiddle,
+        ),
+        sharp: const Size(986, 2192),
+      ),
+      devicePixelRatio: 2.625,
+      sharp: true,
+    );
+    expect(chosen[1].size, const Size(986, 2192));
+    expect(chosen[2].size, const Size(1080, 2400));
   });
 
   test('The output is the planned size with the chosen Windows scale, within '
@@ -412,7 +481,18 @@ void main() {
       'limitWidth': 3840,
       'limitHeight': 3840,
       'limitPixels': 8294400,
+      'topScale': 200,
     });
+    // 조금 선명하게 says its ceiling.
+    await engine.plan(
+      panel: const Size(2176, 1642),
+      base: const Size(1142, 862),
+      fps: 60,
+      portrait: true,
+      top: 150,
+    );
+    expect((calls.last.arguments as Map)['topScale'], 150);
+    calls.removeLast();
     expect((plan!.width, plan.height, plan.scale), (2176, 1642, 200));
     expect(plan.reason, isNull);
     expect(plan.gains, isTrue);
@@ -577,6 +657,37 @@ void main() {
       await _frames(tester);
       expect(h.engine.asked, hasLength(1));
       expect(h.sent('stream.resize'), hasLength(1));
+    } finally {
+      await _close(tester);
+    }
+  });
+
+  testWidgets('조금 선명하게 asks the engine with its ceiling of 150 %', (
+    tester,
+  ) async {
+    final h = await _open(
+      tester,
+      resolution: AndroidResolution.sharpMiddle,
+      prepare: (engine) => engine.answer = (panel, base) => AndroidSharpPlan(
+        width: (base.width * 1.5).floor() ~/ 2 * 2,
+        height: (base.height * 1.5).floor() ~/ 2 * 2,
+        baseWidth: base.width.round(),
+        baseHeight: base.height.round(),
+        scale: 150,
+        reason: 'chosen_scale',
+      ),
+    );
+    try {
+      expect(h.engine.tops, [150]);
+      final automatic = h.engine.asked.single.base;
+      expect(
+        (h.requested.single.maxWidth, h.requested.single.maxHeight),
+        (
+          (automatic.width * 1.5).floor() ~/ 2 * 2,
+          (automatic.height * 1.5).floor() ~/ 2 * 2,
+        ),
+      );
+      expect(h.scales.single, 150);
     } finally {
       await _close(tester);
     }

@@ -256,6 +256,24 @@ void main() {
     expect(_pixel(plain, 1, 0), [0, 0, 0, 0]);
   });
 
+  test('the least pointer size is for a 32-pixel cursor; a cursor Windows '
+      'already drew larger (선명하게) is not enlarged again', () {
+    // Trackpad mode: at least .7 dp per pixel of a 32-pixel cursor (22.4 dp).
+    expect(androidCursorScale(.38, .7, 32), .7);
+    // 선명하게 at 200 %: Windows draws 64 pixels, shown at the device's own
+    // pixels (.5 dp each): 32 dp as it is, not 45.
+    expect(androidCursorScale(.5, .7, 64), .5);
+    // At 2.625 pixels per dp the 64-pixel cursor is 24.4 dp: above the least.
+    expect(androidCursorScale(1 / 2.625, .7, 64), closeTo(.381, .001));
+    // A picture shown small still keeps the pointer at 22.4 dp.
+    expect(androidCursorScale(.2, .7, 64) * 64, closeTo(22.4, .001));
+    expect(androidCursorScale(.2, .7, 48) * 48, closeTo(22.4, .001));
+    // Smaller cursor images keep the per-pixel rule; no least without one.
+    expect(androidCursorScale(.2, .7, 16), .7);
+    expect(androidCursorScale(.38, 0, 64), .38);
+    expect(androidCursorScale(1.5, .7, 32), 1.5);
+  });
+
   test('malformed shape records are refused', () {
     final good = shape(
       id: 4,

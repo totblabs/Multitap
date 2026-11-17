@@ -16,6 +16,8 @@ package me.totb.multitap_client
 // size is asked for twice that size, not for more pixels that would make everything smaller.
 // What the decoder does not take is tried smaller, towards the automatic size; when nothing
 // above it is taken the plan is the automatic size and counts as a fallback.
+// 조금 선명하게 is the same with the person's own ceiling of 150 % (topScale): one and a half
+// times the automatic size at most, for fewer pixels and a Windows scale more programs like.
 
 internal data class SharpPictureRequest(
     /** The picture area in panel pixels. */
@@ -30,11 +32,14 @@ internal data class SharpPictureRequest(
     val limitWidth: Int = 0,
     val limitHeight: Int = 0,
     val limitPixels: Long = 0,
+    /** The most Windows scale (percent) the person chose to go to: 200 (선명하게) or 150 (조금 선명하게). */
+    val topScale: Int = 200,
 )
 
 /**
  * [scale]: the Windows scale (percent) that keeps things the size they have at [SharpPictureRequest.baseWidth]
  * and 100 %. [reason] null: the panel's own pixels. Otherwise why it is less: `scale_limit`,
+ * `chosen_scale` (the person's own ceiling, 조금 선명하게),
  * `host_limit`, `decoder_size`, `decoder_rate`, `decoder_profile`, `memory_budget`,
  * `decoder_unknown`, `no_gain` (the automatic size already is the panel's), `invalid_request`.
  * [fallback]: nothing sharper than the automatic size could be had.
@@ -71,9 +76,10 @@ internal fun sharpPicturePlan(
     val most = minOf(request.panelWidth.toDouble() / baseWidth, request.panelHeight.toDouble() / baseHeight)
     if (even(baseWidth * most) <= baseWidth || even(baseHeight * most) <= baseHeight) return base("no_gain", fallback = false)
     var reason: String? = null
-    // Above 200 % (and half a step) more pixels would only make everything smaller.
-    val top = sharpScaleSteps.last() / 100.0
-    val wanted = if (most > top + .125 / 2) { reason = "scale_limit"; top } else most
+    // Above 200 % (and half a step) more pixels would only make everything smaller; the
+    // person's own ceiling, when lower, is what they chose.
+    val top = request.topScale / 100.0
+    val wanted = if (most > top + .125 / 2) { reason = if (request.topScale < sharpScaleSteps.last()) "chosen_scale" else "scale_limit"; top } else most
     for (step in 0 until sharpPictureSteps) {
         val factor = wanted - (wanted - 1) * step / sharpPictureSteps
         val width = if (step == 0 && reason == null) even(request.panelWidth.toDouble().coerceAtMost(baseWidth * most + 1)) else even(baseWidth * factor)
@@ -81,7 +87,7 @@ internal fun sharpPicturePlan(
         if (width <= baseWidth || height <= baseHeight) break
         if ((request.limitWidth > 0 && width > request.limitWidth) || (request.limitHeight > 0 && height > request.limitHeight) ||
             (request.limitPixels > 0 && width.toLong() * height > request.limitPixels)) {
-            if (reason == null || reason == "scale_limit") reason = "host_limit"
+            if (reason == null || reason == "scale_limit" || reason == "chosen_scale") reason = "host_limit"
             continue
         }
         val check = validateStreamSizeRequest(
@@ -94,7 +100,7 @@ internal fun sharpPicturePlan(
             "memory_budget" -> "memory_budget"
             else -> "decoder_unknown"
         }
-        if (reason == null || reason == "scale_limit" || reason == "host_limit") reason = refused
+        if (reason == null || reason == "scale_limit" || reason == "chosen_scale" || reason == "host_limit") reason = refused
     }
     return base(reason ?: "decoder_unknown", fallback = true)
 }
@@ -117,6 +123,8 @@ internal fun sharpPictureRequest(value: Any?): SharpPictureRequest? {
         limitWidth = int("limitWidth") ?: 0,
         limitHeight = int("limitHeight") ?: 0,
         limitPixels = number("limitPixels")?.coerceAtLeast(0) ?: 0,
+        // An app without the choice says nothing: 200.
+        topScale = int("topScale")?.takeIf { it > 100 && sharpScaleSteps.contains(it) } ?: 200,
     )
 }
 

@@ -1082,6 +1082,24 @@ abstract class AppLocalizations {
   /// **'선명하게'**
   String get sharp;
 
+  /// No description provided for @sharpMiddle.
+  ///
+  /// In ko, this message translates to:
+  /// **'조금 선명하게'**
+  String get sharpMiddle;
+
+  /// No description provided for @usesLittleMoreDataBattery.
+  ///
+  /// In ko, this message translates to:
+  /// **'데이터·배터리 조금 더 씀'**
+  String get usesLittleMoreDataBattery;
+
+  /// No description provided for @getsOneAndHalfPixels.
+  ///
+  /// In ko, this message translates to:
+  /// **'화소를 1.5배까지 받아요. 선명하게보다 덜 또렷하고, 데이터와 배터리를 덜 써요.'**
+  String get getsOneAndHalfPixels;
+
   /// No description provided for @wiFiLowLatency.
   ///
   /// In ko, this message translates to:

@@ -161,6 +161,7 @@ enum AndroidResolutionKind {
 
   /// 선명하게: (up to) the panel's own pixels with Windows' scale raised by
   /// the same factor, so things keep their size (android_sharp_picture.dart).
+  /// 조금 선명하게 is this kind with a ceiling ([AndroidResolution.sharpTop]).
   sharp,
 }
 
@@ -179,6 +180,18 @@ class AndroidResolution {
   static const device = AndroidResolution._(AndroidResolutionKind.device);
   static const half = AndroidResolution._(AndroidResolutionKind.half);
   static const sharp = AndroidResolution._(AndroidResolutionKind.sharp);
+
+  /// 조금 선명하게: at most one and a half times the automatic size (Windows at
+  /// 150 %).
+  static const sharpMiddle = AndroidResolution._(
+    AndroidResolutionKind.sharp,
+    150,
+  );
+
+  /// 선명하게 kinds: the most Windows scale (percent) to go to.
+  int get sharpTop => kind == AndroidResolutionKind.sharp && shortSide == 150
+      ? 150
+      : 200;
 
   final AndroidResolutionKind kind;
 
@@ -226,6 +239,7 @@ class AndroidResolution {
     AndroidResolutionKind.longEdge => 'l$shortSide',
     AndroidResolutionKind.desktop => 'd$shortSide',
     AndroidResolutionKind.workspace => 'w$shortSide',
+    AndroidResolutionKind.sharp when shortSide == 150 => 'sharp150',
     _ => kind.name,
   };
 
@@ -264,6 +278,7 @@ class AndroidResolution {
     return switch (value) {
       'half' => half,
       'sharp' => sharp,
+      'sharp150' => sharpMiddle,
       _ => auto,
     };
   }
@@ -682,8 +697,28 @@ List<AndroidResolutionOption> androidResolutionOptions(
   final mode = policy ?? AndroidScreenPolicy(deviceClass: deviceClass);
   if (mode.deviceClass != AndroidDeviceClass.television) {
     final automatic = mode.recommendedSize(physical, devicePixelRatio);
+    // The size 선명하게 gives is known once the engine planned it for the
+    // choice in force; the other of the two is shown by its rule.
+    Size sharpSize(AndroidResolution option, Size rule) =>
+        mode.choice.resolution == option ? mode.sharp ?? rule : rule;
     final options = <AndroidResolutionOption>[
       AndroidResolutionOption(AndroidResolution.auto, l10n.autoRecommended, automatic),
+      // 조금 선명하게, where 선명하게 would go beyond one and a half times.
+      if (sharp &&
+          !automatic.isEmpty &&
+          physical.width > automatic.width * 1.5625 &&
+          physical.height > automatic.height * 1.5625)
+        AndroidResolutionOption(
+          AndroidResolution.sharpMiddle,
+          l10n.sharpMiddle,
+          sharpSize(
+            AndroidResolution.sharpMiddle,
+            Size(
+              (automatic.width * 1.5).floor() ~/ 2 * 2.0,
+              (automatic.height * 1.5).floor() ~/ 2 * 2.0,
+            ),
+          ),
+        ),
       // 선명하게, where Windows' scale can follow and the panel has more
       // pixels than the automatic size (the planned size once known).
       if (sharp &&
@@ -693,11 +728,13 @@ List<AndroidResolutionOption> androidResolutionOptions(
         AndroidResolutionOption(
           AndroidResolution.sharp,
           l10n.sharp,
-          mode.sharp ??
-              Size(
-                physical.width.floor() ~/ 2 * 2.0,
-                physical.height.floor() ~/ 2 * 2.0,
-              ),
+          sharpSize(
+            AndroidResolution.sharp,
+            Size(
+              physical.width.floor() ~/ 2 * 2.0,
+              physical.height.floor() ~/ 2 * 2.0,
+            ),
+          ),
         ),
     ];
     // Automatic remains a distinct preference; duplicate explicit sizes on a
