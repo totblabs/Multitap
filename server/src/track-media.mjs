@@ -72,8 +72,10 @@ function initialIdr(bytes) {
 
 export class TrackStream {
   // audioOpus: the session was granted audio-opus-tracks-v1 (the Host may then state "opus").
-  constructor(sessionId, requests, options, { now=Date.now, prepareMs=90000, readyMs=15000, mediaMs=10000, allowRestored=false, sizeProtocol=null, decoderLimits=null, audioOpus=false } = {}) {
+  constructor(sessionId, requests, options, { now=Date.now, prepareMs=90000, readyMs=15000, mediaMs=10000, allowRestored=false, sizeProtocol=null, decoderLimits=null, audioOpus=false, adaptive=false } = {}) {
     Object.assign(this,{sessionId,requests,options,now,prepareMs,readyMs,mediaMs,sizeProtocol,decoderLimits});this.allowRestored=allowRestored===true;this.audioOpus=audioOpus===true;
+    // bitrate-adaptive-tracks-v1: the statistics may carry the session's rate.
+    this.adaptive=adaptive===true;
     this.pending={topologyEpoch:1,epochs:new Map(requests.map(t=>[t.id,1])),tracks:requests,fps:options.fps};
     this.deadline=now()+prepareMs;this.info=null;this.video=new Map();this.audioPts=null;this.clientReady=false;
   }
@@ -212,11 +214,19 @@ export class TrackStream {
   }
   stats(value) {
     if(!value || value.sessionId!==this.sessionId || !this.info || this.pending || value.topologyEpoch!==this.info.topologyEpoch)return null;
-    if(!shape(value,['type','sessionId','topologyEpoch','measuredMs','tracks']) || !integer(value.measuredMs,1,10000) ||
+    // bitrate-adaptive-tracks-v1: the Host's current target (all outputs), its
+    // ceiling, the delay and delivered rate its controller sees, and each
+    // output's share of the target. Only in a session that negotiated it.
+    const rate=this.adaptive?['bitrateTarget','bitrateMax','networkDelayMs','deliveredKbps']:[];
+    if(!shape(value,['type','sessionId','topologyEpoch','measuredMs','tracks'],rate) || !integer(value.measuredMs,1,10000) ||
        !Array.isArray(value.tracks) || value.tracks.length!==this.info.tracks.length)return false;
+    if(this.adaptive && ((Object.hasOwn(value,'bitrateTarget') && !integer(value.bitrateTarget,500000,this.options.bitrate)) ||
+        (Object.hasOwn(value,'bitrateMax') && !integer(value.bitrateMax,500000,this.options.bitrate)) ||
+        ['networkDelayMs','deliveredKbps'].some(k=>Object.hasOwn(value,k) && (!Number.isFinite(value[k]) || value[k]<0 || value[k]>1000000))))return false;
     const tracks=ordered(value.tracks);
-    if(tracks.some((t,n)=>!shape(t,['id','epoch','capturedFps','encodedFps','bitrateKbps'],['encoderInfo']) ||
+    if(tracks.some((t,n)=>!shape(t,['id','epoch','capturedFps','encodedFps','bitrateKbps'],['encoderInfo',...(this.adaptive?['bitrateTarget']:[])]) ||
         t.id!==this.info.tracks[n].id || t.epoch!==this.info.tracks[n].epoch ||
+        (Object.hasOwn(t,'bitrateTarget') && !integer(t.bitrateTarget,500000,this.options.bitrate)) ||
         ['capturedFps','encodedFps','bitrateKbps'].some(k=>!Number.isFinite(t[k]) || t[k]<0 || t[k]>(k==='bitrateKbps'?1000000:100000))))return false;
     return {...value,tracks:tracks.map(t=>{const {encoderInfo,...base}=t;const info=safeEncoderInfo(encoderInfo);return info?{...base,encoderInfo:info}:base;})};
   }

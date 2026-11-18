@@ -303,6 +303,11 @@ class HostStreamTelemetry {
       if (lowCapture == null || c < lowCapture) lowCapture = c;
       if (lowEncode == null || e < lowEncode) lowEncode = e;
     }
+    // bitrate-adaptive-tracks-v1: the Host's target of all outputs, its
+    // ceiling and the delay its controller sees (only such a session has them).
+    final target = value['bitrateTarget'], ceiling = value['bitrateMax'];
+    final automatic =
+        target is int && target >= 500000 && target <= 100000000;
     return HostStreamTelemetry(
       capturedFps: capture,
       encodedFps: encode,
@@ -310,6 +315,18 @@ class HostStreamTelemetry {
       measuredMs: metricNumber(value['measuredMs'], 120000),
       lowestCapturedFps: lowCapture,
       lowestEncodedFps: lowEncode,
+      bitrateTarget: automatic ? target : null,
+      bitrateMax:
+          automatic &&
+              ceiling is int &&
+              ceiling >= 500000 &&
+              ceiling <= 100000000
+          ? ceiling
+          : null,
+      automaticBitrate: automatic,
+      networkDelayMs: automatic
+          ? metricNumber(value['networkDelayMs'], 60000)
+          : null,
     );
   }
 }

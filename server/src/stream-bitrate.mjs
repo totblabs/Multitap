@@ -5,6 +5,12 @@ import { HttpError } from './errors.mjs';
 // released 4-20 Mbps fixed range is accepted only for a host that advertises
 // the protocol, and only then does the client send arrival feedback.
 export const bitrateProtocol = 'bitrate-adaptive-v1';
+// bitrate-adaptive-tracks-v1: the same controller for independent outputs
+// (tracks-v1), one rate for the session that the Host shares between them.
+// The Host advertises bitrateTracksHostProtocol; only this broker shows
+// clients bitrateTracksProtocol (an older broker drops the Host field, so a
+// client never asks it for an automatic rate it would refuse).
+export const bitrateTracksProtocol = 'bitrate-adaptive-tracks-v1';
 export const legacyMaxBitrate = 20000000, adaptiveMaxBitrate = 100000000, adaptiveStartBitrate = 20000000;
 const integer = (n, min, max) => Number.isSafeInteger(n) && n >= min && n <= max;
 
@@ -12,8 +18,9 @@ const integer = (n, min, max) => Number.isSafeInteger(n) && n >= min && n <= max
 // desktop stays fixed-rate) and never invalidate the other capabilities.
 export function bitrateCapability(value) {
   if (value?.bitrateProtocol !== bitrateProtocol || !integer(value.maxBitrate, legacyMaxBitrate, adaptiveMaxBitrate)) return null;
-  return { bitrateProtocol, maxBitrate: value.maxBitrate };
+  return { bitrateProtocol, maxBitrate: value.maxBitrate, ...(value.bitrateTracksHostProtocol === bitrateTracksProtocol ? { bitrateTracksHostProtocol: bitrateTracksProtocol } : {}) };
 }
+export const bitrateTracksCapability = value => bitrateCapability(value)?.bitrateTracksHostProtocol === bitrateTracksProtocol;
 
 // Connect-time rule once the host is known. Returns whether the session runs
 // the adaptive controller; throws before any session state exists.
@@ -21,8 +28,8 @@ export function negotiateBitrate(options, host, tracks) {
   const capability = bitrateCapability(host?.capabilities);
   const adaptive = options.bitrateMode === 'auto';
   if (!adaptive && options.bitrate <= legacyMaxBitrate) return false;
-  // Independent outputs (tracks-v1) keep a fixed total rate.
-  if (adaptive && tracks) throw new HttpError(400, 'invalid_stream_options');
+  // Independent outputs (tracks-v1): automatic only where the Host runs it for them.
+  if (adaptive && tracks && !bitrateTracksCapability(host?.capabilities)) throw new HttpError(400, 'invalid_stream_options');
   if (!capability) {
     // Exactly the released answer for an out-of-range fixed bitrate.
     if (!adaptive) throw new HttpError(400, 'invalid_stream_options');
@@ -33,9 +40,9 @@ export function negotiateBitrate(options, host, tracks) {
 }
 
 // session.start bitrate fields. Auto: start at min(20 Mbps, ceiling); the
-// options' bitrate is the ceiling.
-export function startBitrateFields(options, adaptive) {
-  return adaptive ? { bitrate: Math.min(adaptiveStartBitrate, options.bitrate), bitrateMode: 'auto', bitrateMax: options.bitrate } : { bitrate: options.bitrate };
+// options' bitrate is the ceiling. Independent outputs carry the tracks marker.
+export function startBitrateFields(options, adaptive, tracks = false) {
+  return adaptive ? { bitrate: Math.min(adaptiveStartBitrate, options.bitrate), bitrateMode: 'auto', bitrateMax: options.bitrate, ...(tracks ? { bitrateTracksProtocol } : {}) } : { bitrate: options.bitrate };
 }
 
 // Client arrival report: host PTS and client monotonic arrival per video packet.

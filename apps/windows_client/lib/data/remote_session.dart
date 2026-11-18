@@ -1330,7 +1330,9 @@ class RemoteSession extends ChangeNotifier {
   Timer? _feedbackTimer;
   final _arrivals = <List<int>>[];
   int _feedbackBytes = 0, _feedbackEpoch = 0, _feedbackSinceUs = 0;
-  bool get adaptiveBitrate => connection.bitrateAdaptive && _tracks == null;
+  /// bitrate-adaptive-v1, or bitrate-adaptive-tracks-v1 on independent outputs
+  /// (the broker grants that one only with the tracks marker).
+  bool get adaptiveBitrate => connection.bitrateAdaptive;
   bool _losslessOffered = false;
 
   /// 게임 마우스 holds the mouse: no lossless tiles. Its
@@ -2331,6 +2333,9 @@ class RemoteSession extends ChangeNotifier {
             _lastMediaUs = _clock.elapsedMicroseconds;
             if (bytes[4] == 1) _lastVideoUs = _lastMediaUs;
             receivedBytes += bytes.length;
+            // bitrate-adaptive-tracks-v1: a packet is named by its pts and the
+            // topology's low 16 bits, as the Host's controller names it.
+            if (adaptiveBitrate) _noteTrackArrival(bytes, arrivedUs);
             await _pushMedia(() => _media.push(bytes));
             continue;
           }
@@ -4153,6 +4158,16 @@ class RemoteSession extends ChangeNotifier {
       pts |= packet[4 + i] << (8 * i);
     }
     return pts;
+  }
+
+  void _noteTrackArrival(Uint8List packet, int arrivedUs) {
+    final header = ByteData.sublistView(packet, 0, 28);
+    _noteFeedback(
+      header.getUint32(8, Endian.little) & 0xffff,
+      packet.length,
+      packet[4] == 1 ? header.getUint64(16, Endian.little) : null,
+      arrivedUs,
+    );
   }
 
   void _noteArrival(List<int> packet, int epoch, int arrivedUs) =>

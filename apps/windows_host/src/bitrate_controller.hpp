@@ -80,6 +80,15 @@ class BitrateController {
     idleRestore_ = std::min(idleRestore_, double(maximum_));
     return publish(true);
   }
+  // Independent outputs (bitrate-adaptive-tracks-v1): the floor is the sum of
+  // the outputs' own floors (each encoder's limit holds at its own geometry).
+  std::optional<int> geometryFloor(int floor, int fps) {
+    fps_ = std::clamp(fps, 1, 60);
+    floor_ = std::clamp(floor, adaptiveMinimumBitrate, maximum_);
+    target_ = std::clamp(target_, double(floor_), double(maximum_));
+    idleRestore_ = std::min(idleRestore_, double(maximum_));
+    return publish(true);
+  }
   // A media packet entered the host send queue. `tile` = lossless tile payload
   // (kind 1, not encoder output). Video packets are remembered for feedback.
   void sent(uint64_t nowUs, bool video, uint16_t epoch, uint64_t pts, size_t bytes, bool tile = false) {

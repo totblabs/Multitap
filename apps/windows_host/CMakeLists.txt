@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.30 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.31 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -759,6 +759,10 @@ target_compile_options(MultitapHostFrameRefinementTest PRIVATE /W4 /WX /permissi
 # link, and the actual MFT/decoder loop for a live mean-bitrate change.
 add_executable(MultitapHostBitrateControllerTest EXCLUDE_FROM_ALL src/bitrate_controller_test.cpp)
 target_compile_options(MultitapHostBitrateControllerTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# bitrate-adaptive-tracks-v1: the share split, the worker command and the session on a simulated link.
+add_executable(MultitapHostTrackBitrateTest EXCLUDE_FROM_ALL src/track_bitrate_test.cpp)
+target_link_libraries(MultitapHostTrackBitrateTest PRIVATE host_engine winhttp crypt32)
+target_compile_options(MultitapHostTrackBitrateTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostEncoderBitrateTest EXCLUDE_FROM_ALL src/encoder_bitrate_test.cpp ../windows_client/windows/runner/remote_decoder.cpp)
 target_include_directories(MultitapHostEncoderBitrateTest PRIVATE ../windows_client/windows/runner)
 target_link_libraries(MultitapHostEncoderBitrateTest PRIVATE host_engine)

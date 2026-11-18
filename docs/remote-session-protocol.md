@@ -470,8 +470,10 @@ and every requested monitor (otherwise 409 `track_streaming_unavailable`). A
 Host with the console profile additionally needs
 `streamProfileTracksProtocol:'group-v1'`, which the client then requests. The
 response uses `transport:'media-tracks-v1'` and echoes the tracks. The
-tracks keep a fixed total rate (`bitrateMode:'auto'` is 400
-`invalid_stream_options`); input latency, text, touch, caret and UDP media are
+tracks keep a fixed total rate, or with `bitrate-adaptive-tracks-v1` (a Host
+advertising it, shown to the client as `bitrateTracksProtocol`) the automatic
+rate of [adaptive-bitrate.md](adaptive-bitrate.md#independent-outputs-bitrate-adaptive-tracks-v1)
+(`bitrateMode:'auto'` is 400 `invalid_stream_options` otherwise); input latency, text, touch, caret and UDP media are
 not granted, and cursor, display scale, relative mouse, Opus audio and resume
 need their tracks markers.
 

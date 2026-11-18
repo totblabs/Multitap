@@ -56,7 +56,7 @@ struct WorkerPipeBacklog {
   // request (secure_desktop_service.hpp) may cross a resize; it must never end the RPC, and the handles a ready
   // carries are taken by the ordinary loop afterwards.
   static bool deferrable(const std::string& type){
-    for(const auto* allowed:{"stream.lossless","ping","stream.tracks.ready","stream.bitrate","stream.resize","stream.tracks.resize","display.scale","worker.secure.ready","worker.secure.failed"})if(type==allowed)return true;
+    for(const auto* allowed:{"stream.lossless","ping","stream.tracks.ready","stream.bitrate","stream.tracks.bitrate","stream.resize","stream.tracks.resize","display.scale","worker.secure.ready","worker.secure.failed"})if(type==allowed)return true;
     return false;
   }
   bool defer(const Json& value){

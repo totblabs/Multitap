@@ -22,11 +22,15 @@ inline std::wstring trackTunnelPath(const Credentials& credentials,const std::st
 // loss. The broker decides within its own window and restarts every output at
 // an IDR; a broker that ended the session also stops it on the channel.
 inline constexpr char trackResumeProtocol[]="tracks-resume-v1";
-inline bool trackTunnelControlAllowed(const std::string& type,bool udpTracks){
+// stream.feedback: bitrate-adaptive-tracks-v1 only (the broker sends the client's
+// arrival feedback here, to the controller beside this tunnel).
+inline bool trackTunnelControlAllowed(const std::string& type,bool udpTracks,bool adaptive=false){
   static const std::set<std::string> ordinary{"input","input.reset","ping","stream.tracks.ready","stream.tracks.resize","cursor.compose","stream.keyframe"};
   static const std::set<std::string> scoped{"input.direct","udp.tracks.grant","udp.tracks.key","udp.tracks.peer","udp.tracks.lease"};
-  return ordinary.contains(type)||(udpTracks&&scoped.contains(type));
+  return ordinary.contains(type)||(udpTracks&&scoped.contains(type))||(adaptive&&type=="stream.feedback");
 }
+// The session.start of a bitrate-adaptive-tracks-v1 session (track_bitrate.hpp).
+inline bool trackTunnelAdaptive(const Json& request){return request.get("mediaProtocol").string()=="tracks-v1"&&request.get("bitrateMode").string()=="auto"&&request.get("bitrateTracksProtocol").string()=="bitrate-adaptive-tracks-v1";}
 class TrackTunnelHold {
  public:
   // Longer than the broker's detection (two heartbeats) plus its 30 s window.
@@ -54,23 +58,34 @@ class TrackSourceTunnel {
  public:
   using Receive=std::function<void(const std::string&)>;
   using Closed=std::function<void()>;
+  // bitrate-adaptive-tracks-v1: the queue after each enqueue (oldest packet's
+  // age, bytes, packets) and the bytes of each completed write. Set before start.
+  struct Observer{std::function<void(uint64_t,size_t,size_t)> queued;std::function<void(size_t)> written;};
+  void observe(std::shared_ptr<const Observer> observer){observer_.store(std::move(observer));}
   ~TrackSourceTunnel(){stop();}
   DWORD httpStatus()const{return status_.load();}
   bool waitReady(DWORD timeoutMs){std::unique_lock lock(mutex_);condition_.wait_for(lock,std::chrono::milliseconds(timeoutMs),[this]{return stopped_||socket_.load()!=nullptr;});return !stopped_&&socket_.load()!=nullptr;}
   void cancel()noexcept{close();}
   void stop(){std::lock_guard lifecycle(lifecycle_);close();if(thread_.joinable())thread_.join();receive_={};closed_={};lost_={};}
   // While a lost tunnel is held (tracks-resume-v1) media is dropped, not queued.
+  // An automatic-rate session holds 128 packets (adaptiveHostQueuePackets, as the
+  // channel of one output): 32 were ~0.2 s of sound alone, which a burst of two
+  // outputs overflows before a lower rate can act. Bytes stay 8 MiB.
   bool send(bool text,std::vector<uint8_t> bytes){
-    bool overflow=false;{std::lock_guard lock(mutex_);if(stopped_)return false;if(holding_)return true;
-      if(bytes.empty()||bytes.size()>(text?8192:4*1024*1024)||queue_.size()>=32||queued_+bytes.size()>8*1024*1024)overflow=true;
-      else{queued_+=bytes.size();queue_.push_back({text,std::move(bytes),observability_.enabled()?Clock::now():Clock::time_point{}});}
-    }if(overflow){close();return false;}condition_.notify_one();return true;
+    bool overflow=false,queuedNow=false;uint64_t oldestUs=0;size_t queuedBytes=0,queuedPackets=0;
+    {std::lock_guard lock(mutex_);if(stopped_)return false;if(holding_)return true;
+      if(bytes.empty()||bytes.size()>(text?8192:4*1024*1024)||queue_.size()>=(adaptive_?128u:32u)||queued_+bytes.size()>8*1024*1024)overflow=true;
+      else{const auto now=Clock::now();queued_+=bytes.size();queue_.push_back({text,std::move(bytes),now});
+        queuedNow=true;queuedPackets=queue_.size();queuedBytes=queued_;oldestUs=uint64_t(std::max<int64_t>(0,std::chrono::duration_cast<std::chrono::microseconds>(now-queue_.front().queuedAt).count()));}
+    }if(overflow){close();return false;}condition_.notify_one();
+    if(queuedNow)if(const auto observer=observer_.load();observer&&observer->queued)try{observer->queued(oldestUs,queuedBytes,queuedPackets);}catch(...){ }
+    return true;
   }
   // `resumable`: the broker granted tracks-resume-v1; `lost` runs once when a
   // held loss begins (the service releases the worker's input then).
   void start(const Credentials& credentials,const std::string& sessionId,const std::string& url,Receive receive,Closed closed,const Json* observationRequest=nullptr,bool resumable=false,Closed lost={}){
     const auto path=trackTunnelPath(credentials,sessionId,url);
-    std::lock_guard lifecycle(lifecycle_);stop();receive_=std::move(receive);closed_=std::move(closed);lost_=std::move(lost);stopped_=false;holding_=false;status_=0;udpTracks_=observationRequest&&observationRequest->get("udpTracksProtocol").string()=="udp-tracks-v1";
+    std::lock_guard lifecycle(lifecycle_);stop();receive_=std::move(receive);closed_=std::move(closed);lost_=std::move(lost);stopped_=false;holding_=false;status_=0;udpTracks_=observationRequest&&observationRequest->get("udpTracksProtocol").string()=="udp-tracks-v1";adaptive_=observationRequest&&trackTunnelAdaptive(*observationRequest);
     if(observationRequest)observability_.configure(*observationRequest);else observability_.reset();
     thread_=std::thread([this,credentials,sessionId,path,resumable]{
       TrackTunnelHold hold;
@@ -123,6 +138,7 @@ class TrackSourceTunnel {
           // during a large frame broke the connection).
           const auto began=observability_.enabled()?Clock::now():Clock::time_point{};
           if(sendWebSocketMessageOn(socket_.load(),packet.text,packet.bytes.data(),packet.bytes.size())!=NO_ERROR){failed=true;break;}
+          if(const auto observer=observer_.load();observer&&observer->written)try{observer->written(packet.bytes.size());}catch(...){ }
           if(observability_.enabled()&&!packet.text)lastWriteUs=uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now()-began).count());
         }}catch(...){failed=true;}
         // The receive below returns once this connection's handle is closed.
@@ -138,7 +154,7 @@ class TrackSourceTunnel {
         if(type==WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE){const auto value=JsonParser::parse(json);
           // cursor.compose: 게임 마우스 (cursor-compose-v1 on independent outputs).
           // stream.keyframe: tracks-resume-v1, every output restarts at an IDR.
-          if(value.get("sessionId").string()!=sessionId||!trackTunnelControlAllowed(value.get("type").string(),udpTracks_)){ended=Ended::closed;throw std::runtime_error("Invalid track control binding");}
+          if(value.get("sessionId").string()!=sessionId||!trackTunnelControlAllowed(value.get("type").string(),udpTracks_,adaptive_)){ended=Ended::closed;throw std::runtime_error("Invalid track control binding");}
           if(receive_)receive_(json);json.clear();
         }
       }
@@ -152,7 +168,8 @@ class TrackSourceTunnel {
   std::atomic<bool> stopped_{true};std::atomic<HINTERNET> socket_{nullptr};
   std::atomic<DWORD> status_{0};
   std::thread thread_;Receive receive_;Closed closed_,lost_;std::mutex mutex_;std::recursive_mutex lifecycle_;
-  std::condition_variable condition_;std::deque<Packet> queue_;size_t queued_=0;bool holding_=false,udpTracks_=false;
+  std::condition_variable condition_;std::deque<Packet> queue_;size_t queued_=0;bool holding_=false,udpTracks_=false;std::atomic<bool> adaptive_{false};
+  std::atomic<std::shared_ptr<const Observer>> observer_;
   void close()noexcept{stopped_=true;dropSocket();}
 };
 }

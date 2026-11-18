@@ -549,6 +549,16 @@ class BrokerSession {
 
 const bitrateAdaptiveProtocol = 'bitrate-adaptive-v1';
 
+/// bitrate-adaptive-tracks-v1: the same automatic rate for independent
+/// outputs (모든 모니터), shown by a broker that grants it for this desktop.
+const bitrateTracksProtocol = 'bitrate-adaptive-tracks-v1';
+
+/// Whether a desktop's capabilities offer the automatic rate on all monitors.
+bool bitrateTracksAdvertised(Object? capabilities) =>
+    capabilities is Map &&
+    capabilities['bitrateTracksProtocol'] == bitrateTracksProtocol &&
+    adaptiveBitrateAdvertised(capabilities) != null;
+
 /// The adaptive-bitrate ceiling a capability advertises, or null.
 int? adaptiveBitrateAdvertised(Object? capabilities) {
   if (capabilities is! Map ||
@@ -604,6 +614,7 @@ class BrokerDesktop {
     this.audioState,
     this.sessionCleanup = const SessionCleanupState(),
     this.maxBitrate,
+    this.bitrateTracks = false,
     this.hostUpdate = HostUpdateState.absent,
     this.hostMissingAfterUpdate,
     this.inputLatency = false,
@@ -816,6 +827,9 @@ class BrokerDesktop {
   /// bitrate-adaptive-v1 ceiling of this desktop's host, passed through by a
   /// broker that understands it; null = released fixed 4-20 Mbps only.
   final int? maxBitrate;
+
+  /// bitrate-adaptive-tracks-v1: automatic rate on all monitors too.
+  final bool bitrateTracks;
   final VmResources resources;
   final ConsolePreparationState consolePreparation;
   final SessionCleanupState sessionCleanup;
@@ -929,6 +943,9 @@ class BrokerDesktop {
       (data['host'] as Map?)?['capabilities'],
     ),
     maxBitrate: adaptiveBitrateAdvertised(
+      (data['host'] as Map?)?['capabilities'],
+    ),
+    bitrateTracks: bitrateTracksAdvertised(
       (data['host'] as Map?)?['capabilities'],
     ),
     inputLatency:
@@ -1227,11 +1244,18 @@ class BrokerConnection {
         (data['clipboardSync'] == true &&
             (mode != 'stream' ||
                 data['clipboardProtocol'] != 'clipboard-sync-v1')) ||
-        // The adaptive rate is granted only to an ordinary stream session.
+        // The adaptive rate is granted to an ordinary stream session, and to
+        // independent outputs with bitrate-adaptive-tracks-v1 (asked for auto).
         (data['bitrateProtocol'] != null &&
             (data['bitrateProtocol'] != bitrateAdaptiveProtocol ||
                 mode != 'stream' ||
-                trackMedia)) ||
+                (trackMedia &&
+                    data['bitrateTracksProtocol'] != bitrateTracksProtocol))) ||
+        (data['bitrateTracksProtocol'] != null &&
+            (data['bitrateTracksProtocol'] != bitrateTracksProtocol ||
+                !trackMedia ||
+                data['bitrateProtocol'] != bitrateAdaptiveProtocol ||
+                requestedOptions?.automaticBitrate != true)) ||
         // Input latency is measured only when this request asked for it, for
         // an ordinary stream session; the grant itself is optional.
         (data['inputLatencyProtocol'] != null &&
@@ -2591,6 +2615,10 @@ class HttpBrokerApi
   Map<String, int> _bitrateCeilings = {};
   int? _bitrateCeiling(String token, String desktopId) =>
       _inventoryToken == token ? _bitrateCeilings[desktopId] : null;
+  // bitrate-adaptive-tracks-v1: the same rule (an older broker refuses auto on tracks).
+  Set<String> _bitrateTracksDesktops = {};
+  bool _bitrateTracksAdvertised(String token, String desktopId) =>
+      _inventoryToken == token && _bitrateTracksDesktops.contains(desktopId);
   // input-latency-v1 is requested only from a broker whose inventory shows the
   // host capability: a released broker rejects the unknown connect field.
   Set<String> _inputLatencyDesktops = {};
@@ -3264,10 +3292,12 @@ class HttpBrokerApi
       throw ArgumentError('Invalid display scale.');
     }
     _refuseSamePc(desktopId);
-    // Independent outputs keep a fixed total rate (up to the host ceiling).
+    // Independent outputs: automatic where the desktop runs it for them
+    // (bitrate-adaptive-tracks-v1), else a fixed total rate up to its ceiling.
     var options = requested.negotiated(
       _bitrateCeiling(token, desktopId),
       independentOutputs: true,
+      adaptiveOutputs: _bitrateTracksAdvertised(token, desktopId),
     );
     tracks.checkOptions(options);
     final v2 = _streamSizeV2Advertised(token, desktopId);
@@ -3386,6 +3416,7 @@ class HttpBrokerApi
     var options = requested.negotiated(
       _bitrateCeiling(token, desktopId),
       independentOutputs: true,
+      adaptiveOutputs: _bitrateTracksAdvertised(token, desktopId),
     );
     tracks.checkOptions(options);
     final v2 = _streamSizeV2Advertised(token, desktopId);
@@ -3879,6 +3910,10 @@ class HttpBrokerApi
         for (final desktop in desktops)
           if (desktop.maxBitrate != null) desktop.id: desktop.maxBitrate!,
       };
+      _bitrateTracksDesktops = {
+        for (final desktop in desktops)
+          if (desktop.bitrateTracks) desktop.id,
+      };
       _observabilityDesktops
         ..clear()
         ..addAll(desktops.where((d) => d.observability).map((d) => d.id));
@@ -4066,6 +4101,7 @@ class HttpBrokerApi
       _inventorySequence++;
       _inventoryToken = null;
       _bitrateCeilings = {};
+      _bitrateTracksDesktops = {};
       _inputLatencyDesktops = {};
       _observabilityDesktops.clear();
       _cursorDesktops = {};
@@ -4576,6 +4612,7 @@ class HttpBrokerApi
     _inventorySequence++;
     _inventoryToken = null;
     _bitrateCeilings = {};
+    _bitrateTracksDesktops = {};
     _inputLatencyDesktops = {};
     _observabilityDesktops.clear();
     _cursorDesktops = {};

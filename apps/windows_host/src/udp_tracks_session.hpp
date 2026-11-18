@@ -37,6 +37,11 @@ class UdpTracksSession {
     std::function<bool(const std::string&)> send;
     std::function<void(const Json&)> input;
     std::function<void()> keyFrame;
+    // bitrate-adaptive-tracks-v1 (track_bitrate.hpp): a leg's round trip and losses,
+    // its path, a pacer backlog. Each returns that output's share (0: keep its own rate).
+    std::function<int(const std::string&,uint64_t,uint32_t,uint32_t)> rateFeedback;
+    std::function<int(const std::string&,bool)> ratePath;
+    std::function<void()> rateBacklog;
   };
   UdpTracksSession(std::string session,Callbacks callbacks,bool relative=false):session_(std::move(session)),callbacks_(std::move(callbacks)),relative_(relative),input_([this](const DirectInputItem& item){emitInput(item);}){}
   ~UdpTracksSession(){close();}
@@ -138,7 +143,9 @@ class UdpTracksSession {
     for(auto& [id,item]:ready){
       const auto scope=item.first;const auto up=std::make_shared<std::atomic<bool>>(false);UdpProbeLegOptions options;
       options.media.keyFrame=[this]{if(!closed_&&callbacks_.keyFrame)callbacks_.keyFrame();};
-      options.media.feedback=[rate=scope.bitrate](uint64_t,uint32_t,uint32_t){return rate;};options.media.path=[up,rate=scope.bitrate](bool value){*up=value;return rate;};
+      options.media.feedback=[this,id=scope.track,rate=scope.bitrate](uint64_t rtt,uint32_t received,uint32_t lost){int share=0;try{if(!closed_&&callbacks_.rateFeedback)share=callbacks_.rateFeedback(id,rtt,received,lost);}catch(...){ }return share>0?share:rate;};
+      options.media.path=[this,up,id=scope.track,rate=scope.bitrate](bool value){*up=value;int share=0;try{if(!closed_&&callbacks_.ratePath)share=callbacks_.ratePath(id,value);}catch(...){ }return share>0?share:rate;};
+      options.media.backlog=[this]{try{if(!closed_&&callbacks_.rateBacklog)callbacks_.rateBacklog();}catch(...){ }};
       options.media.local=[this,scope](const std::string& address,uint16_t port){send(scoped("udp.tracks.local",scope,",\"protocol\":\"udp-direct-v1\",\"address\":"+jsonQuote(address)+",\"port\":"+std::to_string(port)));};
       options.media.reflexive=[this,scope](const std::string& address,uint16_t port){send(scoped("udp.tracks.local",scope,",\"protocol\":\"udp-direct-v1\",\"candidateType\":\"srflx\",\"address\":"+jsonQuote(address)+",\"port\":"+std::to_string(port)));};
       options.media.input=[this,scope](uint32_t sequence,uint16_t epoch,const std::string& body){try{if(closed_||epoch!=scope.binding.epoch)return;{std::lock_guard lock(mutex_);if(scope.generation!=generation_||scope.binding.topology!=topology_||!legs_.contains(scope.track))return;}if(validDirectTrackInput(JsonParser::parse(body),scope,relative_))input_.submit(false,{sequence,body,udpProbeNowUs()});}catch(...){ }};

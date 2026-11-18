@@ -24,6 +24,7 @@
 #include "stream_worker_watchdog.hpp"
 #include "track_tunnel.hpp"
 #include "udp_tracks_session.hpp"
+#include "track_bitrate.hpp"
 #include "display_cache.hpp"
 #include "display_change_signals.hpp"
 #include "capability_inputs.hpp"
@@ -749,7 +750,7 @@ class ServiceBridge final : public AgentBridge {
     // rdpSupported and rdpEnabled are always false: the Host has no RDP, and the
     // broker requires both booleans in every capability report.
     // keyframe-v1: stream.keyframe reaches the worker as an IDR request (keyFrame()).
-    const auto original="{\"observabilityProtocol\":\"stream-observability-v1\",\"streamSizeProtocol\":\"stream-size-v1\",\"streamSizeProtocols\":[\"stream-size-v1\",\"stream-size-v2\"],\"sessionStopProtocol\":\"stop-v1\",\"keyFrameProtocol\":\"" + std::string(keyFrameProtocol) + "\",\"hostResumeProtocol\":\"" + std::string(hostResumeProtocol) + "\",\"hostChannelResumeProtocol\":\"" + std::string(channelResumeProtocol) + "\",\"udpMediaProtocol\":\"" + std::string(udpMediaProtocol) + "\",\"udpDirectHostProtocol\":\"udp-direct-v1\",\"udpTracksHostProtocol\":\"udp-tracks-v1\",\"audioCodecProtocol\":\"" + std::string(audioOpusProtocol) + "\",\"audioCodecTracksProtocol\":\"" + std::string(audioOpusTracksProtocol) + "\",\"trackResumeProtocol\":\"" + std::string(trackResumeProtocol) + "\",\"bitrateProtocol\":\"" + std::string(bitrateAdaptiveProtocol) + "\",\"maxBitrate\":" + std::to_string(adaptiveMaximumBitrate) + ",\"inputLatencyProtocol\":\"" + std::string(inputLatencyProtocol) + "\",\"cursorProtocol\":\"" + std::string(cursor::protocol) + "\",\"cursorTracksProtocol\":\"" + std::string(cursor::tracksProtocol) + "\",\"cursorEchoProtocol\":\"" + std::string(cursor::echoProtocol) + "\",\"cursorComposeProtocol\":\"" + std::string(cursor::composeProtocol) + "\",\"backgroundVideoProtocol\":\"" + std::string(backgroundVideoProtocol) + "\",\"textInputProtocol\":\"" + std::string(textInputProtocol) + "\",\"displayScaleProtocol\":\"" + std::string(displayScaleProtocolName) + "\",\"displayScaleOutputsProtocol\":\"" + std::string(displayScaleOutputsProtocolName) + "\",\"touchInputProtocol\":\"" + std::string(touchInputProtocol) + "\",\"relativeMouseProtocol\":\"" + std::string(relativeMouseProtocol) + "\",\"relativeMouseTracksProtocol\":\"" + std::string(relativeMouseTracksProtocol) + "\",\"caretProtocol\":\"" + std::string(caretProtocol) + "\",\"speakerMuteProtocol\":\"" + std::string(speakerMuteProtocol) + "\"" + printCapabilityFields() + usbCapabilityFields() + gamepadCapabilityFields() + (interactive && driveCapable() ? ",\"driveProtocol\":\"" + std::string(drive::protocol) + "\"" + (driveFsCapable() ? ",\"driveFs\":true" : "") : std::string()) + (interactive && !driveCapable() ? ",\"driveUnavailableReason\":\"drive_webclient_unavailable\"" : std::string()) + ",\"diagnosticsSupported\":true,\"imeStateProtocol\":\"" + std::string(ime::protocol) + "\",\"service\":true,\"interactiveSession\":" + std::string(interactive ? "true" : "false") + ",\"streaming\":" + (!maintenance&&interactive && display.streamable() && captureAvailable ? "true" : "false") + ",\"rdpSupported\":false,\"rdpEnabled\":false,\"virtualDisplayReady\":" + (!maintenance&&display.streamable() ? "true" : "false") + ",\"clipboard\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"clipboardSync\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"virtualMonitorControl\":" + (!maintenance&&interactive && captureAvailable && console && display.streamable() && display.monitorControlSupported ? "true" : "false") + ",\"dynamicResolution\":"+(viewport?"true":"false")+",\"viewportProvisioning\":"+(viewport?"true":"false")+",\"viewportFailureReason\":"+jsonQuote(viewportReason)+(viewport?",\"resizeProtocol\":\"epoch-v1\"":"")+consoleFields+thumbnailFields+",\"monitors\":"+monitors+'}';
+    const auto original="{\"observabilityProtocol\":\"stream-observability-v1\",\"streamSizeProtocol\":\"stream-size-v1\",\"streamSizeProtocols\":[\"stream-size-v1\",\"stream-size-v2\"],\"sessionStopProtocol\":\"stop-v1\",\"keyFrameProtocol\":\"" + std::string(keyFrameProtocol) + "\",\"hostResumeProtocol\":\"" + std::string(hostResumeProtocol) + "\",\"hostChannelResumeProtocol\":\"" + std::string(channelResumeProtocol) + "\",\"udpMediaProtocol\":\"" + std::string(udpMediaProtocol) + "\",\"udpDirectHostProtocol\":\"udp-direct-v1\",\"udpTracksHostProtocol\":\"udp-tracks-v1\",\"audioCodecProtocol\":\"" + std::string(audioOpusProtocol) + "\",\"audioCodecTracksProtocol\":\"" + std::string(audioOpusTracksProtocol) + "\",\"trackResumeProtocol\":\"" + std::string(trackResumeProtocol) + "\",\"bitrateProtocol\":\"" + std::string(bitrateAdaptiveProtocol) + "\",\"maxBitrate\":" + std::to_string(adaptiveMaximumBitrate) + ",\"bitrateTracksHostProtocol\":\"" + std::string(bitrateTracksProtocol) + "\",\"inputLatencyProtocol\":\"" + std::string(inputLatencyProtocol) + "\",\"cursorProtocol\":\"" + std::string(cursor::protocol) + "\",\"cursorTracksProtocol\":\"" + std::string(cursor::tracksProtocol) + "\",\"cursorEchoProtocol\":\"" + std::string(cursor::echoProtocol) + "\",\"cursorComposeProtocol\":\"" + std::string(cursor::composeProtocol) + "\",\"backgroundVideoProtocol\":\"" + std::string(backgroundVideoProtocol) + "\",\"textInputProtocol\":\"" + std::string(textInputProtocol) + "\",\"displayScaleProtocol\":\"" + std::string(displayScaleProtocolName) + "\",\"displayScaleOutputsProtocol\":\"" + std::string(displayScaleOutputsProtocolName) + "\",\"touchInputProtocol\":\"" + std::string(touchInputProtocol) + "\",\"relativeMouseProtocol\":\"" + std::string(relativeMouseProtocol) + "\",\"relativeMouseTracksProtocol\":\"" + std::string(relativeMouseTracksProtocol) + "\",\"caretProtocol\":\"" + std::string(caretProtocol) + "\",\"speakerMuteProtocol\":\"" + std::string(speakerMuteProtocol) + "\"" + printCapabilityFields() + usbCapabilityFields() + gamepadCapabilityFields() + (interactive && driveCapable() ? ",\"driveProtocol\":\"" + std::string(drive::protocol) + "\"" + (driveFsCapable() ? ",\"driveFs\":true" : "") : std::string()) + (interactive && !driveCapable() ? ",\"driveUnavailableReason\":\"drive_webclient_unavailable\"" : std::string()) + ",\"diagnosticsSupported\":true,\"imeStateProtocol\":\"" + std::string(ime::protocol) + "\",\"service\":true,\"interactiveSession\":" + std::string(interactive ? "true" : "false") + ",\"streaming\":" + (!maintenance&&interactive && display.streamable() && captureAvailable ? "true" : "false") + ",\"rdpSupported\":false,\"rdpEnabled\":false,\"virtualDisplayReady\":" + (!maintenance&&display.streamable() ? "true" : "false") + ",\"clipboard\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"clipboardSync\":" + (!maintenance&&interactive && captureAvailable && display.streamable() && display.clipboardSupported ? "true" : "false") + ",\"virtualMonitorControl\":" + (!maintenance&&interactive && captureAvailable && console && display.streamable() && display.monitorControlSupported ? "true" : "false") + ",\"dynamicResolution\":"+(viewport?"true":"false")+",\"viewportProvisioning\":"+(viewport?"true":"false")+",\"viewportFailureReason\":"+jsonQuote(viewportReason)+(viewport?",\"resizeProtocol\":\"epoch-v1\"":"")+consoleFields+thumbnailFields+",\"monitors\":"+monitors+'}';
     return original;
   }
   // thumbnail-capture-v1 (thumbnail_capture.hpp). The privacy ticket is taken
@@ -1185,6 +1186,13 @@ class ServiceBridge final : public AgentBridge {
     }catch(...){unavailable("virtual_display_required");return;}
     stopping_=false;stopFence_.reset(id_,sessionHadProfile_);
     stopped_ = false;
+    // bitrate-adaptive-tracks-v1 (track_bitrate.hpp): this service's controller for
+    // independent outputs. It sees the tunnel's queue and writes; a new target or
+    // split wakes the relay loop, which hands the shares to the worker.
+    {const auto trackRate=trackSession?adaptiveTracksBitrateRequest(request):AdaptiveBitrateRequest{};
+      pendingTrackRate_=false;trackRate_.start(id_,trackRate,int(std::clamp(request.get("fps").number(60),1.0,60.0)),[this]{pendingTrackRate_=true;if(relayWake_.value)SetEvent(relayWake_.value);});
+      if(trackRate.adaptive)tracks_.observe(std::make_shared<const TrackSourceTunnel::Observer>(TrackSourceTunnel::Observer{[this](uint64_t oldestUs,size_t bytes,size_t packets){trackRate_.queue(oldestUs,bytes,packets);},[this](size_t bytes){trackRate_.written(bytes);}}));
+      else tracks_.observe({});}
     if(trackSession){
       try{std::lock_guard lock(resizeMutex_);currentTrack_=nativeInitialTrackViewport(request);pendingTrack_=currentTrack_;trackMedia_=initialTrack_=true;trackMetadataReady_=trackResizeVerified_=false;resizeTicket_=displayCache_.begin(session_);resizeDeadline_=streamMonotonicMillis()+streamResizeTimeoutMs;if(v2)profileInstanceForInitial_=profileSnapshot.get("deviceInstanceId").string();}catch(...){stopped_=true;streaming_=false;unavailable("worker_failed");return;}
       try{tracks_.start(credentials_,id_,request.get("tunnelUrl").string(),
@@ -1201,7 +1209,10 @@ class ServiceBridge final : public AgentBridge {
       try{udpTracks_.store(std::make_shared<UdpTracksSession>(id_,UdpTracksSession::Callbacks{
         [this](const std::string& value){return tracks_.send(true,{value.begin(),value.end()});},
         [this,expected=id_](const Json& value){trackControl(jsonObject(value),expected,true);},
-        [this]{pendingKeyFrame_=true;SetEvent(relayWake_.value);}},relativeMouseTrackSessionRequested(request)));}catch(...){ }
+        [this]{pendingKeyFrame_=true;SetEvent(relayWake_.value);},
+        [this](const std::string& track,uint64_t rtt,uint32_t received,uint32_t lost){return trackRate_.udpFeedback(track,rtt,received,lost);},
+        [this](const std::string& track,bool onUdp){return trackRate_.udpPath(track,onUdp);},
+        [this]{trackRate_.udpBacklog();}},relativeMouseTrackSessionRequested(request)));}catch(...){ }
     }
     const auto encoderTicket=encoderDiagnostics_.begin();
     workerQuiescent_=false;worker_ = std::thread([this, request,trackSession,wantsProfile,initial,initialGroup,v2,encoderTicket,startLease=profileLease,startSnapshot=profileSnapshot,received] {
@@ -1463,6 +1474,12 @@ class ServiceBridge final : public AgentBridge {
             if(const int scale=pendingScale_.exchange(0))return sendCommand("{\"type\":\"display.scale\",\"sessionId\":"+jsonQuote(id_)+",\"scale\":"+std::to_string(scale)+'}');
             return true;
           }
+          // bitrate-adaptive-tracks-v1: the outputs' shares, once no track transaction reads the pipe.
+          if(trackSession&&!terminal&&pendingTrackRate_.load()){
+            std::lock_guard lock(resizeMutex_);
+            if(!stopping_&&!pendingTrack_&&!initialCompletion_.pending()&&pendingTrackRate_.exchange(false))
+              if(const auto command=trackRate_.takeCommand())if(!sendCommand(*command))return false;
+          }
           if(trackSession||prepareStage<10||terminal)return true;
           if(!pendingBitrate_.load()&&!pendingKeyFrame_.load()&&!pendingRecover_.load()&&!pendingDecoder_.load()&&!pendingScale_.load()&&!pendingCaret_.load()&&!pendingCursorEcho_.load()&&!pendingCursorCompose_.load()&&!pendingBackground_.load())return true;
           std::lock_guard lock(resizeMutex_);
@@ -1521,7 +1538,10 @@ class ServiceBridge final : public AgentBridge {
             observeEncoderStats(value,encoderTicket);
             // Extra encoder details are private on the released exact-shape
             // dual wire; current-worker diagnostics retain them above.
-            if(value.get("type").string()=="stream.tracks.stats"){auto legacy=value;auto* object=std::get_if<Json::Object>(&legacy.value);if(object)if(auto found=object->find("tracks");found!=object->end())if(auto* rows=std::get_if<Json::Array>(&found->second.value))for(auto& row:*rows)if(auto* fields=std::get_if<Json::Object>(&row.value))fields->erase("encoderInfo");const auto packet=jsonObject(legacy);bytes.assign(packet.begin(),packet.end());}
+            if(value.get("type").string()=="stream.tracks.stats"){auto legacy=value;auto* object=std::get_if<Json::Object>(&legacy.value);if(object)if(auto found=object->find("tracks");found!=object->end())if(auto* rows=std::get_if<Json::Array>(&found->second.value))for(auto& row:*rows)if(auto* fields=std::get_if<Json::Object>(&row.value))fields->erase("encoderInfo");
+              // bitrate-adaptive-tracks-v1: the session's rate and each output's share.
+              if(trackSession)trackRate_.annotate(legacy);
+              const auto packet=jsonObject(legacy);bytes.assign(packet.begin(),packet.end());}
             // The start's own stream.info carries its stages (connect_stages.hpp);
             // independent outputs keep their exact-shape stream.tracks.info.
             if(!trackSession&&!stages.info&&value.get("type").string()=="stream.info"){stages.info=ConnectStages::Clock::now();bytes=withStartStages(std::move(bytes),stages);}
@@ -1534,7 +1554,7 @@ class ServiceBridge final : public AgentBridge {
           if(!streamWorkerVideoAlive(lastVideo,Clock::now(),resizeDeadline_.load(),streamMonotonicMillis())){relayFacts.ended(WorkerRelayCause::videoWatchdog);break;}
           if(handledControl)continue;
           if(stopping_)continue;
-          if(trackSession){const auto udp=udpTracks_.load();if(!(udp&&udp->outgoing(text,bytes))&&!tracks_.send(text,std::move(bytes))){relayFacts.ended(WorkerRelayCause::trackSendFailed);break;}}else send_(text, std::move(bytes));
+          if(trackSession){trackRate_.outgoing(text,bytes);const auto udp=udpTracks_.load();if(!(udp&&udp->outgoing(text,bytes))&&!tracks_.send(text,std::move(bytes))){relayFacts.ended(WorkerRelayCause::trackSendFailed);break;}}else send_(text, std::move(bytes));
           // Its flushed log record follows the first video instead of delaying it.
           if(firstVideo){firstVideo=false;recordHostEvent("hostAction",{{"action",uint32_t(200)},{"ok",true},{"stage",uint32_t(10)},{"error",uint32_t(0)},
             {"admitMs",ConnectStages::logged(stages.admitMs())},{"workerMs",ConnectStages::logged(stages.workerMs())},{"displayMs",ConnectStages::logged(stages.displayMs())},
@@ -1628,6 +1648,7 @@ class ServiceBridge final : public AgentBridge {
   void stop() override {
     std::lock_guard lifecycle(lifecycleMutex_);if(ownsSignin_&&signinRuntime_)signinRuntime_->stop(signinOwnedSession_);stopping_=true;encoderDiagnostics_.retire();
     if(auto udp=udpTracks_.exchange({}))udp->close();
+    trackRate_.stop();pendingTrackRate_=false;
     {std::lock_guard lock(consoleMutex_);if(consoleOperation_){consoleOperation_->cancelled=true;consoleOperation_->hold.release();consoleOperation_->result.ok=false;consoleOperation_->result.reason="qemu_console_cancelled";}}if(consoleWorker_.joinable())consoleWorker_.join();consoleRunning_=!qemuConsoleQuiescent();
     {std::lock_guard lock(resizeMutex_);encoderDiagnosticEpoch_=0;pendingResize_.reset();pendingEncoderLimits_.reset();pendingTrack_.reset();currentTrack_.reset();initialCompletion_={};initialGroupCompletion_={};resizeVerified_=false;trackMedia_=trackMetadataReady_=trackResizeVerified_=initialTrack_=false;resizeDeadline_=0;}
     {std::lock_guard lock(displayOperationMutex_);if(displayOperation_)displayOperation_->cancelled=true;}if(displayOperationWorker_.joinable())displayOperationWorker_.join();endChannelRedials();clipboard_.stop();print_.stop();drives_.stop();usb_.stop();
@@ -1778,6 +1799,8 @@ class ServiceBridge final : public AgentBridge {
         if(inner!="input.fence"){auto input=value.get("input");if(auto* object=std::get_if<Json::Object>(&input.value))(*object)["sessionId"]=Json{expected};trackControl(jsonObject(input),expected,true);}return;
       }
     }
+    // bitrate-adaptive-tracks-v1: the client's arrival feedback is this service's, never the worker's.
+    if(type=="stream.feedback"){trackRate_.feedback(value);return;}
     if(type=="stream.tracks.resize"){
       const auto request=nativeTrackResizeRequest(value);(void)resizeDecoderLimits(value,streamSizesV2_);const bool sizeAllowed=streamSizesV2_||legacyTrackRequestSize(request);bool allowed=false;
       {std::lock_guard lock(resizeMutex_);bool capture=false;const auto display=displayCache_.snapshot(session_,sessionUnlocked(session_),&capture);allowed=sizeAllowed&&trackMedia_&&trackMetadataReady_&&currentTrack_&&!pendingTrack_&&!pendingResize_&&nativeDisplay_&&nativeDisplaySelected()&&request.sessionId==id_&&nativeTrackResizeFollows(*currentTrack_,request)&&capture&&display.viewportProvisioning&&display.monitors.size()==request.outputs.size()&&sameInteractiveConsole(session_)&&sessionUnlocked(session_);
@@ -2165,6 +2188,7 @@ class ServiceBridge final : public AgentBridge {
   bool qemuConsoleHolding(){(void)qemuConsoleQuiescent();std::lock_guard lock(consoleMutex_);return consoleOperation_&&consoleOperation_->qemu&&consoleOperation_->hold.held();}
   void pollQemuConsoleCompletion(){(void)qemuConsoleQuiescent();}
   NativeActivationGate nativeActivationGate_;TrackSourceTunnel tracks_;std::atomic<std::shared_ptr<UdpTracksSession>> udpTracks_;
+  TrackBitrateSession trackRate_;std::atomic<bool> pendingTrackRate_{false};
   std::mutex displayOperationMutex_;std::shared_ptr<PendingDisplayOperation> displayOperation_;std::atomic<bool> displayOperationRunning_{false};std::thread displayOperationWorker_;
   void invalidateDisplay(){displayCache_.invalidate();capabilityInputs_.invalidate();probeStopped_=true;readinessChanged_=true;}
   void performExpiredProfileRecovery(const NativeStreamProfileRecord& profile,DWORD workerSession)noexcept{

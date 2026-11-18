@@ -79,18 +79,23 @@ class StreamOptions {
 
   /// The request this desktop's broker and host accept. [maximumBitrate] is
   /// the advertised bitrate-adaptive-v1 ceiling, or null for released peers.
-  /// Automatic: the ceiling where supported (independent outputs stay fixed),
-  /// otherwise the released fixed 20 Mbps. Manual: bounded by the ceiling.
+  /// Automatic: the ceiling where supported (independent outputs only where
+  /// the desktop also runs it for them, [adaptiveOutputs]:
+  /// bitrate-adaptive-tracks-v1), otherwise the released fixed 20 Mbps.
+  /// Manual: bounded by the ceiling.
   StreamOptions negotiated(
     int? maximumBitrate, {
     bool independentOutputs = false,
+    bool adaptiveOutputs = false,
   }) {
     final supported =
         maximumBitrate != null && maximumBitrate >= legacyMaximumBitrate;
     final ceiling = supported
         ? math.min(maximumBitrate, adaptiveMaximumBitrate)
         : legacyMaximumBitrate;
-    if (automaticBitrate && supported && !independentOutputs) {
+    if (automaticBitrate &&
+        supported &&
+        (!independentOutputs || adaptiveOutputs)) {
       return _with(bitrate: ceiling);
     }
     return _with(

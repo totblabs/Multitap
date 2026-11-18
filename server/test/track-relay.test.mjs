@@ -363,3 +363,57 @@ test('A group readiness transition cannot hide a stalled second video behind liv
   let pts=0;const timer=setInterval(()=>{if(source.readyState===WebSocket.OPEN){source.send(packet({track:'0',pts:++pts}));source.send(sound(1,pts));}},10);t.after(()=>clearInterval(timer));
   assert.equal((await c.client.take(v=>v.type==='stream.unavailable')).reason,'tracks_source_stalled');await hostStillOnline(f);
 });
+
+test('bitrate-adaptive-tracks-v1: automatic rate on independent outputs only where the Host runs it; feedback reaches the track tunnel',async t=>{
+  const f=await fixture(t,{api:true});
+  const adaptive={...capabilities,bitrateProtocol:'bitrate-adaptive-v1',maxBitrate:100000000};
+  const auto={...options,bitrate:100000000,bitrateMode:'auto'};
+  const body={mode:'stream',options:auto,mediaProtocol:'tracks-v1',tracks:requests};
+  // A Host with the one-output controller only: refused before any session, as before.
+  await f.advertise(adaptive);
+  const listed=async()=>(await (await fetch(f.base+'/api/v1/desktops',{headers:{Authorization:'Bearer '+f.aliceToken,Origin:origin}})).json()).desktops.find(d=>d.id==='pve-170').host.capabilities;
+  assert.equal((await listed()).bitrateTracksProtocol,undefined);
+  const refused=await f.call(body);assert.equal(refused.status,400);assert.equal(refused.body.error.code,'invalid_stream_options');
+  // The Host's own marker is never shown as is; this broker shows its grant.
+  await f.advertise({...adaptive,bitrateTracksHostProtocol:'bitrate-adaptive-tracks-v1'});
+  const shown=await listed();assert.equal(shown.bitrateTracksProtocol,'bitrate-adaptive-tracks-v1');assert.equal(shown.bitrateTracksHostProtocol,undefined);
+  // A malformed one-output capability takes the tracks marker with it.
+  await f.advertise({...capabilities,bitrateProtocol:'bitrate-adaptive-v1',maxBitrate:7,bitrateTracksHostProtocol:'bitrate-adaptive-tracks-v1'});
+  assert.equal((await listed()).bitrateTracksProtocol,undefined);assert.equal((await f.call(body)).status,400);
+  await f.advertise({...adaptive,bitrateTracksHostProtocol:'bitrate-adaptive-tracks-v1'});
+  const c=await f.connect(body);
+  assert.equal(c.session.bitrateProtocol,'bitrate-adaptive-v1');assert.equal(c.session.bitrateTracksProtocol,'bitrate-adaptive-tracks-v1');
+  assert.deepEqual(c.session.options,auto);
+  // Start 20 Mbps (not the ceiling), the ceiling and the marker.
+  assert.equal(c.start.bitrate,20000000);assert.equal(c.start.bitrateMode,'auto');assert.equal(c.start.bitrateMax,100000000);
+  assert.equal(c.start.bitrateTracksProtocol,'bitrate-adaptive-tracks-v1');
+  const metadata={...info(c.session.sessionId),bitrateTarget:20000000,tracks:info(c.session.sessionId).tracks.map(t=>({...t,bitrateTarget:10000000}))};
+  const {source}=await prepare(f,c,metadata);
+  // Arrival feedback goes to the track tunnel with the relay's own queue, never to the channel.
+  const feedback={type:'stream.feedback',epoch:1,frames:[[1000,2000]],bytes:4096,intervalUs:100000};
+  c.client.json(feedback);
+  const forwarded=await source.take(v=>v.type==='stream.feedback');
+  assert.deepEqual({...forwarded,relayQueuedBytes:0},{...feedback,sessionId:c.session.sessionId,relayQueuedBytes:0});
+  assert.ok(Number.isSafeInteger(forwarded.relayQueuedBytes));
+  assert.equal(f.host.messages.some(v=>v.type==='stream.feedback'),false);
+  // The statistics may carry the session's rate and each output's share.
+  const stats={type:'stream.tracks.stats',sessionId:c.session.sessionId,topologyEpoch:1,measuredMs:1000,bitrateTarget:31000000,bitrateMax:100000000,networkDelayMs:3.5,deliveredKbps:12000,
+    tracks:[{id:'0',epoch:1,capturedFps:30,encodedFps:30,bitrateKbps:9000,bitrateTarget:15500000},{id:'1',epoch:1,capturedFps:30,encodedFps:30,bitrateKbps:3000,bitrateTarget:15500000}]};
+  source.json(stats);const shownStats=await c.client.take(v=>v.type==='stream.tracks.stats');
+  assert.equal(shownStats.bitrateTarget,31000000);assert.equal(shownStats.tracks[0].bitrateTarget,15500000);
+  // Beyond the ceiling is invalid.
+  source.json({...stats,bitrateTarget:100000001});
+  assert.equal((await c.client.take(v=>v.type==='session.ended')).reason,'invalid_track_stats');
+});
+
+test('A fixed-rate independent-output session keeps the released shapes: no rate fields, no feedback',async t=>{
+  const f=await fixture(t);
+  await f.advertise({...capabilities,bitrateProtocol:'bitrate-adaptive-v1',maxBitrate:100000000,bitrateTracksHostProtocol:'bitrate-adaptive-tracks-v1'});
+  const c=await f.connect();
+  assert.equal(c.session.bitrateProtocol,undefined);assert.equal(c.session.bitrateTracksProtocol,undefined);
+  assert.equal(c.start.bitrate,options.bitrate);assert.equal('bitrateMode' in c.start,false);assert.equal('bitrateTracksProtocol' in c.start,false);
+  const {source}=await prepare(f,c);
+  source.json({type:'stream.tracks.stats',sessionId:c.session.sessionId,topologyEpoch:1,measuredMs:1000,bitrateTarget:8000000,
+    tracks:[{id:'0',epoch:1,capturedFps:30,encodedFps:30,bitrateKbps:1},{id:'1',epoch:1,capturedFps:30,encodedFps:30,bitrateKbps:1}]});
+  assert.equal((await c.client.take(v=>v.type==='session.ended')).reason,'invalid_track_stats');
+});

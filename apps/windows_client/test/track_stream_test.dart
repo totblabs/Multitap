@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/data/broker_api.dart';
 import 'package:multitap_client/data/remote_session.dart';
+import 'package:multitap_client/data/stream_telemetry.dart';
 import 'package:multitap_client/data/track_stream.dart';
 import 'package:multitap_client/data/video_geometry.dart';
 import 'package:multitap_client/models/stream_options.dart';
@@ -256,6 +257,217 @@ void main() {
     expect(manual.options.automaticBitrate, isFalse);
     expect(manual.options.bitrate, 12000000);
     fixedApi.close();
+  });
+  test('bitrate-adaptive-tracks-v1: all monitors run the automatic rate where the desktop offers it', () async {
+    const chosen = StreamOptions(
+      maxWidth: 1920,
+      maxHeight: 1080,
+      audio: false,
+      monitor: 'all',
+      bitrate: 100000000,
+      bitrateMode: StreamBitrateMode.auto,
+    );
+    Map<String, dynamic> desktop({bool tracks = true}) => {
+      'id': 'pve-149',
+      'name': 'TESTER',
+      'kind': 'vm',
+      'description': '',
+      'os': 'Windows',
+      'status': 'ready',
+      'canConnect': true,
+      'host': {
+        'connected': true,
+        'capabilities': {
+          'service': true,
+          'streaming': true,
+          'bitrateProtocol': 'bitrate-adaptive-v1',
+          'maxBitrate': 100000000,
+          if (tracks) 'bitrateTracksProtocol': 'bitrate-adaptive-tracks-v1',
+        },
+      },
+    };
+    final auto = chosen.negotiated(
+      100000000,
+      independentOutputs: true,
+      adaptiveOutputs: true,
+    );
+    expect(auto.automaticBitrate, isTrue);
+    expect(auto.bitrate, 100000000);
+    final fixed = chosen.negotiated(null, independentOutputs: true);
+    Map<String, dynamic> granted(StreamOptions value) => {
+      ...response(),
+      'options': value.toJson(),
+      'bitrateProtocol': 'bitrate-adaptive-v1',
+      'bitrateTracksProtocol': 'bitrate-adaptive-tracks-v1',
+    };
+    Future<(List<Map>, BrokerConnection)> run(
+      Map<String, dynamic> listed,
+      List<(int, Map<String, dynamic>)> replies,
+    ) async {
+      final client = ApiClient()
+        ..responses.add((
+          200,
+          {
+            'desktops': [listed],
+          },
+        ))
+        ..responses.addAll(replies);
+      final api = HttpBrokerApi(
+        origin: Uri.parse('https://cloud.example.com'),
+        client: client,
+      );
+      await api.desktops('qa-only-token');
+      final connection = await api.connectTracks(
+        'qa-only-token',
+        'pve-149',
+        plan(),
+        chosen,
+      );
+      api.close();
+      return (
+        [
+          for (final request in client.requests.skip(1))
+            (jsonDecode(request.body.toString()) as Map)['options'] as Map,
+        ],
+        connection,
+      );
+    }
+
+    // Offered: auto with the ceiling, granted, arrivals reported.
+    final adaptive = await run(desktop(), [(200, granted(auto))]);
+    expect(adaptive.$1, [auto.toJson()]);
+    expect(adaptive.$2.bitrateAdaptive, isTrue);
+    expect(adaptive.$2.options.automaticBitrate, isTrue);
+    // Not offered (a released Host or broker): the fixed 20 Mbps, the choice kept.
+    final released = await run(desktop(tracks: false), [
+      (200, {...response(), 'options': fixed.toJson()}),
+    ]);
+    expect(released.$1, [fixed.toJson()]);
+    expect(released.$2.bitrateAdaptive, isFalse);
+    expect(released.$2.options.automaticBitrate, isTrue);
+    // A stale list (the Host went back to an older one): one fallback to fixed.
+    final stale = await run(desktop(), [
+      (
+        400,
+        {
+          'error': {'code': 'invalid_stream_options'},
+        },
+      ),
+      (200, {...response(), 'options': fixed.toJson()}),
+    ]);
+    expect(stale.$1, [auto.toJson(), fixed.toJson()]);
+    expect(stale.$2.bitrateAdaptive, isFalse);
+    // A grant must name both protocols and answer an automatic request.
+    final origin = Uri.parse('https://cloud.example.com');
+    expect(
+      () => BrokerConnection.fromJson(
+        {...granted(auto)}..remove('bitrateTracksProtocol'),
+        origin,
+        requestedOptions: auto,
+        requestedTracks: plan(),
+      ),
+      throwsA(isA<BrokerException>()),
+    );
+    expect(
+      () => BrokerConnection.fromJson(
+        granted(fixed),
+        origin,
+        requestedOptions: fixed,
+        requestedTracks: plan(),
+      ),
+      throwsA(isA<BrokerException>()),
+    );
+    expect(
+      () => BrokerConnection.fromJson(
+        {...granted(auto), 'bitrateTracksProtocol': 'bitrate-adaptive-tracks-v2'},
+        origin,
+        requestedOptions: auto,
+        requestedTracks: plan(),
+      ),
+      throwsA(isA<BrokerException>()),
+    );
+  });
+  test('bitrate-adaptive-tracks-v1: a granted session reports arrivals by pts and topology; a fixed one never does', () async {
+    const auto = StreamOptions(
+      maxWidth: 1920,
+      maxHeight: 1080,
+      audio: false,
+      monitor: 'all',
+      bitrate: 100000000,
+      bitrateMode: StreamBitrateMode.auto,
+    );
+    for (final adaptive in [true, false]) {
+      final socket = SessionSocket(), media = TrackMedia();
+      final granted = adaptive
+          ? BrokerConnection.fromJson(
+              {
+                ...response(),
+                'options': auto.toJson(),
+                'bitrateProtocol': 'bitrate-adaptive-v1',
+                'bitrateTracksProtocol': 'bitrate-adaptive-tracks-v1',
+              },
+              Uri.parse('https://cloud.example.com'),
+              requestedOptions: auto,
+              requestedTracks: plan(),
+            )
+          : connection();
+      expect(granted.bitrateAdaptive, adaptive);
+      final session = RemoteSession(
+        connection: granted,
+        token: 'not-a-real-token',
+        media: media,
+        dialer: (_, _) async => socket,
+      );
+      unawaited(session.start());
+      await flush();
+      socket.incoming.add(jsonEncode(info()));
+      await flush();
+      socket.incoming.add(packet(0, pts: 16667));
+      socket.incoming.add(packet(1, pts: 16671));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      final reports = socket.sent
+          .where((event) => event['type'] == 'stream.feedback')
+          .toList();
+      if (!adaptive) {
+        expect(reports, isEmpty);
+      } else {
+        expect(reports, isNotEmpty);
+        expect(reports.every((r) => r['epoch'] == 1), isTrue);
+        final frames = [
+          for (final report in reports) ...(report['frames'] as List),
+        ];
+        expect([for (final f in frames) (f as List).first], [16667, 16671]);
+        expect(
+          reports.fold<int>(0, (sum, r) => sum + (r['bytes'] as int)),
+          packet(0).length * 2,
+        );
+      }
+      await session.close();
+    }
+    // The statistics' rate fields belong to such a session only.
+    final telemetry = HostStreamTelemetry.parseTracks({
+      'type': 'stream.tracks.stats',
+      'measuredMs': 1000,
+      'bitrateTarget': 31000000,
+      'bitrateMax': 100000000,
+      'networkDelayMs': 4.5,
+      'tracks': [
+        {'id': '0', 'capturedFps': 60, 'encodedFps': 60, 'bitrateKbps': 9000, 'bitrateTarget': 21000000},
+        {'id': '1', 'capturedFps': 1, 'encodedFps': 1, 'bitrateKbps': 10, 'bitrateTarget': 10000000},
+      ],
+    })!;
+    expect(telemetry.automaticBitrate, isTrue);
+    expect(telemetry.bitrateTarget, 31000000);
+    expect(telemetry.bitrateMax, 100000000);
+    expect(telemetry.networkDelayMs, 4.5);
+    final plain = HostStreamTelemetry.parseTracks({
+      'measuredMs': 1000,
+      'tracks': [
+        {'id': '0', 'capturedFps': 60, 'encodedFps': 60, 'bitrateKbps': 9000},
+      ],
+    })!;
+    expect(plain.automaticBitrate, isFalse);
+    expect(plain.bitrateTarget, isNull);
   });
   test('Negotiation rejects silent protocol upgrade, downgrade, foreign origin and altered output request', () {
     expect(connection().trackPlan!.outputs.length, 2);

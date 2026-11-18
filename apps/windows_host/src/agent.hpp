@@ -14,6 +14,7 @@
 #include "remote_pointer.hpp"
 #include "lossless_tile_source.hpp"
 #include "bitrate_session.hpp"
+#include "track_bitrate.hpp"
 #include "host_update.hpp"
 #include "host_power.hpp"
 #include "input_latency.hpp"
@@ -415,7 +416,10 @@ class Agent {
     const bool cursorSeparated=cursor::trackSessionRequested(command);
     // speaker-mute-v1 (speaker_mute.hpp): only a command carrying the broker's marker (a physical PC).
     const bool speakerMute=speakerMuteSessionRequested(command);
-    capture_=std::thread([this,plan=std::move(plan),input,sizesV2,cursorSeparated,speakerMute]{
+    // bitrate-adaptive-tracks-v1: the service sends the outputs' shares (stream.tracks.bitrate).
+    const bool adaptiveRate=adaptiveTracksBitrateRequest(command).adaptive;
+    {std::lock_guard lock(trackRateMutex_);trackRates_.reset();}
+    capture_=std::thread([this,plan=std::move(plan),input,sizesV2,cursorSeparated,speakerMute,adaptiveRate]{
       std::thread audio;std::atomic<bool> audioGo{false},audioEnabled{false};std::shared_ptr<TrackSourcePipeline> pipeline;
       speakerMuteFlush();
       try{
@@ -450,6 +454,7 @@ class Agent {
 #endif
         pipeline=std::make_shared<TrackSourcePipeline>(sent,available,micros);
         if(local_)try{pipeline->enableOutputUsage();}catch(...){ }
+        if(adaptiveRate)pipeline->adaptiveRate();
         if(observability_.enabled())pipeline->enableObservability();
         if(cursorSeparated)pipeline->enableCursor([this,session=plan.sessionId]{return cursorIds_.next(session);});
         // capture_follow.hpp: an output followed an application's mode change;
@@ -516,6 +521,7 @@ class Agent {
           if(local_&&pointerAsk.due(hostMonotonicUs()))text("{\"type\":\"worker.pointer.absent\",\"sessionId\":"+jsonQuote(plan.sessionId)+'}');
           // tracks-resume-v1: the relay restarts every output at an IDR after a resume.
           if(keyFrameRequested_.exchange(false))pipeline->keyFrame();
+          if(auto rates=takeTrackRates())pipeline->retarget(rates->first,rates->second);
           pipeline->lossless(losslessRequested(plan.sessionId),losslessMoves(plan.sessionId));pipeline->composeRequested(cursorCompose_.wanted());
           auto packets=pipeline->step();if(pipeline->keysReady())input->encodedReady();
           if(!packets.empty())lastWork=began;
@@ -562,6 +568,9 @@ class Agent {
   // controller; the encoder owner applies a requested target of its session.
   AdaptiveBitrateSession adaptive_;
   std::atomic<int> requestedBitrate_{0}, autoBitrate_{0}; std::string autoSession_;
+  // stream.tracks.bitrate: the latest shares (topology, output id -> bitrate), taken by the track loop.
+  std::mutex trackRateMutex_; std::optional<std::pair<uint32_t, std::vector<std::pair<uint8_t, int>>>> trackRates_;
+  std::optional<std::pair<uint32_t, std::vector<std::pair<uint8_t, int>>>> takeTrackRates() { std::lock_guard lock(trackRateMutex_); return std::exchange(trackRates_, std::nullopt); }
   // stream-size-v1 (stream_size.hpp): the client's latest decoder report (and
   // when it arrived), and what this session learned about load across resizes.
   std::atomic<uint64_t> clientDecoder_{0}, clientDecoderAt_{0};
@@ -1729,6 +1738,8 @@ class Agent {
       const double value = message.get("bitrate").number(-1);
       if (!bridge_ && value >= encoderMinimumBitrate && value <= encoderMaximumBitrate && std::floor(value) == value) requestedBitrate_ = int(value);
     }
+    // bitrate-adaptive-tracks-v1: each output's share from the service (track_bitrate.hpp).
+    else if (type == "stream.tracks.bitrate") { if (!bridge_ && message.get("sessionId").string() == sessionId_) if (auto rates = trackBitrateCommand(message)) { std::lock_guard lock(trackRateMutex_); trackRates_ = std::move(rates); } }
     // The service's send queue dropped video of this session (service.hpp
     // forwards it to the worker): the capture loop codes its next frame as an IDR.
     else if (type == "stream.keyframe") { if (bridge_) bridge_->keyFrame(); else { if (const auto* resend = std::get_if<bool>(&message.get("cursor").value); resend && *resend) cursorResend_ = true; keyFrameRequested_ = true; } }

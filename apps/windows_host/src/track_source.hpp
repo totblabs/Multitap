@@ -16,6 +16,8 @@
 #include <memory>
 #include <array>
 #include <condition_variable>
+#include <deque>
+#include <atomic>
 #include <exception>
 #include <functional>
 #include <iomanip>
@@ -294,7 +296,10 @@ class TrackSourcePipeline {
     for(auto& state:states_)if(state->lossless)state->lossless->moves(moves);
     for(auto& state:states_)if(!state->lossless&&state->tilesAllowed&&state->capture&&state->capture->composed()&&state->output.media.width==state->output.media.sourceWidth&&state->output.media.height==state->output.media.sourceHeight){
       const auto& t=state->output.media;
-      auto settings=LosslessSettings::forBitrate(state->output.bitrate);settings.moves=moves;
+      auto settings=LosslessSettings::forBitrate(state->output.bitrate);
+      // Automatic rate: tiles take what this output's video leaves of its share (as for one output).
+      if(adaptive_){settings=LosslessSettings::forTargetRate([share=state->tileShare]{return share->load();});settings.minimumRateBytesPerSecond=62500;}
+      settings.moves=moves;
       state->lossless=std::make_unique<LosslessTileSource>(t.width,t.height,settings);state->helper=std::make_unique<ParallelWork>();
     }
   }
@@ -379,6 +384,14 @@ class TrackSourcePipeline {
   // tracks-resume-v1 (stream.keyframe on the track tunnel): every output codes
   // its next frame as an IDR. Call between step()s, on the stepping thread.
   void keyFrame(){for(auto& state:states_)state->keyFrame=true;}
+  // bitrate-adaptive-tracks-v1 (track_bitrate.hpp): the session's rate is the
+  // service's controller's; each output takes its share from its next tick on.
+  // Call before the first step / between steps, on the stepping thread.
+  void adaptiveRate(){adaptive_=true;}
+  void retarget(uint32_t topology,const std::vector<std::pair<uint8_t,int>>& rates){
+    if(topology!=plan_.topology)return;
+    for(const auto& [id,rate]:rates)if(id<wanted_.size())wanted_[id]=std::clamp(rate,encoderMinimumBitrate,encoderMaximumBitrate);
+  }
   std::string stats(uint32_t milliseconds){
     if(!milliseconds||milliseconds>10000)throw std::runtime_error("invalid_track_stats");
     std::ostringstream out;out<<std::fixed<<std::setprecision(2)<<"{\"type\":\"stream.tracks.stats\",\"sessionId\":"<<jsonQuote(plan_.sessionId)<<",\"topologyEpoch\":"<<plan_.topology<<",\"measuredMs\":"<<milliseconds<<",\"tracks\":[";
@@ -401,12 +414,21 @@ class TrackSourcePipeline {
     // Secure desktop: this tick's capture failed because of it; this output's capture was made again after the
     // desktop returned; the notice at this output's coded size.
     bool secureLost=false,secureRebuilt=false;std::vector<uint8_t> noticeNv12;
+    // Automatic rate: what this output's video left of its share in the last 0.5 s (bytes/s), for its tiles.
+    std::shared_ptr<std::atomic<size_t>> tileShare=std::make_shared<std::atomic<size_t>>(0);
+    std::deque<std::pair<Clock::time_point,size_t>> recentVideo;size_t recentVideoBytes=0;
     State(OwnedTrackSource source,std::unique_ptr<TrackCapture> input,int fps):output(std::move(source)),capture(std::move(input)),
       encoder(int(output.media.width),int(output.media.height),fps,output.bitrate,EncoderTuning{},EncoderBackend::automatic,capture?capture->adapterLuid():std::nullopt),policy(size_t(output.media.width)*output.media.height*3/2,FrameRefinement::forCbr(output.bitrate,fps)){if(!capture)throw std::runtime_error("capture_failed");}
   };
   // One output's capture and encode, on the thread that owns that output. Only
   // the gate is shared (under gateMutex_; its order rules are per output).
   void tick(State& state){
+    // bitrate-adaptive-tracks-v1: a live target change on this output's own encoder (no IDR), here on its thread.
+    if(adaptive_){
+      if(const int wanted=state.output.media.id<wanted_.size()?wanted_[state.output.media.id]:0;wanted&&wanted!=state.output.bitrate&&state.encoder.setBitrate(wanted)){
+        state.output.bitrate=wanted;state.policy.retarget(FrameRefinement::forCbr(wanted,plan_.fps));}
+      shareTiles(state,0);
+    }
     // A frame of another size, or a WGC error (its item may close while the mode changes): step() follows.
     TrackCapturedFrame captured;
     try{captured=state.capture->frame();}
@@ -443,8 +465,16 @@ class TrackSourcePipeline {
     if(state.packets.size()>=8)throw std::runtime_error("track_output_backpressure");
     (video?state.bytes:state.losslessBytes)+=bytes.size();state.packets.push_back(std::move(bytes));
   }
+  // Automatic rate: the tile share is this output's share minus its video of the last 0.5 s.
+  static void shareTiles(State& state,size_t frameBytes){
+    const auto now=Clock::now();state.recentVideo.push_back({now,frameBytes});state.recentVideoBytes+=frameBytes;
+    while(now-state.recentVideo.front().first>std::chrono::milliseconds(500)){state.recentVideoBytes-=state.recentVideo.front().second;state.recentVideo.pop_front();}
+    const size_t used=state.recentVideoBytes*2,target=size_t(std::max(state.output.bitrate,0))/8;
+    state.tileShare->store(target>used?target-used:0);
+  }
   void emitFrame(State& state,Frame frame){
     if(!state.policy.output(frame.ptsUs,frame.key,now_(),frame.bytes.size()))throw std::runtime_error("encoder_failed");
+    if(adaptive_)shareTiles(state,frame.bytes.size());
     state.encoded++;pushPacket(state,uint8_t(frame.key?1:0),frame.ptsUs,frame.bytes,true);
   }
   // This step's packets of every output, in the previous wire order and bound.
@@ -608,6 +638,8 @@ class TrackSourcePipeline {
   TrackSourcePlan plan_;Micros now_;Monitors observed_;CaptureFactory capture_;Modes modes_;std::vector<std::unique_ptr<State>> states_;
   Followed followed_;inline static const std::atomic<bool> never_{false};const std::atomic<bool>* stop_=&never_;
   bool losslessWanted_=false;Clock::time_point followedAt_{};
+  // bitrate-adaptive-tracks-v1: automatic rate, and each output's latest share (0: none yet).
+  bool adaptive_=false;std::array<int,2> wanted_{};
   std::vector<std::unique_ptr<TrackOutputThread>> threads_;  // threads_[n-1] owns states_[n]
   bool observability_=false;ReadbackObservation readback_;
   // Secure desktop: stills are coded (secure_); the desktop returned and the captures are being made again.

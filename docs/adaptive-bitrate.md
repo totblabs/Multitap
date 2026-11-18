@@ -131,6 +131,55 @@ fed by the UDP leg (`native/windows_video/udp_media.hpp`):
   probing.
 - **Backlog.** Video refused by the UDP pacer triggers the overflow guard.
 
+## Independent outputs (`bitrate-adaptive-tracks-v1`)
+
+Two monitors (tracks-v1, the client's 모든 모니터) used a fixed total rate: an
+automatic choice became a fixed 20 Mbps, 10 Mbps per 1080p output, which broke
+up under motion; a manual 100 Mbps overloaded the path when a whole picture
+changed (a map street view: 23.5 Mbps received, the round trip at 615 ms).
+
+The same controller now runs for them. Its pieces sit where independent outputs
+put their media: the Host's track tunnel (Session0, `track_tunnel.hpp`), not
+the broker channel.
+
+- **Owner.** `TrackBitrateSession` (`apps/windows_host/src/track_bitrate.hpp`)
+  in the service, beside the tunnel. It sees every worker packet before it is
+  queued (tunnel or UDP: TVT1 header, video, tile or other), the tunnel's queue
+  after each enqueue and each completed write, and the client's
+  `stream.feedback`, which the broker sends to the track tunnel for such a
+  session. A packet is named by its pts and the topology's low 16 bits on both
+  sides. The tunnel holds 128 packets in such a session (32 otherwise).
+- **Floor.** The sum of the outputs' own floors (each encoder's limit holds at
+  its own geometry): two 1080p60 outputs 10 Mbps, 4K60 + 1080p60 24.9 Mbps.
+- **Shares.** Each output keeps its part of the target by area. What an output
+  leaves unused (its part beyond 1.25 x its rate of the last 0.5 s) goes to an
+  output that uses its own part (at least 80 % of it), split again every
+  250 ms and after every target change. One output moving and one still: the
+  moving one gets nearly the whole target, and the controller sees enough use
+  to probe (an even split kept a moving output at half and never probed). Both
+  moving or both still: their parts. A still output that starts moving is at
+  most 1.5 x the target for one split.
+- **Apply.** The service sends `stream.tracks.bitrate`
+  (`{sessionId, topologyEpoch, tracks:[{id, bitrate}]}`) to the worker when the
+  shares changed by 5 % or a new topology came, once no track transaction reads
+  the pipe. Each output applies its share on its own thread: `Encoder::setBitrate`
+  (no IDR) and `FrameEncodePolicy::retarget`. Its tiles take what its video
+  leaves of its share, as for one output.
+- **UDP** (`udp-tracks-v1`). Each output's leg paces at its share. The
+  controller reads the legs' round trips and losses only while every output is
+  on UDP; otherwise the arrival feedback describes the tunnel.
+- **Statistics.** `stream.tracks.stats` of such a session adds the target,
+  the ceiling, `networkDelayMs`, `deliveredKbps` and each output's
+  `bitrateTarget`; the broker accepts them only there. The client shows
+  "자동 · 지금 N Mbps".
+
+`MultitapHostTrackBitrateTest` (simulated link, two 1080p60 outputs, client
+feedback every 100 ms): on 200 Mbps with one output moving the target rose to
+the 100 Mbps ceiling and the moving output got all of it; on 30 Mbps with both
+moving it settled at 27 Mbps with a p95 delay of 67 ms and even shares; a
+second output that starts moving got its part back. Simulated only: no relay,
+no encoder, no client; not yet seen in a real two-monitor session.
+
 ## Encoder measurements (Microsoft MFT, `MultitapHostEncoderBitrateTest`)
 
 These measurements on the Microsoft software H.264 MFT (the fallback encoder)
@@ -189,8 +238,8 @@ event-loop jitter.
 
 | Peer | Field | Rule |
 |---|---|---|
-| Host → broker capability | `bitrateProtocol:"bitrate-adaptive-v1"`, `maxBitrate` (20–100 M) | Both or neither; a malformed value is omitted (the desktop stays fixed-rate) and never invalidates other capabilities. |
-| Client → broker options | `bitrateMode:"auto"\|"fixed"`; `bitrate` ≤ `maxBitrate` | Auto: `bitrate` is the ceiling. Only for an advertising Host; otherwise 400 `invalid_stream_options` for a fixed rate above 20 M and 409 `stream_bitrate_unavailable` for auto, before any session exists. Independent outputs (tracks-v1): fixed only. |
+| Host → broker capability | `bitrateProtocol:"bitrate-adaptive-v1"`, `maxBitrate` (20–100 M); `bitrateTracksHostProtocol:"bitrate-adaptive-tracks-v1"` | Both or neither; a malformed value is omitted (the desktop stays fixed-rate) and never invalidates other capabilities. The tracks marker counts only with a valid pair; the broker shows clients `bitrateTracksProtocol` instead (an older broker drops the Host field). |
+| Client → broker options | `bitrateMode:"auto"\|"fixed"`; `bitrate` ≤ `maxBitrate` | Auto: `bitrate` is the ceiling. Only for an advertising Host; otherwise 400 `invalid_stream_options` for a fixed rate above 20 M and 409 `stream_bitrate_unavailable` for auto, before any session exists. Independent outputs (tracks-v1): auto only for a Host with `bitrate-adaptive-tracks-v1` (else 400 `invalid_stream_options`). |
 | Broker → client | capability in the desktop list; the connect response adds `bitrateProtocol` when auto is granted | The client sends only `StreamOptions.negotiated()` options. |
 | Broker → Host `session.start` | auto: `bitrate` = min(20 M, ceiling), `bitrateMode:"auto"`, `bitrateMax` | Hosts without the capability never receive these. |
 | Client → relay → Host | `stream.feedback` | Only in a session that negotiated auto; any other session ends with `invalid_input`. |
@@ -200,4 +249,4 @@ event-loop jitter.
 |---|---|---|
 | 자동 (default) | fixed 20 Mbps | auto, start 20 Mbps, ceiling `maxBitrate` |
 | 직접 설정 | fixed 4–20 Mbps | fixed 4 Mbps–`maxBitrate` |
-| two independent outputs | fixed ≤ 20 Mbps | fixed ≤ `maxBitrate` (자동 → fixed 20 Mbps) |
+| two independent outputs | fixed ≤ 20 Mbps | fixed ≤ `maxBitrate` (자동 → fixed 20 Mbps); with `bitrate-adaptive-tracks-v1`: auto, start 20 Mbps, ceiling `maxBitrate` |
