@@ -148,7 +148,9 @@ the broker channel.
   after each enqueue and each completed write, and the client's
   `stream.feedback`, which the broker sends to the track tunnel for such a
   session. A packet is named by its pts and the topology's low 16 bits on both
-  sides. The tunnel holds 128 packets in such a session (32 otherwise).
+  sides. The tunnel holds 128 packets / 8 MiB in every session of independent
+  outputs; a full queue ends its connection as lost (`tracks-resume-v1` dials
+  it again, every output restarts at an IDR) instead of the whole stream.
 - **Floor.** The sum of the outputs' own floors (each encoder's limit holds at
   its own geometry): two 1080p60 outputs 10 Mbps, 4K60 + 1080p60 24.9 Mbps.
 - **Shares.** Each output keeps its part of the target by area. What an output

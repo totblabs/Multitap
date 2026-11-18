@@ -1191,8 +1191,11 @@ class ServiceBridge final : public AgentBridge {
     // split wakes the relay loop, which hands the shares to the worker.
     {const auto trackRate=trackSession?adaptiveTracksBitrateRequest(request):AdaptiveBitrateRequest{};
       pendingTrackRate_=false;trackRate_.start(id_,trackRate,int(std::clamp(request.get("fps").number(60),1.0,60.0)),[this]{pendingTrackRate_=true;if(relayWake_.value)SetEvent(relayWake_.value);});
-      if(trackRate.adaptive)tracks_.observe(std::make_shared<const TrackSourceTunnel::Observer>(TrackSourceTunnel::Observer{[this](uint64_t oldestUs,size_t bytes,size_t packets){trackRate_.queue(oldestUs,bytes,packets);},[this](size_t bytes){trackRate_.written(bytes);}}));
-      else tracks_.observe({});}
+      // hostAction 262: the tunnel's queue was full and its connection ended as lost
+      // (stage 1: tracks-resume-v1 dials again; stage 2: no resume, the stream ends).
+      const bool resumable=request.get("trackResumeProtocol").string()==trackResumeProtocol;
+      tracks_.observe(std::make_shared<const TrackSourceTunnel::Observer>(TrackSourceTunnel::Observer{[this](uint64_t oldestUs,size_t bytes,size_t packets){trackRate_.queue(oldestUs,bytes,packets);},[this](size_t bytes){trackRate_.written(bytes);},
+        [resumable](size_t packets,size_t bytes){recordHostEvent("hostAction",{{"action",uint32_t(262)},{"stage",uint32_t(resumable?1:2)},{"items",int64_t(packets)},{"kib",int64_t(bytes/1024)},{"ok",false}});}}));}
     if(trackSession){
       try{std::lock_guard lock(resizeMutex_);currentTrack_=nativeInitialTrackViewport(request);pendingTrack_=currentTrack_;trackMedia_=initialTrack_=true;trackMetadataReady_=trackResizeVerified_=false;resizeTicket_=displayCache_.begin(session_);resizeDeadline_=streamMonotonicMillis()+streamResizeTimeoutMs;if(v2)profileInstanceForInitial_=profileSnapshot.get("deviceInstanceId").string();}catch(...){stopped_=true;streaming_=false;unavailable("worker_failed");return;}
       try{tracks_.start(credentials_,id_,request.get("tunnelUrl").string(),

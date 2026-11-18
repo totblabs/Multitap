@@ -672,7 +672,9 @@ stream that already shows pictures (`server/src/session-resume.mjs`).
 - `tracks-resume-v1`: for independent outputs, only from a Host that
   advertises `trackResumeProtocol`. Its track socket accepts
   `{type:'stream.keyframe', sessionId}` (an IDR on every output), and a lost
-  track socket is dialled again.
+  track socket is dialled again. A send queue that stays full (128 packets or
+  8 MiB: the path stalled) counts as a lost socket (Host 1.1.32; hostAction
+  262), where it used to end the stream as `worker_failed`.
 - Any resume restarts the picture at an IDR; the display is not prepared
   again. Resizes in flight and streams without a first picture still end.
 - `channel-resume-v1` (`server/src/channel-resume.mjs`): the side channels

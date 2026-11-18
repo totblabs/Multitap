@@ -58,6 +58,11 @@ void request() {
   require(!adaptiveBitrateRequest(start(R"(,"bitrateMode":"auto","bitrateTracksProtocol":"bitrate-adaptive-tracks-v1")")).adaptive, "the one-output controller took independent outputs");
   // The tunnel lets the client's feedback through only in such a session.
   require(trackTunnelControlAllowed("stream.feedback", false, true) && !trackTunnelControlAllowed("stream.feedback", false, false) && !trackTunnelControlAllowed("stream.feedback", true, false), "tunnel feedback rule");
+  // A full tunnel queue is a stalled path (the connection ends as lost), never a protocol error; every track session holds 128 packets / 8 MiB.
+  require(trackTunnelAdmission(false, 4096, 0, 0) == TrackTunnelAdmission::queued && trackTunnelAdmission(false, 4096, 127, 0) == TrackTunnelAdmission::queued, "tunnel: room was refused");
+  require(trackTunnelAdmission(false, 4096, 128, 0) == TrackTunnelAdmission::full && trackTunnelAdmission(false, 4096, 3, 8u * 1024 * 1024 - 100) == TrackTunnelAdmission::full, "tunnel: a full queue was not full");
+  require(trackTunnelAdmission(false, 0, 0, 0) == TrackTunnelAdmission::invalid && trackTunnelAdmission(true, 8193, 0, 0) == TrackTunnelAdmission::invalid && trackTunnelAdmission(false, 4u * 1024 * 1024 + 1, 0, 0) == TrackTunnelAdmission::invalid, "tunnel: an out-of-bounds packet was not invalid");
+  require(trackTunnelAdmission(true, 8192, 200, 0) == TrackTunnelAdmission::full, "tunnel: a control text in a full queue was not full");
   require(trackTunnelAdaptive(start(R"(,"bitrateMode":"auto","bitrateTracksProtocol":"bitrate-adaptive-tracks-v1")")) && !trackTunnelAdaptive(start(R"(,"bitrateMode":"auto")")), "tunnel adaptive rule");
 }
 

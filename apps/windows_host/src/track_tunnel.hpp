@@ -31,6 +31,21 @@ inline bool trackTunnelControlAllowed(const std::string& type,bool udpTracks,boo
 }
 // The session.start of a bitrate-adaptive-tracks-v1 session (track_bitrate.hpp).
 inline bool trackTunnelAdaptive(const Json& request){return request.get("mediaProtocol").string()=="tracks-v1"&&request.get("bitrateMode").string()=="auto"&&request.get("bitrateTracksProtocol").string()=="bitrate-adaptive-tracks-v1";}
+// What send() does with one worker packet. A packet out of bounds is a protocol
+// error (the tunnel ends). A full queue means the relay is not taking media as
+// fast as it comes (a stalled path): the connection ends as lost, and with
+// tracks-resume-v1 it is dialled again and every output restarts at an IDR.
+// It used to end the whole stream (worker_failed) whenever 32 packets waited,
+// about 0.15 s of two outputs and sound: on 2026-11-18 two sessions ended so
+// while the round trip rose to 1.6-3 s. A connection of one output drops video
+// in that case (send_queue.hpp); 128 packets / 8 MiB as its automatic sessions.
+enum class TrackTunnelAdmission{queued,invalid,full};
+inline constexpr size_t trackTunnelQueuePackets=128,trackTunnelQueueBytes=size_t(8)*1024*1024;
+inline TrackTunnelAdmission trackTunnelAdmission(bool text,size_t size,size_t queuedPackets,size_t queuedBytes){
+  if(!size||size>(text?8192u:size_t(4)*1024*1024))return TrackTunnelAdmission::invalid;
+  if(queuedPackets>=trackTunnelQueuePackets||queuedBytes+size>trackTunnelQueueBytes)return TrackTunnelAdmission::full;
+  return TrackTunnelAdmission::queued;
+}
 class TrackTunnelHold {
  public:
   // Longer than the broker's detection (two heartbeats) plus its 30 s window.
@@ -59,8 +74,9 @@ class TrackSourceTunnel {
   using Receive=std::function<void(const std::string&)>;
   using Closed=std::function<void()>;
   // bitrate-adaptive-tracks-v1: the queue after each enqueue (oldest packet's
-  // age, bytes, packets) and the bytes of each completed write. Set before start.
-  struct Observer{std::function<void(uint64_t,size_t,size_t)> queued;std::function<void(size_t)> written;};
+  // age, bytes, packets) and the bytes of each completed write; a full queue
+  // (packets, bytes) before its connection ends as lost. Set before start.
+  struct Observer{std::function<void(uint64_t,size_t,size_t)> queued;std::function<void(size_t)> written;std::function<void(size_t,size_t)> overflowed;};
   void observe(std::shared_ptr<const Observer> observer){observer_.store(std::move(observer));}
   ~TrackSourceTunnel(){stop();}
   DWORD httpStatus()const{return status_.load();}
@@ -68,17 +84,24 @@ class TrackSourceTunnel {
   void cancel()noexcept{close();}
   void stop(){std::lock_guard lifecycle(lifecycle_);close();if(thread_.joinable())thread_.join();receive_={};closed_={};lost_={};}
   // While a lost tunnel is held (tracks-resume-v1) media is dropped, not queued.
-  // An automatic-rate session holds 128 packets (adaptiveHostQueuePackets, as the
-  // channel of one output): 32 were ~0.2 s of sound alone, which a burst of two
-  // outputs overflows before a lower rate can act. Bytes stay 8 MiB.
+  // trackTunnelAdmission above: an invalid packet ends the tunnel (false); a
+  // full queue ends this connection as lost and drops the packet (true).
   bool send(bool text,std::vector<uint8_t> bytes){
-    bool overflow=false,queuedNow=false;uint64_t oldestUs=0;size_t queuedBytes=0,queuedPackets=0;
+    auto admission=TrackTunnelAdmission::queued;uint64_t oldestUs=0;size_t queuedBytes=0,queuedPackets=0;
     {std::lock_guard lock(mutex_);if(stopped_)return false;if(holding_)return true;
-      if(bytes.empty()||bytes.size()>(text?8192:4*1024*1024)||queue_.size()>=(adaptive_?128u:32u)||queued_+bytes.size()>8*1024*1024)overflow=true;
-      else{const auto now=Clock::now();queued_+=bytes.size();queue_.push_back({text,std::move(bytes),now});
-        queuedNow=true;queuedPackets=queue_.size();queuedBytes=queued_;oldestUs=uint64_t(std::max<int64_t>(0,std::chrono::duration_cast<std::chrono::microseconds>(now-queue_.front().queuedAt).count()));}
-    }if(overflow){close();return false;}condition_.notify_one();
-    if(queuedNow)if(const auto observer=observer_.load();observer&&observer->queued)try{observer->queued(oldestUs,queuedBytes,queuedPackets);}catch(...){ }
+      admission=trackTunnelAdmission(text,bytes.size(),queue_.size(),queued_);
+      if(admission==TrackTunnelAdmission::queued){const auto now=Clock::now();queued_+=bytes.size();queue_.push_back({text,std::move(bytes),now});
+        oldestUs=uint64_t(std::max<int64_t>(0,std::chrono::duration_cast<std::chrono::microseconds>(now-queue_.front().queuedAt).count()));}
+      queuedPackets=queue_.size();queuedBytes=queued_;
+    }
+    if(admission==TrackTunnelAdmission::invalid){close();return false;}
+    const auto observer=observer_.load();
+    if(admission==TrackTunnelAdmission::full){
+      if(observer&&observer->overflowed)try{observer->overflowed(queuedPackets,queuedBytes);}catch(...){ }
+      dropSocket();return true;
+    }
+    condition_.notify_one();
+    if(observer&&observer->queued)try{observer->queued(oldestUs,queuedBytes,queuedPackets);}catch(...){ }
     return true;
   }
   // `resumable`: the broker granted tracks-resume-v1; `lost` runs once when a
