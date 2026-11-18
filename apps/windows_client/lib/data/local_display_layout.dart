@@ -170,6 +170,9 @@ class LocalDisplayLayout {
     bitrate: quality.bitrate,
     audio: quality.audio,
     monitor: 'all',
+    // The rate choice goes along: without it an automatic choice arrived as
+    // its ceiling, a fixed 100 Mbps, instead of independent outputs' 20 Mbps.
+    bitrateMode: quality.bitrateMode,
   );
 
   /// Current Host source rectangles must still pair with these physical local

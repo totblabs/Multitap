@@ -101,6 +101,14 @@ class StreamOptions {
     );
   }
 
+  /// The same request, remembering that its rate was the automatic choice.
+  /// Independent outputs run that choice as a fixed rate ([negotiated]); the
+  /// connection keeps this form, so the choice is still automatic in the
+  /// settings and in the next connection (a single output negotiates it back
+  /// to the adaptive rate). The bitrate stays the one that was sent.
+  StreamOptions asAutomaticChoice() =>
+      automaticBitrate ? this : _with(mode: StreamBitrateMode.auto);
+
   /// A window or one-monitor fullscreen session owns exactly output zero.
   /// Quality preferences never carry a previous dual/output-one selection into
   /// a new single-display connection.

@@ -187,6 +187,76 @@ void main() {
     api.close();
     old.close();
   });
+  test('An automatic rate choice goes to two monitors as a fixed 20 Mbps and stays the choice', () async {
+    // What the session view holds after a single-output session on a Host
+    // with a 100 Mbps ceiling: automatic, bitrate = the ceiling.
+    const chosen = StreamOptions(
+      maxWidth: 1920,
+      maxHeight: 1080,
+      audio: false,
+      monitor: 'all',
+      bitrate: 100000000,
+      bitrateMode: StreamBitrateMode.auto,
+    );
+    final sent = chosen.negotiated(null, independentOutputs: true);
+    expect(sent.automaticBitrate, isFalse);
+    expect(sent.bitrate, 20000000);
+    final client = ApiClient()
+      ..responses.add((200, {...response(), 'options': sent.toJson()}));
+    final api = HttpBrokerApi(
+      origin: Uri.parse('https://cloud.example.com'),
+      client: client,
+    );
+    final connection = await api.connectTracks(
+      'qa-only-token',
+      'pve-149',
+      plan(),
+      chosen,
+    );
+    // On the wire: the released fixed request, never the ceiling.
+    final body = jsonDecode(client.requests.single.body.toString()) as Map;
+    expect((body['options'] as Map)['bitrate'], 20000000);
+    expect((body['options'] as Map).containsKey('bitrateMode'), isFalse);
+    // Kept: still the automatic choice, with the rate that was sent.
+    expect(connection.options.automaticBitrate, isTrue);
+    expect(connection.options.bitrate, 20000000);
+    expect(connection.bitrateAdaptive, isFalse);
+    // Shown as 작업 while on two monitors, and automatic again on one.
+    expect(StreamPreset.of(connection.options, 100000000), StreamPreset.work);
+    final single = connection.options.forSingleDisplay().negotiated(100000000);
+    expect(single.automaticBitrate, isTrue);
+    expect(single.bitrate, 100000000);
+    // The same connection made again asks for the same thing.
+    expect(
+      connection.options.negotiated(100000000, independentOutputs: true).toJson(),
+      sent.toJson(),
+    );
+    api.close();
+
+    // A chosen fixed rate stays a fixed rate.
+    const fixed = StreamOptions(
+      maxWidth: 1920,
+      maxHeight: 1080,
+      audio: false,
+      monitor: 'all',
+      bitrate: 12000000,
+    );
+    final fixedClient = ApiClient()
+      ..responses.add((200, {...response(), 'options': fixed.toJson()}));
+    final fixedApi = HttpBrokerApi(
+      origin: Uri.parse('https://cloud.example.com'),
+      client: fixedClient,
+    );
+    final manual = await fixedApi.connectTracks(
+      'qa-only-token',
+      'pve-149',
+      plan(),
+      fixed,
+    );
+    expect(manual.options.automaticBitrate, isFalse);
+    expect(manual.options.bitrate, 12000000);
+    fixedApi.close();
+  });
   test('Negotiation rejects silent protocol upgrade, downgrade, foreign origin and altered output request', () {
     expect(connection().trackPlan!.outputs.length, 2);
     final origin = Uri.parse('https://cloud.example.com');

@@ -32,6 +32,23 @@ Map<Object?, Object?> physicalLayout() => {
 };
 
 void main() {
+  test('the rate choice goes along to all monitors', () {
+    final layout = LocalDisplayLayout.fromMap(physicalLayout());
+    final automatic = layout.options(
+      const StreamOptions(
+        bitrate: 100000000,
+        bitrateMode: StreamBitrateMode.auto,
+      ),
+    );
+    expect(automatic.automaticBitrate, isTrue);
+    // Sent as independent outputs' fixed 20 Mbps, not as the ceiling.
+    final sent = automatic.negotiated(100000000, independentOutputs: true);
+    expect(sent.automaticBitrate, isFalse);
+    expect(sent.bitrate, 20000000);
+    final manual = layout.options(const StreamOptions(bitrate: 12000000));
+    expect(manual.automaticBitrate, isFalse);
+    expect(manual.bitrate, 12000000);
+  });
   test('mixed DPI physical monitors retain independent requested pixels and relative placement', () {
     final layout = LocalDisplayLayout.fromMap(physicalLayout());
     expect(layout.plan.toJson(), [

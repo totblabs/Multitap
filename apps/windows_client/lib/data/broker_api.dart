@@ -1141,6 +1141,9 @@ class BrokerConnection {
     Map<String, dynamic> data,
     Uri origin, {
     StreamOptions? requestedOptions,
+    // Independent outputs only: the request's rate was the automatic choice
+    // (sent as a fixed rate); the connection's options remember it.
+    bool requestedAutomaticChoice = false,
     TrackPlan? requestedTracks,
     InitialViewport? requestedInitialViewport,
     bool requestedProfileTracks = false,
@@ -1452,7 +1455,7 @@ class BrokerConnection {
         throw const BrokerException('invalid_response');
       }
     }
-    final options = data['options'] is Map<String, dynamic>
+    var options = data['options'] is Map<String, dynamic>
         ? StreamOptions.fromJson(data['options'] as Map<String, dynamic>)
         : requestedOptions ?? const StreamOptions();
     InitialViewportPreparation? initial;
@@ -1491,6 +1494,7 @@ class BrokerConnection {
         throw const BrokerException('invalid_response');
       }
       requestedTracks!.checkOptions(options);
+      if (requestedAutomaticChoice) options = options.asAutomaticChoice();
     }
     final ClipboardPolicy clipboardPolicy;
     try {
@@ -3344,6 +3348,7 @@ class HttpBrokerApi
       data,
       origin,
       requestedOptions: options,
+      requestedAutomaticChoice: requested.automaticBitrate,
       requestedTracks: tracks,
       requestedObservability: observe,
       requestedStreamSize: size,
@@ -3461,6 +3466,7 @@ class HttpBrokerApi
       data,
       origin,
       requestedOptions: options,
+      requestedAutomaticChoice: requested.automaticBitrate,
       requestedTracks: tracks,
       requestedObservability: observe,
       requestedStreamSize: size,
