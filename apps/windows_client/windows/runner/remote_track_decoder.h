@@ -33,9 +33,17 @@ class RemoteTrackDecoder {
   // Each output with its own decoder device / GPU converter (see Pipeline).
   HRESULT ConfigurePipelines(tracks::Configuration configuration,const std::array<Pipeline,2>& pipelines);
   // A tiles-v1 video packet never reaches H.264: its tiles are composited on
-  // every later decoded frame and, given `latest`, republished at once.
+  // every later decoded frame and, given `latest`, republished at once. Without
+  // `latest` they wait for that frame; the caller shows them with Republish
+  // when no frame comes (tilesPending says whether any wait).
   HRESULT Push(const uint8_t* bytes,size_t size,const FrameCallback& frame,
                const AudioCallback& audio = {},tracks::Decision* decision = nullptr,const LatestFrame& latest = {});
+  // Tiles accepted since this output's last composition that no picture shows yet.
+  bool tilesPending(uint8_t track) const;
+  // Those tiles on a copy of the output's newest picture, emitted like a decoded
+  // frame: S_OK when a picture was emitted, S_FALSE when there was nothing to show
+  // or no picture to put it on (the tiles then appear with the next decoded frame).
+  HRESULT Republish(uint8_t track,const FrameCallback& frame,const LatestFrame& latest);
   HRESULT Drain(const FrameCallback& frame);
   bool ready() const;
   void Close();

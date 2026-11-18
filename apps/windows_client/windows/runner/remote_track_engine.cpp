@@ -87,7 +87,7 @@ bool RemoteTrackEngine::Start(const tracks::Configuration& configuration){
     }
     output.id=registrar_->RegisterTexture(output.texture.get());
     if(output.id<0){Stop();return false;}
-  }  {std::lock_guard<std::mutex> lock(mutex_);stalePackets_=waitingPackets_=0;losslessPackets_=0;losslessMs_=0;losslessPresent_={};losslessPoisoned_=false;
+  }  {std::lock_guard<std::mutex> lock(mutex_);stalePackets_=waitingPackets_=0;losslessPackets_=losslessRepublishes_=losslessWithPicture_=0;losslessMs_=0;losslessPresent_={};losslessPoisoned_=false;
     audioPts_.reset();for(auto& lane:lanes_){lane.queue.clear();lane.bytes=0;lane.refused=0;lane.ready=false;}}
   error_=S_OK;ready_=false;running_=true;
   // audio-opus-tracks-v1: the shared audio decodes from Opus (with its PLC and timer wait).
@@ -253,7 +253,10 @@ flutter::EncodableMap RemoteTrackEngine::Stats(){
     {V("audioReceivedFrames"),V(int64_t(configuration_.audioEnabled?audio_.received_frames():0))},
     {V("audioDroppedFrames"),V(int64_t(configuration_.audioEnabled?audio_.dropped_frames():0))},
     // ToTBSeamless lossless tiles (zero unless the host sends tiles-v1).
+    // Republishes: tiles shown on a copy of the newest picture; with picture:
+    // tiles that waited and were shown by the decoded picture of their tick.
     {V("losslessPackets"),V(int64_t(losslessPackets_))},{V("losslessPacketMs"),V(losslessMs_)},
+    {V("losslessRepublishes"),V(int64_t(losslessRepublishes_))},{V("losslessWithPicture"),V(int64_t(losslessWithPicture_))},
     {V("losslessPresentTiles"),V(int64_t(losslessPresent_[0]+losslessPresent_[1]))},{V("losslessPoisoned"),V(losslessPoisoned_)}};
   if(configuration_.audioEnabled)audio_.AppendStats(stats);
   return stats;
@@ -295,27 +298,54 @@ void RemoteTrackEngine::Run(tracks::Configuration configuration,bool power)noexc
         output.fallbacks=decoder.fallbacks(id);output.gpuDropped=decoder.gpuDropped(id);
       };
       if(SUCCEEDED(hr))publishDecoder();
-      while(SUCCEEDED(hr)&&running_){
-        Packet queued;
-        {std::unique_lock<std::mutex> lock(mutex_);lane.wake.wait(lock,[&]{return !running_||FAILED(error_)||!lane.queue.empty();});
-          if(!running_||FAILED(error_))break;queued=std::move(lane.queue.front());lane.queue.pop_front();lane.bytes-=queued.bytes.size();}
-        tracks::Packet packet;if(!tracks::parse(queued.bytes.data(),queued.bytes.size(),packet)){hr=E_INVALIDARG;break;}
-        const auto beginning=std::chrono::steady_clock::now();double notify=0,notifyMax=0;
-        tracks::Decision decision;const bool tile=packet.kind==tracks::video&&lossless::isTilePayload(packet.payload,packet.size);
-        hr=decoder.Push(queued.bytes.data(),queued.bytes.size(),[this,&notify,&notifyMax](uint8_t track,uint32_t topology,uint32_t epoch,DecodedFrame&& frame){
-          if(!running_)return;
-          const auto beginning=std::chrono::steady_clock::now();const auto frames=outputs_[track].frames;
-          auto value=std::make_shared<DecodedFrame>(std::move(frame));
-          bool signal=false;
-          {std::lock_guard<std::mutex> lock(frames->mutex);frames->latest=std::move(value);++frames->published;frames->lastDecoded=beginning;if(notification_&&!frames->notificationQueued){frames->notificationQueued=true;signal=true;}}
-          if(!hidden_&&!registrar_->MarkTextureFrameAvailable(outputs_[track].id))throw std::runtime_error("Track texture unavailable");
-          if(signal)notification_(track,topology,epoch);
-          const auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-beginning).count();notify+=elapsed;notifyMax=std::max(notifyMax,elapsed);
-        },{},&decision,
-        [this](uint8_t output)->std::shared_ptr<const DecodedFrame>{const auto frames=outputs_[output].frames;if(!frames)return {};std::lock_guard<std::mutex> lock(frames->mutex);return frames->latest;});
-        publishDecoder();
+      double notify=0,notifyMax=0;
+      const RemoteTrackDecoder::FrameCallback publish=[this,&notify,&notifyMax](uint8_t track,uint32_t topology,uint32_t epoch,DecodedFrame&& frame){
+        if(!running_)return;
+        const auto beginning=std::chrono::steady_clock::now();const auto frames=outputs_[track].frames;
+        auto value=std::make_shared<DecodedFrame>(std::move(frame));
+        bool signal=false;
+        {std::lock_guard<std::mutex> lock(frames->mutex);frames->latest=std::move(value);++frames->published;frames->lastDecoded=beginning;if(notification_&&!frames->notificationQueued){frames->notificationQueued=true;signal=true;}}
+        if(!hidden_&&!registrar_->MarkTextureFrameAvailable(outputs_[track].id))throw std::runtime_error("Track texture unavailable");
+        if(signal)notification_(track,topology,epoch);
+        const auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-beginning).count();notify+=elapsed;notifyMax=std::max(notifyMax,elapsed);
+      };
+      const RemoteTrackDecoder::LatestFrame newest=[this](uint8_t output)->std::shared_ptr<const DecodedFrame>{const auto frames=outputs_[output].frames;if(!frames)return {};std::lock_guard<std::mutex> lock(frames->mutex);return frames->latest;};
+      // Tiles that came without their picture (Options::tile_hold_ms): shown with
+      // the next decoded picture of this output, or alone once `tilesDue` passes
+      // with nothing waiting in the lane.
+      const auto hold=std::chrono::milliseconds(options_.tile_hold_ms<0?1000/std::max<uint32_t>(1,options_.fps):uint32_t(options_.tile_hold_ms));
+      bool tilesHeld=false;std::chrono::steady_clock::time_point tilesDue{};
+      const auto showTiles=[&]{
+        const auto beginning=std::chrono::steady_clock::now();notify=notifyMax=0;
+        const HRESULT shown=decoder.Republish(id,publish,newest);
         const double work=std::max(0.0,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-beginning).count()-notify);
+        std::lock_guard<std::mutex> lock(mutex_);losslessMs_+=work;if(shown==S_OK)++losslessRepublishes_;
+        return shown;
+      };
+      while(SUCCEEDED(hr)&&running_){
+        Packet queued;bool alone=false;
+        {std::unique_lock<std::mutex> lock(mutex_);const auto woken=[&]{return !running_||FAILED(error_)||!lane.queue.empty();};
+          if(tilesHeld)alone=!lane.wake.wait_until(lock,tilesDue,woken);else lane.wake.wait(lock,woken);
+          if(!running_||FAILED(error_))break;
+          if(!alone){queued=std::move(lane.queue.front());lane.queue.pop_front();lane.bytes-=queued.bytes.size();}}
+        if(alone){tilesHeld=false;hr=showTiles();if(hr==S_FALSE)hr=S_OK;continue;}
+        tracks::Packet packet;if(!tracks::parse(queued.bytes.data(),queued.bytes.size(),packet)){hr=E_INVALIDARG;break;}
+        const auto beginning=std::chrono::steady_clock::now();notify=notifyMax=0;
+        tracks::Decision decision;const bool tile=packet.kind==tracks::video&&lossless::isTilePayload(packet.payload,packet.size);
+        const bool waited=tilesHeld&&decoder.tilesPending(id);
+        hr=decoder.Push(queued.bytes.data(),queued.bytes.size(),publish,{},&decision);
+        publishDecoder();
+        const double notified=notify,notifiedMax=notifyMax;  // this packet's own (showTiles starts its count again)
+        const double work=std::max(0.0,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-beginning).count()-notified);
+        // A decoded picture took the waiting tiles with it; tiles that still wait
+        // keep the first packet's deadline (several packets, one republish).
+        const bool pending=SUCCEEDED(hr)&&decoder.tilesPending(id);
+        const bool withPicture=waited&&!pending&&!tile&&SUCCEEDED(hr);
+        if(!pending)tilesHeld=false;
+        else if(hold.count()<=0){if(SUCCEEDED(hr)){hr=showTiles();if(hr==S_FALSE)hr=S_OK;}}
+        else if(!tilesHeld){tilesHeld=true;tilesDue=std::chrono::steady_clock::now()+hold;}
         {std::lock_guard<std::mutex> lock(mutex_);
+          if(withPicture)++losslessWithPicture_;
           // Ready once every configured output's own decoder delivered a picture.
           lane.ready=decoder.ready()&&SUCCEEDED(hr);bool all=running_&&SUCCEEDED(error_);
           for(const auto& track:configuration_.tracks)all=all&&lanes_[track.id].ready;
@@ -324,7 +354,7 @@ void RemoteTrackEngine::Run(tracks::Configuration configuration,bool power)noexc
           else if(decision!=tracks::Decision::accepted)++waitingPackets_;
           else if(tile){++losslessPackets_;losslessMs_+=work;}  // not a decode call
           else if(packet.kind==tracks::video){auto& output=outputs_[packet.track];++output.decodeCalls;output.decodeTotalMs+=work;
-            output.decodeMaxMs=std::max(output.decodeMaxMs,work);output.notifyTotalMs+=notify;output.notifyMaxMs=std::max(output.notifyMaxMs,notifyMax);}
+            output.decodeMaxMs=std::max(output.decodeMaxMs,work);output.notifyTotalMs+=notified;output.notifyMaxMs=std::max(output.notifyMaxMs,notifiedMax);}
           if(packet.kind==tracks::video&&packet.track<2){const auto tiles=decoder.losslessStats(packet.track);losslessPresent_[packet.track]=tiles.presentTiles;losslessPoisoned_=losslessPoisoned_||tiles.poisoned;}}
       }
       decoder.Close();

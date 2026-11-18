@@ -58,6 +58,27 @@ struct RemoteTrackDecoder::State {
       }else compositor.ComposeDecoded(frame.rgba.data(),size_t(frame.width)*4,frame.pts_us);
     }
     emit(state,track,topology,callback,std::move(frame));
+  }
+  // New tiles now instead of at the next video frame: a copy of the newest frame
+  // (which already has every earlier tile) plus the added tiles. False: nothing
+  // waits, or there is no picture of the right kind to put it on.
+  static bool republish(const std::shared_ptr<State>& state,const tracks::Track& track,uint32_t topology,
+                        const FrameCallback& callback,const LatestFrame& latest) {
+    auto& compositor=state->lossless[track.id];
+    if(!compositor.republishPending()||!latest)return false;
+    auto* converter=state->converters[track.id];auto* overlay=state->overlays[track.id];
+    const auto shown=latest(track.id);
+    if(shown&&converter&&overlay){
+      DecodedFrame copy;
+      if(!gpu::RepublishLatest(compositor,*converter,*overlay,shown.get(),copy))return false;
+      emit(state,track,topology,callback,std::move(copy));return true;
+    }
+    if(shown&&shown->width==track.sourceWidth&&shown->height==track.sourceHeight&&shown->rgba.size()==size_t(track.sourceWidth)*track.sourceHeight*4){
+      DecodedFrame copy;copy.width=shown->width;copy.height=shown->height;copy.pts_us=shown->pts_us;copy.rgba=shown->rgba;
+      compositor.ComposeAdded(copy.rgba.data(),size_t(copy.width)*4);
+      emit(state,track,topology,callback,std::move(copy));return true;
+    }
+    return false;
   }};
 RemoteTrackDecoder::RemoteTrackDecoder():state_(std::make_shared<State>()){}
 RemoteTrackDecoder::~RemoteTrackDecoder(){Close();}
@@ -137,21 +158,29 @@ HRESULT RemoteTrackDecoder::Push(const uint8_t* bytes,size_t size,const FrameCal
         auto* converter=state->converters[packet.track];auto* overlay=state->overlays[packet.track];
         // A GPU output keeps the tile pixels in its overlay texture.
         if(converter&&overlay)gpu::UploadAddedTiles(compositor,*overlay,addedBefore);
-        if(compositor.republishPending()&&latest){
-          const auto shown=latest(packet.track);
-          if(shown&&converter&&overlay){
-            DecodedFrame copy;
-            if(gpu::RepublishLatest(compositor,*converter,*overlay,shown.get(),copy))State::emit(state,track,packet.topology,emit,std::move(copy));
-          }else if(shown&&shown->width==track.sourceWidth&&shown->height==track.sourceHeight&&shown->rgba.size()==size_t(track.sourceWidth)*track.sourceHeight*4){
-            DecodedFrame copy;copy.width=shown->width;copy.height=shown->height;copy.pts_us=shown->pts_us;copy.rgba=shown->rgba;
-            compositor.ComposeAdded(copy.rgba.data(),size_t(copy.width)*4);
-            State::emit(state,track,packet.topology,emit,std::move(copy));
-          }
-        }      }else hr=decoder->Decode(packet.payload,packet.size,packet.pts,[state,track,topology=packet.topology,emit](DecodedFrame&& value){State::deliver(state,track,topology,emit,std::move(value));});
+        State::republish(state,track,packet.topology,emit,latest);
+      }else hr=decoder->Decode(packet.payload,packet.size,packet.pts,[state,track,topology=packet.topology,emit](DecodedFrame&& value){State::deliver(state,track,topology,emit,std::move(value));});
     }
     if(state->closed)return E_ABORT;
     if(FAILED(hr))state->failure=hr;
     return FAILED(state->failure)?state->failure:hr;
+  }catch(const std::bad_alloc&){state->failure=E_OUTOFMEMORY;return E_OUTOFMEMORY;}
+  catch(...){state->failure=E_FAIL;return E_FAIL;}
+}
+bool RemoteTrackDecoder::tilesPending(uint8_t track)const{return track<2&&state_->lossless[track].republishPending();}
+HRESULT RemoteTrackDecoder::Republish(uint8_t id,const FrameCallback& frame,const LatestFrame& latest){
+  const auto state=state_;
+  if(state->closed)return E_ABORT;if(state->busy)return E_PENDING;if(FAILED(state->failure))return state->failure;
+  if(state->drained)return E_UNEXPECTED;
+  if(!frame||!latest)return E_INVALIDARG;
+  State::Command command(state);
+  try{
+    const auto& configuration=state->gate.configuration();
+    const auto track=std::find_if(configuration.tracks.begin(),configuration.tracks.end(),[&](const auto& value){return value.id==id;});
+    if(track==configuration.tracks.end())return S_FALSE;
+    const bool shown=State::republish(state,*track,configuration.topology,frame,latest);
+    if(state->closed)return E_ABORT;
+    return FAILED(state->failure)?state->failure:shown?S_OK:S_FALSE;
   }catch(const std::bad_alloc&){state->failure=E_OUTOFMEMORY;return E_OUTOFMEMORY;}
   catch(...){state->failure=E_FAIL;return E_FAIL;}
 }

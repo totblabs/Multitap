@@ -51,6 +51,12 @@ class RemoteTrackEngine {
     // decoder-prestart-v1: one per output at most, each lane takes one (see
     // RemoteDecoder::Options::prestart).
     std::vector<std::shared_ptr<DecoderPrestart>> prestarts;
+    // Lossless tiles come right before the picture of their tick. They wait this
+    // long for it and show with it; only when no picture comes are they put on a
+    // copy of the newest one (a full-picture copy and two GPU waits, which every
+    // tile packet used to cost: the lane then had no room left at 60 fps).
+    // Negative: one picture time of `fps`. 0: at once, as before (tests compare).
+    int tile_hold_ms=-1;
   };
   explicit RemoteTrackEngine(flutter::TextureRegistrar* registrar,FrameNotification notification={},Options options={}):registrar_(registrar),notification_(std::move(notification)),options_(std::move(options)){}
   ~RemoteTrackEngine(){Stop();}
@@ -130,7 +136,7 @@ class RemoteTrackEngine {
   // Shared audio (UI thread, under mutex_): played once every output has a
   // picture, timestamps strictly increasing like the tracks gate requires.
   std::optional<uint64_t> audioPts_;
-  uint64_t losslessPackets_=0;double losslessMs_=0;std::array<uint32_t,2> losslessPresent_{};bool losslessPoisoned_=false;
+  uint64_t losslessPackets_=0,losslessRepublishes_=0,losslessWithPicture_=0;double losslessMs_=0;std::array<uint32_t,2> losslessPresent_{};bool losslessPoisoned_=false;
   RemoteAudio audio_;
 };
 }

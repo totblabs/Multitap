@@ -356,6 +356,12 @@ only the newly exposed strip as pixels.
 - **Not measured yet:** a real session (capture path, relay, a real GPU, a
   phone); the upload cost per scrolled frame on the clients.
 
+## Two monitors (tracks-v1): tiles and their picture
+
+The Host sends a tick's tile packet (pts T-1) right before its picture (pts T), per output. The one-monitor engine shows new tiles with that picture when it is already queued. The two-monitor engine (`RemoteTrackEngine`, one lane per output) used to put every tile packet on a copy of the newest picture at once: a full-picture copy and two GPU waits per tick besides the decode, two publications for one picture. Field records of 2026-11-18 (Windows app 1.1.27) showed what that cost: decoded count twice the encoded count, the lane's queue of 8 full in 52 of 146 half-minute windows (never with one monitor), the relay reader waiting, GPU load two to three times higher.
+
+Since Windows app 1.1.28 a lane holds new tiles for one picture time (`Options::tile_hold_ms`, 16 ms at 60 a second): the next decoded picture of the output carries them; when none comes they are shown alone, several waiting packets as one publication. `track_lanes_smoke` checks it on the CPU and the WARP path; its `--tile-benchmark` on a test VM (WARP, one 1080p output, a tile packet before each picture): publications 479 to 240, lane time per tick 23.6 to 15.5 ms, full-lane offers 403 to 0. Not yet in two-monitor records: Host stage times and stall events (the tracks statistics carry rates only).
+
 ## Limits
 
 - Photographic content compresses poorly in TQ1 (≈ 3–4 B/px); the token bucket

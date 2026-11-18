@@ -6,12 +6,18 @@
 //  - Audio never waits behind, or counts against, a full video lane.
 //  - Two converters of one shared device converting at the same time (two
 //    lanes on one GPU) produce exactly the CPU pixels.
+//  - Lossless tiles show with the picture of their tick (one publication a
+//    tick), alone only when no picture follows; on the CPU and the WARP path.
 // `--benchmark` decodes two 1920x1080 outputs as fast as they are accepted
 // and prints the decoded rate (informational; this PC's CPU decoder, not the
 // hardware decoder of a user's PC). It proves no presentation or VM behaviour.
+// `--tile-benchmark` compares a tile packet in front of every picture shown at
+// once with the same shown with its picture. `--write-fixtures <folder>` writes
+// the recorded packets that resize_hold_smoke and thumbnail_engine_smoke read.
 #include "remote_track_engine.h"
 #include "remote_media_session.h"
 #include "gpu_video.h"
+#include "track_gpu_fixture.hpp"
 #include "../../../../native/windows_video/color.hpp"
 #include <codecapi.h>
 #include <mferror.h>
@@ -21,6 +27,7 @@
 #include <chrono>
 #include <cstring>
 #include <condition_variable>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -352,6 +359,149 @@ void dualUdpAdmission() {
   require(session.Stop(1)==S_OK&&!gates[0]->attached()&&!gates[1]->attached(),"Both sockets detach before decoder stop");
 }
 
+// One tile of a flat colour (red = blue, so the channel order does not matter),
+// packed like the Host's tile packet of a tick: video kind, pts one before the picture's.
+std::vector<uint8_t> tilePacket(uint32_t width, uint32_t height, uint32_t sequence, uint64_t picturePts, uint16_t index, uint8_t green) {
+  const auto rect = multitap::lossless::tileRect(index, width, height);
+  std::vector<uint8_t> pixels(size_t(rect.width) * rect.height * 4);
+  for (size_t i = 0; i < pixels.size(); i += 4) { pixels[i] = 60; pixels[i + 1] = green; pixels[i + 2] = 60; pixels[i + 3] = 255; }
+  multitap::lossless::PayloadBuilder builder(width, height, sequence, picturePts, {});
+  builder.add(index, pixels.data(), size_t(rect.width) * 4);
+  const auto payload = builder.finish();
+  multitap::tracks::Packet packet{multitap::tracks::video, 0, 0, 1, 1, picturePts - 1, payload.data(), payload.size()};
+  std::vector<uint8_t> bytes; require(multitap::tracks::pack(packet, bytes), "Tile packet"); return bytes;
+}
+
+// A tick's tiles and its picture are one publication; tiles without a picture
+// appear once the hold passed, several packets as one publication.
+void tilesWithTheirPicture(bool gpu) {
+  constexpr unsigned ticks = 8; constexpr uint32_t width = 640, height = 360;
+  const auto video = encodeTrack(0, 1, 1, width, height, ticks + 1, 2000000);
+  const auto pts = [](unsigned n) { return 1000 + uint64_t(n) * 16667; };
+  const auto green = [](unsigned n) { return uint8_t(100 + n * 10); };
+  const auto start = [&](multitap::RemoteTrackEngine& engine) {
+    auto configuration = outputs(width, height, false); configuration.tracks.pop_back();
+    require(engine.Start(configuration), "Tile engine start");
+    require(offer(engine, video[0]) && until([&] { return integer(engine.Stats(), "decodedFrames") == 1; }, std::chrono::seconds(10)), "First picture");
+  };
+  const auto options = [&](int hold) {
+    multitap::RemoteTrackEngine::Options value; value.tile_hold_ms = hold;
+    if (gpu) value.hardware_decode = value.allow_software_render = value.warp_render = true;
+    return value;
+  };
+  // The newest picture shows tile `index` in its colour (its middle pixel).
+  const auto shows = [&](multitap::RemoteTrackEngine& engine, uint16_t index, uint8_t value) {
+    multitap::RemoteTrackEngine::FrameSnapshot frame;
+    if (engine.LatestFrame(0, 1, 1, frame) != S_OK || !frame.pixels || bool(frame.pixels->gpu) != gpu) return false;
+    const auto rgba = trackgpu::rgba(*frame.pixels);
+    const auto rect = multitap::lossless::tileRect(index, width, height);
+    const uint8_t* p = rgba.data() + (size_t(rect.y + rect.height / 2) * width + rect.x + rect.width / 2) * 4;
+    return p[0] == 60 && p[1] == value && p[2] == 60;
+  };
+  const auto settled = [&](multitap::RemoteTrackEngine& engine, int64_t pictures) {
+    if (!until([&] { return integer(engine.Stats(), "decodedFrames") >= pictures; }, std::chrono::seconds(10))) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));  // nothing more may follow
+    return integer(engine.Stats(), "decodedFrames") == pictures;
+  };
+  {
+    // The hold is far longer than any scheduling delay of this test: the picture always comes in time.
+    Registrar registrar; multitap::RemoteTrackEngine engine(&registrar, {}, options(5000));
+    start(engine);
+    for (unsigned n = 1; n <= ticks; ++n)
+      require(offer(engine, tilePacket(width, height, n, pts(n), uint16_t(n), green(n))) && offer(engine, video[n]), "Tick packets");
+    require(settled(engine, 1 + ticks), "A tick's tiles and its picture were not one publication");
+    const auto stats = engine.Stats();
+    require(integer(stats, "losslessPackets") == ticks && integer(stats, "losslessWithPicture") == ticks && integer(stats, "losslessRepublishes") == 0 &&
+            integer(stats, "losslessPresentTiles") == ticks && integer(stats, "decodeCalls") == 1 + ticks, "Tile accounting with pictures");
+    for (unsigned n = 1; n <= ticks; ++n) require(shows(engine, uint16_t(n), green(n)), "A tile is missing from the picture of its tick");
+    engine.Stop();
+  }
+  {
+    constexpr int hold = 60;
+    Registrar registrar; multitap::RemoteTrackEngine engine(&registrar, {}, options(hold));
+    start(engine);
+    // No picture follows: the tile appears alone, not before the hold passed.
+    const auto offered = std::chrono::steady_clock::now();
+    require(offer(engine, tilePacket(width, height, 1, pts(1), 3, 150)), "Lone tile");
+    require(until([&] { return integer(engine.Stats(), "decodedFrames") == 2; }, std::chrono::seconds(10)), "A tile without a picture never appeared");
+    require(std::chrono::steady_clock::now() - offered >= std::chrono::milliseconds(hold - 5), "A tile did not wait for its picture");
+    require(shows(engine, 3, 150) && integer(engine.Stats(), "losslessRepublishes") == 1, "The lone tile is not in the picture");
+    // Three packets in a row: one publication with all of them.
+    for (unsigned n = 0; n < 3; ++n) require(offer(engine, tilePacket(width, height, 2 + n, pts(2 + n), uint16_t(10 + n), uint8_t(200 + n))), "Tile run");
+    require(settled(engine, 3), "Several waiting tile packets were not one publication");
+    for (unsigned n = 0; n < 3; ++n) require(shows(engine, uint16_t(10 + n), uint8_t(200 + n)), "A tile of the run is missing");
+    const auto stats = engine.Stats();
+    require(integer(stats, "losslessRepublishes") == 2 && integer(stats, "losslessWithPicture") == 0 && integer(stats, "losslessPackets") == 4, "Tile accounting without pictures");
+    // The next picture carries every tile, and nothing is republished for it.
+    auto next = video[1]; multitap::tracks::write64(next.data() + 16, pts(10));  // after the tiles, as the gate requires
+    require(offer(engine, next) && settled(engine, 4), "Picture after lone tiles");
+    require(shows(engine, 3, 150) && shows(engine, 12, 202) && integer(engine.Stats(), "losslessRepublishes") == 2, "Tiles lost with the next picture");
+    engine.Stop();
+  }
+  {
+    // Hold 0 is the earlier behaviour: every tile packet is a publication of its own.
+    Registrar registrar; multitap::RemoteTrackEngine engine(&registrar, {}, options(0));
+    start(engine);
+    for (unsigned n = 1; n <= ticks; ++n) {
+      require(offer(engine, tilePacket(width, height, n, pts(n), uint16_t(n), green(n))), "Tile at once");
+      require(until([&] { return integer(engine.Stats(), "decodedFrames") == int64_t(2 * n); }, std::chrono::seconds(10)), "A tile was not shown at once");
+      require(offer(engine, video[n]) && until([&] { return integer(engine.Stats(), "decodedFrames") == int64_t(2 * n + 1); }, std::chrono::seconds(10)), "Picture after a tile shown at once");
+    }
+    require(integer(engine.Stats(), "losslessRepublishes") == ticks && shows(engine, uint16_t(ticks), green(ticks)), "Tile accounting at once");
+    engine.Stop();
+  }
+}
+
+// What a tile packet in front of every picture costs a lane: one 1080p output,
+// pictures paced at 60 a second, with the hold (tiles with their picture) and
+// without it (every tile packet republished at once, as before).
+void tileBenchmark() {
+  constexpr unsigned count = 240; constexpr uint32_t width = 1920, height = 1080;
+  std::cerr << "encoding " << count << " pictures...\n";
+  const auto video = encodeTrack(0, 1, 1, width, height, count, 12000000);
+  const auto pts = [](unsigned n) { return 1000 + uint64_t(n) * 16667; };
+  for (const bool gpu : {false, true}) for (const int hold : {0, -1}) {
+    multitap::RemoteTrackEngine::Options options; options.tile_hold_ms = hold;
+    if (gpu) options.hardware_decode = options.allow_software_render = options.warp_render = true;
+    Registrar registrar; multitap::RemoteTrackEngine engine(&registrar, {}, std::move(options));
+    auto configuration = outputs(width, height, false); configuration.tracks.pop_back();
+    require(engine.Start(configuration), "Tile benchmark engine start");
+    require(offer(engine, video[0]) && until([&] { return integer(engine.Stats(), "decodedFrames") == 1; }, std::chrono::seconds(20)), "Tile benchmark first picture");
+    const auto began = std::chrono::steady_clock::now(); int64_t waits = 0;
+    for (unsigned n = 1; n < count; ++n) {
+      std::this_thread::sleep_until(began + std::chrono::microseconds(uint64_t(n) * 16667));
+      for (const auto& bytes : {tilePacket(width, height, n, pts(n), uint16_t(n % 400), uint8_t(n)), video[n]}) {
+        if (engine.Offer(bytes) == multitap::MediaPushResult::accepted) continue;
+        ++waits; require(offer(engine, bytes, std::chrono::seconds(30)), "Tile benchmark packet");
+      }
+    }
+    require(until([&] { return integer(engine.Stats(), "decodeCalls") == int64_t(count); }, std::chrono::seconds(60)), "Tile benchmark decode");
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+    const auto stats = engine.Stats();
+    const double decodeMs = std::get<double>(stats.at(V("decodeTotalMs"))), tileMs = std::get<double>(stats.at(V("losslessPacketMs")));
+    std::cout << "{\"kind\":\"track-tiles-benchmark\",\"path\":\"" << (gpu ? "warp" : "cpu") << "\",\"tiles\":\"" << (hold ? "with their picture" : "at once")
+              << "\",\"pictures\":" << count << ",\"seconds\":" << seconds << ",\"publications\":" << integer(stats, "decodedFrames")
+              << ",\"republishes\":" << integer(stats, "losslessRepublishes") << ",\"withPicture\":" << integer(stats, "losslessWithPicture")
+              << ",\"laneBusyMsPerTick\":" << (decodeMs + tileMs) / double(count) << ",\"decodeMsPerCall\":" << decodeMs / double(count)
+              << ",\"tileMsPerPacket\":" << tileMs / double(count - 1) << ",\"fullLaneOffers\":" << waits << "}" << std::endl;
+    engine.Stop();
+  }
+}
+
+// The recorded packets other smoke tests take as their argument: topology 1,
+// output 1 at 800x600 and output 0 at 640x360, eight pictures each.
+void writeFixtures(const std::string& folder) {
+  for (const unsigned id : {0u, 1u}) {
+    const auto packets = encodeTrack(uint8_t(id), 1, 1, id ? 800 : 640, id ? 600 : 360, 8, 2000000);
+    for (size_t n = 0; n < packets.size(); ++n) {
+      std::ofstream file(folder + "/topology-1-track-" + std::to_string(id) + "-frame-" + std::to_string(n) + ".tvt1", std::ios::binary | std::ios::trunc);
+      file.write(reinterpret_cast<const char*>(packets[n].data()), std::streamsize(packets[n].size()));
+      file.flush(); require(bool(file), "A fixture file could not be written");
+    }
+  }
+  std::cout << "{\"kind\":\"track-fixtures\",\"files\":16}" << std::endl;
+}
+
 // Two 1080p outputs, every picture offered as soon as its lane takes it.
 void benchmark() {
   constexpr unsigned count = 180; constexpr uint32_t width = 1920, height = 1080;
@@ -380,11 +530,14 @@ int main(int argc, char** argv) {
   int code = 0;
   try {
     if (argc == 2 && std::string(argv[1]) == "--benchmark") benchmark();
+    else if (argc == 2 && std::string(argv[1]) == "--tile-benchmark") tileBenchmark();
+    else if (argc == 3 && std::string(argv[1]) == "--write-fixtures") writeFixtures(argv[2]);
     else {
       independentLanes(); topologyRules(); sharedDeviceConversions();dualUdpAdmission();
+      tilesWithTheirPicture(false); tilesWithTheirPicture(true);
       const bool hardwarePresentation = flutterPresentationStatistics();
       std::cout << "{\"kind\":\"flutter-presentation-statistics\",\"hardwareCaseVerified\":" << (hardwarePresentation ? "true" : "false") << ",\"physicalPresentation\":false}" << std::endl;
-      std::cout << "{\"kind\":\"track-lanes-smoke\",\"checks\":" << checks << ",\"independentLanes\":true,\"audioOutsideVideoLanes\":true,\"sharedDeviceConversions\":true,\"dualUdpDecoded\":true,\"mixedWssUdp\":true,\"hardwareDecoder\":false,\"presentation\":false}" << std::endl;
+      std::cout << "{\"kind\":\"track-lanes-smoke\",\"checks\":" << checks << ",\"independentLanes\":true,\"audioOutsideVideoLanes\":true,\"sharedDeviceConversions\":true,\"dualUdpDecoded\":true,\"mixedWssUdp\":true,\"tilesWithTheirPicture\":true,\"hardwareDecoder\":false,\"presentation\":false}" << std::endl;
     }
   } catch (const std::exception& error) { std::cerr << "FAILED: " << error.what() << std::endl; code = 1; }
   MFShutdown(); CoUninitialize();
