@@ -67,7 +67,12 @@ class RemoteTrackEngine {
   // A full decode queue is `full` (offer the packet again), never a failure.
   // Only the packet's own output can be full: video waits in its output's lane
   // (kLanePackets / kLaneBytes); audio goes straight to playback.
-  static constexpr size_t kLanePackets=8,kLaneBytes=12*1024*1024;
+  // 24 packets: a tick of an output is up to two (its tile packet and its
+  // picture), so 8 held about 4 pictures, and one slow decode of a large
+  // picture (54 ms at an automatic rate near 100 Mbps, field records of
+  // 2026-11-18) filled the lane: the relay reader then waited, which stops the
+  // other output and the sound too. 24 hold about 12 pictures (0.2 s at 60).
+  static constexpr size_t kLanePackets=24,kLaneBytes=12*1024*1024;
   MediaPushResult Offer(const std::vector<uint8_t>& bytes);
   bool Push(const std::vector<uint8_t>& bytes){return Offer(bytes)==MediaPushResult::accepted;}
   flutter::EncodableMap Stats();

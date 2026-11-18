@@ -208,7 +208,8 @@ multitap::tracks::Configuration outputs(uint32_t width, uint32_t height, bool so
 }
 
 void independentLanes() {
-  constexpr unsigned count = 16;
+  // Enough pictures to fill output 0's lane and still have some left.
+  constexpr unsigned count = unsigned(multitap::RemoteTrackEngine::kLanePackets) + 8;
   const auto first = encodeTrack(0, 1, 1, 640, 360, count, 2000000), second = encodeTrack(1, 1, 1, 640, 360, count, 2000000);
   Registrar registrar; multitap::RemoteTrackEngine engine(&registrar);
   // A failed check must not leave a lane held (Stop joins it).
