@@ -251,7 +251,7 @@ void main() {
     );
     expect(c.rows.first.phase, BulkHostPhase.waiting);
     expect(c.rows.first.otherUser, isTrue);
-    expect(c.rows.first.message, '다른 사용자의 연결이 끝나면 업데이트해요');
+    expect(c.rows.first.message, '다른 사용자 연결이 끝나면 업데이트');
     expect(c.rows.last.phase, BulkHostPhase.acknowledged);
     expect(api.maxActive, 1);
     c.dispose();

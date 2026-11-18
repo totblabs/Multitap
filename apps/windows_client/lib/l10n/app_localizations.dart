@@ -293,7 +293,7 @@ abstract class AppLocalizations {
   /// No description provided for @opensDesktopsProxmoxConsoleApp.
   ///
   /// In ko, this message translates to:
-  /// **'{desktopName}\n\n앱 안에서 데스크톱의 Proxmox 콘솔 화면을 열어요.\nProxmox에 따로 로그인하지 않아도 돼요.'**
+  /// **'{desktopName}\n\n데스크톱의 Proxmox 콘솔을 앱에서 열어요.\nProxmox 로그인은 필요 없어요.'**
   String opensDesktopsProxmoxConsoleApp(Object desktopName);
 
   /// No description provided for @openConsole2.
@@ -803,7 +803,7 @@ abstract class AppLocalizations {
   /// No description provided for @youreAboutShareAllStorage.
   ///
   /// In ko, this message translates to:
-  /// **'저장공간 전체를 공유하려고 해요.\n데스크톱의 프로그램이 이 저장공간의 모든 파일을 읽고 바꿀 수 있어요.\n꼭 필요한 폴더만 고르는 걸 권해요.'**
+  /// **'저장공간 전체를 공유해요.\n데스크톱에서 모든 파일을 읽고 바꿀 수 있어요.\n필요한 폴더만 고르길 권해요.'**
   String get youreAboutShareAllStorage;
 
   /// No description provided for @chosenFolder.
@@ -815,7 +815,7 @@ abstract class AppLocalizations {
   /// No description provided for @stoppedSharingBecausePermissionOpen.
   ///
   /// In ko, this message translates to:
-  /// **'‘{name}’ 폴더를 열 권한이 없어져서 공유를 끝냈어요'**
+  /// **'‘{name}’ 공유를 끝냈어요\n폴더를 열 권한이 없어졌어요'**
   String stoppedSharingBecausePermissionOpen(Object name);
 
   /// No description provided for @stoppedSharingBecauseFolderCant.
@@ -1121,7 +1121,7 @@ abstract class AppLocalizations {
   /// No description provided for @chooseFolderMultitapNeedsSee.
   ///
   /// In ko, this message translates to:
-  /// **'폴더를 고르려면 Multitap이 이 기기의 저장공간을 볼 수 있어야 해요.\n허용하면 Multitap이 저장공간을 읽고 쓸 수 있어요. 데스크톱에는 고른 폴더만 보여요.'**
+  /// **'폴더를 고르려면 저장공간 접근을 허용해야 해요.\n데스크톱에는 고른 폴더만 보여요.'**
   String get chooseFolderMultitapNeedsSee;
 
   /// No description provided for @openSettings.
@@ -1547,13 +1547,13 @@ abstract class AppLocalizations {
   /// No description provided for @setLargestScaleWindowsAllows.
   ///
   /// In ko, this message translates to:
-  /// **'이 화면 크기에서 Windows가 허용하는 최대 배율 {scale}%로 맞췄어요.'**
+  /// **'Windows 최대 배율 {scale}%로 맞췄어요'**
   String setLargestScaleWindowsAllows(Object scale);
 
   /// No description provided for @couldntSendInputWhileScreen.
   ///
   /// In ko, this message translates to:
-  /// **'화면 크기를 맞추는 중이라 입력을 보내지 못했어요. 끝난 뒤 다시 입력하세요.'**
+  /// **'화면 크기를 맞추는 중이에요\n끝난 뒤 다시 입력하세요'**
   String get couldntSendInputWhileScreen;
 
   /// No description provided for @couldntConfirmInputWasDelivered.
@@ -1565,7 +1565,7 @@ abstract class AppLocalizations {
   /// No description provided for @hostReceivesKoreanTextAs.
   ///
   /// In ko, this message translates to:
-  /// **'이 Host는 한글을 키 입력으로 받아요. 데스크톱이 한글 입력 상태일 때 그대로 입력되고, 영문이 나오면 키 줄의 한/영을 누르세요.'**
+  /// **'한글이 영문으로 나오면\n키 줄의 한/영을 누르세요'**
   String get hostReceivesKoreanTextAs;
 
   /// No description provided for @controlCharactersCantSentSo.
@@ -1595,13 +1595,13 @@ abstract class AppLocalizations {
   /// No description provided for @mouseLockedInsideDesktopPress.
   ///
   /// In ko, this message translates to:
-  /// **'마우스를 데스크톱 안에 잠갔어요 · 뒤로 가기로 풀기'**
+  /// **'마우스 잠금 켬 · 뒤로 가기로 풀기'**
   String get mouseLockedInsideDesktopPress;
 
   /// No description provided for @someGamesSuchAsLeague.
   ///
   /// In ko, this message translates to:
-  /// **'롤 같은 일부 게임에서는 마우스가 움직이지 않을 수 있어요'**
+  /// **'롤 같은 일부 게임에서는 안 움직일 수 있어요'**
   String get someGamesSuchAsLeague;
 
   /// No description provided for @mouseLockOff.
@@ -1619,13 +1619,13 @@ abstract class AppLocalizations {
   /// No description provided for @deviceCantReceiveSharperPicture.
   ///
   /// In ko, this message translates to:
-  /// **'이 기기에서는 더 선명하게 받을 수 없어 자동 크기로 보여요.'**
+  /// **'기기가 더 받지 못해 자동 크기로 보여요'**
   String get deviceCantReceiveSharperPicture;
 
   /// No description provided for @couldntApplySharpSoShows.
   ///
   /// In ko, this message translates to:
-  /// **'선명하게를 적용하지 못해 자동 크기로 보여요.'**
+  /// **'선명하게를 쓸 수 없어 자동 크기로 보여요'**
   String get couldntApplySharpSoShows;
 
   /// No description provided for @stoppedWaitingHostUpdateTap.
@@ -1739,6 +1739,12 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'선명하게를 적용하지 못해 자동 크기로 보여요 ({sharpRefusedReason}) · {current}'**
   String couldntApplySharpSoShows2(Object sharpRefusedReason, Object current);
+
+  /// No description provided for @shownAtAutoSize.
+  ///
+  /// In ko, this message translates to:
+  /// **'자동 크기로 표시 · {current}'**
+  String shownAtAutoSize(Object current);
 
   /// No description provided for @checkingSharp.
   ///
@@ -1893,13 +1899,13 @@ abstract class AppLocalizations {
   /// No description provided for @locksMouseInsideDesktop.
   ///
   /// In ko, this message translates to:
-  /// **'마우스를 데스크톱 안에 잠가요'**
+  /// **'데스크톱 안에 잠가요'**
   String get locksMouseInsideDesktop;
 
   /// No description provided for @availableWhenMouseConnected.
   ///
   /// In ko, this message translates to:
-  /// **'마우스를 연결하면 쓸 수 있어요'**
+  /// **'마우스 연결 필요'**
   String get availableWhenMouseConnected;
 
   /// No description provided for @touchControlsPrinterCopy.
@@ -2025,7 +2031,7 @@ abstract class AppLocalizations {
   /// No description provided for @couldntConfirmShortcutWasSent.
   ///
   /// In ko, this message translates to:
-  /// **'단축키 전송 결과를 확인하지 못했어요. 원격 화면을 확인한 뒤 필요하면 다시 선택해 주세요.'**
+  /// **'단축키 전송을 확인하지 못했어요\n화면을 보고 다시 눌러 보세요'**
   String get couldntConfirmShortcutWasSent;
 
   /// No description provided for @technology.
@@ -3147,7 +3153,7 @@ abstract class AppLocalizations {
   /// No description provided for @androidSettingsAllowInstallUnknown.
   ///
   /// In ko, this message translates to:
-  /// **'Android 설정에서 Multitap의\n‘알 수 없는 앱 설치’를 허용해 주세요.\n허용한 뒤 이 화면으로 돌아오세요.\n설정에서 언제든 다시 끌 수 있어요.'**
+  /// **'Android 설정에서 Multitap의\n‘알 수 없는 앱 설치’를 허용한 뒤 돌아오세요.\n설정에서 언제든 다시 끌 수 있어요.'**
   String get androidSettingsAllowInstallUnknown;
 
   /// No description provided for @checkingInstallPermissionDownloadLocation.
@@ -3489,7 +3495,7 @@ abstract class AppLocalizations {
   /// No description provided for @desktopConnectedFromAnotherWindow.
   ///
   /// In ko, this message translates to:
-  /// **'이 데스크톱은 다른 창이나 기기에서 연결 중이에요. 아래 버튼을 누르면 그쪽 연결을 끊고 여기서 이어서 써요. 데스크톱과 실행 중인 작업은 그대로예요.'**
+  /// **'다른 곳에서 연결 중이에요. 끊고 여기서 이어서 쓸 수 있어요. 실행 중인 작업은 그대로예요.'**
   String get desktopConnectedFromAnotherWindow;
 
   /// No description provided for @connectionSetupCanceledYouCan.
@@ -3699,7 +3705,7 @@ abstract class AppLocalizations {
   /// No description provided for @serverIsntRespondingTryAgain.
   ///
   /// In ko, this message translates to:
-  /// **'서버가 응답하지 않아요. 잠시 후 다시 시도하세요.'**
+  /// **'서버가 응답하지 않아요.\n잠시 후 다시 시도하세요.'**
   String get serverIsntRespondingTryAgain;
 
   /// No description provided for @checkCurrentPassword.
@@ -3933,7 +3939,7 @@ abstract class AppLocalizations {
   /// No description provided for @youDontHavePermissionDesktop.
   ///
   /// In ko, this message translates to:
-  /// **'이 데스크톱을 쓸 권한이 없거나 배정이 바뀌었어요. 목록을 새로고침하고, 필요하면 관리자에게 요청하세요.'**
+  /// **'이 데스크톱을 쓸 권한이 없거나 배정이 바뀌었어요. 목록을 새로고침해 보세요.'**
   String get youDontHavePermissionDesktop;
 
   /// No description provided for @cantCheckPowerActionsResult.
@@ -4317,7 +4323,7 @@ abstract class AppLocalizations {
   /// No description provided for @notUseUpdatesRightAway.
   ///
   /// In ko, this message translates to:
-  /// **'사용 중 아님 · 요청하면 바로 업데이트해요'**
+  /// **'사용 중 아님 · 바로 업데이트해요'**
   String get notUseUpdatesRightAway;
 
   /// No description provided for @notRequestedYet.
@@ -4347,7 +4353,7 @@ abstract class AppLocalizations {
   /// No description provided for @updatesWhenOtherUsersConnection.
   ///
   /// In ko, this message translates to:
-  /// **'다른 사용자의 연결이 끝나면 업데이트해요'**
+  /// **'다른 사용자 연결이 끝나면 업데이트'**
   String get updatesWhenOtherUsersConnection;
 
   /// No description provided for @useUpdatesWhenConnectionEnds.
@@ -4419,7 +4425,7 @@ abstract class AppLocalizations {
   /// No description provided for @serverCantCheckUpdatePermission.
   ///
   /// In ko, this message translates to:
-  /// **'서버에서 업데이트 권한·상태를 확인할 수 없어요'**
+  /// **'권한·상태를 확인할 수 없어요'**
   String get serverCantCheckUpdatePermission;
 
   /// No description provided for @hostOffline.
@@ -7050,7 +7056,7 @@ abstract class AppLocalizations {
   /// No description provided for @desktopWasConnectedFromAnother.
   ///
   /// In ko, this message translates to:
-  /// **'다른 창이나 기기에서 이 데스크톱에 연결해 이 연결이 끊겼어요. 다시 연결하면 그쪽 연결을 끊을 수 있어요.'**
+  /// **'다른 곳에서 연결해 이 연결이 끊겼어요. 다시 연결하면 그쪽을 끊을 수 있어요.'**
   String get desktopWasConnectedFromAnother;
 
   /// No description provided for @administratorChangedClipboardSharingPermission.
@@ -7200,7 +7206,7 @@ abstract class AppLocalizations {
   /// No description provided for @desktopConnectedSomewhereElseInformation.
   ///
   /// In ko, this message translates to:
-  /// **'다른 곳에서 연결 중이에요. 그 연결을 끊는 데 필요한 정보를 받지 못했어요. 다시 연결해 보고, 계속되면 관리자에게 알려 주세요.'**
+  /// **'다른 곳에서 연결 중인데 끊을 수 없어요. 다시 연결해 보고, 계속되면 관리자에게 알려 주세요.'**
   String get desktopConnectedSomewhereElseInformation;
 
   /// No description provided for @connectedAccount.
@@ -7830,7 +7836,7 @@ abstract class AppLocalizations {
   /// No description provided for @noDesktopsMatch2.
   ///
   /// In ko, this message translates to:
-  /// **'\'{short}\'에 맞는 데스크톱이 없어요'**
+  /// **'\'{short}\' 검색 결과가 없어요'**
   String noDesktopsMatch2(Object short);
 
   /// No description provided for @searchByNameNumberGroup.
@@ -7986,7 +7992,7 @@ abstract class AppLocalizations {
   /// No description provided for @remoteUpdateNotSupportedInstall2.
   ///
   /// In ko, this message translates to:
-  /// **'{host} · 원격 업데이트 미지원 · 직접 설치 필요'**
+  /// **'{host} · 원격 업데이트 미지원 · 직접 설치'**
   String remoteUpdateNotSupportedInstall2(Object host);
 
   /// No description provided for @newVersionAvailable.
@@ -8052,13 +8058,13 @@ abstract class AppLocalizations {
   /// No description provided for @hostUpdatedWindowsRestartNeeded.
   ///
   /// In ko, this message translates to:
-  /// **'Host {targetVersion} 업데이트 완료 · Windows 다시 시작 필요'**
+  /// **'Host {targetVersion} 설치됨 · Windows 다시 시작 필요'**
   String hostUpdatedWindowsRestartNeeded(Object targetVersion);
 
   /// No description provided for @hostUpdatedCheckHostSettings.
   ///
   /// In ko, this message translates to:
-  /// **'Host {targetVersion} 업데이트 완료 · Host 설정 확인 필요'**
+  /// **'Host {targetVersion} 설치됨 · Host 설정 확인 필요'**
   String hostUpdatedCheckHostSettings(Object targetVersion);
 
   /// No description provided for @hostUpdated.
@@ -8088,43 +8094,43 @@ abstract class AppLocalizations {
   /// No description provided for @hostDidntReconnectAfterUpdate.
   ///
   /// In ko, this message translates to:
-  /// **'Host가 업데이트 후 다시 연결되지 않았어요'**
+  /// **'Host 다시 연결 안 됨'**
   String get hostDidntReconnectAfterUpdate;
 
   /// No description provided for @checkConnectionStatusHostDiagnostics.
   ///
   /// In ko, this message translates to:
-  /// **'Host 진단과 서버 활동 기록에서 연결 상태를 확인하세요.'**
+  /// **'Host 진단과 서버 활동 기록을 확인하세요.'**
   String get checkConnectionStatusHostDiagnostics;
 
   /// No description provided for @checkServiceStatusLocalPcs.
   ///
   /// In ko, this message translates to:
-  /// **'로컬 PC의 Host 설정 → 진단에서 서비스 상태를 확인하세요.'**
+  /// **'로컬 PC의 Host 설정 → 진단을 확인하세요.'**
   String get checkServiceStatusLocalPcs;
 
   /// No description provided for @openDesktopConsoleCheckHost.
   ///
   /// In ko, this message translates to:
-  /// **'Console로 데스크톱을 열고 Host 설정 → 진단을 확인하세요.'**
+  /// **'Console에서 Host 설정 → 진단을 확인하세요.'**
   String get openDesktopConsoleCheckHost;
 
   /// No description provided for @couldntConfirmUpdateResultConnection.
   ///
   /// In ko, this message translates to:
-  /// **'{host} 업데이트 결과와 연결을 확인하지 못했어요.'**
+  /// **'{host} 업데이트 결과를 확인하지 못했어요.'**
   String couldntConfirmUpdateResultConnection(Object host);
 
   /// No description provided for @couldntGetResponseFromAfter.
   ///
   /// In ko, this message translates to:
-  /// **'{host} 업데이트 실패 후 응답을 확인하지 못했어요.'**
+  /// **'{host} 업데이트 실패 뒤 응답이 없어요.'**
   String couldntGetResponseFromAfter(Object host);
 
   /// No description provided for @couldntGetResponseFromAfter2.
   ///
   /// In ko, this message translates to:
-  /// **'{host} 업데이트 완료 보고 뒤 응답을 확인하지 못했어요.'**
+  /// **'{host} 업데이트 완료 뒤 응답이 없어요.'**
   String couldntGetResponseFromAfter2(Object host);
 
   /// No description provided for @connectionUse.
@@ -8316,7 +8322,7 @@ abstract class AppLocalizations {
   /// No description provided for @youCanPasteCopiedText.
   ///
   /// In ko, this message translates to:
-  /// **'복사한 글을 기기와 데스크톱 사이에서 붙여넣을 수 있어요.'**
+  /// **'복사한 글을 서로 붙여넣을 수 있어요.'**
   String get youCanPasteCopiedText;
 
   /// No description provided for @youCanPasteTextCopied.
@@ -8406,7 +8412,7 @@ abstract class AppLocalizations {
   /// No description provided for @desktopHasNoSoundDevice2.
   ///
   /// In ko, this message translates to:
-  /// **'이 데스크톱에는 소리 장치가 없어요. 관리자가 Proxmox에서 오디오 장치를 추가해야 해요.'**
+  /// **'이 데스크톱에는 소리 장치가 없어요\n관리자에게 알려 주세요'**
   String get desktopHasNoSoundDevice2;
 
   /// No description provided for @restartDesktopUseSoundDevice.
@@ -8943,7 +8949,7 @@ abstract class AppLocalizations {
   /// No description provided for @connectedDesktopsConnectionEndsUpdate.
   ///
   /// In ko, this message translates to:
-  /// **'연결된 데스크톱은 내 연결을 끊고 바로 업데이트해요.\n다른 사용자가 연결 중이면 그 연결이 끝난 뒤 업데이트해요.'**
+  /// **'연결된 데스크톱은 내 연결을 끊고 바로 업데이트해요.\n다른 사용자가 연결 중이면 끝난 뒤에 해요.'**
   String get connectedDesktopsConnectionEndsUpdate;
 
   /// No description provided for @stopRemainingRequestsClose.
@@ -8979,7 +8985,7 @@ abstract class AppLocalizations {
   /// No description provided for @currentVersionUnknown.
   ///
   /// In ko, this message translates to:
-  /// **'현재 버전 확인 필요'**
+  /// **'버전 확인 필요'**
   String get currentVersionUnknown;
 
   /// No description provided for @windowsRestartNeeded.
@@ -9255,7 +9261,7 @@ abstract class AppLocalizations {
   /// No description provided for @stopIsntAvailableServerYet.
   ///
   /// In ko, this message translates to:
-  /// **'이 서버에서는 아직 정지를 쓸 수 없어요. 관리자에게 알려 주세요.'**
+  /// **'이 서버는 정지를 지원하지 않아요.'**
   String get stopIsntAvailableServerYet;
 
   /// No description provided for @localPc2.
@@ -9417,13 +9423,13 @@ abstract class AppLocalizations {
   /// No description provided for @windowsNeedsRestart.
   ///
   /// In ko, this message translates to:
-  /// **'Windows를 다시 시작해야 해요'**
+  /// **'Windows 다시 시작 필요'**
   String get windowsNeedsRestart;
 
   /// No description provided for @getsVirtualDisplayReadyUnsaved.
   ///
   /// In ko, this message translates to:
-  /// **'그래야 가상 화면이 준비돼요. 저장하지 않은 작업은 사라질 수 있어요.'**
+  /// **'저장하지 않은 작업은 사라질 수 있어요.'**
   String get getsVirtualDisplayReadyUnsaved;
 
   /// No description provided for @signedOverRdp.
@@ -9441,37 +9447,37 @@ abstract class AppLocalizations {
   /// No description provided for @notSignedWindows.
   ///
   /// In ko, this message translates to:
-  /// **'Windows에 로그인돼 있지 않아요'**
+  /// **'Windows 로그인 필요'**
   String get notSignedWindows;
 
   /// No description provided for @windowsAccountNeedsChecking.
   ///
   /// In ko, this message translates to:
-  /// **'Windows 계정 확인이 필요해요'**
+  /// **'Windows 계정 확인 필요'**
   String get windowsAccountNeedsChecking;
 
   /// No description provided for @couldntCheckWindowsScreen.
   ///
   /// In ko, this message translates to:
-  /// **'Windows 화면을 확인하지 못했어요'**
+  /// **'Windows 화면 확인 안 됨'**
   String get couldntCheckWindowsScreen;
 
   /// No description provided for @refreshCheckAgainIfKeeps2.
   ///
   /// In ko, this message translates to:
-  /// **'새로고침해 다시 확인하세요. 계속되면 관리자에게 알려 주세요.'**
+  /// **'새로고침해 다시 확인하세요.'**
   String get refreshCheckAgainIfKeeps2;
 
   /// No description provided for @windowsScreenFromRdpOpen.
   ///
   /// In ko, this message translates to:
-  /// **'RDP에서 쓰던 Windows 화면이 있어요'**
+  /// **'RDP에 Windows 화면 있음'**
   String get windowsScreenFromRdpOpen;
 
   /// No description provided for @bringScreenIntoStreamingConnect.
   ///
   /// In ko, this message translates to:
-  /// **'그 화면을 스트리밍으로 가져와야 연결할 수 있어요.'**
+  /// **'그 화면을 가져와야 연결할 수 있어요.'**
   String get bringScreenIntoStreamingConnect;
 
   /// No description provided for @windowsLocked2.
@@ -9489,55 +9495,55 @@ abstract class AppLocalizations {
   /// No description provided for @signWindowsAdministratorAccount.
   ///
   /// In ko, this message translates to:
-  /// **'Windows 관리자 계정으로 로그인해야 해요'**
+  /// **'관리자 계정 로그인 필요'**
   String get signWindowsAdministratorAccount;
 
   /// No description provided for @virtualDisplayNeedsRepair.
   ///
   /// In ko, this message translates to:
-  /// **'가상 화면을 복구해야 해요'**
+  /// **'가상 화면 복구 필요'**
   String get virtualDisplayNeedsRepair;
 
   /// No description provided for @youCanRepairHostSettings.
   ///
   /// In ko, this message translates to:
-  /// **'Host 설정에서 복구할 수 있어요. 관리자에게 알려 주세요.'**
+  /// **'Host 설정에서 복구 · 관리자에게 알려 주세요'**
   String get youCanRepairHostSettings;
 
   /// No description provided for @virtualDisplayIsntReady.
   ///
   /// In ko, this message translates to:
-  /// **'가상 화면이 준비되지 않았어요'**
+  /// **'가상 화면 준비 안 됨'**
   String get virtualDisplayIsntReady;
 
   /// No description provided for @refreshMomentIfKeepsHappening.
   ///
   /// In ko, this message translates to:
-  /// **'잠시 후 새로고침하세요. 계속되면 관리자에게 알려 주세요.'**
+  /// **'잠시 후 새로고침하세요.'**
   String get refreshMomentIfKeepsHappening;
 
   /// No description provided for @virtualDisplayDriverNeedsChecking.
   ///
   /// In ko, this message translates to:
-  /// **'가상 화면 드라이버를 확인해야 해요'**
+  /// **'드라이버 확인 필요'**
   String get virtualDisplayDriverNeedsChecking;
 
   /// No description provided for @youCanCheckHostSettings.
   ///
   /// In ko, this message translates to:
-  /// **'Host 설정의 진단에서 확인할 수 있어요. 관리자에게 알려 주세요.'**
+  /// **'Host 설정 → 진단 확인 · 관리자에게 알려 주세요'**
   String get youCanCheckHostSettings;
 
   /// No description provided for @virtualDisplaySettingsNeedChecking2.
   ///
   /// In ko, this message translates to:
-  /// **'가상 화면 설정 확인이 필요해요'**
+  /// **'가상 화면 설정 확인'**
   String get virtualDisplaySettingsNeedChecking2;
 
   /// No description provided for @hostSettingUpScreen.
   ///
   /// In ko, this message translates to:
-  /// **'Host가 화면을 구성하고 있어요'**
+  /// **'Host가 화면 구성 중'**
   String get hostSettingUpScreen;
 
   /// No description provided for @youCanConnectWhenSetup.
@@ -9549,7 +9555,7 @@ abstract class AppLocalizations {
   /// No description provided for @couldntCheckVirtualDisplayStatus2.
   ///
   /// In ko, this message translates to:
-  /// **'가상 화면 상태를 확인하지 못했어요'**
+  /// **'가상 화면 확인 안 됨'**
   String get couldntCheckVirtualDisplayStatus2;
 
   /// No description provided for @checkingWindowsSign.
@@ -9561,7 +9567,7 @@ abstract class AppLocalizations {
   /// No description provided for @checkingWindowsSignStateUpdates.
   ///
   /// In ko, this message translates to:
-  /// **'Windows 로그인 상태를 확인하고 있어요. 준비되면 바로 바뀌어요.'**
+  /// **'Windows 로그인 상태를 확인하고 있어요.'**
   String get checkingWindowsSignStateUpdates;
 
   /// No description provided for @preparingScreen.
@@ -9573,7 +9579,7 @@ abstract class AppLocalizations {
   /// No description provided for @preparingVirtualDisplayUpdatesAs.
   ///
   /// In ko, this message translates to:
-  /// **'가상 화면을 준비하고 있어요. 끝나면 바로 바뀌어요.'**
+  /// **'가상 화면을 준비하고 있어요.'**
   String get preparingVirtualDisplayUpdatesAs;
 
   /// No description provided for @preparing3.
@@ -9585,7 +9591,7 @@ abstract class AppLocalizations {
   /// No description provided for @hostPreparingConnectionUpdatesAs.
   ///
   /// In ko, this message translates to:
-  /// **'Host가 연결을 준비하고 있어요. 끝나면 바로 바뀌어요.'**
+  /// **'Host가 연결을 준비하고 있어요.'**
   String get hostPreparingConnectionUpdatesAs;
 
   /// No description provided for @power.
@@ -9645,7 +9651,7 @@ abstract class AppLocalizations {
   /// No description provided for @notRespondingIfWindowsStarting.
   ///
   /// In ko, this message translates to:
-  /// **'응답하지 않아요 · Windows가 시작 중이면 잠시 기다려 주세요'**
+  /// **'응답 없음 · Windows 시작 중이면 기다리세요'**
   String get notRespondingIfWindowsStarting;
 
   /// No description provided for @noResponseYet.
@@ -9729,7 +9735,7 @@ abstract class AppLocalizations {
   /// No description provided for @availableViaCheckedAgainWhen.
   ///
   /// In ko, this message translates to:
-  /// **'{server} 경유 연결 가능 · 연결할 때 다시 확인해요'**
+  /// **'{server} 경유 연결 가능 · 연결할 때 다시 확인'**
   String availableViaCheckedAgainWhen(Object server);
 
   /// No description provided for @notCheckedCheckedOnceEarlier.
@@ -9813,7 +9819,7 @@ abstract class AppLocalizations {
   /// No description provided for @ifWindowsDoesNotRespond.
   ///
   /// In ko, this message translates to:
-  /// **'Windows가 응답하지 않으면 전원 메뉴에서 정지할 수 있어요.'**
+  /// **'응답이 없으면 전원 메뉴에서 정지하세요.'**
   String get ifWindowsDoesNotRespond;
 
   /// No description provided for @statusCheckedAgainWhenFinishes.
@@ -9831,13 +9837,13 @@ abstract class AppLocalizations {
   /// No description provided for @takeOverWindowsScreenConnect.
   ///
   /// In ko, this message translates to:
-  /// **'Windows 화면을 넘겨받아 연결'**
+  /// **'Windows 화면 넘겨받기'**
   String get takeOverWindowsScreenConnect;
 
   /// No description provided for @bringsWindowsScreenUsedRdp.
   ///
   /// In ko, this message translates to:
-  /// **'RDP에서 쓰던 Windows 화면을 스트리밍으로 가져와요.'**
+  /// **'RDP에서 쓰던 화면을 스트리밍으로 가져와요.'**
   String get bringsWindowsScreenUsedRdp;
 
   /// No description provided for @readyConnect.
@@ -9879,19 +9885,19 @@ abstract class AppLocalizations {
   /// No description provided for @cleaningUpConnectionJustEnded.
   ///
   /// In ko, this message translates to:
-  /// **'방금 끝난 연결을 정리하고 있어요. 누르면 끝나는 대로 연결해요.'**
+  /// **'연결 정리 중 · 누르면 끝나는 대로 연결해요'**
   String get cleaningUpConnectionJustEnded;
 
   /// No description provided for @screenRestoreNotConfirmed.
   ///
   /// In ko, this message translates to:
-  /// **'화면 복원이 확인되지 않았어요'**
+  /// **'화면 복원 확인 안 됨'**
   String get screenRestoreNotConfirmed;
 
   /// No description provided for @cleaningUpLastConnection.
   ///
   /// In ko, this message translates to:
-  /// **'이전 연결을 정리하고 있어요'**
+  /// **'이전 연결 정리 중'**
   String get cleaningUpLastConnection;
 
   /// No description provided for @youCanConnectWhenDone.
@@ -9921,7 +9927,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingUpVirtualDisplay.
   ///
   /// In ko, this message translates to:
-  /// **'가상 화면을 구성하고 있어요'**
+  /// **'가상 화면 구성 중'**
   String get settingUpVirtualDisplay;
 
   /// No description provided for @updating2.
@@ -9969,7 +9975,7 @@ abstract class AppLocalizations {
   /// No description provided for @windowsHasStartedChangesAs.
   ///
   /// In ko, this message translates to:
-  /// **'Windows가 시작됐어요. Host가 연결되면 바로 바뀌어요.'**
+  /// **'Windows 시작됨 · Host가 연결되면 바뀌어요'**
   String get windowsHasStartedChangesAs;
 
   /// No description provided for @hostDisconnected.
@@ -9981,7 +9987,7 @@ abstract class AppLocalizations {
   /// No description provided for @desktopRunningChangesAutomaticallyWhen.
   ///
   /// In ko, this message translates to:
-  /// **'데스크톱은 실행 중이에요. Host가 돌아오면 자동으로 바뀌어요.'**
+  /// **'실행 중 · Host가 돌아오면 자동으로 바뀌어요'**
   String get desktopRunningChangesAutomaticallyWhen;
 
   /// No description provided for @hostNotResponding.
@@ -9993,7 +9999,7 @@ abstract class AppLocalizations {
   /// No description provided for @ifYouJustStartedWait.
   ///
   /// In ko, this message translates to:
-  /// **'방금 켰다면 잠시 기다려 주세요. 계속되면 관리자에게 알려 주세요.'**
+  /// **'방금 켰다면 잠시 기다려 주세요.'**
   String get ifYouJustStartedWait;
 
   /// No description provided for @unlockConsole.
@@ -10005,25 +10011,25 @@ abstract class AppLocalizations {
   /// No description provided for @ifSigningAutomaticallyYouCan.
   ///
   /// In ko, this message translates to:
-  /// **'자동 로그인 중이면 곧 연결할 수 있어요. 아니면 Console에서 로그인하세요.'**
+  /// **'곧 연결돼요 · 안 되면 Console에서 로그인'**
   String get ifSigningAutomaticallyYouCan;
 
   /// No description provided for @signFromConsoleAfterRestart.
   ///
   /// In ko, this message translates to:
-  /// **'Console에서 로그인하세요. 다시 시작하면 자동으로 로그인돼요.'**
+  /// **'Console에서 로그인하거나 다시 시작하세요.'**
   String get signFromConsoleAfterRestart;
 
   /// No description provided for @virtualDisplayNeedsCheckedHost.
   ///
   /// In ko, this message translates to:
-  /// **'Host 설정에서 가상 화면을 확인해야 해요. 관리자에게 알려 주세요.'**
+  /// **'가상 화면 확인 필요 · 관리자에게 알려 주세요'**
   String get virtualDisplayNeedsCheckedHost;
 
   /// No description provided for @checkingStreamingReadiness.
   ///
   /// In ko, this message translates to:
-  /// **'스트리밍 준비를 확인하고 있어요'**
+  /// **'스트리밍 준비 확인 중'**
   String get checkingStreamingReadiness;
 
   /// No description provided for @changesAsSoonAsHost.
@@ -10035,7 +10041,7 @@ abstract class AppLocalizations {
   /// No description provided for @waitingHostConnect2.
   ///
   /// In ko, this message translates to:
-  /// **'Host 연결을 기다리고 있어요'**
+  /// **'Host 연결 대기 중'**
   String get waitingHostConnect2;
 
   /// No description provided for @checkingStatus.
@@ -10461,7 +10467,7 @@ abstract class AppLocalizations {
   /// No description provided for @webclientServiceDesktopOffMissing.
   ///
   /// In ko, this message translates to:
-  /// **'데스크톱의 WebClient 서비스가 꺼져 있거나 없어요.\n관리자에게 알려 주세요.'**
+  /// **'데스크톱 WebClient가 꺼져 있어요.\n관리자에게 알려 주세요.'**
   String get webclientServiceDesktopOffMissing;
 
   /// No description provided for @desktopHasNoDriveLetters.
@@ -10563,7 +10569,7 @@ abstract class AppLocalizations {
   /// No description provided for @shareFolderDesktopAsDrive.
   ///
   /// In ko, this message translates to:
-  /// **'이 폴더를 데스크톱에 드라이브로 공유할까요?'**
+  /// **'이 폴더를 공유할까요?'**
   String get shareFolderDesktopAsDrive;
 
   /// No description provided for @folderCautionYouCanTurn.
@@ -16138,7 +16144,7 @@ abstract class AppLocalizations {
   /// No description provided for @statusServerGotFromHost.
   ///
   /// In ko, this message translates to:
-  /// **'서버가 Host와 Proxmox에서 받은 상태'**
+  /// **'서버가 받은 상태'**
   String get statusServerGotFromHost;
 
   /// No description provided for @checkAgain3.
@@ -16798,7 +16804,7 @@ abstract class AppLocalizations {
   /// No description provided for @signingHereEndsStreamingConsole.
   ///
   /// In ko, this message translates to:
-  /// **'로그인하면 기존 로그인의 스트리밍·Console 연결이 끊겨요.'**
+  /// **'다른 곳의 로그인은 로그아웃되고 그쪽의 스트리밍·Console 연결이 끊겨요.'**
   String get signingHereEndsStreamingConsole;
 
   /// No description provided for @recoveryCodeHasBeenUsed.
@@ -16810,7 +16816,7 @@ abstract class AppLocalizations {
   /// No description provided for @signOutElsewhereSignHere.
   ///
   /// In ko, this message translates to:
-  /// **'다른 곳에서 로그아웃하고 여기서 로그인할까요?'**
+  /// **'여기서 로그인할까요?'**
   String get signOutElsewhereSignHere;
 
   /// No description provided for @signOutSign.
@@ -19146,7 +19152,7 @@ abstract class AppLocalizations {
   /// No description provided for @androidCheckingDesktopAgain.
   ///
   /// In ko, this message translates to:
-  /// **'데스크톱 상태를 다시 확인하는 중이에요'**
+  /// **'상태 다시 확인 중'**
   String get androidCheckingDesktopAgain;
 
   /// No description provided for @androidOpeningConsole.
@@ -19680,7 +19686,7 @@ abstract class AppLocalizations {
   /// No description provided for @samePcDetail.
   ///
   /// In ko, this message translates to:
-  /// **'여기서는 연결할 수 없어요. 다른 기기에서 연결하세요.'**
+  /// **'다른 기기에서 연결하세요.'**
   String get samePcDetail;
 
   /// No description provided for @samePcMessage.

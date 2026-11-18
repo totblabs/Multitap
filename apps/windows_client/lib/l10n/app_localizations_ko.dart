@@ -114,7 +114,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String opensDesktopsProxmoxConsoleApp(Object desktopName) {
-    return '$desktopName\n\n앱 안에서 데스크톱의 Proxmox 콘솔 화면을 열어요.\nProxmox에 따로 로그인하지 않아도 돼요.';
+    return '$desktopName\n\n데스크톱의 Proxmox 콘솔을 앱에서 열어요.\nProxmox 로그인은 필요 없어요.';
   }
 
   @override
@@ -402,14 +402,14 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get youreAboutShareAllStorage =>
-      '저장공간 전체를 공유하려고 해요.\n데스크톱의 프로그램이 이 저장공간의 모든 파일을 읽고 바꿀 수 있어요.\n꼭 필요한 폴더만 고르는 걸 권해요.';
+      '저장공간 전체를 공유해요.\n데스크톱에서 모든 파일을 읽고 바꿀 수 있어요.\n필요한 폴더만 고르길 권해요.';
 
   @override
   String get chosenFolder => '고른 폴더';
 
   @override
   String stoppedSharingBecausePermissionOpen(Object name) {
-    return '‘$name’ 폴더를 열 권한이 없어져서 공유를 끝냈어요';
+    return '‘$name’ 공유를 끝냈어요\n폴더를 열 권한이 없어졌어요';
   }
 
   @override
@@ -585,7 +585,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get chooseFolderMultitapNeedsSee =>
-      '폴더를 고르려면 Multitap이 이 기기의 저장공간을 볼 수 있어야 해요.\n허용하면 Multitap이 저장공간을 읽고 쓸 수 있어요. 데스크톱에는 고른 폴더만 보여요.';
+      '폴더를 고르려면 저장공간 접근을 허용해야 해요.\n데스크톱에는 고른 폴더만 보여요.';
 
   @override
   String get openSettings => '설정 열기';
@@ -841,20 +841,18 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String setLargestScaleWindowsAllows(Object scale) {
-    return '이 화면 크기에서 Windows가 허용하는 최대 배율 $scale%로 맞췄어요.';
+    return 'Windows 최대 배율 $scale%로 맞췄어요';
   }
 
   @override
-  String get couldntSendInputWhileScreen =>
-      '화면 크기를 맞추는 중이라 입력을 보내지 못했어요. 끝난 뒤 다시 입력하세요.';
+  String get couldntSendInputWhileScreen => '화면 크기를 맞추는 중이에요\n끝난 뒤 다시 입력하세요';
 
   @override
   String get couldntConfirmInputWasDelivered =>
       '입력 전달을 확인하지 못해 키보드를 닫았어요. 다시 열어 입력해 주세요.';
 
   @override
-  String get hostReceivesKoreanTextAs =>
-      '이 Host는 한글을 키 입력으로 받아요. 데스크톱이 한글 입력 상태일 때 그대로 입력되고, 영문이 나오면 키 줄의 한/영을 누르세요.';
+  String get hostReceivesKoreanTextAs => '한글이 영문으로 나오면\n키 줄의 한/영을 누르세요';
 
   @override
   String get controlCharactersCantSentSo => '제어 문자는 보낼 수 없어서 뺐어요.';
@@ -871,10 +869,10 @@ class AppLocalizationsKo extends AppLocalizations {
       '확인을 누르면 마우스를 데스크톱 안에 잠가요.\n뒤로 가기를 누르면 풀려요.';
 
   @override
-  String get mouseLockedInsideDesktopPress => '마우스를 데스크톱 안에 잠갔어요 · 뒤로 가기로 풀기';
+  String get mouseLockedInsideDesktopPress => '마우스 잠금 켬 · 뒤로 가기로 풀기';
 
   @override
-  String get someGamesSuchAsLeague => '롤 같은 일부 게임에서는 마우스가 움직이지 않을 수 있어요';
+  String get someGamesSuchAsLeague => '롤 같은 일부 게임에서는 안 움직일 수 있어요';
 
   @override
   String get mouseLockOff => '마우스 잠금 꺼짐';
@@ -884,11 +882,10 @@ class AppLocalizationsKo extends AppLocalizations {
       '화면 크기를 맞추지 못했어요. 메뉴 맨 위 연결 품질에서 ‘화면 크기 다시 적용’을 누르세요.';
 
   @override
-  String get deviceCantReceiveSharperPicture =>
-      '이 기기에서는 더 선명하게 받을 수 없어 자동 크기로 보여요.';
+  String get deviceCantReceiveSharperPicture => '기기가 더 받지 못해 자동 크기로 보여요';
 
   @override
-  String get couldntApplySharpSoShows => '선명하게를 적용하지 못해 자동 크기로 보여요.';
+  String get couldntApplySharpSoShows => '선명하게를 쓸 수 없어 자동 크기로 보여요';
 
   @override
   String get stoppedWaitingHostUpdateTap =>
@@ -971,6 +968,11 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String couldntApplySharpSoShows2(Object sharpRefusedReason, Object current) {
     return '선명하게를 적용하지 못해 자동 크기로 보여요 ($sharpRefusedReason) · $current';
+  }
+
+  @override
+  String shownAtAutoSize(Object current) {
+    return '자동 크기로 표시 · $current';
   }
 
   @override
@@ -1061,10 +1063,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pressBackRelease => '뒤로 가기로 풀어요';
 
   @override
-  String get locksMouseInsideDesktop => '마우스를 데스크톱 안에 잠가요';
+  String get locksMouseInsideDesktop => '데스크톱 안에 잠가요';
 
   @override
-  String get availableWhenMouseConnected => '마우스를 연결하면 쓸 수 있어요';
+  String get availableWhenMouseConnected => '마우스 연결 필요';
 
   @override
   String get touchControlsPrinterCopy => '터치 조작 · 프린터 · 복사';
@@ -1134,7 +1136,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get couldntConfirmShortcutWasSent =>
-      '단축키 전송 결과를 확인하지 못했어요. 원격 화면을 확인한 뒤 필요하면 다시 선택해 주세요.';
+      '단축키 전송을 확인하지 못했어요\n화면을 보고 다시 눌러 보세요';
 
   @override
   String get technology => '연결 기술';
@@ -1761,7 +1763,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get androidSettingsAllowInstallUnknown =>
-      'Android 설정에서 Multitap의\n‘알 수 없는 앱 설치’를 허용해 주세요.\n허용한 뒤 이 화면으로 돌아오세요.\n설정에서 언제든 다시 끌 수 있어요.';
+      'Android 설정에서 Multitap의\n‘알 수 없는 앱 설치’를 허용한 뒤 돌아오세요.\n설정에서 언제든 다시 끌 수 있어요.';
 
   @override
   String get checkingInstallPermissionDownloadLocation =>
@@ -1964,7 +1966,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get desktopConnectedFromAnotherWindow =>
-      '이 데스크톱은 다른 창이나 기기에서 연결 중이에요. 아래 버튼을 누르면 그쪽 연결을 끊고 여기서 이어서 써요. 데스크톱과 실행 중인 작업은 그대로예요.';
+      '다른 곳에서 연결 중이에요. 끊고 여기서 이어서 쓸 수 있어요. 실행 중인 작업은 그대로예요.';
 
   @override
   String get connectionSetupCanceledYouCan => '연결 준비를 취소했어요. 다시 연결할 수 있어요.';
@@ -2096,7 +2098,7 @@ class AppLocalizationsKo extends AppLocalizations {
       '서버에 연결하지 못했어요. 네트워크를 확인해 주세요.';
 
   @override
-  String get serverIsntRespondingTryAgain => '서버가 응답하지 않아요. 잠시 후 다시 시도하세요.';
+  String get serverIsntRespondingTryAgain => '서버가 응답하지 않아요.\n잠시 후 다시 시도하세요.';
 
   @override
   String get checkCurrentPassword => '현재 비밀번호를 확인해 주세요.';
@@ -2240,7 +2242,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get youDontHavePermissionDesktop =>
-      '이 데스크톱을 쓸 권한이 없거나 배정이 바뀌었어요. 목록을 새로고침하고, 필요하면 관리자에게 요청하세요.';
+      '이 데스크톱을 쓸 권한이 없거나 배정이 바뀌었어요. 목록을 새로고침해 보세요.';
 
   @override
   String get cantCheckPowerActionsResult =>
@@ -2460,7 +2462,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get useRequestingDisconnects => '사용 중 · 요청하면 연결을 끊어요';
 
   @override
-  String get notUseUpdatesRightAway => '사용 중 아님 · 요청하면 바로 업데이트해요';
+  String get notUseUpdatesRightAway => '사용 중 아님 · 바로 업데이트해요';
 
   @override
   String get notRequestedYet => '아직 요청하지 않았어요';
@@ -2476,7 +2478,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get acceptedByServerWaitingInstall => '서버 접수됨 · 설치 결과를 기다려요';
 
   @override
-  String get updatesWhenOtherUsersConnection => '다른 사용자의 연결이 끝나면 업데이트해요';
+  String get updatesWhenOtherUsersConnection => '다른 사용자 연결이 끝나면 업데이트';
 
   @override
   String get useUpdatesWhenConnectionEnds => '사용 중 · 연결이 끝나면 업데이트해요';
@@ -2518,7 +2520,7 @@ class AppLocalizationsKo extends AppLocalizations {
       '아직 접수되지 않은 남은 요청을 중지했어요';
 
   @override
-  String get serverCantCheckUpdatePermission => '서버에서 업데이트 권한·상태를 확인할 수 없어요';
+  String get serverCantCheckUpdatePermission => '권한·상태를 확인할 수 없어요';
 
   @override
   String get hostOffline => 'Host 오프라인';
@@ -4092,7 +4094,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get desktopWasConnectedFromAnother =>
-      '다른 창이나 기기에서 이 데스크톱에 연결해 이 연결이 끊겼어요. 다시 연결하면 그쪽 연결을 끊을 수 있어요.';
+      '다른 곳에서 연결해 이 연결이 끊겼어요. 다시 연결하면 그쪽을 끊을 수 있어요.';
 
   @override
   String get administratorChangedClipboardSharingPermission =>
@@ -4182,7 +4184,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get desktopConnectedSomewhereElseInformation =>
-      '다른 곳에서 연결 중이에요. 그 연결을 끊는 데 필요한 정보를 받지 못했어요. 다시 연결해 보고, 계속되면 관리자에게 알려 주세요.';
+      '다른 곳에서 연결 중인데 끊을 수 없어요. 다시 연결해 보고, 계속되면 관리자에게 알려 주세요.';
 
   @override
   String connectedAccount(Object username) {
@@ -4541,7 +4543,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String noDesktopsMatch2(Object short) {
-    return '\'$short\'에 맞는 데스크톱이 없어요';
+    return '\'$short\' 검색 결과가 없어요';
   }
 
   @override
@@ -4645,7 +4647,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String remoteUpdateNotSupportedInstall2(Object host) {
-    return '$host · 원격 업데이트 미지원 · 직접 설치 필요';
+    return '$host · 원격 업데이트 미지원 · 직접 설치';
   }
 
   @override
@@ -4692,12 +4694,12 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String hostUpdatedWindowsRestartNeeded(Object targetVersion) {
-    return 'Host $targetVersion 업데이트 완료 · Windows 다시 시작 필요';
+    return 'Host $targetVersion 설치됨 · Windows 다시 시작 필요';
   }
 
   @override
   String hostUpdatedCheckHostSettings(Object targetVersion) {
-    return 'Host $targetVersion 업데이트 완료 · Host 설정 확인 필요';
+    return 'Host $targetVersion 설치됨 · Host 설정 확인 필요';
   }
 
   @override
@@ -4719,33 +4721,31 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get hostDidntReconnectAfterUpdate => 'Host가 업데이트 후 다시 연결되지 않았어요';
+  String get hostDidntReconnectAfterUpdate => 'Host 다시 연결 안 됨';
 
   @override
   String get checkConnectionStatusHostDiagnostics =>
-      'Host 진단과 서버 활동 기록에서 연결 상태를 확인하세요.';
+      'Host 진단과 서버 활동 기록을 확인하세요.';
 
   @override
-  String get checkServiceStatusLocalPcs =>
-      '로컬 PC의 Host 설정 → 진단에서 서비스 상태를 확인하세요.';
+  String get checkServiceStatusLocalPcs => '로컬 PC의 Host 설정 → 진단을 확인하세요.';
 
   @override
-  String get openDesktopConsoleCheckHost =>
-      'Console로 데스크톱을 열고 Host 설정 → 진단을 확인하세요.';
+  String get openDesktopConsoleCheckHost => 'Console에서 Host 설정 → 진단을 확인하세요.';
 
   @override
   String couldntConfirmUpdateResultConnection(Object host) {
-    return '$host 업데이트 결과와 연결을 확인하지 못했어요.';
+    return '$host 업데이트 결과를 확인하지 못했어요.';
   }
 
   @override
   String couldntGetResponseFromAfter(Object host) {
-    return '$host 업데이트 실패 후 응답을 확인하지 못했어요.';
+    return '$host 업데이트 실패 뒤 응답이 없어요.';
   }
 
   @override
   String couldntGetResponseFromAfter2(Object host) {
-    return '$host 업데이트 완료 보고 뒤 응답을 확인하지 못했어요.';
+    return '$host 업데이트 완료 뒤 응답이 없어요.';
   }
 
   @override
@@ -4848,7 +4848,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get copyPaste => '복사·붙여넣기';
 
   @override
-  String get youCanPasteCopiedText => '복사한 글을 기기와 데스크톱 사이에서 붙여넣을 수 있어요.';
+  String get youCanPasteCopiedText => '복사한 글을 서로 붙여넣을 수 있어요.';
 
   @override
   String get youCanPasteTextCopied => '기기에서 복사한 글을 데스크톱에 붙여넣을 수 있어요.';
@@ -4901,8 +4901,7 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get desktopHasNoSoundDevice2 =>
-      '이 데스크톱에는 소리 장치가 없어요. 관리자가 Proxmox에서 오디오 장치를 추가해야 해요.';
+  String get desktopHasNoSoundDevice2 => '이 데스크톱에는 소리 장치가 없어요\n관리자에게 알려 주세요';
 
   @override
   String get restartDesktopUseSoundDevice => '소리 장치를 쓰려면 데스크톱을 다시 시작해야 해요.';
@@ -5216,7 +5215,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get connectedDesktopsConnectionEndsUpdate =>
-      '연결된 데스크톱은 내 연결을 끊고 바로 업데이트해요.\n다른 사용자가 연결 중이면 그 연결이 끝난 뒤 업데이트해요.';
+      '연결된 데스크톱은 내 연결을 끊고 바로 업데이트해요.\n다른 사용자가 연결 중이면 끝난 뒤에 해요.';
 
   @override
   String get stopRemainingRequestsClose => '남은 요청 중지·닫기';
@@ -5238,7 +5237,7 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get currentVersionUnknown => '현재 버전 확인 필요';
+  String get currentVersionUnknown => '버전 확인 필요';
 
   @override
   String get windowsRestartNeeded => 'Windows 다시 시작 필요';
@@ -5401,8 +5400,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get shutDown => '종료';
 
   @override
-  String get stopIsntAvailableServerYet =>
-      '이 서버에서는 아직 정지를 쓸 수 없어요. 관리자에게 알려 주세요.';
+  String get stopIsntAvailableServerYet => '이 서버는 정지를 지원하지 않아요.';
 
   @override
   String get localPc2 => '로컬 PC를';
@@ -5495,11 +5493,10 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get windowsNeedsRestart => 'Windows를 다시 시작해야 해요';
+  String get windowsNeedsRestart => 'Windows 다시 시작 필요';
 
   @override
-  String get getsVirtualDisplayReadyUnsaved =>
-      '그래야 가상 화면이 준비돼요. 저장하지 않은 작업은 사라질 수 있어요.';
+  String get getsVirtualDisplayReadyUnsaved => '저장하지 않은 작업은 사라질 수 있어요.';
 
   @override
   String get signedOverRdp => 'RDP로 로그인돼 있어요';
@@ -5508,22 +5505,22 @@ class AppLocalizationsKo extends AppLocalizations {
   String get virtualDisplayCantPreparedRdp2 => 'RDP 로그인에서는 가상 화면을 준비할 수 없어요.';
 
   @override
-  String get notSignedWindows => 'Windows에 로그인돼 있지 않아요';
+  String get notSignedWindows => 'Windows 로그인 필요';
 
   @override
-  String get windowsAccountNeedsChecking => 'Windows 계정 확인이 필요해요';
+  String get windowsAccountNeedsChecking => 'Windows 계정 확인 필요';
 
   @override
-  String get couldntCheckWindowsScreen => 'Windows 화면을 확인하지 못했어요';
+  String get couldntCheckWindowsScreen => 'Windows 화면 확인 안 됨';
 
   @override
-  String get refreshCheckAgainIfKeeps2 => '새로고침해 다시 확인하세요. 계속되면 관리자에게 알려 주세요.';
+  String get refreshCheckAgainIfKeeps2 => '새로고침해 다시 확인하세요.';
 
   @override
-  String get windowsScreenFromRdpOpen => 'RDP에서 쓰던 Windows 화면이 있어요';
+  String get windowsScreenFromRdpOpen => 'RDP에 Windows 화면 있음';
 
   @override
-  String get bringScreenIntoStreamingConnect => '그 화면을 스트리밍으로 가져와야 연결할 수 있어요.';
+  String get bringScreenIntoStreamingConnect => '그 화면을 가져와야 연결할 수 있어요.';
 
   @override
   String get windowsLocked2 => 'Windows가 잠겨 있어요';
@@ -5532,60 +5529,55 @@ class AppLocalizationsKo extends AppLocalizations {
   String get unlockConnect => '잠금을 해제하면 연결할 수 있어요.';
 
   @override
-  String get signWindowsAdministratorAccount => 'Windows 관리자 계정으로 로그인해야 해요';
+  String get signWindowsAdministratorAccount => '관리자 계정 로그인 필요';
 
   @override
-  String get virtualDisplayNeedsRepair => '가상 화면을 복구해야 해요';
+  String get virtualDisplayNeedsRepair => '가상 화면 복구 필요';
 
   @override
-  String get youCanRepairHostSettings => 'Host 설정에서 복구할 수 있어요. 관리자에게 알려 주세요.';
+  String get youCanRepairHostSettings => 'Host 설정에서 복구 · 관리자에게 알려 주세요';
 
   @override
-  String get virtualDisplayIsntReady => '가상 화면이 준비되지 않았어요';
+  String get virtualDisplayIsntReady => '가상 화면 준비 안 됨';
 
   @override
-  String get refreshMomentIfKeepsHappening =>
-      '잠시 후 새로고침하세요. 계속되면 관리자에게 알려 주세요.';
+  String get refreshMomentIfKeepsHappening => '잠시 후 새로고침하세요.';
 
   @override
-  String get virtualDisplayDriverNeedsChecking => '가상 화면 드라이버를 확인해야 해요';
+  String get virtualDisplayDriverNeedsChecking => '드라이버 확인 필요';
 
   @override
-  String get youCanCheckHostSettings =>
-      'Host 설정의 진단에서 확인할 수 있어요. 관리자에게 알려 주세요.';
+  String get youCanCheckHostSettings => 'Host 설정 → 진단 확인 · 관리자에게 알려 주세요';
 
   @override
-  String get virtualDisplaySettingsNeedChecking2 => '가상 화면 설정 확인이 필요해요';
+  String get virtualDisplaySettingsNeedChecking2 => '가상 화면 설정 확인';
 
   @override
-  String get hostSettingUpScreen => 'Host가 화면을 구성하고 있어요';
+  String get hostSettingUpScreen => 'Host가 화면 구성 중';
 
   @override
   String get youCanConnectWhenSetup => '구성이 끝나면 연결할 수 있어요.';
 
   @override
-  String get couldntCheckVirtualDisplayStatus2 => '가상 화면 상태를 확인하지 못했어요';
+  String get couldntCheckVirtualDisplayStatus2 => '가상 화면 확인 안 됨';
 
   @override
   String get checkingWindowsSign => 'Windows 로그인 확인 중';
 
   @override
-  String get checkingWindowsSignStateUpdates =>
-      'Windows 로그인 상태를 확인하고 있어요. 준비되면 바로 바뀌어요.';
+  String get checkingWindowsSignStateUpdates => 'Windows 로그인 상태를 확인하고 있어요.';
 
   @override
   String get preparingScreen => '화면 준비 중';
 
   @override
-  String get preparingVirtualDisplayUpdatesAs =>
-      '가상 화면을 준비하고 있어요. 끝나면 바로 바뀌어요.';
+  String get preparingVirtualDisplayUpdatesAs => '가상 화면을 준비하고 있어요.';
 
   @override
   String get preparing3 => '연결 준비 중';
 
   @override
-  String get hostPreparingConnectionUpdatesAs =>
-      'Host가 연결을 준비하고 있어요. 끝나면 바로 바뀌어요.';
+  String get hostPreparingConnectionUpdatesAs => 'Host가 연결을 준비하고 있어요.';
 
   @override
   String get power => '전원';
@@ -5615,8 +5607,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get responding => '응답함';
 
   @override
-  String get notRespondingIfWindowsStarting =>
-      '응답하지 않아요 · Windows가 시작 중이면 잠시 기다려 주세요';
+  String get notRespondingIfWindowsStarting => '응답 없음 · Windows 시작 중이면 기다리세요';
 
   @override
   String get noResponseYet => '응답을 아직 받지 못했어요';
@@ -5661,7 +5652,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String availableViaCheckedAgainWhen(Object server) {
-    return '$server 경유 연결 가능 · 연결할 때 다시 확인해요';
+    return '$server 경유 연결 가능 · 연결할 때 다시 확인';
   }
 
   @override
@@ -5712,7 +5703,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get powerAction => '전원 작업 중';
 
   @override
-  String get ifWindowsDoesNotRespond => 'Windows가 응답하지 않으면 전원 메뉴에서 정지할 수 있어요.';
+  String get ifWindowsDoesNotRespond => '응답이 없으면 전원 메뉴에서 정지하세요.';
 
   @override
   String get statusCheckedAgainWhenFinishes => '작업이 끝나면 상태를 다시 확인해요.';
@@ -5721,10 +5712,10 @@ class AppLocalizationsKo extends AppLocalizations {
   String get windowsSign2 => 'Windows 로그인';
 
   @override
-  String get takeOverWindowsScreenConnect => 'Windows 화면을 넘겨받아 연결';
+  String get takeOverWindowsScreenConnect => 'Windows 화면 넘겨받기';
 
   @override
-  String get bringsWindowsScreenUsedRdp => 'RDP에서 쓰던 Windows 화면을 스트리밍으로 가져와요.';
+  String get bringsWindowsScreenUsedRdp => 'RDP에서 쓰던 화면을 스트리밍으로 가져와요.';
 
   @override
   String get readyConnect => '연결 준비됨';
@@ -5745,14 +5736,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get letAdministratorKnow => '관리자에게 알려 주세요.';
 
   @override
-  String get cleaningUpConnectionJustEnded =>
-      '방금 끝난 연결을 정리하고 있어요. 누르면 끝나는 대로 연결해요.';
+  String get cleaningUpConnectionJustEnded => '연결 정리 중 · 누르면 끝나는 대로 연결해요';
 
   @override
-  String get screenRestoreNotConfirmed => '화면 복원이 확인되지 않았어요';
+  String get screenRestoreNotConfirmed => '화면 복원 확인 안 됨';
 
   @override
-  String get cleaningUpLastConnection => '이전 연결을 정리하고 있어요';
+  String get cleaningUpLastConnection => '이전 연결 정리 중';
 
   @override
   String get youCanConnectWhenDone => '끝나면 연결할 수 있어요.';
@@ -5767,7 +5757,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get checking => '확인 중';
 
   @override
-  String get settingUpVirtualDisplay => '가상 화면을 구성하고 있어요';
+  String get settingUpVirtualDisplay => '가상 화면 구성 중';
 
   @override
   String get updating2 => '업데이트 중';
@@ -5791,45 +5781,41 @@ class AppLocalizationsKo extends AppLocalizations {
   String get preparingConnection => '연결을 준비하고 있어요';
 
   @override
-  String get windowsHasStartedChangesAs =>
-      'Windows가 시작됐어요. Host가 연결되면 바로 바뀌어요.';
+  String get windowsHasStartedChangesAs => 'Windows 시작됨 · Host가 연결되면 바뀌어요';
 
   @override
   String get hostDisconnected => 'Host 연결 끊김';
 
   @override
   String get desktopRunningChangesAutomaticallyWhen =>
-      '데스크톱은 실행 중이에요. Host가 돌아오면 자동으로 바뀌어요.';
+      '실행 중 · Host가 돌아오면 자동으로 바뀌어요';
 
   @override
   String get hostNotResponding => 'Host가 응답하지 않아요';
 
   @override
-  String get ifYouJustStartedWait => '방금 켰다면 잠시 기다려 주세요. 계속되면 관리자에게 알려 주세요.';
+  String get ifYouJustStartedWait => '방금 켰다면 잠시 기다려 주세요.';
 
   @override
   String get unlockConsole => 'Console에서 잠금을 해제하세요.';
 
   @override
-  String get ifSigningAutomaticallyYouCan =>
-      '자동 로그인 중이면 곧 연결할 수 있어요. 아니면 Console에서 로그인하세요.';
+  String get ifSigningAutomaticallyYouCan => '곧 연결돼요 · 안 되면 Console에서 로그인';
 
   @override
-  String get signFromConsoleAfterRestart =>
-      'Console에서 로그인하세요. 다시 시작하면 자동으로 로그인돼요.';
+  String get signFromConsoleAfterRestart => 'Console에서 로그인하거나 다시 시작하세요.';
 
   @override
-  String get virtualDisplayNeedsCheckedHost =>
-      'Host 설정에서 가상 화면을 확인해야 해요. 관리자에게 알려 주세요.';
+  String get virtualDisplayNeedsCheckedHost => '가상 화면 확인 필요 · 관리자에게 알려 주세요';
 
   @override
-  String get checkingStreamingReadiness => '스트리밍 준비를 확인하고 있어요';
+  String get checkingStreamingReadiness => '스트리밍 준비 확인 중';
 
   @override
   String get changesAsSoonAsHost => 'Host가 상태를 보고하면 바로 바뀌어요.';
 
   @override
-  String get waitingHostConnect2 => 'Host 연결을 기다리고 있어요';
+  String get waitingHostConnect2 => 'Host 연결 대기 중';
 
   @override
   String get checkingStatus => '상태를 확인하고 있어요';
@@ -6085,7 +6071,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get webclientServiceDesktopOffMissing =>
-      '데스크톱의 WebClient 서비스가 꺼져 있거나 없어요.\n관리자에게 알려 주세요.';
+      '데스크톱 WebClient가 꺼져 있어요.\n관리자에게 알려 주세요.';
 
   @override
   String get desktopHasNoDriveLetters =>
@@ -6151,7 +6137,7 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get shareFolderDesktopAsDrive => '이 폴더를 데스크톱에 드라이브로 공유할까요?';
+  String get shareFolderDesktopAsDrive => '이 폴더를 공유할까요?';
 
   @override
   String folderCautionYouCanTurn(Object path, Object risk) {
@@ -9328,7 +9314,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get checked3 => '점검 시각';
 
   @override
-  String get statusServerGotFromHost => '서버가 Host와 Proxmox에서 받은 상태';
+  String get statusServerGotFromHost => '서버가 받은 상태';
 
   @override
   String get checkAgain3 => '다시 점검';
@@ -9710,13 +9696,13 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get signingHereEndsStreamingConsole =>
-      '로그인하면 기존 로그인의 스트리밍·Console 연결이 끊겨요.';
+      '다른 곳의 로그인은 로그아웃되고 그쪽의 스트리밍·Console 연결이 끊겨요.';
 
   @override
   String get recoveryCodeHasBeenUsed => '복구 코드는 사용됐어요. 취소해도 다시 쓸 수 없어요.';
 
   @override
-  String get signOutElsewhereSignHere => '다른 곳에서 로그아웃하고 여기서 로그인할까요?';
+  String get signOutElsewhereSignHere => '여기서 로그인할까요?';
 
   @override
   String get signOutSign => '로그아웃하고 로그인';
@@ -11114,7 +11100,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get androidCheckingOtherConnection => '다른 연결이 있는지 확인하는 중이에요';
 
   @override
-  String get androidCheckingDesktopAgain => '데스크톱 상태를 다시 확인하는 중이에요';
+  String get androidCheckingDesktopAgain => '상태 다시 확인 중';
 
   @override
   String get androidOpeningConsole => 'Console을 여는 중이에요';
@@ -11407,7 +11393,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get samePcHeadline => '지금 쓰고 있는 PC예요';
 
   @override
-  String get samePcDetail => '여기서는 연결할 수 없어요. 다른 기기에서 연결하세요.';
+  String get samePcDetail => '다른 기기에서 연결하세요.';
 
   @override
   String get samePcMessage =>

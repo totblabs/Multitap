@@ -171,8 +171,8 @@ void main() {
         );
         await open(tester, [desktop]);
         expect(find.text(label), findsWidgets, reason: reason);
-        expect(find.text('Windows에 로그인돼 있지 않아요'), findsNothing, reason: reason);
-        expect(find.text('가상 화면이 준비되지 않았어요'), findsNothing, reason: reason);
+        expect(find.text('Windows 로그인 필요'), findsNothing, reason: reason);
+        expect(find.text('가상 화면 준비 안 됨'), findsNothing, reason: reason);
         final button = tester.widget<FilledButton>(mainButton(desktop.id));
         expect(button.onPressed, isNull, reason: reason);
         await tester.pumpWidget(const SizedBox.shrink());
@@ -201,7 +201,7 @@ void main() {
         vmStateRevision: 1,
       );
       await open(tester, [desktop]);
-      expect(find.text('Windows에 로그인돼 있지 않아요'), findsWidgets);
+      expect(find.text('Windows 로그인 필요'), findsWidgets);
       expect(find.text('Console로 열기'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
     },

@@ -113,7 +113,7 @@ void main() {
       await t.tap(find.byKey(const Key('login-submit')));
       await t.pump();
       await t.pump(const Duration(milliseconds: 350));
-      expect(find.text('다른 곳에서 로그아웃하고 여기서 로그인할까요?'), findsOneWidget);
+      expect(find.text('여기서 로그인할까요?'), findsOneWidget);
       expect(broker.liveOwner, 'other-device');
       expect(broker.confirmations, 0);
       await t.tap(find.text('취소'));

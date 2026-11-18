@@ -780,9 +780,9 @@ void main() {
         ];
       await start(tester, api);
       await login(tester);
-      expect(statusOf(tester, 'vm149'), '가상 화면이 준비되지 않았어요');
+      expect(statusOf(tester, 'vm149'), '가상 화면 준비 안 됨');
       // The one main button is the refresh; its tooltip keeps the reason.
-      expect(badgeDetail(tester, 'attention-vm149'), '가상 화면이 준비되지 않았어요');
+      expect(badgeDetail(tester, 'attention-vm149'), '가상 화면 준비 안 됨');
       expect(find.text('Host 연결을 기다리고 있어요.'), findsNothing);
       expect(find.byKey(const Key('open-vm149')), findsNothing);
       await tester.tap(find.byKey(const Key('stream-state-vm149')));

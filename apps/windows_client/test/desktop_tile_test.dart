@@ -720,9 +720,9 @@ void main() {
         final f = await _show(t, [machine]);
         expect(find.text(label), findsWidgets, reason: reason);
         expect(find.text(prep.badge), findsNothing, reason: reason);
-        expect(find.text('Windows에 로그인돼 있지 않아요'), findsNothing);
-        expect(find.text('가상 화면이 준비되지 않았어요'), findsNothing);
-        expect(find.text('Windows 화면을 확인하지 못했어요'), findsNothing);
+        expect(find.text('Windows 로그인 필요'), findsNothing);
+        expect(find.text('가상 화면 준비 안 됨'), findsNothing);
+        expect(find.text('Windows 화면 확인 안 됨'), findsNothing);
         final button = t.widget<FilledButton>(
           find.byKey(const Key('open-pve-153')),
         );
@@ -764,7 +764,7 @@ void main() {
           ];
           await t.pumpWidget(f.shell());
           await t.pump(const Duration(milliseconds: 300));
-          expect(find.text('Windows에 로그인돼 있지 않아요'), findsWidgets);
+          expect(find.text('Windows 로그인 필요'), findsWidgets);
           expect(
             find.byKey(const Key('readiness-verdict-progress')),
             findsNothing,
@@ -797,7 +797,7 @@ void main() {
         ),
       );
       expect(r.phase, TilePhase.attention, reason: '$state');
-      expect(r.headline, 'Windows에 로그인돼 있지 않아요', reason: '$state');
+      expect(r.headline, 'Windows 로그인 필요', reason: '$state');
       expect(r.primary, ReadinessAction.console, reason: '$state');
       expect(r.progressLabel, isNull, reason: '$state');
     }
@@ -824,7 +824,7 @@ void main() {
       final f = await _show(t, [
         vm('pve-152', preparation: StreamPreparation.display),
       ]);
-      expect(find.text('가상 화면이 준비되지 않았어요'), findsWidgets);
+      expect(find.text('가상 화면 준비 안 됨'), findsWidgets);
       expect(find.byKey(const Key('open-pve-152')), findsNothing);
       expect(find.byKey(const Key('stream-modes-pve-152')), findsNothing);
       expect(find.text('다시 시작'), findsNothing);

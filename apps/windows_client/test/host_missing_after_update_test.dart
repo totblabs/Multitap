@@ -15,8 +15,8 @@ import 'package:multitap_client/ui/desktop_readiness.dart';
 import 'package:multitap_client/ui/readiness_dialog.dart';
 import 'package:multitap_client/ui/workspace_shell.dart';
 
-const headline = 'Host가 업데이트 후 다시 연결되지 않았어요';
-const guidance = 'Console로 데스크톱을 열고 Host 설정 → 진단을 확인하세요.';
+const headline = 'Host 다시 연결 안 됨';
+const guidance = 'Console에서 Host 설정 → 진단을 확인하세요.';
 const pcId = 'pc-b1234567-89ab-cdef-8123-0123456789ab';
 
 /// One desktop list entry as the broker sends it.
@@ -156,7 +156,7 @@ void main() {
       await t.pump(const Duration(milliseconds: 300));
       expect(find.byType(ReadinessDialog), findsOneWidget);
       final steps = textOf(t, 'readiness-detail-1')!;
-      expect(steps, startsWith('Host 0.2.146 업데이트 실패 후 응답을 확인하지 못했어요.'));
+      expect(steps, startsWith('Host 0.2.146 업데이트 실패 뒤 응답이 없어요.'));
       expect(steps, contains('Host 설정 → 진단'));
       expect(steps, isNot(contains('보호 기록')));
       expect(steps, isNot(contains('복원')));
@@ -180,7 +180,7 @@ void main() {
       of(listed('pve-247', missing: {...failedAttempt, 'result': 'completed'}))
           .checks[1]
           .detail,
-      startsWith('Host 0.2.146 업데이트 완료 보고 뒤 응답을 확인하지 못했어요.'),
+      startsWith('Host 0.2.146 업데이트 완료 뒤 응답이 없어요.'),
     );
     // A PC has no Proxmox power: its card says the same.
     expect(

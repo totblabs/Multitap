@@ -110,7 +110,7 @@ void main() {
       expect(wait.waiting, isFalse, reason: 'it ends the wait: $other');
     }
     // The error text of a restart that is not waited for (or outlasted the wait).
-    expect(_restart.message, '서버가 응답하지 않아요. 잠시 후 다시 시도하세요.');
+    expect(_restart.message, '서버가 응답하지 않아요.\n잠시 후 다시 시도하세요.');
     expect(_restart.serverRestarting, isTrue);
     expect(refused.serverRestarting, isTrue);
     expect(const BrokerException('network_error').serverRestarting, isFalse);
@@ -215,7 +215,7 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await drain(tester);
     expect(workspace(tester).notice, isNull);
-    expect(workspace(tester).error, '서버가 응답하지 않아요. 잠시 후 다시 시도하세요.');
+    expect(workspace(tester).error, '서버가 응답하지 않아요.\n잠시 후 다시 시도하세요.');
     expect(find.byKey(const Key('workspace-error')), findsOneWidget);
     api.restarts = 0;
     await tester.pumpWidget(const SizedBox.shrink());

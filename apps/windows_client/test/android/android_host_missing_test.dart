@@ -47,7 +47,7 @@ void main() {
         headline,
       );
       expect(
-        find.text('Console로 데스크톱을 열고 Host 설정 → 진단을 확인하세요.'),
+        find.text('Console에서 Host 설정 → 진단을 확인하세요.'),
         findsOneWidget,
       );
       for (final unprovenAdvice in ['보호 기록', '복원', '다시 설치']) {

@@ -38,7 +38,7 @@ void main() {
                       backgroundColor: const Color(0xFF080D16),
                       body: SessionStatusPanel(
                         machine: 'TESTER · Windows',
-                        message: '이 데스크톱은 다른 창이나 기기에서 연결 중이에요. 아래 버튼을 누르면 그쪽 연결을 끊고 여기서 이어서 써요. 데스크톱과 실행 중인 작업은 그대로예요.',
+                        message: '다른 곳에서 연결 중이에요. 끊고 여기서 이어서 쓸 수 있어요. 실행 중인 작업은 그대로예요.',
                         busy: busy,
                         backLabel: '원격 창 닫기',
                         retryLabel: '끊고 여기서 연결',
@@ -374,7 +374,7 @@ void main() {
       const size = Size(360, 640);
       t.view.physicalSize = size;
       const message =
-          '이 데스크톱은 다른 창이나 기기에서 연결 중이에요. 아래 버튼을 누르면 그쪽 연결을 끊고 여기서 이어서 써요. 데스크톱과 실행 중인 작업은 그대로예요.';
+          '다른 곳에서 연결 중이에요. 끊고 여기서 이어서 쓸 수 있어요. 실행 중인 작업은 그대로예요.';
       final details = [
         for (var i = 0; i < 5; i++) '연결 중인 계정 account-$i · 11월 11일 10:2$i부터',
       ];

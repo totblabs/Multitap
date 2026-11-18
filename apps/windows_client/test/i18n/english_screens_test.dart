@@ -377,7 +377,7 @@ void main() {
     // A USB device moving to this window is not a file transfer.
     expect(l10n.usbMovingHere, 'Moving');
     expect(l10n.starting(l10n.desktop3), 'Starting the desktop');
-    expect(l10n.currentVersionUnknown, 'Current version unknown');
+    expect(l10n.currentVersionUnknown, 'Version unknown');
     // The field says "ID": so do the lines about it.
     expect(l10n.id, 'ID');
     for (final line in [

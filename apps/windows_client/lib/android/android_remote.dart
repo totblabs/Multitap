@@ -2606,7 +2606,6 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   /// resize, or a picture encoded smaller): the automatic size until 선명하게
   /// is chosen again.
   bool _sharpRefused = false;
-  String? _sharpRefusedReason;
 
   /// Windows' scale as the person set it, relative to the automatic size
   /// (1.0 = 100 % there): the scale asked of Windows follows the picture's
@@ -2675,7 +2674,6 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
         _sharpKey = _sharpPendingKey = null;
         _sharpPlanning = null;
         _sharpRefused = false;
-        _sharpRefusedReason = null;
         widget.sharpPicture.off();
       }
       _syncSharpScale();
@@ -2728,7 +2726,6 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   void _sharpFellBack(String reason) {
     if (_sharpRefused || _sharpActive == null) return;
     _sharpRefused = true;
-    _sharpRefusedReason = reason;
     widget.sharpPicture.hostFallback(reason);
     _notice(l10n.couldntApplySharpSoShows);
     _attemptedViewport = null;
@@ -3210,7 +3207,6 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
       if (choice.resolution != previous.resolution) {
         // 선명하게 chosen (again): the desktop is asked once more.
         _sharpRefused = false;
-        _sharpRefusedReason = null;
       }
       _saveScreenChoice(policy.deviceClass, choice);
     });
@@ -3326,7 +3322,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
       resolutionNote = l10n.selected(desiredWidth, desiredHeight, requestNote, current);
     } else if (resolution.kind == AndroidResolutionKind.sharp) {
       // What 선명하게 gives here, or why it gives the automatic size.
-      final plan = _sharpActive, planned = _sharpPlan;
+      final plan = _sharpActive;
       final currentWidth = session.sourceWidth,
           currentHeight = session.sourceHeight;
       final current =
@@ -3336,13 +3332,13 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
               currentHeight > 0
           ? l10n.current2(currentWidth, currentHeight)
           : l10n.checkingCurrent;
+      // One line: what is in force. Why it is less than asked was said in a
+      // notice when it happened and stays in 연결 통계 (선명하게).
       resolutionNote = plan != null
-          ? l10n.sharp2(plan.width, plan.height, plan.reason == null ? '' : ' (${androidSharpReasonLabel(plan.reason)})', current)
-          : _sharpRefused
-          ? l10n.couldntApplySharpSoShows2(androidSharpReasonLabel(_sharpRefusedReason), current)
-          : _sharpPendingKey != null
+          ? l10n.sharp2(plan.width, plan.height, '', current)
+          : !_sharpRefused && _sharpPendingKey != null
           ? l10n.checkingSharp(current)
-          : l10n.cantReceiveSharperPictureSo(planned == null ? '' : ' (${androidSharpReasonLabel(planned.reason)})', current);
+          : l10n.shownAtAutoSize(current);
     }
     return AndroidScreenOptions(
       deviceClass: policy.deviceClass,

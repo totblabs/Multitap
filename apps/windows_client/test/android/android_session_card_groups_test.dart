@@ -106,10 +106,10 @@ List<SessionToolbarMenu> _phone(
       SessionToolbarMenu.command(
         key: const Key('android-session-game-mouse'),
         label: SessionTool.gameMouse.label,
-        tooltip: locked ? '마우스 잠금 끄기 · 뒤로 가기로 풀기' : '마우스 잠금 · 마우스를 데스크톱 안에 잠가요',
+        tooltip: locked ? '마우스 잠금 끄기 · 뒤로 가기로 풀기' : '마우스 잠금 · 데스크톱 안에 잠가요',
         icon: SessionTool.gameMouse.icon,
         active: locked,
-        disabledReason: '마우스를 연결하면 쓸 수 있어요',
+        disabledReason: '마우스 연결 필요',
         onInteract: () {},
         onPressed: mouse ? () => host.used.add('game-mouse') : null,
       ),
@@ -572,7 +572,7 @@ void main() {
       expect(
         find.descendant(
           of: _mouseRow,
-          matching: find.text('마우스를 연결하면 쓸 수 있어요'),
+          matching: find.text('마우스 연결 필요'),
         ),
         findsOneWidget,
       );
@@ -581,7 +581,7 @@ void main() {
         findsNothing,
       );
       expect(
-        find.byTooltip('마우스 잠금 · 마우스를 데스크톱 안에 잠가요 · 마우스를 연결하면 쓸 수 있어요'),
+        find.byTooltip('마우스 잠금 · 데스크톱 안에 잠가요 · 마우스 연결 필요'),
         findsOneWidget,
       );
       await tester.tap(_mouseRow, warnIfMissed: false);

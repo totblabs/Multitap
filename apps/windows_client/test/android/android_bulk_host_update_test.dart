@@ -270,13 +270,13 @@ void main() {
           '로컬 PC · $_current → $_latest');
       expect(_text(tester, 'bulk-host-status-pve-102'), '사용 중 · 요청하면 연결을 끊어요');
       expect(_text(tester, 'bulk-host-status-pve-103'),
-          '서버에서 업데이트 권한·상태를 확인할 수 없어요');
+          '권한·상태를 확인할 수 없어요');
       expect(
         find.descendant(
           of: find.byKey(const Key('bulk-host-disconnect-note')),
           matching: find.text(
             '연결된 데스크톱은 내 연결을 끊고 바로 업데이트해요.\n'
-            '다른 사용자가 연결 중이면 그 연결이 끝난 뒤 업데이트해요.',
+            '다른 사용자가 연결 중이면 끝난 뒤에 해요.',
           ),
         ),
         findsOneWidget,
@@ -366,7 +366,7 @@ void main() {
       ]);
       expect(
         _text(tester, 'bulk-host-status-pve-101'),
-        '다른 사용자의 연결이 끝나면 업데이트해요',
+        '다른 사용자 연결이 끝나면 업데이트',
       );
       await _press(tester, 'bulk-host-close');
     },

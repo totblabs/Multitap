@@ -165,7 +165,7 @@ void main() {
       final fixture = ContextFixture(broker);
       await fixture.mount(tester);
       expect(fixture.error, isNull);
-      expect(find.text('다른 곳에서 로그아웃하고 여기서 로그인할까요?'), findsOneWidget);
+      expect(find.text('여기서 로그인할까요?'), findsOneWidget);
       expect(find.textContaining('alice'), findsNothing);
       expect(broker.confirmations, 0);
       await tester.tap(find.text('취소'));

@@ -89,7 +89,7 @@ void main() {
   test('A missing saved Windows identity stays actionable and never claims no login', () {
     final readiness = DesktopReadiness.of(machine(StreamPreparation.identity));
     expect(readiness.phase, TilePhase.attention);
-    expect(readiness.headline, 'Windows 계정 확인이 필요해요');
+    expect(readiness.headline, 'Windows 계정 확인 필요');
     expect(readiness.detail, contains('Host 설정 → Windows 로그인'));
     expect(readiness.detail, isNot(contains('로그인 세션이 없어요')));
     expect(readiness.primary, ReadinessAction.refresh);

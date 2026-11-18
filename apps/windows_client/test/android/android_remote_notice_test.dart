@@ -8,7 +8,7 @@ import 'package:multitap_client/android/android_remote_notice.dart';
 import 'package:multitap_client/data/print_session.dart';
 import 'package:multitap_client/ui/app_theme.dart';
 
-const _message = '단축키 전송 결과를 확인하지 못했어요. 원격 화면을 확인한 뒤 필요하면 다시 선택해 주세요.';
+const _message = '단축키 전송을 확인하지 못했어요\n화면을 보고 다시 눌러 보세요';
 
 class _Printer extends PrintSession {
   _Printer()

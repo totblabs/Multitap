@@ -183,7 +183,7 @@ void main() {
       );
       final calls = await _card(t, settling);
       // No blocking card: the tile reads ready and its button works.
-      expect(find.text('이전 연결을 정리하고 있어요'), findsNothing);
+      expect(find.text('이전 연결 정리 중'), findsNothing);
       expect(find.byKey(const Key('stream-state-pve-149')), findsNothing);
       expect(
         t.widget<FilledButton>(find.byKey(const Key('open-pve-149'))).onPressed,
@@ -224,7 +224,7 @@ void main() {
     await t.pump();
     await t.pump();
     expect(calls.opens, 0);
-    expect(find.text('화면 복원이 확인되지 않았어요'), findsWidgets);
+    expect(find.text('화면 복원 확인 안 됨'), findsWidgets);
     expect(find.textContaining('연결하는 중'), findsNothing);
     await t.pumpWidget(const SizedBox());
   });
@@ -236,7 +236,7 @@ void main() {
       // Streaming is not offered at all: the one main button is the refresh.
       expect(find.byKey(const Key('open-pve-149')), findsNothing);
       expect(find.byKey(const Key('stream-modes-pve-149')), findsNothing);
-      expect(find.text('화면 복원이 확인되지 않았어요'), findsWidgets);
+      expect(find.text('화면 복원 확인 안 됨'), findsWidgets);
       expect(
         find.byKey(const Key('stream-state-pve-149-warning')),
         findsOneWidget,

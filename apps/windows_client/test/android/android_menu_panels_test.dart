@@ -993,7 +993,7 @@ void main() {
         ]);
         expect(rows.map((row) => row.subtitle).toList(), [
           '작업 · 60 fps',
-          if (relative) '마우스를 데스크톱 안에 잠가요',
+          if (relative) '데스크톱 안에 잠가요',
           '포인터 · 속도 표준',
           '터치 조작 · 프린터 · 복사',
         ]);
@@ -1094,7 +1094,7 @@ void main() {
       expect(
         find.descendant(
           of: _panelRow(key),
-          matching: find.text('마우스를 데스크톱 안에 잠가요'),
+          matching: find.text('데스크톱 안에 잠가요'),
         ),
         findsOneWidget,
       );
@@ -1163,11 +1163,11 @@ void main() {
       expect(row, findsOneWidget);
       final greyed = tester.widget<SessionPanelRow>(row);
       expect(greyed.onTap, isNull);
-      expect(greyed.disabledReason, '마우스를 연결하면 쓸 수 있어요');
-      expect(greyed.subtitle, '마우스를 데스크톱 안에 잠가요');
+      expect(greyed.disabledReason, '마우스 연결 필요');
+      expect(greyed.subtitle, '데스크톱 안에 잠가요');
       expect(_toggled(tester, key), isFalse);
       expect(_switchSemantics(tester, key)!.properties.enabled, isFalse);
-      expect(find.byTooltip('마우스 잠금 · 마우스를 연결하면 쓸 수 있어요'), findsOneWidget);
+      expect(find.byTooltip('마우스 잠금 · 마우스 연결 필요'), findsOneWidget);
       // A tap changes nothing: the panel stays, nothing is handed over.
       await tester.tap(row);
       await _frames(tester);
@@ -1183,7 +1183,7 @@ void main() {
       expect(ready.onTap, isNotNull);
       expect(ready.disabledReason, isNull);
       expect(_switchSemantics(tester, key)!.properties.enabled, isTrue);
-      expect(find.byTooltip('마우스 잠금 · 마우스를 연결하면 쓸 수 있어요'), findsNothing);
+      expect(find.byTooltip('마우스 잠금 · 마우스 연결 필요'), findsNothing);
     } finally {
       await _close(tester);
     }
@@ -1566,7 +1566,7 @@ void main() {
     for (final (policy, message) in const [
       (
         ClipboardPolicy(textToRemote: true, textToLocal: true),
-        '복사한 글을 기기와 데스크톱 사이에서 붙여넣을 수 있어요.',
+        '복사한 글을 서로 붙여넣을 수 있어요.',
       ),
       (ClipboardPolicy(textToRemote: true), '기기에서 복사한 글을 데스크톱에 붙여넣을 수 있어요.'),
       (ClipboardPolicy(textToLocal: true), '데스크톱에서 복사한 글을 기기에 붙여넣을 수 있어요.'),

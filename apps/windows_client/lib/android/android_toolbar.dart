@@ -1209,21 +1209,32 @@ class AndroidMenuCaption extends StatelessWidget {
         AndroidMenuStyle.inset,
         4,
       ),
-      child: Text.rich(
-        TextSpan(
-          children: [
-            TextSpan(text: label),
-            if (note != null)
-              TextSpan(
-                text: '  $note',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: chrome.faint,
-                ),
+      // The note has a line of its own under the label: beside it, the two
+      // together broke into two lines on a phone.
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: AndroidMenuStyle.text(
+              12,
+              chrome.muted,
+              weight: FontWeight.w600,
+            ),
+          ),
+          if (note != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              note!,
+              style: AndroidMenuStyle.text(
+                12,
+                chrome.faint,
+                weight: FontWeight.w600,
               ),
+            ),
           ],
-        ),
-        style: AndroidMenuStyle.text(12, chrome.muted, weight: FontWeight.w600),
+        ],
       ),
     );
   }

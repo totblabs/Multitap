@@ -158,7 +158,7 @@ void main() {
     final now = DesktopReadiness.of(machine, consoleRecovery: true);
     expect(now.console, isTrue);
     expect(now.canStream, isTrue);
-    expect(now.headline, 'Windows 화면을 넘겨받아 연결');
+    expect(now.headline, 'Windows 화면 넘겨받기');
   });
 
   testWidgets('a VM left in RDP offers 스트리밍 연결 and takes the session over', (
@@ -166,7 +166,7 @@ void main() {
   ) async {
     final broker = ConsoleFake([afterRdp()]);
     await pumpApp(tester, broker);
-    expect(find.text('Windows 화면을 넘겨받아 연결'), findsOneWidget);
+    expect(find.text('Windows 화면 넘겨받기'), findsOneWidget);
     expect(
       find.descendant(
         of: mainButton('pve-149'),
@@ -390,7 +390,7 @@ void main() {
     'without hand-over the card preserves the blocked cause and offers checks',
     (tester) async {
       await pumpApp(tester, FakeBroker([afterRdp()]));
-      expect(find.text('Windows 화면을 넘겨받아 연결'), findsNothing);
+      expect(find.text('Windows 화면 넘겨받기'), findsNothing);
       // A restart is not the fix for a session left in RDP: the launcher keeps
       // the cause and the checklist.
       expect(mainButton('pve-149'), findsOneWidget);

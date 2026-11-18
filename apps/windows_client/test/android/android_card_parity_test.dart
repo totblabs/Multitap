@@ -195,7 +195,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.textContaining('정지를 쓸 수 없어요'), findsOneWidget);
+    expect(find.textContaining('정지를 지원하지 않아요'), findsOneWidget);
     await t.pumpWidget(const SizedBox.shrink());
     await t.pumpAndSettle();
   });

@@ -166,7 +166,7 @@ void main() {
     });
 
     testWidgets('a reason the server gave is shown as it is', (tester) async {
-      const reason = '서버가 응답하지 않아요. 잠시 후 다시 시도하세요.';
+      const reason = '서버가 응답하지 않아요.\n잠시 후 다시 시도하세요.';
       await _workspace(tester, error: reason, machines: []);
       expect(
         tester.widget<Text>(find.byKey(const Key('workspace-error'))).data,

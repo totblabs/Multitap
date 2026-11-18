@@ -551,7 +551,7 @@ void main() {
         find.byKey(const Key('power-stop-pve-149-reason')),
         findsOneWidget,
       );
-      expect(find.textContaining('정지를 쓸 수 없어요'), findsOneWidget);
+      expect(find.textContaining('정지를 지원하지 않아요'), findsOneWidget);
       expect(broker.calls.where((c) => c.startsWith('power:')), isEmpty);
       expect(tester.takeException(), isNull);
     },
@@ -672,7 +672,7 @@ void main() {
     );
     final readiness = DesktopReadiness.of(machine);
     // Signed out: Console or a restart, never an in-stream sign-in.
-    expect(readiness.headline, 'Windows에 로그인돼 있지 않아요');
+    expect(readiness.headline, 'Windows 로그인 필요');
     expect(readiness.detail, contains('Console'));
     expect(readiness.primary, ReadinessAction.console);
     expect(readiness.detail, isNot(contains('RDP')));

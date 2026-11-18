@@ -88,12 +88,12 @@ To run over HTTP on the same internal network, read [Security](10-security.md) f
 | **Host offline** | Check the power state. | In Host settings, check the server connection and the service status. |
 | **Waiting for administrator approval** | Ask the administrator to check the approval. | Compare the confirmation codes on both screens, then approve the Host connection request. |
 | Host settings shows **This Windows looks like a copy of another registered desktop.** | Tell the administrator. | It is a copied VM. In Host settings, click **Request connection** in **Server connection**, and approve it like a new Host ([chapter 4](04-host-install.md#copied-vms)). |
-| **The virtual display isn't ready** | Ask the administrator to check the Host. | Check the status and the needed action in **Virtual display** in Host settings. |
-| **The Host is setting up the screen** | Connect again when setup is done. | If it stays stuck, check **Diagnostics** in Host settings. |
-| **The Windows account needs checking** | Ask the administrator to check the Windows account. | Check the saved account in **Windows sign-in** in Host settings. |
-| **Windows isn't signed in** or **Windows is locked** | Open it with **Console** on the card and sign in or unlock it. **Restart** signs in automatically. | Check that an account is saved in **Windows sign-in** on the Host. |
-| **Windows needs to restart** | Save your open work, then **Restart**. | Check the cause shown, then restart that Windows. |
-| **Cleaning up the previous connection** | You can connect when it is done. Wait a moment. | If it keeps happening, check the screen recovery status in **Diagnostics** on the Host. |
+| **Display not ready** | Ask the administrator to check the Host. | Check the status and the needed action in **Virtual display** in Host settings. |
+| **Host setting up screen** | Connect again when setup is done. | If it stays stuck, check **Diagnostics** in Host settings. |
+| **Check Windows account** | Ask the administrator to check the Windows account. | Check the saved account in **Windows sign-in** in Host settings. |
+| **Windows sign-in needed** or **Windows is locked** | Open it with **Console** on the card and sign in or unlock it. **Restart** signs in automatically. | Check that an account is saved in **Windows sign-in** on the Host. |
+| **Restart needed** | Save your open work, then **Restart**. | Check the cause shown, then restart that Windows. |
+| **Cleaning up** | You can connect when it is done. Wait a moment. | If it keeps happening, check the screen recovery status in **Diagnostics** on the Host. |
 
 If Host settings shows **Start service** and the service is stopped, start it with that button.
 After the status changes, click **Refresh** in the client.

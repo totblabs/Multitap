@@ -12,7 +12,7 @@ import 'package:multitap_client/ui/app_theme.dart';
 
 void main() {
   // The broker's VM checks before a stream have their own codes, not the
-  // general virtual_display_required ("가상 화면이 준비되지 않았어요").
+  // general virtual_display_required ("가상 화면 준비 안 됨").
   test('A stream refused by the VM checks says why, with its own code', () {
     final generic = SessionFailure.ended('unspecified_reason').message;
     final virtualDisplay =

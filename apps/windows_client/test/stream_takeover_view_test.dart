@@ -102,7 +102,7 @@ void main() {
         },
       );
       expect(find.text('다른 곳에서 연결 중이에요'), findsOneWidget);
-      expect(find.textContaining('그쪽 연결을 끊고 여기서 이어서'), findsOneWidget);
+      expect(find.textContaining('끊고 여기서 이어서'), findsOneWidget);
       expect(find.text('연결 중인 계정 kim.minji · 11월 11일 10:20부터'), findsOneWidget);
       // What the old second dialog added and nobody could use.
       expect(find.text('기기 정보 없음'), findsNothing);

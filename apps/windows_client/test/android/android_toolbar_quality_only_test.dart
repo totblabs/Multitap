@@ -209,7 +209,7 @@ void main() {
       expect(hint, findsOneWidget);
       expect(
         tester.widget<Text>(hint).data,
-        '이 데스크톱에는 소리 장치가 없어요. 관리자가 Proxmox에서 오디오 장치를 추가해야 해요.',
+        '이 데스크톱에는 소리 장치가 없어요\n관리자에게 알려 주세요',
       );
       expect(tester.widget<Text>(hint).data, audioDeviceMissingText);
       // Whole, inside the panel, and nothing to press for it.

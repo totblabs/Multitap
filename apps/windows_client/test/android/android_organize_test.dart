@@ -178,7 +178,7 @@ void main() {
     );
     await type('없는이름');
     expect(_order(tester), isEmpty);
-    expect(find.text("'없는이름'에 맞는 데스크톱이 없어요"), findsOneWidget);
+    expect(find.text("'없는이름' 검색 결과가 없어요"), findsOneWidget);
     await _tapVisible(tester, find.byKey(const Key('no-match-clear')));
     await pumpWork(tester);
     expect(_order(tester).length, 4);

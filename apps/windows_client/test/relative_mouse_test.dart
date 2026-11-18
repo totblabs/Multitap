@@ -34,7 +34,7 @@ import 'viewport_session_test.dart' show startInfo;
 
 const _origin = 'https://fixture.invalid';
 const _notice = '마우스를 데스크톱 안에 잠갔어요 · Ctrl+Shift+Alt+Z로 켜기·끄기';
-const _injectedNotice = '롤 같은 일부 게임에서는 마우스가 움직이지 않을 수 있어요';
+const _injectedNotice = '롤 같은 일부 게임에서는 안 움직일 수 있어요';
 const _picture = Rect.fromLTWH(10, 20, 640, 360);
 
 /// A row of the bar's 설정 panel (마우스 잠금, 바 열어 두기, 화질). The

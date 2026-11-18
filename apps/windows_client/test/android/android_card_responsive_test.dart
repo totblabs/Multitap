@@ -60,7 +60,7 @@ void main() {
     ]);
     expect(
       // Signed out: the Proxmox console, not an in-stream sign-in.
-      find.text('Console에서 로그인하세요. 다시 시작하면 자동으로 로그인돼요.'),
+      find.text('Console에서 로그인하거나 다시 시작하세요.'),
       findsOneWidget,
     );
     expect(find.text(DesktopUse.other.label!), findsNothing);

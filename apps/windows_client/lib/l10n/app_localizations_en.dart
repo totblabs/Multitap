@@ -104,7 +104,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'End the current connection, then connect.';
 
   @override
-  String get disconnectConsoleConnect => 'Disconnect Console and connect?';
+  String get disconnectConsoleConnect => 'End Console and connect?';
 
   @override
   String get openConsoleConnectionWillEnd =>
@@ -122,7 +122,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String opensDesktopsProxmoxConsoleApp(Object desktopName) {
-    return '$desktopName\n\nOpens the desktop\'s Proxmox console in the app.\nNo separate Proxmox sign-in needed.';
+    return '$desktopName\n\nOpens the desktop\'s Proxmox console here.\nNo Proxmox sign-in needed.';
   }
 
   @override
@@ -417,14 +417,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get youreAboutShareAllStorage =>
-      'You\'re about to share all of the storage.\nPrograms on the desktop can read and change every file in it.\nChoosing only the folders you need is recommended.';
+      'This shares all of the storage.\nThe desktop can read and change every file.\nChoose only the folders you need.';
 
   @override
   String get chosenFolder => 'Chosen folder';
 
   @override
   String stoppedSharingBecausePermissionOpen(Object name) {
-    return 'Stopped sharing because permission to open the ‘$name’ folder was lost';
+    return 'Stopped sharing ‘$name’\nPermission to open the folder was lost';
   }
 
   @override
@@ -608,7 +608,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get chooseFolderMultitapNeedsSee =>
-      'To choose a folder, Multitap needs to see this device\'s storage.\nIf you allow it, Multitap can read and write the storage. The desktop sees only the folder you choose.';
+      'To choose a folder, allow Multitap to access storage.\nThe desktop sees only the folder you choose.';
 
   @override
   String get openSettings => 'Open settings';
@@ -694,7 +694,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String updatesOnlyHostProgramYou(Object kind) {
-    return 'Updates only the Host program on the $kind.\nYou can\'t connect for a moment while it installs.';
+    return 'Updates only the Host on the $kind.\nYou can\'t connect while it installs.';
   }
 
   @override
@@ -789,7 +789,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get passwordEncryptedKeptDevice =>
-      'Your password is encrypted and kept on this device.';
+      'Encrypted and kept on this device.';
 
   @override
   String get signing => 'Signing in…';
@@ -878,12 +878,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String setLargestScaleWindowsAllows(Object scale) {
-    return 'Set to $scale%, the largest scale Windows allows at this screen size.';
+    return 'Set to $scale%, the most Windows allows here';
   }
 
   @override
   String get couldntSendInputWhileScreen =>
-      'Couldn\'t send input while the screen size is adjusting. Type again when it\'s done.';
+      'The screen size is adjusting\nType again when it\'s done';
 
   @override
   String get couldntConfirmInputWasDelivered =>
@@ -891,7 +891,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get hostReceivesKoreanTextAs =>
-      'This Host receives Korean text as key presses. It types as is when the desktop is in Korean input mode; if English letters appear, tap Han/Eng in the key row.';
+      'If English letters appear instead of Korean,\ntap Han/Eng in the key row';
 
   @override
   String get controlCharactersCantSentSo =>
@@ -910,11 +910,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mouseLockedInsideDesktopPress =>
-      'Mouse locked inside the desktop · press Back to release';
+      'Mouse locked · press Back to release';
 
   @override
   String get someGamesSuchAsLeague =>
-      'In some games, such as League of Legends, the mouse may not move';
+      'Some games (League of Legends) ignore it';
 
   @override
   String get mouseLockOff => 'Mouse lock off';
@@ -925,11 +925,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get deviceCantReceiveSharperPicture =>
-      'This device can\'t receive a sharper picture, so it shows at auto size.';
+      'Auto size: this device can\'t take more';
 
   @override
   String get couldntApplySharpSoShows =>
-      'Couldn\'t apply Sharp, so it shows at auto size.';
+      'Sharp isn\'t available: shown at auto size';
 
   @override
   String get stoppedWaitingHostUpdateTap =>
@@ -951,7 +951,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get resolutionWindowsScaleSeparate =>
-      'Resolution and Windows scale apply separately.';
+      'Resolution and scale apply separately.';
 
   @override
   String resolutionWindowsScaleApplySeparately(
@@ -986,7 +986,7 @@ class AppLocalizationsEn extends AppLocalizations {
     Object requested,
     Object current,
   ) {
-    return 'Recommended $desired×$desired2$requested · $current';
+    return 'Auto $desired×$desired2$requested · $current';
   }
 
   @override
@@ -1016,6 +1016,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String shownAtAutoSize(Object current) {
+    return 'Shown at auto size · $current';
+  }
+
+  @override
   String checkingSharp(Object current) {
     return 'Checking Sharp · $current';
   }
@@ -1038,7 +1043,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String windowsScale(Object session, Object session2) {
-    return '$session\nWindows scale · $session2';
+    return '$session\nScale · $session2';
   }
 
   @override
@@ -1105,11 +1110,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pressBackRelease => 'Press Back to release';
 
   @override
-  String get locksMouseInsideDesktop => 'Locks the mouse inside the desktop';
+  String get locksMouseInsideDesktop => 'Locks it in the desktop';
 
   @override
-  String get availableWhenMouseConnected =>
-      'Available when a mouse is connected';
+  String get availableWhenMouseConnected => 'Needs a mouse';
 
   @override
   String get touchControlsPrinterCopy => 'Touch controls · printer · copy';
@@ -1172,8 +1176,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get useDevicesFoldersDesktop =>
-      'Use this device\'s folders on the desktop';
+  String get useDevicesFoldersDesktop => 'Use this device\'s folders';
 
   @override
   String get availableOnceConnected => 'Available once connected';
@@ -1188,7 +1191,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get couldntConfirmShortcutWasSent =>
-      'Couldn\'t confirm the shortcut was sent. Check the remote screen and choose it again if needed.';
+      'Couldn\'t confirm the shortcut\nCheck the screen and press again';
 
   @override
   String get technology => 'Technology';
@@ -1452,19 +1455,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get actualValueUnknownNotSupported =>
-      'Actual value unknown · not supported by Host';
+      'Actual unknown · no Host support';
 
   @override
   String get manual => 'Manual';
 
   @override
   String actualValueUnknown(Object mode) {
-    return '$mode · actual value unknown';
+    return '$mode · actual unknown';
   }
 
   @override
   String requestedActualValueUnknown(Object mode, Object wanted) {
-    return '$mode $wanted% requested · actual value unknown';
+    return '$mode $wanted% asked · actual unknown';
   }
 
   @override
@@ -1491,7 +1494,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get resolution => 'Resolution';
 
   @override
-  String get recommended2 => 'Recommended';
+  String get recommended2 => 'Default';
 
   @override
   String get fitted => 'Fitted';
@@ -1840,11 +1843,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get appDataSignSettingsKept =>
-      'Your app data and sign-in settings are kept.\nThe downloaded file is checked, then the Android installer opens.\nAndroid asks again whether to install.';
+      'Your app data and sign-in settings are kept.\nThe file is checked, then the installer opens.\nAndroid asks again before installing.';
 
   @override
   String get androidSettingsAllowInstallUnknown =>
-      'In Android settings, allow\n‘Install unknown apps’ for Multitap.\nThen come back to this screen.\nYou can turn it off again in settings anytime.';
+      'Allow ‘Install unknown apps’ for Multitap in Android settings, then come back. You can turn it off again anytime.';
 
   @override
   String get checkingInstallPermissionDownloadLocation =>
@@ -2065,7 +2068,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get desktopConnectedFromAnotherWindow =>
-      'This desktop is connected from another window or device. The button below disconnects it there and continues here. The desktop and running work stay as they are.';
+      'Connected somewhere else. You can end that connection and continue here. Running work stays as it is.';
 
   @override
   String get connectionSetupCanceledYouCan =>
@@ -2204,7 +2207,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get serverIsntRespondingTryAgain =>
-      'The server isn\'t responding. Try again in a moment.';
+      'No answer from the server.\nTry again in a moment.';
 
   @override
   String get checkCurrentPassword => 'Check your current password.';
@@ -2358,7 +2361,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get youDontHavePermissionDesktop =>
-      'You don\'t have permission for this desktop, or its assignment changed. Refresh the list, and ask your administrator if needed.';
+      'No permission for this desktop, or its assignment changed. Refresh the list.';
 
   @override
   String get cantCheckPowerActionsResult =>
@@ -2447,7 +2450,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get serverIsntRespondingMomentRetrying =>
-      'The server isn\'t responding for a moment. Retrying automatically.';
+      'Server not responding · retrying';
 
   @override
   String get couldntFindServerAddressCheck2 =>
@@ -2594,8 +2597,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get useRequestingDisconnects => 'In use · requesting disconnects it';
 
   @override
-  String get notUseUpdatesRightAway =>
-      'Not in use · updates right away when requested';
+  String get notUseUpdatesRightAway => 'Not in use · updates at once';
 
   @override
   String get notRequestedYet => 'Not requested yet';
@@ -2613,7 +2615,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get updatesWhenOtherUsersConnection =>
-      'Updates when the other user\'s connection ends';
+      'Updates after the other user leaves';
 
   @override
   String get useUpdatesWhenConnectionEnds =>
@@ -2660,7 +2662,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get serverCantCheckUpdatePermission =>
-      'The server can\'t check update permission or state';
+      'Can\'t check permission or state';
 
   @override
   String get hostOffline => 'Host offline';
@@ -4365,12 +4367,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String connectedDesktopSoConnectionEnded(Object who) {
-    return '$who connected to this desktop, so this connection ended.\nReconnect to disconnect that one.';
+    return '$who connected, ending this connection.\nReconnect to end that one.';
   }
 
   @override
   String get desktopWasConnectedFromAnother =>
-      'This desktop was connected from another window or device, so this connection ended. Reconnect to disconnect that one.';
+      'Connected from somewhere else, so this connection ended. Reconnect to end that one.';
 
   @override
   String get administratorChangedClipboardSharingPermission =>
@@ -4465,7 +4467,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get desktopConnectedSomewhereElseInformation =>
-      'This desktop is connected somewhere else. The information needed to end that connection didn\'t arrive. Try connecting again, and if it keeps happening, tell your administrator.';
+      'Connected somewhere else, and it can\'t be ended from here. Try again; if it continues, tell your administrator.';
 
   @override
   String connectedAccount(Object username) {
@@ -4852,7 +4854,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String noDesktopsMatch2(Object short) {
-    return 'No desktops match \'$short\'';
+    return 'No results for \'$short\'';
   }
 
   @override
@@ -4957,7 +4959,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String remoteUpdateNotSupportedInstall2(Object host) {
-    return '$host · remote update not supported · install manually';
+    return '$host · no remote update · install by hand';
   }
 
   @override
@@ -4990,7 +4992,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get hostUpdateWaitingStartsWhen =>
-      'Host update waiting · starts when the connection ends';
+      'Host update starts after this connection';
 
   @override
   String updatingHostDownloading(Object op) {
@@ -5005,7 +5007,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String hostUpdatedWindowsRestartNeeded(Object targetVersion) {
-    return 'Host $targetVersion updated · Windows restart needed';
+    return 'Host $targetVersion updated · restart Windows';
   }
 
   @override
@@ -5032,34 +5034,33 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get hostDidntReconnectAfterUpdate =>
-      'The Host didn\'t reconnect after the update';
+  String get hostDidntReconnectAfterUpdate => 'Host didn\'t reconnect';
 
   @override
   String get checkConnectionStatusHostDiagnostics =>
-      'Check the connection status in Host diagnostics and the server activity log.';
+      'Check Host diagnostics and the server log.';
 
   @override
   String get checkServiceStatusLocalPcs =>
-      'Check the service status in the local PC\'s Host settings → Diagnostics.';
+      'On the PC: Host settings → Diagnostics.';
 
   @override
   String get openDesktopConsoleCheckHost =>
-      'Open the desktop with Console and check Host settings → Diagnostics.';
+      'In Console: Host settings → Diagnostics.';
 
   @override
   String couldntConfirmUpdateResultConnection(Object host) {
-    return 'Couldn\'t confirm the $host update result and connection.';
+    return '$host update result not confirmed.';
   }
 
   @override
   String couldntGetResponseFromAfter(Object host) {
-    return 'Couldn\'t get a response from $host after the update failed.';
+    return 'No response after the $host update failed.';
   }
 
   @override
   String couldntGetResponseFromAfter2(Object host) {
-    return 'Couldn\'t get a response from $host after it reported the update was done.';
+    return 'No response after the $host update.';
   }
 
   @override
@@ -5080,7 +5081,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get filesSha256DoesntMatch =>
-      'The file\'s SHA-256 doesn\'t match the release info';
+      'SHA-256 doesn\'t match the release info';
 
   @override
   String get couldntVerifyReleaseSignature =>
@@ -5171,8 +5172,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get copyPaste => 'Copy and paste';
 
   @override
-  String get youCanPasteCopiedText =>
-      'You can paste copied text between this device and the desktop.';
+  String get youCanPasteCopiedText => 'Copy and paste text between the two.';
 
   @override
   String get youCanPasteTextCopied =>
@@ -5229,7 +5229,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get desktopHasNoSoundDevice2 =>
-      'This desktop has no sound device. Your administrator must add an audio device in Proxmox.';
+      'This desktop has no sound device\nTell your administrator';
 
   @override
   String get restartDesktopUseSoundDevice =>
@@ -5583,7 +5583,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get connectedDesktopsConnectionEndsUpdate =>
-      'On connected desktops, your connection ends and the update starts right away.\nIf another user is connected, the update starts after that connection ends.';
+      'Connected desktops update at once; your connection ends.\nIf another user is connected, it waits.';
 
   @override
   String get stopRemainingRequestsClose => 'Stop remaining requests and close';
@@ -5605,7 +5605,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get currentVersionUnknown => 'Current version unknown';
+  String get currentVersionUnknown => 'Version unknown';
 
   @override
   String get windowsRestartNeeded => 'Windows restart needed';
@@ -5777,8 +5777,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get shutDown => 'Shut down';
 
   @override
-  String get stopIsntAvailableServerYet =>
-      'Stop isn\'t available on this server yet. Tell your administrator.';
+  String get stopIsntAvailableServerYet => 'This server can\'t stop a desktop.';
 
   @override
   String get localPc2 => 'local PC';
@@ -5873,39 +5872,36 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get windowsNeedsRestart => 'Windows needs a restart';
+  String get windowsNeedsRestart => 'Restart needed';
 
   @override
-  String get getsVirtualDisplayReadyUnsaved =>
-      'That gets the virtual display ready. Unsaved work may be lost.';
+  String get getsVirtualDisplayReadyUnsaved => 'Unsaved work may be lost.';
 
   @override
   String get signedOverRdp => 'Signed in over RDP';
 
   @override
   String get virtualDisplayCantPreparedRdp2 =>
-      'The virtual display can\'t be prepared on an RDP sign-in.';
+      'No virtual display on an RDP sign-in.';
 
   @override
-  String get notSignedWindows => 'Not signed in to Windows';
+  String get notSignedWindows => 'Windows sign-in needed';
 
   @override
-  String get windowsAccountNeedsChecking =>
-      'The Windows account needs checking';
+  String get windowsAccountNeedsChecking => 'Check Windows account';
 
   @override
-  String get couldntCheckWindowsScreen => 'Couldn\'t check the Windows screen';
+  String get couldntCheckWindowsScreen => 'Screen not checked';
 
   @override
-  String get refreshCheckAgainIfKeeps2 =>
-      'Refresh to check again. If it keeps happening, tell your administrator.';
+  String get refreshCheckAgainIfKeeps2 => 'Refresh to check again.';
 
   @override
-  String get windowsScreenFromRdpOpen => 'A Windows screen from RDP is open';
+  String get windowsScreenFromRdpOpen => 'Windows screen on RDP';
 
   @override
   String get bringScreenIntoStreamingConnect =>
-      'Bring that screen into streaming to connect.';
+      'Bring that screen over to connect.';
 
   @override
   String get windowsLocked2 => 'Windows is locked';
@@ -5914,65 +5910,60 @@ class AppLocalizationsEn extends AppLocalizations {
   String get unlockConnect => 'Unlock it to connect.';
 
   @override
-  String get signWindowsAdministratorAccount =>
-      'Sign in with a Windows administrator account';
+  String get signWindowsAdministratorAccount => 'Admin sign-in needed';
 
   @override
-  String get virtualDisplayNeedsRepair => 'The virtual display needs repair';
+  String get virtualDisplayNeedsRepair => 'Display needs repair';
 
   @override
   String get youCanRepairHostSettings =>
-      'You can repair it in Host settings. Tell your administrator.';
+      'Tell your administrator: repair the Host';
 
   @override
-  String get virtualDisplayIsntReady => 'The virtual display isn\'t ready';
+  String get virtualDisplayIsntReady => 'Display not ready';
 
   @override
-  String get refreshMomentIfKeepsHappening =>
-      'Refresh soon, or tell your administrator.';
+  String get refreshMomentIfKeepsHappening => 'Refresh in a moment.';
 
   @override
-  String get virtualDisplayDriverNeedsChecking =>
-      'The virtual display driver needs checking';
+  String get virtualDisplayDriverNeedsChecking => 'Check display driver';
 
   @override
   String get youCanCheckHostSettings =>
-      'You can check this in Host settings → Diagnostics. Tell your administrator.';
+      'Tell your administrator: Host diagnostics';
 
   @override
-  String get virtualDisplaySettingsNeedChecking2 =>
-      'The virtual display settings need checking';
+  String get virtualDisplaySettingsNeedChecking2 => 'Check display settings';
 
   @override
-  String get hostSettingUpScreen => 'The Host is setting up the screen';
+  String get hostSettingUpScreen => 'Host setting up screen';
 
   @override
   String get youCanConnectWhenSetup => 'You can connect when setup is done.';
 
   @override
-  String get couldntCheckVirtualDisplayStatus2 =>
-      'Couldn\'t check the virtual display status';
+  String get couldntCheckVirtualDisplayStatus2 => 'Display status unknown';
 
   @override
   String get checkingWindowsSign => 'Checking Windows sign-in';
 
   @override
   String get checkingWindowsSignStateUpdates =>
-      'Checking the Windows sign-in state. This updates as soon as it\'s ready.';
+      'Checking the Windows sign-in state.';
 
   @override
   String get preparingScreen => 'Preparing screen';
 
   @override
   String get preparingVirtualDisplayUpdatesAs =>
-      'Preparing the virtual display. This updates as soon as it\'s done.';
+      'Preparing the virtual display.';
 
   @override
   String get preparing3 => 'Preparing';
 
   @override
   String get hostPreparingConnectionUpdatesAs =>
-      'The Host is preparing the connection. This updates as soon as it\'s done.';
+      'The Host is preparing the connection.';
 
   @override
   String get power => 'Power';
@@ -6004,7 +5995,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get notRespondingIfWindowsStarting =>
-      'Not responding · If Windows is starting, wait a moment';
+      'No response · wait if Windows is starting';
 
   @override
   String get noResponseYet => 'No response yet';
@@ -6018,11 +6009,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get screenRestoreFromLastConnection =>
-      'Screen restore from the last connection not confirmed';
+      'Last screen restore not confirmed';
 
   @override
   String get checkingScreenRestoreFromLast =>
-      'Checking screen restore from the last connection';
+      'Checking the last screen restore';
 
   @override
   String get checkingVirtualDisplaySetup =>
@@ -6039,7 +6030,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get readyOnceScreenUsedRdp =>
-      'Ready once the screen used in RDP is brought over';
+      'Ready once the RDP screen is brought over';
 
   @override
   String get notReadyCheckHostSettings =>
@@ -6057,12 +6048,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String availableViaCheckedAgainWhen(Object server) {
-    return 'Available via $server · checked again when you connect';
+    return 'Via $server · checked again on connect';
   }
 
   @override
   String get notCheckedCheckedOnceEarlier =>
-      'Unknown · Checked once the earlier steps are ready';
+      'Unknown · checked after the earlier steps';
 
   @override
   String get sample => 'Sample';
@@ -6111,22 +6102,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get ifWindowsDoesNotRespond =>
-      'If Windows does not respond, you can stop it from the power menu.';
+      'No response? Stop it from the power menu.';
 
   @override
   String get statusCheckedAgainWhenFinishes =>
-      'The status is checked again when this finishes.';
+      'Checked again when this finishes.';
 
   @override
   String get windowsSign2 => 'Windows sign-in';
 
   @override
-  String get takeOverWindowsScreenConnect =>
-      'Take over the Windows screen and connect';
+  String get takeOverWindowsScreenConnect => 'Take over the screen';
 
   @override
   String get bringsWindowsScreenUsedRdp =>
-      'Brings the Windows screen used in RDP into streaming.';
+      'Brings the RDP screen into streaming.';
 
   @override
   String get readyConnect => 'Ready to connect';
@@ -6148,13 +6138,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cleaningUpConnectionJustEnded =>
-      'Cleaning up the connection that just ended. Press to connect as soon as it is done.';
+      'Cleaning up · press to connect when done';
 
   @override
-  String get screenRestoreNotConfirmed => 'Screen restore not confirmed';
+  String get screenRestoreNotConfirmed => 'Restore not confirmed';
 
   @override
-  String get cleaningUpLastConnection => 'Cleaning up the last connection';
+  String get cleaningUpLastConnection => 'Cleaning up';
 
   @override
   String get youCanConnectWhenDone => 'You can connect when it is done.';
@@ -6164,13 +6154,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get youCanDisconnectConsoleConnect =>
-      'You can disconnect Console and connect by streaming.';
+      'Disconnect Console and stream instead.';
 
   @override
   String get checking => 'Checking';
 
   @override
-  String get settingUpVirtualDisplay => 'Setting up the virtual display';
+  String get settingUpVirtualDisplay => 'Setting up display';
 
   @override
   String get updating2 => 'Updating';
@@ -6186,57 +6176,54 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get changesAutomaticallyWhenRestartFinishes =>
-      'This changes automatically when the restart finishes.';
+      'Changes when the restart finishes.';
 
   @override
   String get changesAutomaticallyWhenStartupFinishes =>
-      'This changes automatically when startup finishes.';
+      'Changes when startup finishes.';
 
   @override
-  String get preparingConnection => 'Preparing the connection';
+  String get preparingConnection => 'Preparing connection';
 
   @override
   String get windowsHasStartedChangesAs =>
-      'Windows has started. This changes as soon as the Host connects.';
+      'Windows started · waiting for the Host';
 
   @override
   String get hostDisconnected => 'Host disconnected';
 
   @override
   String get desktopRunningChangesAutomaticallyWhen =>
-      'The desktop is running. This changes automatically when the Host is back.';
+      'Running · changes when the Host is back';
 
   @override
-  String get hostNotResponding => 'The Host is not responding';
+  String get hostNotResponding => 'Host not responding';
 
   @override
-  String get ifYouJustStartedWait =>
-      'If you just started it, wait a moment. If it continues, let your administrator know.';
+  String get ifYouJustStartedWait => 'If you just started it, wait a moment.';
 
   @override
   String get unlockConsole => 'Unlock it in Console.';
 
   @override
   String get ifSigningAutomaticallyYouCan =>
-      'If it is signing in automatically, you can connect soon. Otherwise, sign in from Console.';
+      'Connects soon · or sign in from Console';
 
   @override
-  String get signFromConsoleAfterRestart =>
-      'Sign in from Console. After a restart it signs in automatically.';
+  String get signFromConsoleAfterRestart => 'Sign in from Console, or restart.';
 
   @override
   String get virtualDisplayNeedsCheckedHost =>
-      'The virtual display needs to be checked in Host settings. Let your administrator know.';
+      'Tell your administrator: check the display';
 
   @override
-  String get checkingStreamingReadiness => 'Checking streaming readiness';
+  String get checkingStreamingReadiness => 'Checking readiness';
 
   @override
-  String get changesAsSoonAsHost =>
-      'This changes as soon as the Host reports its status.';
+  String get changesAsSoonAsHost => 'Changes when the Host reports.';
 
   @override
-  String get waitingHostConnect2 => 'Waiting for the Host to connect';
+  String get waitingHostConnect2 => 'Waiting for the Host';
 
   @override
   String get checkingStatus => 'Checking the status';
@@ -6507,7 +6494,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get webclientServiceDesktopOffMissing =>
-      'The WebClient service on the desktop is off or missing.\nLet your administrator know.';
+      'WebClient on the desktop is off.\nTell your administrator.';
 
   @override
   String get desktopHasNoDriveLetters =>
@@ -6574,8 +6561,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get shareFolderDesktopAsDrive =>
-      'Share this folder with the desktop as a drive?';
+  String get shareFolderDesktopAsDrive => 'Share this folder?';
 
   @override
   String folderCautionYouCanTurn(Object path, Object risk) {
@@ -6631,7 +6617,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get onlyFoldersYouChooseShared =>
-      'Only the folders you choose are shared, for this connection only.\nSharing ends when you disconnect.';
+      'Only folders you choose are shared.\nSharing ends when you disconnect.';
 
   @override
   String get noSharedFoldersYet => 'No shared folders yet.';
@@ -9237,7 +9223,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get verifySign => 'Verify and sign in';
 
   @override
-  String get plannedMaintenance => 'Planned maintenance';
+  String get plannedMaintenance => 'Maintenance';
 
   @override
   String plannedMaintenance2(Object when) {
@@ -9984,8 +9970,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get checked3 => 'Checked at';
 
   @override
-  String get statusServerGotFromHost =>
-      'Status the server got from Host and Proxmox';
+  String get statusServerGotFromHost => 'Server\'s view';
 
   @override
   String get checkAgain3 => 'Check again';
@@ -10426,14 +10411,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get signingHereEndsStreamingConsole =>
-      'Signing in here ends the streaming and Console connections of the other sign-in.';
+      'The other sign-in is signed out and its connections end.';
 
   @override
   String get recoveryCodeHasBeenUsed =>
       'The recovery code has been used. Cancelling won\'t make it usable again.';
 
   @override
-  String get signOutElsewhereSignHere => 'Sign out elsewhere and sign in here?';
+  String get signOutElsewhereSignHere => 'Sign in here?';
 
   @override
   String get signOutSign => 'Sign out and sign in';
@@ -11945,7 +11930,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Checking for another connection';
 
   @override
-  String get androidCheckingDesktopAgain => 'Checking the desktop again';
+  String get androidCheckingDesktopAgain => 'Checking again';
 
   @override
   String get androidOpeningConsole => 'Opening the Console';
@@ -12252,8 +12237,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get samePcHeadline => 'This desktop is the PC you\'re using';
 
   @override
-  String get samePcDetail =>
-      'You can\'t connect from here. Connect from another device.';
+  String get samePcDetail => 'Connect from another device.';
 
   @override
   String get samePcMessage =>

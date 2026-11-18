@@ -277,7 +277,7 @@ void main() {
       expect(offered(tester), ['reboot', 'shutdown', 'stop']);
       expect(item(tester, 'shutdown').onPressed, isNotNull);
       expect(item(tester, 'stop').onPressed, isNull);
-      expect(tooltipOf(tester, 'stop'), contains('정지를 쓸 수 없어요'));
+      expect(tooltipOf(tester, 'stop'), contains('정지를 지원하지 않아요'));
       expect(offered(tester), isNot(contains('reset')));
       expect(actions, isEmpty);
     },
@@ -295,7 +295,7 @@ void main() {
         powerAction: 'shutdown',
       );
       expect(find.text('종료하는 중'), findsWidgets);
-      expect(find.text('Windows가 응답하지 않으면 전원 메뉴에서 정지할 수 있어요.'), findsOneWidget);
+      expect(find.text('응답이 없으면 전원 메뉴에서 정지하세요.'), findsOneWidget);
       await openMenu(tester, settle: false);
       for (final action in ['reboot', 'shutdown']) {
         expect(item(tester, action).onPressed, isNull, reason: action);

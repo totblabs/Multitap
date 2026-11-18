@@ -444,7 +444,7 @@ void main() {
       );
       expect(find.byKey(const Key('retry-remote-connection')), findsNothing);
       // The card itself says what the button does.
-      expect(find.textContaining('그쪽 연결을 끊고 여기서 이어서'), findsOneWidget);
+      expect(find.textContaining('끊고 여기서 이어서'), findsOneWidget);
       expect(find.text('끊고 여기서 연결'), findsOneWidget);
       // ...and whose connection it ends. Nothing is sent before the press.
       expect(find.text('연결 중인 계정 alice'), findsOneWidget);
@@ -500,7 +500,7 @@ void main() {
       expect(SessionFailure.ended('taken_over').code, 'taken_over');
       expect(
         SessionFailure.ended('taken_over').message,
-        contains('다른 창이나 기기에서'),
+        contains('다른 곳에서'),
       );
     },
   );

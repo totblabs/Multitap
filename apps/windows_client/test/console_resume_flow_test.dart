@@ -147,7 +147,7 @@ void main() {
       await login(tester, api);
       expect(api.transfers, 0, reason: 'Reading the list never moves Windows.');
       expect(api.connects, 0);
-      expect(find.text('Windows 화면을 넘겨받아 연결'), findsWidgets);
+      expect(find.text('Windows 화면 넘겨받기'), findsWidgets);
       await tester.tap(find.byKey(const Key('open-qa-vm')));
       await tester.pumpAndSettle();
       // One question: the takeover question is the connect question here.

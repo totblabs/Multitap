@@ -603,7 +603,7 @@ void main() {
         );
         expect(
           message.data,
-          '이 데스크톱에는 소리 장치가 없어요. 관리자가 Proxmox에서 오디오 장치를 추가해야 해요.',
+          '이 데스크톱에는 소리 장치가 없어요\n관리자에게 알려 주세요',
         );
         expect(message.data, audioDeviceMissingText);
         // Multitap adds no sound device: nothing to press.
@@ -2244,7 +2244,7 @@ void main() {
     );
     expect(field.controller!.value, AndroidTypingBridge.initial);
     expect(h.texts, ['z']);
-    expect(find.textContaining('화면 크기를 맞추는 중이라 입력을 보내지 못했어요'), findsOneWidget);
+    expect(find.textContaining('화면 크기를 맞추는 중이에요'), findsOneWidget);
     final id = h.socket.sent.lastWhere(
       (m) => m['type'] == 'stream.resize',
     )['requestId'];
@@ -3877,7 +3877,7 @@ void main() {
     await tester.tap(find.text('Windows 키  Win'));
     await tester.pumpAndSettle();
     expect(h.keys, ['5b↓', '5b↑']);
-    expect(find.textContaining('단축키 전송 결과를 확인하지 못했어요'), findsOneWidget);
+    expect(find.textContaining('단축키 전송을 확인하지 못했어요'), findsOneWidget);
     await tester.pump(const Duration(seconds: 1));
     expect(h.keys, ['5b↓', '5b↑'], reason: 'no automatic resend');
     await _close(tester);

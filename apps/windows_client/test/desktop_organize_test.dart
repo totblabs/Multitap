@@ -308,8 +308,8 @@ void main() {
 
     test('the empty-result texts name the active conditions', () {
       expect(noMatchTitle(''), '조건에 맞는 데스크톱이 없어요');
-      expect(noMatchTitle(' abc '), "'abc'에 맞는 데스크톱이 없어요");
-      expect(noMatchTitle('가' * 30), "'${'가' * 24}…'에 맞는 데스크톱이 없어요");
+      expect(noMatchTitle(' abc '), "'abc' 검색 결과가 없어요");
+      expect(noMatchTitle('가' * 30), "'${'가' * 24}…' 검색 결과가 없어요");
       expect(
         noMatchDetail(DesktopStatus.all, DesktopChip.all),
         '이름, 번호, 분류로 찾을 수 있어요.',

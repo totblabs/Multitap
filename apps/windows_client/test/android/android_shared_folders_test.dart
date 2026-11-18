@@ -865,7 +865,7 @@ void main() {
       expect(
         androidDriveWording(files).gone(drive.lastGone!),
         revoked
-            ? '‘Documents’ 폴더를 열 권한이 없어져서 공유를 끝냈어요'
+            ? '‘Documents’ 공유를 끝냈어요\n폴더를 열 권한이 없어졌어요'
             : '‘Documents’ 폴더를 찾을 수 없어서 공유를 끝냈어요',
       );
       engine.revoked = engine.gone = false;
@@ -1138,7 +1138,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 250));
       await tester.pump(const Duration(milliseconds: 50));
       expect(h.drive.shares, isEmpty);
-      expect(find.text('‘Documents’ 폴더를 열 권한이 없어져서 공유를 끝냈어요'), findsOneWidget);
+      expect(find.text('‘Documents’ 공유를 끝냈어요\n폴더를 열 권한이 없어졌어요'), findsOneWidget);
       engine.revoked = false;
 
       // The channel ends while the stream goes on.

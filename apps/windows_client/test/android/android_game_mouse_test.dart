@@ -322,7 +322,7 @@ Future<bool> _tileOn(WidgetTester tester) async {
       .evaluate()
       .isNotEmpty;
   expect(
-    find.descendant(of: tile, matching: find.text('마우스를 데스크톱 안에 잠가요')),
+    find.descendant(of: tile, matching: find.text('데스크톱 안에 잠가요')),
     on ? findsNothing : findsOneWidget,
   );
   // The row is a switch row, as in the Windows 설정 panel: the switch says
@@ -457,7 +457,7 @@ void main() {
     final h = await _open(tester, mouse: false);
     await _tapTile(tester);
     expect(find.byKey(const Key('game-mouse-dialog')), findsNothing);
-    expect(find.byTooltip('마우스 잠금 · 마우스를 연결하면 쓸 수 있어요'), findsOneWidget);
+    expect(find.byTooltip('마우스 잠금 · 마우스 연결 필요'), findsOneWidget);
     // Nothing ran: the 설정 panel is still there, its switch off.
     expect(find.byKey(const Key('android-more-panel')), findsOneWidget);
     expect(await _tileOn(tester), isFalse);
@@ -501,7 +501,7 @@ void main() {
     expect(h.sent('cursor.echo'), isEmpty);
     expect(h.capture.calls, contains('key:true'));
     expect(
-      find.textContaining('마우스를 데스크톱 안에 잠갔어요 · 뒤로 가기로 풀기'),
+      find.textContaining('마우스 잠금 켬 · 뒤로 가기로 풀기'),
       findsOneWidget,
     );
     // The Host draws the VM's cursor into the video: none here.
@@ -581,7 +581,7 @@ void main() {
       'release',
     ]);
     expect(await _tileOn(tester), isFalse);
-    expect(find.byTooltip('마우스 잠금 · 마우스를 연결하면 쓸 수 있어요'), findsOneWidget);
+    expect(find.byTooltip('마우스 잠금 · 마우스 연결 필요'), findsOneWidget);
     await _close(tester);
   });
 
@@ -674,7 +674,7 @@ void main() {
       'once', (tester) async {
     final h = await _open(tester);
     await _turnOn(tester, h);
-    expect(find.textContaining('롤 같은 일부 게임에서는 마우스가 움직이지 않을 수 있어요'),
+    expect(find.textContaining('롤 같은 일부 게임에서는 안 움직일 수 있어요'),
         findsOneWidget);
     // AndroidGameMouse.kt sends through the media's input channel.
     for (final event in [
@@ -701,7 +701,7 @@ void main() {
     await _mouseClick(tester);
     expect(h.capture.engages, 2);
     expect(find.textContaining('롤 같은 일부 게임에서는'), findsNothing);
-    expect(find.textContaining('마우스를 데스크톱 안에 잠갔어요'), findsOneWidget);
+    expect(find.textContaining('마우스 잠금 켬'), findsOneWidget);
     await _close(tester);
   });
 }

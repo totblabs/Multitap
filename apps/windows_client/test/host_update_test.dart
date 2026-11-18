@@ -201,7 +201,7 @@ void main() {
       );
       expect(
         state({'status': 'completed', 'rebootRequired': true}).tileStatus(now),
-        'Host 0.2.59 업데이트 완료 · Windows 다시 시작 필요',
+        'Host 0.2.59 설치됨 · Windows 다시 시작 필요',
       );
       expect(
         state({'status': 'failed', 'code': 'driver_install_required'})
@@ -395,7 +395,7 @@ void main() {
             latestVersion: '0.2.59',
             newer: true,
           ),
-          'Host 0.2.57 · 원격 업데이트 미지원 · 직접 설치 필요',
+          'Host 0.2.57 · 원격 업데이트 미지원 · 직접 설치',
         ),
         (
           const HostUpdateState(

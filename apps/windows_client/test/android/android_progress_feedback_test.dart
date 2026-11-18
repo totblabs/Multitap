@@ -393,7 +393,7 @@ void main() {
       broker.listGate = list;
       preflight.complete();
       await _frames(t);
-      expect(_activitySentence(t), 'TESTER · 데스크톱 상태를 다시 확인하는 중이에요');
+      expect(_activitySentence(t), 'TESTER · 상태 다시 확인 중');
       const failure = BrokerException('network_error');
       list.completeError(failure);
       await _frames(t);

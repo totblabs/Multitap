@@ -232,7 +232,7 @@ void main() {
       await _show(t, _fleet());
       await _type(t, '없는이름');
       expect(_order(t), isEmpty);
-      expect(find.text("'없는이름'에 맞는 데스크톱이 없어요"), findsOneWidget);
+      expect(find.text("'없는이름' 검색 결과가 없어요"), findsOneWidget);
       await t.tap(find.byKey(const Key('no-match-clear')));
       await t.pumpAndSettle();
       expect(_order(t).length, 5);
@@ -1181,7 +1181,7 @@ void main() {
       await t.tap(segment('stopped'));
       await t.pumpAndSettle();
       await _type(t, 'zeta');
-      expect(find.text("'zeta'에 맞는 데스크톱이 없어요"), findsOneWidget);
+      expect(find.text("'zeta' 검색 결과가 없어요"), findsOneWidget);
       expect(find.text("'꺼짐' 조건 안에서 찾았어요."), findsOneWidget);
       await t.tap(find.byKey(const Key('no-match-clear')));
       await t.pumpAndSettle();

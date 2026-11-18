@@ -49,7 +49,7 @@ const _pcTag =
 const _otherUuid = '99999999-1234-4234-8234-000000000001';
 
 const _headline = '지금 쓰고 있는 PC예요';
-const _detail = '여기서는 연결할 수 없어요. 다른 기기에서 연결하세요.';
+const _detail = '다른 기기에서 연결하세요.';
 const _message = '지금 Multitap 앱을 쓰고 있는 PC라 연결할 수 없어요. 다른 기기에서 연결하세요.';
 
 Map<String, dynamic> _json(String id, {Object? tag, String kind = 'vm'}) => {
@@ -429,7 +429,7 @@ void main() {
       expect(l10n.samePcHeadline, "This desktop is the PC you're using");
       expect(
         l10n.samePcDetail,
-        "You can't connect from here. Connect from another device.",
+        "Connect from another device.",
       );
       expect(
         const BrokerException('same_pc').message,

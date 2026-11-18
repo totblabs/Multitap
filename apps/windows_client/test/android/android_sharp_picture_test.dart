@@ -780,12 +780,12 @@ void main() {
         expect(h.requested.single.maxWidth, lessThan(1080));
         expect(h.scales.single, 100);
         expect(
-          find.text('이 기기에서는 더 선명하게 받을 수 없어 자동 크기로 보여요.'),
+          find.text('기기가 더 받지 못해 자동 크기로 보여요'),
           silent ? findsNothing : findsOneWidget,
         );
         // The choice stays the person's; its note says why it is not in use.
         await _openScreen(tester);
-        expect(find.textContaining('더 선명하게 받을 수 없어 자동 크기로 보여요'), findsWidgets);
+        expect(find.textContaining('자동 크기로 표시'), findsWidgets);
       } finally {
         await _close(tester);
       }
@@ -811,7 +811,7 @@ void main() {
       );
       await _frames(tester, 8);
       expect(h.engine.fallbacks, ['host_refused']);
-      expect(find.text('선명하게를 적용하지 못해 자동 크기로 보여요.'), findsOneWidget);
+      expect(find.text('선명하게를 쓸 수 없어 자동 크기로 보여요'), findsOneWidget);
       expect(h.sent('display.scale').last['scale'], 100);
       // The stream still has the automatic size: nothing more is resized.
       await _frames(tester, 40);
@@ -821,7 +821,7 @@ void main() {
       // The choice is kept; its note says what happened.
       expect(h.saved.last.screen(_phone).resolution, AndroidResolution.sharp);
       expect(
-        find.textContaining('선명하게를 적용하지 못해 자동 크기로 보여요 (데스크톱 한도)'),
+        find.textContaining('자동 크기로 표시'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
@@ -844,7 +844,7 @@ void main() {
         ..notifyListeners();
       await _frames(tester);
       expect(h.engine.fallbacks, ['host_reduced']);
-      expect(find.text('선명하게를 적용하지 못해 자동 크기로 보여요.'), findsOneWidget);
+      expect(find.text('선명하게를 쓸 수 없어 자동 크기로 보여요'), findsOneWidget);
       final resize = h.sent('stream.resize').last;
       expect(
         (resize['width'], resize['height']),
