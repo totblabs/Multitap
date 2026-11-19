@@ -119,8 +119,12 @@ void main() {
 
       await tester.tap(find.byKey(const Key('sign-in-password')));
       await tester.pump();
-      expect(calls.last, 'passwordMode:true');
-      expect(_asked(calls), 1, reason: 'The password field is not observed.');
+      expect(calls, contains('passwordMode:true'));
+      // Leaving the ID field asks what the IME did with its keys; nothing went
+      // through the IME here, so nothing is recorded. The password field
+      // itself is not observed.
+      expect(_asked(calls), 2);
+      expect(seen, [_healthy]);
       await tester.tap(find.byKey(const Key('sign-in-id')));
       await tester.pump();
       // The runner must hear "password mode off" first, or it would answer
@@ -147,6 +151,59 @@ void main() {
       await tester.pump();
       expect(seen, [repaired | InputMethodState.afterSignOut]);
       expect(InputMethodState.afterSignOut, 512);
+    }, variant: _windows);
+
+    // Field records of 2026-11-19: open + Hangul on entering, Latin typed.
+    // Leaving the field says what the IME did with the keys meanwhile.
+    testWidgets('records the typing on leaving the field, only when there was '
+        'some', (tester) async {
+      var answer = _healthy | InputMethodState.afterSignOut;
+      final calls = _runner(() => answer), seen = <int>[];
+      await tester.pumpWidget(
+        _screen(error: '로그아웃했어요.', onState: seen.add),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('sign-in-id')));
+      await tester.pump();
+      answer = _healthy | InputMethodState.latinWhileHangul;
+      await tester.tap(find.byKey(const Key('sign-in-password')));
+      await tester.pump();
+      expect(_asked(calls), 2);
+      expect(seen, [
+        _healthy | InputMethodState.afterSignOut,
+        _healthy |
+            InputMethodState.latinWhileHangul |
+            InputMethodState.onLeaving |
+            InputMethodState.afterSignOut,
+      ]);
+      // Korean typed normally: also kept (it says the IME worked).
+      answer = _healthy | InputMethodState.composed | InputMethodState.keyTaken;
+      await tester.tap(find.byKey(const Key('sign-in-id')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('sign-in-password')));
+      await tester.pump();
+      expect(
+        seen.last,
+        _healthy |
+            InputMethodState.composed |
+            InputMethodState.keyTaken |
+            InputMethodState.onLeaving |
+            InputMethodState.afterSignOut,
+      );
+      expect(
+        [
+          InputMethodState.composed,
+          InputMethodState.keyTaken,
+          InputMethodState.latinWhileHangul,
+          InputMethodState.onLeaving,
+        ],
+        [1024, 2048, 4096, 8192],
+      );
+      // The stored list keeps them (16 bits).
+      final kept = InputMethodObservation.listFrom([
+        {'bits': seen[1], 'time': '2026-11-19T01:00:00Z'},
+      ]);
+      expect(kept.single.bits, seen[1]);
     }, variant: _windows);
 
     testWidgets('asks (the repair) even when nobody listens', (tester) async {
@@ -181,7 +238,8 @@ void main() {
       await focusAgain();
       _runner(() => throw PlatformException(code: 'failed'));
       await focusAgain();
-      expect(_asked(calls), 1);
+      // Leaving and entering the field each asked once.
+      expect(_asked(calls), 2);
       expect(seen, isEmpty);
       expect(tester.takeException(), isNull);
       await tester.enterText(find.byKey(const Key('sign-in-id')), 'alice');
@@ -388,12 +446,14 @@ void main() {
           await tester.pump();
         }
         // The first ones are the evidence; a full list replaces its newest.
+        // Leaving the field asks too (the even answers): no typing bits in
+        // them, so nothing is recorded.
         expect(
           [
             for (final item in await memory.loadInputMethodObservations())
               item.bits,
           ],
-          [1, 2, 3, 6],
+          [1, 3, 5, 11],
         );
         await signIn(tester);
         expect(find.byType(SignInScreen), findsNothing);

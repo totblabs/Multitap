@@ -35,7 +35,7 @@ Windows may show a **Windows protected your PC** or **Unknown publisher** warnin
 
 The app runs without administrator rights.
 Windows asks for administrator approval only when you install, update or install the USB driver.
-Clicking X on the window hides the app in the tray. To close it completely, click **Quit** in the account menu.
+Clicking X on the window hides the app in the tray. To close it completely, click **Quit** in the account menu. On the sign-in screen it is the power button right of the theme button in the top corner.
 
 ### Save the server address
 

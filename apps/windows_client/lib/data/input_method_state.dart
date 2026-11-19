@@ -28,6 +28,19 @@ abstract final class InputMethodState {
   /// when the field got the focus, which is how it looks after a forced
   /// sign-out (a failed sign-in leaves one too, until the next edit).
   static const afterSignOut = 512;
+
+  /// What the IME did with the keys since the previous observation: a
+  /// composition began or changed; it took a key (VK_PROCESSKEY); a Latin
+  /// letter arrived while the context said open and Hangul (the keys went
+  /// past the IME: the field records of 2026-11-19 said Hangul yet the owner
+  /// typed Latin only).
+  static const composed = 1024, keyTaken = 2048, latinWhileHangul = 4096;
+
+  /// Added by the sign-in screen: observed when the ID field lost the focus
+  /// (the typing bits then cover the time it had it).
+  static const onLeaving = 8192;
+
+  static const typing = composed | keyTaken | latinWhileHangul;
 }
 
 /// Asks the runner once; it also puts a missing input context back. Null

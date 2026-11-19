@@ -2,6 +2,7 @@
 #define MULTITAP_PASSWORD_IME_H_
 
 #include <windows.h>
+#include <commctrl.h>
 #include <imm.h>
 
 namespace multitap {
@@ -10,7 +11,11 @@ namespace multitap {
 // context, then restore its original open/conversion state when focus leaves.
 class PasswordIme {
  public:
-  ~PasswordIme() { Restore(); }
+  ~PasswordIme() {
+    Restore();
+    if (watched_ && IsWindow(watched_))
+      RemoveWindowSubclass(watched_, &PasswordIme::Watch, kWatchId);
+  }
   void Set(HWND window, bool enabled) {
     requested_ = enabled;
     if (enabled) Apply(window); else Restore();
@@ -30,12 +35,26 @@ class PasswordIme {
   //    64  the context is held away by password mode
   //   128  the thread's keyboard layout is Korean
   //   256  repaired: the context was missing and is back
+  // What the input method did with the view's keys since the previous
+  // observation (seen through a subclass of the view, set at the first one):
+  //  1024  a composition began or changed (WM_IME_STARTCOMPOSITION/COMPOSITION)
+  //  2048  the IME took a key (WM_KEYDOWN with VK_PROCESSKEY)
+  //  4096  a Latin letter arrived while the context said open and Hangul
+  // Field records of 2026-11-19 (an account with a Korean ID): after a sign-out
+  // the ID field reported open + Hangul yet typed Latin only; a plain Win32
+  // window with this hold and the real Korean IME did not repeat it. These
+  // say next time whether the keys went past the IME.
   // Outside password mode the view must have its context, so one found missing
   // there is associated again (the thread's default one). A password field
   // has none on purpose: never repaired while requested or held.
   int Observe(HWND view) {
     int bits = (requested_ ? 32 : 0) | (held_ ? 64 : 0);
     if (!IsWindow(view)) return bits;
+    if (watched_ == view) bits |= seen_;
+    else if (!watched_ &&
+             SetWindowSubclass(view, &PasswordIme::Watch, kWatchId,
+                               reinterpret_cast<DWORD_PTR>(this))) watched_ = view;
+    seen_ = 0;
     if (HIMC context = ImmGetContext(view)) {
       DWORD conversion = 0, sentence = 0;
       bits |= 1;
@@ -85,7 +104,39 @@ class PasswordIme {
     held_ = false;
     context_ = nullptr;
   }
+  static constexpr UINT_PTR kWatchId = 0x50494d31;  // 'PIM1'
+  static LRESULT CALLBACK Watch(HWND view, UINT message, WPARAM wparam,
+                                LPARAM lparam, UINT_PTR, DWORD_PTR data) {
+    auto* self = reinterpret_cast<PasswordIme*>(data);
+    switch (message) {
+      case WM_IME_STARTCOMPOSITION:
+      case WM_IME_COMPOSITION:
+        self->seen_ |= 1024;
+        break;
+      case WM_KEYDOWN:
+        if (wparam == VK_PROCESSKEY) self->seen_ |= 2048;
+        break;
+      case WM_CHAR:
+        if ((wparam >= 'a' && wparam <= 'z') || (wparam >= 'A' && wparam <= 'Z')) {
+          if (HIMC context = ImmGetContext(view)) {
+            DWORD conversion = 0, sentence = 0;
+            if (ImmGetOpenStatus(context) &&
+                ImmGetConversionStatus(context, &conversion, &sentence) &&
+                (conversion & IME_CMODE_NATIVE)) self->seen_ |= 4096;
+            ImmReleaseContext(view, context);
+          }
+        }
+        break;
+      case WM_NCDESTROY:
+        RemoveWindowSubclass(view, &PasswordIme::Watch, kWatchId);
+        if (self->watched_ == view) self->watched_ = nullptr;
+        break;
+    }
+    return DefSubclassProc(view, message, wparam, lparam);
+  }
   bool requested_ = false, held_ = false;
+  HWND watched_ = nullptr;
+  int seen_ = 0;
   HWND window_ = nullptr;
   HIMC context_ = nullptr;
   BOOL open_ = FALSE;

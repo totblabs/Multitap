@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'app_exit.dart';
 import 'appearance_switch.dart';
 
 import '../data/login_memory.dart';
@@ -108,8 +109,22 @@ class _SignInScreenState extends State<SignInScreen> {
     final focused = _idFocus.hasFocus;
     if (focused == _idFocused) return;
     _idFocused = focused;
-    if (!focused) return;
     final report = widget.onInputMethodState;
+    if (!focused) {
+      // What the IME did with the keys while the field had the focus; kept
+      // only when something was typed, so the rows stay the evidence.
+      final marks =
+          InputMethodState.onLeaving |
+          (widget.error != null ? InputMethodState.afterSignOut : 0);
+      unawaited(
+        readInputMethodState().then((bits) {
+          if (bits != null && bits & InputMethodState.typing != 0) {
+            report?.call(bits | marks);
+          }
+        }),
+      );
+      return;
+    }
     // The line of a forced sign-out is still shown when the field is entered.
     final marks = widget.error != null ? InputMethodState.afterSignOut : 0;
     // A turn later: a node hears of the focus before the focus manager's
@@ -493,16 +508,33 @@ class _SignInScreenState extends State<SignInScreen> {
                   key: const Key('login-header'),
                   top: short ? 6 : 14,
                   right: short ? 8 : 18,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: palette.tile,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: palette.tileLine),
-                    ),
-                    child: AppearanceSwitch(
-                      compact: true,
-                      iconColor: palette.ink,
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _circle(
+                        palette,
+                        AppearanceSwitch(compact: true, iconColor: palette.ink),
+                      ),
+                      // 완전 종료 (the owner, 2026-11-19): the window's X keeps
+                      // Multitap in the tray, and the account menu that ends it
+                      // exists only after sign-in. Only the main window has it.
+                      if (AppExitScope.maybeOf(context) case final exit?) ...[
+                        const SizedBox(width: 8),
+                        _circle(
+                          palette,
+                          IconButton(
+                            key: const Key('login-quit-app'),
+                            tooltip: l10n.quitsMultitapCompletelyInsteadKeeping,
+                            onPressed: () => unawaited(exit.requestExit()),
+                            icon: Icon(
+                              Icons.power_settings_new_rounded,
+                              color: palette.ink,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
@@ -511,6 +543,16 @@ class _SignInScreenState extends State<SignInScreen> {
         ),
       ),
     ),
+  );
+
+  /// A round tile in the window's corner (the header buttons over the scene).
+  Widget _circle(AppPalette palette, Widget child) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: palette.tile,
+      shape: BoxShape.circle,
+      border: Border.all(color: palette.tileLine),
+    ),
+    child: child,
   );
 
   Widget _card(AppPalette palette, {required bool compact}) => Column(

@@ -8,6 +8,7 @@ import 'package:multitap_client/data/appearance_settings.dart';
 import 'package:multitap_client/data/client_tray.dart';
 import 'package:multitap_client/data/launcher_memory.dart';
 import 'package:multitap_client/data/window_close_guard.dart';
+import 'package:multitap_client/ui/sign_in_screen.dart';
 import 'package:multitap_client/ui/themed_app.dart';
 import 'package:multitap_client/ui/workspace_header.dart';
 
@@ -116,7 +117,106 @@ Future<void> _openMenu(WidgetTester t) async {
   await t.pumpAndSettle();
 }
 
+Future<void> _pumpSignIn(
+  WidgetTester t, {
+  required _Guard guard,
+  required _Tray tray,
+  bool confirmExit = true,
+  Size size = const Size(1000, 700),
+}) async {
+  t.view.physicalSize = size;
+  t.view.devicePixelRatio = 1;
+  addTearDown(t.view.resetPhysicalSize);
+  addTearDown(t.view.resetDevicePixelRatio);
+  final appearance = AppAppearance();
+  addTearDown(appearance.dispose);
+  await t.pumpWidget(
+    ThemedApp(
+      appearance: appearance,
+      confirmExit: confirmExit,
+      exitGuard: guard,
+      tray: tray,
+      trayMemory: SessionLauncherMemory(),
+      home: SignInScreen(
+        onLogin: (_, _) async => SignInResult.rejected,
+        serverOrigin: fixtureOrigin,
+        onServerChanged: (_) async {},
+        loginMemory: TestLoginMemory(),
+      ),
+    ),
+  );
+  await t.pumpAndSettle();
+}
+
 void main() {
+  // The owner (2026-11-19): the sign-in screen needs a way to end the program;
+  // the window's X keeps it in the tray and the account menu comes only after
+  // sign-in.
+  group('완전 종료 on the sign-in screen', () {
+    testWidgets('sits right of the appearance button and quits at once', (
+      t,
+    ) async {
+      final guard = _Guard(), tray = _Tray();
+      await _pumpSignIn(t, guard: guard, tray: tray);
+      final quit = find.byKey(const Key('login-quit-app'));
+      expect(quit, findsOneWidget);
+      expect(
+        find.descendant(
+          of: quit,
+          matching: find.byIcon(Icons.power_settings_new_rounded),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        t.getTopLeft(quit).dx,
+        greaterThan(t.getTopRight(find.byKey(const Key('appearance-menu'))).dx),
+      );
+      expect(
+        t.widget<IconButton>(quit).tooltip,
+        '트레이에 남기지 않고 Multitap을 완전히 끝내요.',
+      );
+      await t.tap(quit);
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('exit-confirm-dialog')), findsNothing);
+      expect(guard.closes, 1);
+    });
+
+    testWidgets('asks first when remote connections would end', (t) async {
+      final guard = _Guard(), tray = _Tray()..sessions = true;
+      await _pumpSignIn(t, guard: guard, tray: tray);
+      await t.tap(find.byKey(const Key('login-quit-app')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('exit-confirm-dialog')), findsOneWidget);
+      await t.tap(find.byKey(const Key('exit-cancel')));
+      await t.pumpAndSettle();
+      expect(guard.closes, 0);
+      expect(find.byKey(const Key('login-card')), findsOneWidget);
+    });
+
+    testWidgets('fits a small window beside the appearance button', (t) async {
+      await _pumpSignIn(
+        t,
+        guard: _Guard(),
+        tray: _Tray(),
+        size: const Size(320, 360),
+      );
+      expect(t.takeException(), isNull);
+      final quit = t.getRect(find.byKey(const Key('login-quit-app')));
+      expect(quit.right, lessThanOrEqualTo(320));
+      expect(quit.top, greaterThanOrEqualTo(0));
+      expect(
+        quit.overlaps(t.getRect(find.byKey(const Key('appearance-menu')))),
+        isFalse,
+      );
+    });
+
+    testWidgets('is not offered outside the main client window', (t) async {
+      await _pumpSignIn(t, guard: _Guard(), tray: _Tray(), confirmExit: false);
+      expect(find.byKey(const Key('login-quit-app')), findsNothing);
+      expect(find.byKey(const Key('appearance-menu')), findsOneWidget);
+    });
+  });
+
   group('완전 종료 in the account menu', () {
     testWidgets('is the last item, below 로그아웃, with the exit icon', (t) async {
       await _pumpHeader(t, guard: _Guard(), tray: _Tray());

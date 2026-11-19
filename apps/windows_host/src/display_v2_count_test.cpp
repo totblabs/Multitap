@@ -355,6 +355,25 @@ int restCountCases(){
   // A refused apply puts the previous count back.
   {World w(true);Memory m;rest(w);w.autoActivate=true;w.reject=[](const NativeCcdData&,UINT32){return LONG(ERROR_INVALID_PARAMETER);};DisplaySessionV2 session(access(w,m));
     const auto up=session.count("rest-refused",2,true,deadline(w));require(!up.ok&&!w.hasSecond()&&w.counts==2,"A failed count at rest kept the new count");++passed;}
+  // Field case (pve-180, 2026-11-19, Host 1.1.32): a VM with a vGPU display
+  // of its own beside the console, that display off at rest. When the SDK
+  // removed output 1, Windows switched it on again (its remembered layout for
+  // the displays left). The re-plan treated it as a display it could not
+  // identify (the check for a restore after a restart) and refused three
+  // times within 0.5 s: stage 7, error 0, the count back at 2, and every later
+  // 2->1 the same. `before` was read in this boot moments earlier and lists
+  // that display: it goes back off and the count changes. Both directions.
+  for(const size_t wanted:{size_t(1),size_t(2)}){
+    World w(true);Memory m;w.owned().active=false;w.extra().active=false;
+    if(wanted==1)require(w.setCount(2).has_value()&&!w.second().active,"Fixture count 2 failed");
+    w.afterCount=[](World& world){auto& e=world.extra();e.active=true;e.x=1024;e.y=0;e.width=e.dbWidth;e.height=e.dbHeight;};
+    DisplaySessionV2 session(access(w,m,false));
+    const auto result=session.count("rest-returned",wanted,false,deadline(w));
+    require(result.ok&&result.displaysReturned&&result.foreignBefore==1&&!result.stateKept&&!m.bytes&&w.hasSecond()==(wanted==2),"A count at rest failed when Windows switched on a display that was off before");
+    const auto& c=w.console();
+    require(c.active&&c.x==0&&c.y==0&&c.width==1024&&c.height==768&&!w.extra().active&&!w.owned().active&&(!w.hasSecond()||!w.second().active)&&!overlapping(w),"A count at rest left on a display Windows switched on, or moved the console");
+    ++passed;
+  }
   return passed;
 }
 int main(){

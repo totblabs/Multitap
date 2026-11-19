@@ -470,7 +470,13 @@ inline bool displayV2GroupSatisfied(const NativeCcdData& ccd,std::span<const Dis
 // Source IDs deliberately do not participate: Windows may reassign them.
 // `named`: non-owned adapters the state names; `stale`: those absent now.
 struct DisplayV2RestorePreflight {uint32_t stale=0,named=0;bool resolved=false;};
-inline DisplayV2RestorePreflight preflightDisplayV2Restore(const DisplayV2State& saved,const NativeCcdData& fresh,std::span<const NativeDisplayTarget> current,const DisplayV2Retired& retired={}){
+// `listed`: a reading of every path (active or not) taken in this boot moments
+// before (the count at rest). A display it lists that is active now was off
+// then and Windows switched it on (pve-180, 2026-11-19: a vGPU display beside
+// the console, on again when the SDK removed output 1): known, not a new
+// display, so the plan may switch it off again. Without it (a state file, a
+// restart in between) such a display stays unresolved, as before.
+inline DisplayV2RestorePreflight preflightDisplayV2Restore(const DisplayV2State& saved,const NativeCcdData& fresh,std::span<const NativeDisplayTarget> current,const DisplayV2Retired& retired={},const NativeCcdData* listed=nullptr){
   using Adapter=std::pair<DWORD,LONG>;using Target=std::tuple<DWORD,LONG,UINT32>;
   const auto adapter=[](LUID value){return Adapter{value.LowPart,value.HighPart};};
   const auto target=[](LUID value,UINT32 id){return Target{value.LowPart,value.HighPart,id};};
@@ -479,6 +485,8 @@ inline DisplayV2RestorePreflight preflightDisplayV2Restore(const DisplayV2State&
   for(const auto& path:saved.ccd.paths)if(displayV2Active(path)&&!nativeOwnedPath(path,saved.owned)&&!displayV2RetiredPath(retired,path)){
     named.insert(adapter(path.targetInfo.adapterId));known.insert(target(path.targetInfo.adapterId,path.targetInfo.id));
   }
+  std::set<Target> earlier;
+  if(listed)for(const auto& path:listed->paths)earlier.insert(target(path.targetInfo.adapterId,path.targetInfo.id));
   if(saved.console){named.insert(adapter(saved.console->targetAdapter));known.insert(target(saved.console->targetAdapter,saved.console->target));}
   for(const auto& path:fresh.paths){
     present.insert(adapter(path.targetInfo.adapterId));
@@ -492,7 +500,7 @@ inline DisplayV2RestorePreflight preflightDisplayV2Restore(const DisplayV2State&
   // A removed/unavailable ordinary target on an existing adapter can still be
   // skipped, as before. It is not evidence identifying a new active target.
   for(const auto& path:fresh.paths)if(displayV2Active(path)&&!nativeOwnedPath(path,current)&&!nativeOwnedPath(path,saved.owned)&&!displayV2RetiredPath(retired,path)&&
-      !known.count(target(path.targetInfo.adapterId,path.targetInfo.id)))return result;
+      !known.count(target(path.targetInfo.adapterId,path.targetInfo.id))&&!earlier.count(target(path.targetInfo.adapterId,path.targetInfo.id)))return result;
   result.resolved=true;return result;
 }
 // Every adapter the state names is gone: it was saved before a Windows restart
@@ -521,8 +529,8 @@ inline bool displayV2RestoreTargetsMatch(const NativeCcdData& actual,std::span<c
 // target) at their saved position. Targets that no longer exist are skipped.
 // `ownedOff`: the plan leaves every current owned output off beside another
 // display (the layout Windows should remember, DisplaySessionV2::restore).
-inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const NativeCcdData& fresh,std::span<const NativeDisplayTarget> current,std::vector<DisplayV2Expected>* expected=nullptr,const DisplayV2Retired& retired={},bool* ownedOff=nullptr){
-  const auto identity=preflightDisplayV2Restore(saved,fresh,current,retired);if(!identity.resolved)throw DisplayV2RestoreIdentityError(identity.stale);
+inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const NativeCcdData& fresh,std::span<const NativeDisplayTarget> current,std::vector<DisplayV2Expected>* expected=nullptr,const DisplayV2Retired& retired={},bool* ownedOff=nullptr,const NativeCcdData* listed=nullptr){
+  const auto identity=preflightDisplayV2Restore(saved,fresh,current,retired,listed);if(!identity.resolved)throw DisplayV2RestoreIdentityError(identity.stale);
   NativeCcdData plan;std::map<UINT32,UINT32> copied;std::set<DisplayV2SourceKey> taken;
   struct Owned {NativeDisplayTarget target;LONG left=0,top=0;DWORD width=0,height=0;};std::vector<Owned> owned;
   std::vector<DISPLAYCONFIG_PATH_INFO> kept;
@@ -1402,8 +1410,11 @@ class DisplaySessionV2 {
       NativeCcdData fresh;
       try{fresh=access_.query();}catch(const NativeTopologyWindowsError& error){lastError=LONG(error.code);continue;}
       if(settled(fresh)){verified=true;break;}
+      for(const auto& path:fresh.paths)if(displayV2Active(path)&&!nativeOwnedPath(path,ours)&&!displayV2TargetActive(before,path.targetInfo.adapterId,path.targetInfo.id))result.displaysReturned=true;
       NativeCcdData plan;
-      try{plan=planDisplayV2Restore(saved,fresh,owned_,nullptr,access_.retired);}catch(...){access_.pause();continue;}
+      // `before` lists every display of this boot: one Windows switched on
+      // meanwhile is switched off again, not taken for an unknown display.
+      try{plan=planDisplayV2Restore(saved,fresh,owned_,nullptr,access_.retired,nullptr,&before);}catch(...){access_.pause();continue;}
       LONG code=apply(plan,displayV2Supplied,true);if(code!=ERROR_SUCCESS)code=apply(plan,displayV2Supplied|SDC_ALLOW_CHANGES,true);
       if(code!=ERROR_SUCCESS){code=apply(plan,displayV2Supplied);if(code!=ERROR_SUCCESS)code=apply(plan,displayV2Supplied|SDC_ALLOW_CHANGES);}
       if(code!=ERROR_SUCCESS){lastError=code;access_.pause();continue;}
