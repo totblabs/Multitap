@@ -58,6 +58,17 @@ class BitrateController {
   static constexpr uint64_t lossWindowUs = 300000;
   static constexpr uint64_t lossMinimumDatagrams = 30;
   static constexpr double lossCut = 0.01, lossDrain = 0.95;
+  // The rate that lost is remembered (a policer or a shallow queue gives no delay signal, so
+  // probing finds it only by loss, and each datagram given up costs a frame and a recovery).
+  // Field 2026-11-20 (a game on a local PC over UDP, a path that carried 35-45 Mbps): probing
+  // touched the limit about every 2.5 s (254 recoveries in ten minutes), and once the 30 s
+  // "gentle" memory ran out it climbed at 34 %/s to 69-79 Mbps, then 0.6 s freezes came in
+  // bursts. Now the rate stays below 97 % of it; a try above it comes after a wait that
+  // doubles while the loss keeps coming at the same rate (2 s up to 32 s), climbs gently,
+  // and a try that passes it by 5 % without loss moves it up (the path carries more now).
+  // Five minutes without loss forget it.
+  static constexpr double ceilingMargin = 0.97, ceilingRepeat = 1.1, ceilingPassed = 1.05;
+  static constexpr uint64_t ceilingWaitFirstUs = 2000000, ceilingWaitLongestUs = 32000000, ceilingMemoryUs = 300000000;
 
   BitrateController(int start, int maximum, int fps = 60)
       : maximum_(std::clamp(maximum, adaptiveMinimumBitrate, adaptiveMaximumBitrate)), floor_(adaptiveMinimumBitrate), fps_(std::clamp(fps, 1, 60)) {
@@ -166,6 +177,7 @@ class BitrateController {
     buckets_.clear(); delivered_.clear(); written_.clear(); baselineValid_ = false; delayAtUs_ = 0; overuseRuns_ = 0;
     standingDelayUs_ = standingExcessUs_ = relayExcessUs_ = previousExcessUs_ = cutDelayUs_ = 0;
     losses_.clear(); lossSeenUs_ = lossCutUs_ = lossHoldUs_ = 0; lossCutFraction_ = spikeBase_ = 0; lossStuck_ = false;
+    lossCeiling_ = 0; lossCeilingAtUs_ = ceilingTryAtUs_ = 0; ceilingWaitUs_ = ceilingWaitFirstUs;
   }
   // One UDP FEEDBACK: the round trip (0 when it echoed no TAIL) and the datagrams
   // received and given up since the last. TAIL skips the pacer, so its round trip
@@ -190,6 +202,7 @@ class BitrateController {
     if (given && (fraction >= lossCut || lossy >= 3) && nowUs >= lossHoldUs_ && !encoderLimited_ && !lossStuck_) {
       const auto cut = [&](double base, double lowest) {
         cutting(true);
+        remember(nowUs, base);
         target_ = std::clamp(std::min(target_, base * std::clamp((1 - fraction) * lossDrain, lowest, 0.95)), double(floor_), double(maximum_));
         lastOveruseUs_ = nowUs; congestionVideo_ = target_; congestionAtUs_ = nowUs;  // probing comes back gently around it
         return publish();
@@ -279,6 +292,13 @@ class BitrateController {
   // that sat through three minutes of stalls came back at 2.4 of 17.5 Mbps.
   // A cut with evidence (loss, a queue our own sending filled) ends that.
   void cutting(bool evidence) { idleRestore_ = evidence ? 0 : std::max(idleRestore_, target_); }
+  // A loss cut at `lost` (the rate that lost): the same limit again waits twice as long
+  // for its next try, a new one starts over.
+  void remember(uint64_t nowUs, double lost) {
+    const bool again = lossCeiling_ > 0 && nowUs - lossCeilingAtUs_ < ceilingMemoryUs && lost <= ceilingRepeat * lossCeiling_;
+    ceilingWaitUs_ = again ? std::min(2 * ceilingWaitUs_, ceilingWaitLongestUs) : ceilingWaitFirstUs;
+    lossCeiling_ = lost; lossCeilingAtUs_ = nowUs; ceilingTryAtUs_ = nowUs + ceilingWaitUs_;
+  }
   // Overflow guard: at most half, and below what the backed-up leg carries.
   void emergency(uint64_t nowUs, double carried = 0) {
     lastEmergencyUs_ = lastOveruseUs_ = nowUs; holdUntilUs_ = nowUs + 500000;
@@ -370,9 +390,19 @@ class BitrateController {
     const double used = rate(video_, nowUs, 500000);
     if (used < 0.7 * target_) return publish();  // application-limited: no evidence above it
     // Gentle only around the last congestion rate; past it the path changed.
-    const bool gentle = congestionVideo_ > 0 && nowUs - congestionAtUs_ < 30000000 && target_ >= 0.9 * congestionVideo_ && target_ <= 1.15 * congestionVideo_;
-    const double next = target_ * std::pow(gentle ? nearProbeStep : probeStep, double(elapsed) / 100000);
+    bool gentle = congestionVideo_ > 0 && nowUs - congestionAtUs_ < 30000000 && target_ >= 0.9 * congestionVideo_ && target_ <= 1.15 * congestionVideo_;
+    // The rate that lost (remember): below it until the next try, then gently past it.
+    if (lossCeiling_ > 0 && nowUs - lossCeilingAtUs_ >= ceilingMemoryUs) { lossCeiling_ = 0; ceilingWaitUs_ = ceilingWaitFirstUs; }
+    double cap = 0;
+    if (lossCeiling_ > 0) {
+      if (nowUs < ceilingTryAtUs_) cap = ceilingMargin * lossCeiling_;
+      else if (target_ >= ceilingMargin * lossCeiling_) gentle = true;
+    }
+    double next = target_ * std::pow(gentle ? nearProbeStep : probeStep, double(elapsed) / 100000);
+    if (cap > 0) next = std::min(next, std::max(cap, target_));  // holds, never lowers
     target_ = std::min({double(maximum_), next, std::max(target_, 1.5 * used)});
+    // A try that passed it by 5 % without loss: the path carries more now; the next limit is new.
+    if (lossCeiling_ > 0 && target_ >= ceilingPassed * lossCeiling_) { lossCeiling_ = target_; ceilingWaitUs_ = ceilingWaitFirstUs; ceilingTryAtUs_ = nowUs; }
     if (target_ >= idleRestore_) idleRestore_ = 0;
     return publish();
   }  std::optional<int> publish(bool force = false) {
@@ -389,6 +419,7 @@ class BitrateController {
   struct Loss { uint64_t atUs, received, lost; };
   std::deque<Loss> losses_;  // UDP FEEDBACK of the last lossWindowUs
   uint64_t lossSeenUs_ = 0, lossCutUs_ = 0, lossHoldUs_ = 0; double lossCutFraction_ = 0, spikeBase_ = 0; bool lossStuck_ = false;
+  double lossCeiling_ = 0; uint64_t lossCeilingAtUs_ = 0, ceilingTryAtUs_ = 0, ceilingWaitUs_ = ceilingWaitFirstUs;
   double undoTarget_ = 0, undoCongestion_ = 0, limitedRestore_ = 0, idleRestore_ = 0;
   int64_t standingDelayUs_ = 0, standingExcessUs_ = 0, relayExcessUs_ = 0, previousExcessUs_ = 0, cutDelayUs_ = 0, baseline_ = 0;
   int overuseRuns_ = 0;

@@ -225,6 +225,23 @@ void udpLossPatterns() {
     const auto r = lossRun([](int) { return 1e9; }, [](int n) { return n == 100 ? 1.0 : 0.0; }, 300); print("blackout-100ms", r, 95, 300);
     require(r.lowest(95, 300) >= 0.85 * r.mbps[99] - 0.1 && r.mbps[200] >= r.mbps[99], "UDP loss: a blackout cut deeply or for long");
   }
+  {  // Ten minutes on a 40 Mbps link from a 20 Mbps start (field 2026-11-20: a game on a
+     // local PC, UDP; bursts of 0.6 s freezes every ~3 minutes when the target rose to
+     // 69-79 Mbps over a path that carried 35-45). Every report with a datagram given up
+     // costs a frame and a recovery: count them over the steady part.
+    const auto r = lossRun([](int) { return 40e6; }, none, 6000, 20000000); print("link-40-ten-minutes", r, 600, 6000);
+    int lossy = 0, episodes = 0; bool in = false;
+    for (int n = 600; n < 6000; ++n) { const bool any = r.loss[size_t(n)] > 0; lossy += any; if (any && !in) ++episodes; in = any; }
+    std::cout << "{\"kind\":\"bitrate-udp-loss\",\"case\":\"link-40-ten-minutes-detail\",\"reportsWithLoss\":" << lossy << ",\"lossEpisodes\":" << episodes << ",\"maxMbps\":" << r.highest(600, 6000) << ",\"simulated\":true}\n";
+    // Before the remembered limit: 245 episodes (one every 2.2 s). Now a try every ~32 s.
+    require(episodes <= 40 && r.highest(600, 6000) <= 1.1 * 40 && r.mean(600, 6000) >= 0.85 * 40, "UDP loss: probing kept touching a known limit, or held far below it");
+  }
+  {  // The path gets better (30 -> 80 Mbps after two minutes): the remembered limit gives way.
+    const auto r = lossRun([](int n) { return n < 1200 ? 30e6 : 80e6; }, none, 3000, 20000000); print("link-30-then-80", r, 1200, 3000);
+    int reached = -1; for (int n = 1200; n < 3000; ++n) if (r.mbps[size_t(n)] >= 0.9 * 80) { reached = n - 1200; break; }
+    std::cout << "{\"kind\":\"bitrate-udp-loss\",\"case\":\"link-30-then-80-detail\",\"reachedTenthsOfSecond\":" << reached << ",\"simulated\":true}\n";
+    require(reached >= 0 && reached <= 600 && r.mean(2400, 3000) >= 0.85 * 80, "UDP loss: a better path was not used within a minute");
+  }
   {  // The path falls to 20 Mbps for a second under a 100 Mbps stream: cut hard, early.
     const auto r = lossRun([](int n) { return n >= 50 && n < 60 ? 20e6 : 1e9; }, none, 120); print("drop-to-20-for-1s", r, 45, 120);
     require(r.mbps[51] <= 31 && r.mbps[57] <= 21, "UDP loss: a five-fold overload was not cut to it within 600 ms");

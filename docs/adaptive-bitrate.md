@@ -129,6 +129,18 @@ fed by the UDP leg (`native/windows_video/udp_media.hpp`):
   path's own (radio, outage): the rate is held, without probing, until the loss
   stops for 2 s or grows well beyond it. Any loss in the last second blocks
   probing.
+- **The rate that lost is remembered.** A policer or a shallow queue gives no
+  delay signal, so probing finds the limit only by loss, and each datagram given
+  up costs a frame and a recovery. After a loss cut the target stays below 97 %
+  of the rate that lost. A try above it comes after a wait: 2 s, doubled each
+  time loss comes again within 10 % of the same rate, up to 32 s. The try climbs
+  at the gentle step (0.6 % per 100 ms). A try that passes the limit by 5 %
+  without loss makes the current rate the new limit and the next try immediate,
+  so a better path is used within about half a minute. Five minutes without loss
+  forget the limit. Field case 2026-11-20: a game on a local PC over a path that
+  carried 35–45 Mbps; probing touched the limit about every 2.5 s, and after the
+  30 s gentle window climbed to 69–79 Mbps, with bursts of 0.6 s freezes.
+  Simulated on a 40 Mbps link for ten minutes: 245 loss episodes before, 17 after.
 - **Backlog.** Video refused by the UDP pacer triggers the overflow guard.
 
 ## Independent outputs (`bitrate-adaptive-tracks-v1`)
