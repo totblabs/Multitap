@@ -375,9 +375,10 @@ void sessionSignals(){
   session.udpPath(true);const auto cuts=published.size();session.queue(0,8*1024*1024,1);require(published.size()==cuts,"The WebSocket queue moved a UDP stream");
   Sleep(350);  // past the guard's own 300 ms, or this report could not cut with or without the gate
   session.feedback(JsonParser::parse(R"({"type":"stream.feedback","sessionId":"s","epoch":0,"bytes":1,"intervalUs":100000,"relayQueuedBytes":99999999,"frames":[]})"));require(published.size()==cuts,"stream.feedback moved a UDP stream");
-  require(session.udpFeedback(1000,10,0)==session.target(),"FEEDBACK did not return the target");
-  const auto before=session.target();session.udpBacklog();require(session.target()<before&&published.size()==cuts+1,"The pacer backlog did not cut");Sleep(200);
-  session.udpPath(false);session.queue(0,8*1024*1024,1);require(published.size()==cuts+2,"The queue guard did not come back");
+  // A clear FEEDBACK may give the WebSocket guard's cut back (a cut without a measured cause), and publish that.
+  require(session.udpFeedback(1000,10,0)==session.target(),"FEEDBACK did not return the target");const auto fed=published.size();
+  const auto before=session.target();session.udpBacklog();require(session.target()<before&&published.size()==fed+1,"The pacer backlog did not cut");Sleep(200);
+  session.udpPath(false);session.queue(0,8*1024*1024,1);require(published.size()==fed+2,"The queue guard did not come back");
   session.udpPath(true);session.start("s",{true,20000000,100000000},60,[&](const std::string&,int value){published.push_back(value);});Sleep(200);const auto now=published.size();session.queue(0,8*1024*1024,1);require(published.size()==now+1,"A new stream inherited the UDP path");
   session.stop();require(session.udpFeedback(1000,1,0)==0,"A stopped session answered");++passed;
 }

@@ -411,7 +411,8 @@ test('Host latency split and capture loop fields are kept on streamStats and str
   // Guest vs Host share of input -> capture, skipped ticks by reason, pacing lateness, the unmeasured tail and the
   // worker pipe write: numbers only, so an old field set or a text value never rejects the row.
   const loop={hostBackgroundTicks:19,hostBackgroundMs:961,hostSecureHoldTicks:3,hostSecureHoldMs:48,hostSecureNoticeTicks:2,hostSecureNoticeMs:400,
-    hostSecureHelperTicks:30,hostSecureHelperMs:510,hostFollows:1,hostFollowMs:1500,hostOvershootMaxUs:4200,hostTailMaxUs:12000,hostPipeWriteMaxUs:2500};
+    hostSecureHelperTicks:30,hostSecureHelperMs:510,hostFollows:1,hostFollowMs:1500,hostOvershootMaxUs:4200,hostTailMaxUs:12000,hostPipeWriteMaxUs:2500,
+    hostLossAnswers:12,hostLossKeys:1};
   const split={hostInputArrivedP50Us:31000,hostInputArrivedP95Us:52000,hostArrivedCaptureP50Us:1800,hostArrivedCaptureP95Us:9000,hostArrivedSamples:20,hostArrivedUnknown:3,
     hostCaptureBackend:3,hostCaptureMinInterval:1};
   const sent=statsReport(1);Object.assign(sent.events[0].values,loop,split,{hostCaptureBackendName:'wgc-warp',hostTailMaxMs:-1,hostFollowMs2:5});

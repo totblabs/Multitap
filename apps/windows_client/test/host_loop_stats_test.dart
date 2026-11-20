@@ -31,6 +31,8 @@ void main() {
           'overshootMaxUs': 4200,
           'tailMaxUs': 12000,
           'pipeWriteMaxUs': 2500,
+          'lossAnswers': 12,
+          'lossKeys': 1,
         },
       ),
     );
@@ -44,6 +46,8 @@ void main() {
       'hostOvershootMaxUs': 4200,
       'hostTailMaxUs': 12000,
       'hostPipeWriteMaxUs': 2500,
+      'hostLossAnswers': 12,
+      'hostLossKeys': 1,
       'hostCaptureBackend': 3,
       'hostCaptureMinInterval': 1,
     });
@@ -116,7 +120,7 @@ void main() {
     }
     watch.arrival(2000000);
     watch.host(hostStats(stall: {'secureHoldTicks': 30, 'secureHoldMs': 480, 'tailMaxUs': 700, 'pipeWriteMaxUs': 90000}), 1900000);
-    watch.host(hostStats(stall: {'secureHoldTicks': 10, 'secureHoldMs': 160, 'tailMaxUs': 2100, 'pipeWriteMaxUs': 300, 'follows': 1, 'followMs': 600}), 2900000);
+    watch.host(hostStats(stall: {'secureHoldTicks': 10, 'secureHoldMs': 160, 'tailMaxUs': 2100, 'pipeWriteMaxUs': 300, 'follows': 1, 'followMs': 600, 'lossAnswers': 3, 'lossKeys': 1}), 2900000);
     watch.engine([[1, 1, 1000, 0, 1, 8, 8, 3, 5, 2, 18000, 1, 0, 0]], null, 2000000);
     final event = watch.take(3300000).single;
     expect(event['hostWindows'], 2);
@@ -126,6 +130,8 @@ void main() {
     expect(event['hostFollowMs'], 600);
     expect(event['hostTailMaxUs'], 2100);
     expect(event['hostPipeWriteMaxUs'], 90000);
+    expect(event['hostLossAnswers'], 3);
+    expect(event['hostLossKeys'], 1);
     expect(event.keys.every(streamStallFields.contains), isTrue);
   });
 }

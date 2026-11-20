@@ -1173,7 +1173,7 @@ class Agent {
         // changeLate: the longest time from the start of the tick before a changed picture to its encode (its pts), the
         // part of a client's display gap the Host owes while the picture changed (about one period normally; an idle
         // screen's 1 s refreshes never count). The client's own gap past the frames' pts spacing is the rest.
-        struct { Clock::time_point lastOutput{},lastFresh{},waitBegan{},lastTick{}; double encodeGap=0,captureGap=0,wait=0,capture=0,convert=0,encode=0,tickWait=0,changeLate=0; uint32_t keyFrames=0,keyRequests=0,steps=0; int targetMinKbps=0; bool gapTick=false; } stall;
+        struct { Clock::time_point lastOutput{},lastFresh{},waitBegan{},lastTick{}; double encodeGap=0,captureGap=0,wait=0,capture=0,convert=0,encode=0,tickWait=0,changeLate=0; uint32_t keyFrames=0,keyRequests=0,steps=0,lossAnswers=0,lossKeys=0; int targetMinKbps=0; bool gapTick=false; } stall;
         // The window's time outside the measured stages (skipped ticks by reason, pacing lateness, the unmeasured tail):
         // appended to "stall" (capture_loop_stats.hpp). Observational only.
         CaptureLoopStats loopStats;
@@ -1284,7 +1284,7 @@ class Agent {
         const auto stillTick=[&](const std::vector<uint8_t>& nv12){
           const auto pts=std::chrono::duration_cast<std::chrono::microseconds>(Clock::now()-beginning).count();failureReason="encoder_failed";captureStage=8;
           const bool keyFrame=keyFrameRequested_.exchange(false);if(keyFrame){encoder.requestKeyFrame();++stall.keyRequests;}
-          if(const uint64_t lost=recoverRequested_.exchange(0)){answerLoss=true;if(!keyFrame&&!encoder.recover(lost-1))encoder.requestKeyFrame();}
+          if(const uint64_t lost=recoverRequested_.exchange(0)){answerLoss=true;++stall.lossAnswers;if(keyFrame||!encoder.recover(lost-1)){if(!keyFrame)encoder.requestKeyFrame();++stall.lossKeys;}}
           const bool force=keyFrame||answerLoss;
           const EncoderPicture picture{nv12.data(),nullptr,{}};
           std::vector<Frame> outputs;std::optional<LosslessTick> tiled;
@@ -1443,7 +1443,7 @@ class Agent {
           // udp-media-v1 LOSS: frames after the client's last good one never reached its
           // decoder. This tick's frame references only that one or older (reference
           // invalidation) or is an IDR, and is marked as the answer.
-          if(const uint64_t lost=recoverRequested_.exchange(0)){answerLoss=true;if(!keyFrame&&!encoder.recover(lost-1))encoder.requestKeyFrame();}
+          if(const uint64_t lost=recoverRequested_.exchange(0)){answerLoss=true;++stall.lossAnswers;if(keyFrame||!encoder.recover(lost-1)){if(!keyFrame)encoder.requestKeyFrame();++stall.lossKeys;}}
           const bool force=keyFrame||answerLoss;
           // tiles-resync-v1: the client's tiles are poisoned and it asked for them
           // again. A new source numbers its packets from 1, which restarts the
@@ -1535,8 +1535,11 @@ class Agent {
                 <<",\"keyFrames\":"<<stall.keyFrames<<",\"keyRequests\":"<<stall.keyRequests<<",\"bitrateSteps\":"<<stall.steps<<",\"changeLateMs\":"<<ms(stall.changeLate)
                 <<loopStats.takeJson(local_&&!bridge_?std::optional<uint64_t>(pipeWriteMax_.take()):std::nullopt);
               if(stall.targetMinKbps)stats<<",\"targetMinKbps\":"<<stall.targetMinKbps;
+              // udp-media-v1 LOSS answered by the encoder, and how many of those answers were IDRs (no reference
+              // recovery: the encoder cannot, or the client's last good frame left its references). Only when there were any.
+              if(stall.lossAnswers)stats<<",\"lossAnswers\":"<<stall.lossAnswers<<",\"lossKeys\":"<<stall.lossKeys;
               stats<<'}';
-              stall.encodeGap=stall.captureGap=stall.wait=stall.capture=stall.convert=stall.encode=stall.changeLate=0;stall.keyFrames=stall.keyRequests=stall.steps=0;stall.targetMinKbps=0;}
+              stall.encodeGap=stall.captureGap=stall.wait=stall.capture=stall.convert=stall.encode=stall.changeLate=0;stall.keyFrames=stall.keyRequests=stall.steps=stall.lossAnswers=stall.lossKeys=0;stall.targetMinKbps=0;}
             stats << '}'; text(observedWorkerStats(stats.str(),readback.take()));
             captured = encoded = bytes = 0; losslessBytes = losslessPackets = 0; losslessMs = 0; metrics.reset(); measured = now;
             // stream-size-v1: a measured overload (or headroom) restarts the

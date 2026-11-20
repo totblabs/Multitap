@@ -1103,8 +1103,43 @@ void lossRecovery() {
     Client c(20000); givenUp(c); const uint64_t asked = c.now; c.clear();
     const auto answer = split(classRecovery, 4, video(40, 5000)); c.feed(answer[0]); c.feed(answer[1]);
     c.at(asked + keyframeIntervalUs); require(!c.controls(kindKeyframe) && !c.controls(kindLoss), "The repeat went while a recovery frame was arriving");
-    Client d(20000); givenUp(d); d.clear(); d.at(d.now + keyframeIntervalUs);
+    Client d(20000); givenUp(d); d.clear(); d.at(d.now + keyframeIntervalUs - 1000);
+    require(!d.controls(kindKeyframe) && !d.controls(kindLoss), "With no answer seen, the repeat went before its interval");
+    d.clear(); d.at(d.now + 1000);
     require(d.controls(kindLoss) == 1 && d.controls(kindKeyframe) == 1 && d.out.control[0][0] == kindLoss, "The repeat dropped LOSS");
+  }
+  {  // The answer itself is given up: nothing else is on its way, so the repeat goes at once
+     // (field 2026-11-20: 0.6 s freezes, a give-up plus the rest of the interval).
+    Client c(20000); givenUp(c); const uint64_t asked = c.now; c.clear();
+    const auto answer = split(classRecovery, 4, video(40, 5000)); c.feed(answer[0]); c.feed(answer[2]);  // fragment 1 is lost
+    c.at(c.now + 80000); require(!c.controls(kindKeyframe) && !c.controls(kindLoss), "The repeat went while the answer could still be repaired");
+    c.at(c.now + 10000);
+    const auto loss = c.taken(kindLoss);
+    require(c.now < asked + keyframeIntervalUs && loss.size() == 1 && c.controls(kindKeyframe) == 1 && get64(&loss[0][8]) == 20 && get32(&loss[0][4]) == 3, "A lost answer waited out the key interval, or the repeat named other frames");
+    c.clear(); c.feed(split(classRecovery, 5, video(50, 3000)));
+    require(c.videos() == 1 && !c.receiver.awaitingKey(), "The second answer did not end the wait");
+    // A key frame answering a key wait, the same.
+    Client k(20000); const auto lost = split(classVideo, 1, video(10, 5000)); k.feed(lost[0]); k.feed(lost[2]); k.at(k.now + 90000); k.clear();
+    const auto key = split(classVideo, 2, video(20, 5000, true)); k.feed(key[0]); k.feed(key[2]); k.at(k.now + 90000);
+    require(k.controls(kindKeyframe) == 1 && !k.controls(kindLoss), "A lost key frame waited out the key interval");
+  }
+  {  // Host: an answer's repairs may borrow one window's budget; no other repair may, and none
+     // goes until it is paid back. A refused entry does not stop the answer's in the same NACK.
+    auto sender = provenSender(); Plain p; uint64_t now = 1000;
+    const auto older = video(1, 90000), answer = video(2, 30000);
+    sender.video(older, false); for (; now < 100000; now += 500) while (sender.next(now, p)) {}
+    sender.recovering(now); sender.video(answer, false, true); for (; now < 200000; now += 500) while (sender.next(now, p)) {}
+    Bytes both(2 + 2 * nackEntryBytes); both[0] = kindNack; both[1] = 2;
+    put32(&both[2], 1); put16(&both[8], uint16_t(maxFragments)); put32(&both[10], 2); put16(&both[16], uint16_t(maxFragments));
+    sender.control(both.data(), both.size(), now);
+    const auto refused = sender.stats().refused;
+    require(refused > 0 && sender.waitingRepairs() == fragmentCount(older.size()) - refused + fragmentCount(answer.size()), "The answer's repairs were refused with the older frame's");
+    const auto one = nackFor(1, 0, 1); sender.control(one.data(), one.size(), now);
+    require(sender.stats().refused == refused + 1, "A P-frame repair went on borrowed budget");
+    const auto again = nackFor(2, 0, uint16_t(maxFragments)); for (int k = 0; k < 2; ++k) sender.control(again.data(), again.size(), now);
+    require(sender.stats().refused > refused + 1, "An answer borrowed more than one window's budget");
+    const auto paid = sender.stats().refused; sender.control(one.data(), one.size(), now + 2 * repairWindowUs);
+    require(sender.stats().refused == paid, "The borrowed budget was never paid back");
   }
   {  // Nothing delivered on this path yet: no last frame to name, so only a key frame ends it.
     Client c(20000); const auto lost = split(classVideo, 1, video(10, 5000)); c.feed(lost[0]); c.feed(lost[2]); c.at(c.now + 90000);
@@ -1353,9 +1388,14 @@ struct Scenario {
   uint64_t outageFrom = 0, outageTo = 0; bool oneWay = false; uint64_t rttUs = 30000; size_t idrBytes = 300000; uint64_t runUs = 30000000;
   bool spoofed = false;  // the client holds the keys but its address is someone else's: it receives nothing
   uint64_t idleFromUs = 0, idleToUs = 0;  // an unchanged screen with no sound: no media at all
+  // A bottleneck: its rate, and the longest a datagram may wait in its queue before it is dropped
+  // (0: never). Loss then comes from congestion, in runs, and repairs and answers add to it.
+  double linkMbps = 100; uint64_t queueUs = 0;
+  // A recovery frame's size in P-frames (recoverySimulation).
+  double recoveryScale = 6;
 };
 struct Result {
-  int generated = 0, delivered = 0, idrs = 0, keysDelivered = 0, keyRequests = 0, giveUps = 0, recoveries = 0;
+  int generated = 0, delivered = 0, idrs = 0, keysDelivered = 0, keyRequests = 0, giveUps = 0, recoveries = 0, longWaits = 0;
   uint64_t stallUs = 0, longestKeyWaitUs = 0, gaveUpAfterUs = 0, repairs = 0, refused = 0, nacks = 0, mediaDatagrams = 0, bytesToAddress = 0, videoBytes = 0, waitUs = 0;
   double overheadPct = 0; bool gaveUp = false, proven = false;
 };
@@ -1364,6 +1404,7 @@ class Link {
   Link(uint64_t seed, const Scenario& s, double rateBps, bool forward) : random_(seed), s_(s), bytesPerUs_(rateBps / 8e6), forward_(forward) {}
   void send(const uint8_t* data, size_t size, uint64_t now) {
     if ((forward_ && s_.spoofed) || down(now) || uniform() * 100 < s_.lossPct) return;
+    if (s_.queueUs && free_ > now + s_.queueUs) return;  // tail drop
     free_ = std::max(free_, now) + uint64_t(double(size + 28) / bytesPerUs_);
     uint64_t at = free_ + s_.rttUs / 2 + uint64_t(uniform() * 1000);
     if (uniform() * 100 < s_.reorderPct) at += 2000 + uint64_t(uniform() * 6000);
@@ -1392,9 +1433,12 @@ class Link {
 // `recovery`: the Host answers LOSS with a frame `recoveryScale` times a P-frame's size. x264
 // measured 1.3x after one lost frame and 5.5-6.1x after 4-15 lost on scrolling text, 1.3-1.6x on
 // noise (x264-reference-recovery in x264_encoder_test.cpp), so 6 is the pessimistic end.
-Result simulate(const Scenario& s, uint64_t seed, bool recovery = false, double recoveryScale = 6) {
+// A wait this long reached the client's second request (keyframeIntervalUs): the first answer never came.
+constexpr uint64_t longWaitUs = 400000;
+Result simulate(const Scenario& s, uint64_t seed, bool recovery = false) {
+  const double recoveryScale = s.recoveryScale;
   Result result; Pair keys; constexpr int target = 20000000; constexpr uint64_t frameUs = 16667, audioUs = 10000;
-  Link forward(seed, s, 100e6, true), reverse(seed + 1, s, 100e6, false); std::mt19937_64 sizes(seed + 2);
+  Link forward(seed, s, s.linkMbps * 1e6, true), reverse(seed + 1, s, s.linkMbps * 1e6, false); std::mt19937_64 sizes(seed + 2);
   std::mt19937_64 challenges(seed + 3); Sender sender(target, 1000, [&] { return challenges() | 1; });
   Receiver receiver(1, 1000); Receiver::Output out; PathState path; Plain plain;
   std::vector<Bytes> sentFrames; std::vector<bool> answers; uint64_t nextFrame = 1000, nextAudio = 1000, lastDelivered = 0, audioPts = 1, waitingSince = 0; bool forceIdr = true, answerNext = false, widened = false; int64_t lastFrame = -1; uint8_t sealed[maxDatagram], opened[maxPlaintext];
@@ -1427,7 +1471,7 @@ Result simulate(const Scenario& s, uint64_t seed, bool recovery = false, double 
     if (now % 1000 == 0) {
       receiver.tick(now, out);
       if (receiver.awaitingKey() && !waitingSince) { waitingSince = now; ++result.giveUps; }
-      if (!receiver.awaitingKey() && waitingSince) { result.longestKeyWaitUs = std::max(result.longestKeyWaitUs, now - waitingSince); result.waitUs += now - waitingSince; waitingSince = 0; }
+      if (!receiver.awaitingKey() && waitingSince) { result.longestKeyWaitUs = std::max(result.longestKeyWaitUs, now - waitingSince); result.waitUs += now - waitingSince; result.longWaits += now - waitingSince >= longWaitUs; waitingSince = 0; }
       for (const auto& c : out.control) { result.nacks += c[0] == kindNack; const size_t n = keys.clientSeal.seal(c.data(), c.size(), sealed); require(n != 0, "Seal failed in the simulation"); reverse.send(sealed, n, now); }
       out.control.clear();
       if (s.spoofed && now % 50000 == 0) {
@@ -1473,22 +1517,28 @@ void recoverySimulation() {
   { Scenario s; s.name = "RTT 60 ms, bursts"; s.bursts = true; s.rttUs = 60000; scenarios.push_back(s); }
   { Scenario s; s.name = "RTT 30 ms, 10%"; s.lossPct = 10; scenarios.push_back(s); }
   { Scenario s; s.name = "5%, 1.2 MB IDR"; s.lossPct = 5; s.idrBytes = 1200000; scenarios.push_back(s); }
+  // The field case (2026-11-20, a game on a LAN): an 8 ms round trip.
+  for (const int loss : {3, 5}) { Scenario s; s.name = "RTT 8 ms, " + std::to_string(loss) + "%"; s.lossPct = loss; s.rttUs = 8000; scenarios.push_back(s); }
+  { Scenario s; s.name = "RTT 8 ms, bursts"; s.bursts = true; s.rttUs = 8000; scenarios.push_back(s); }
+  // Congestion: a bottleneck just above the mean video rate (about 16 Mbps with sound) and a short
+  // queue. NVENC's one-frame VBV keeps its recovery frame and IDR near a P-frame's size.
+  for (const double mbps : {17.0, 18.0, 20.0}) { Scenario s; s.name = "RTT 8 ms, " + std::to_string(int(mbps)) + " Mbps link"; s.rttUs = 8000; s.linkMbps = mbps; s.queueUs = 30000; s.recoveryScale = 1.5; s.idrBytes = 60000; scenarios.push_back(s); }
   // Five seeds each, summed: one run has too few give-ups to rank, and heavy loss is chaotic.
   // UDP_SIM_SEEDS asks for more in a one-off measurement.
   char text[8] = {}; size_t length = 0; getenv_s(&length, text, sizeof(text), "UDP_SIM_SEEDS");
   const int seeds = length > 1 ? std::clamp(std::atoi(text), 1, 200) : 5;
   std::printf("SIMULATION, %d seeds summed. LOSS answered with a recovery frame (6x a P-frame, 0.6x the IDR; the first LOSS of a run is an IDR) versus an IDR.\n", seeds);
-  std::printf("%-20s %-9s %13s %11s %6s %6s %8s %9s %10s\n", "case", "Host", "frames", "wait ms", "IDRs", "recov", "give-ups", "video MB", "fallbacks");
+  std::printf("%-20s %-9s %13s %11s %6s %6s %8s %6s %8s %9s %10s\n", "case", "Host", "frames", "wait ms", "IDRs", "recov", "give-ups", "long", "max ms", "video MB", "fallbacks");
   for (const auto& s : scenarios) {
     Result sum[2]; int fallbacks[2] = {};
     for (int k = 0; k < 2; ++k) for (int seed = 0; seed < seeds; ++seed) {
       const Result r = simulate(s, 0x5eed + uint64_t(seed) * 7919, k == 1);
       sum[k].delivered += r.delivered; sum[k].generated += r.generated; sum[k].waitUs += r.waitUs; sum[k].idrs += r.idrs; sum[k].recoveries += r.recoveries;
-      sum[k].giveUps += r.giveUps; sum[k].videoBytes += r.videoBytes; fallbacks[k] += r.gaveUp;
+      sum[k].giveUps += r.giveUps; sum[k].videoBytes += r.videoBytes; fallbacks[k] += r.gaveUp; sum[k].longWaits += r.longWaits; sum[k].longestKeyWaitUs = std::max(sum[k].longestKeyWaitUs, r.longestKeyWaitUs);
     }
     for (int k = 0; k < 2; ++k) {
       char frames[32]; std::snprintf(frames, sizeof(frames), "%d/%d", sum[k].delivered, sum[k].generated);
-      std::printf("%-20s %-9s %13s %11.1f %6d %6d %8d %9.2f %10d\n", s.name.c_str(), k ? "recovery" : "IDR only", frames, double(sum[k].waitUs) / 1000, sum[k].idrs, sum[k].recoveries, sum[k].giveUps, double(sum[k].videoBytes) / 1e6, fallbacks[k]);
+      std::printf("%-20s %-9s %13s %11.1f %6d %6d %8d %6d %8.1f %9.2f %10d\n", s.name.c_str(), k ? "recovery" : "IDR only", frames, double(sum[k].waitUs) / 1000, sum[k].idrs, sum[k].recoveries, sum[k].giveUps, sum[k].longWaits, double(sum[k].longestKeyWaitUs) / 1000, double(sum[k].videoBytes) / 1e6, fallbacks[k]);
     }
     require(!sum[0].recoveries, "A Host without recovery answered a LOSS");
     // Where loss is common, recovery replaces IDRs and delivers about as large a share of the
@@ -1572,6 +1622,9 @@ void aesCost() {
 
 int main() {
   try {
+    // UDP_SIM_ONLY=recovery: the recovery table alone, for a one-off measurement.
+    char only[16] = {}; size_t onlyLength = 0; getenv_s(&onlyLength, only, sizeof(only), "UDP_SIM_ONLY");
+    if (std::string(only) == "recovery") { recoverySimulation(); std::cout << "udp-media: recovery table only\n"; return 0; }
     rfc7748(); rfc5869(); nistGcm(); keySchedule(); framingLayout(); tamper(); replay(); retransmissionTakesNewSequence();
     fragments(); inOrderDelivery(); nackTiming(); rttFromTail(); giveUpDeadline(); dropUntilKey(); keyFrameRules(); epochs(); tailHandling();
     feedbackTiming(); audioRules(); pacer(); resendBuffer(); repairBudget(); tailTiming(); silence(); addressProof(); keyFrameMerging(); lossRecovery(); resendMemory(); backoff(); sendQueue(); pathRule();

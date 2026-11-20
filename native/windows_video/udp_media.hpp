@@ -151,6 +151,10 @@ class Receiver {
     }
     drain(out);
     nack(nowUs, out);
+    // The interval keeps a second request from killing an answer still on its way. Once that
+    // answer is given up, nothing is on its way: field 2026-11-20 (a game, RTT 7 ms) froze
+    // 0.6 s on each lost recovery frame, a give-up plus the rest of the interval.
+    if (std::exchange(answerLost_, false) && awaitKey_) keyAt_ = std::min(keyAt_, nowUs);
     if (awaitKey_ && nowUs >= keyAt_ && !keyArriving()) {
       if (lossWait_) {
         std::vector<uint8_t> loss(lossBytes); loss[0] = kindLoss; put16(&loss[2], epoch_); put32(&loss[4], lossId_); put64(&loss[8], lastPts_);
@@ -209,9 +213,13 @@ class Receiver {
   }
   // Ends a wait: a key frame always, a recovery frame only the wait it may end.
   bool ends(const Entry& e) const { return e.known && !e.skip && (e.envelope.key || (lossWait_ && e.recovery)); }
+  // What ends this wait once whole: a key frame, or a recovery frame the wait may take.
+  bool answers(const Entry& e) const { return !e.skip && ((e.known && e.envelope.key) || (lossWait_ && e.recovery)); }
   void abandonBefore(uint64_t id) {
     while (next_ < id && !window_.empty()) {
       const Entry& m = window_.front();
+      // The answer itself is lost: no other is coming, so the repeat need not wait out its interval.
+      if (awaitKey_ && answers(m)) answerLost_ = true;
       if (!m.skip) lost_ += m.started() ? uint32_t(m.missing()) : 1;
       held_ -= m.reserved(); window_.pop_front(); ++next_;
     }
@@ -264,7 +272,7 @@ class Receiver {
   // stalls, TAIL closes it, it is given up, and the repeat that was held goes at once.
   // A recovery frame shows by its class in any fragment, before its envelope.
   bool keyArriving() const {
-    for (const auto& e : window_) if (!e.skip && ((e.known && e.envelope.key) || (lossWait_ && e.recovery))) return true;
+    for (const auto& e : window_) if (answers(e)) return true;
     return false;
   }
   // Fragment 0 names the message. A message of no use stops costing memory and NACKs.
@@ -354,7 +362,8 @@ class Receiver {
   uint64_t feedbackAt_, keyAt_ = 0, echoUs_ = 0, echoAt_ = 0, challenge_ = 0;
   uint64_t next_ = 1, closed_ = 0;  // next ID to deliver, and the last known sent in full
   // lossWait_: the wait a recovery frame may end; lastPts_ the newest video this path delivered.
-  bool awaitKey_ = false, lossWait_ = false, haveLast_ = false;
+  // answerLost_: an answer to this wait was given up since the last tick.
+  bool awaitKey_ = false, lossWait_ = false, haveLast_ = false, answerLost_ = false;
   uint64_t lastPts_ = 0; uint32_t lossId_ = 0;
   size_t held_ = 0;
   uint32_t received_ = 0, lost_ = 0, highestWhole_ = 0;
@@ -567,10 +576,14 @@ class Sender {
       const Item* item = find(get32(entry));
       if (!item) continue;
       const unsigned first = get16(entry + 4), end = std::min<unsigned>(first + get16(entry + 6), item->sent);
+      // A key or recovery frame ends the client's wait; without it the client asks again and
+      // waits for another. Its repairs may borrow one window's budget, paid back before any
+      // other repair goes. Field 2026-11-20: a repair was refused in nearly every 0.6 s freeze.
+      const double floor = item->key || item->recovery ? -budgetLimit() : 0;
       for (unsigned index = first; index < end; ++index) {
         // The budget, like the pacer, only ever counts what goes on the wire.
         const double wire = double(std::min(fragmentPayload, item->bytes.size() - size_t(index) * fragmentPayload) + fragmentHeaderBytes + headerBytes + tagBytes);
-        if (budget_ < wire || repairs_.size() >= maxRepairs) { stats_.refused += end - index; return; }
+        if (budget_ - wire < floor || repairs_.size() >= maxRepairs) { stats_.refused += end - index; break; }
         budget_ -= wire; repairs_.push_back({item->id, uint16_t(index)});
       }
     }

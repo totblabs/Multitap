@@ -9,8 +9,8 @@ void require(bool value,const char* reason){if(!value)throw std::runtime_error(r
 std::vector<uint8_t> hex(std::string_view text){std::vector<uint8_t> out;for(size_t i=0;i+1<text.size();i+=2)out.push_back(uint8_t(std::stoi(std::string(text.substr(i,2)),nullptr,16)));return out;}
 bool same(std::span<const uint8_t> a,std::span<const uint8_t> b){return a.size()==b.size()&&std::equal(a.begin(),a.end(),b.begin());}
 const std::string ticketText="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",idText="oKGio6Slpqc=";
-const auto bindBytes=hex("01a0a1a2a3a4a5a6a759844e012ec1d19ae7d67621889f47182174d56f661a744270183d3722f9a729");
-const auto ackBytes=hex("02a0a1a2a3a4a5a6a723c5c7aef506575f37452a7656101e4d1c0d39f57c93688abe744d0c11e48303");
+const auto bindBytes=hex("01a0a1a2a3a4a5a6a7eb94aa25273d048cc6c648b0c0a4281f67622b3d65417931bca1975ff180b031");
+const auto ackBytes=hex("02a0a1a2a3a4a5a6a750567b41780a2cd797436fc2da9deea7f67a3d51e95beec2b4aea552b18cfa20");
 const auto pingBytes=hex("0301020304050607080100000000000007000000000001e240");
 const std::string goodRelays=R"([{"host":"192.0.2.121","port":18481},{"host":"vdi.example.com","port":18481}])";
 std::string grantText(const std::string& relays=goodRelays,const std::string& id="\""+idText+"\"",const std::string& ticket="\""+ticketText+"\"",const std::string& expires="1793520000000",const std::string& protocol="\"udp-media-v1\""){

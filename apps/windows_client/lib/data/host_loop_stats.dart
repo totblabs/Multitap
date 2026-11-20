@@ -10,7 +10,7 @@ library;
 const _summed = [
   'backgroundTicks', 'backgroundMs', 'secureHoldTicks', 'secureHoldMs',
   'secureNoticeTicks', 'secureNoticeMs', 'secureHelperTicks', 'secureHelperMs',
-  'follows', 'followMs',
+  'follows', 'followMs', 'lossAnswers', 'lossKeys',
 ];
 
 /// Host `stall` members whose largest reading a window keeps (us).
@@ -28,6 +28,8 @@ const hostCaptureBackends = {'gdi': 1, 'wgc-d3d11': 2, 'wgc-warp': 3};
 ///   hostSecureNoticeTicks/Ms   UAC prompt: the notice picture instead of the capture
 ///   hostSecureHelperTicks/Ms   UAC prompt: the SYSTEM helper's frames instead of the capture
 ///   hostFollows/hostFollowMs   capture rebuilds after a display mode change
+///   hostLossAnswers            UDP LOSS reports the encoder answered (recovery frame or IDR)
+///   hostLossKeys               of those, the answers that were IDRs (no reference recovery)
 ///   hostOvershootMaxUs         the longest a pacing wait returned after its target
 ///   hostTailMaxUs              the longest unmeasured time from encode end to the pacing wait
 ///   hostPipeWriteMaxUs         the longest worker -> service pipe write of one packet
@@ -46,7 +48,7 @@ const hostLoopStallFields = <String>{
   'hostBackgroundTicks', 'hostBackgroundMs', 'hostSecureHoldTicks',
   'hostSecureHoldMs', 'hostSecureNoticeTicks', 'hostSecureNoticeMs',
   'hostSecureHelperTicks', 'hostSecureHelperMs', 'hostFollows', 'hostFollowMs',
-  'hostOvershootMaxUs', 'hostTailMaxUs', 'hostPipeWriteMaxUs',
+  'hostLossAnswers', 'hostLossKeys', 'hostOvershootMaxUs', 'hostTailMaxUs', 'hostPipeWriteMaxUs',
 };
 
 /// Host `stall` keys a stall row sums / takes the largest of (stream_stall.dart).

@@ -35,7 +35,9 @@ const gamepadBounds = Object.freeze({ gamepadPads: 4 });
 const diagnosticBounds = { ...observabilityDiagnosticBounds, ...udpProbeBounds, ...gamepadBounds };
 // Host capture loop fields of streamStats rows and (summed or the largest over the covering windows) streamStall rows.
 const hostLoopNumeric = ['hostBackgroundTicks', 'hostBackgroundMs', 'hostSecureHoldTicks', 'hostSecureHoldMs', 'hostSecureNoticeTicks', 'hostSecureNoticeMs',
-  'hostSecureHelperTicks', 'hostSecureHelperMs', 'hostFollows', 'hostFollowMs', 'hostOvershootMaxUs', 'hostTailMaxUs', 'hostPipeWriteMaxUs'];
+  'hostSecureHelperTicks', 'hostSecureHelperMs', 'hostFollows', 'hostFollowMs', 'hostOvershootMaxUs', 'hostTailMaxUs', 'hostPipeWriteMaxUs',
+  // udp-media-v1 LOSS answers of the Host's encoder and the IDRs among them (no reference recovery).
+  'hostLossAnswers', 'hostLossKeys'];
 const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samples', 'windowMs', 'srcWidth', 'srcHeight', 'decodeFps10', 'decodeFpsMin10', 'textureFps10', 'captureFps10', 'encodeFps10',
   // tracks-v1 clients: the slowest output's rates (the others are summed over outputs).
   'decodeFpsLow10', 'captureFpsLow10', 'encodeFpsLow10', 'receiveKbps', 'bitrateKbps', 'targetKbps', 'networkDelayMs', 'rttMs', 'rttMaxMs',
