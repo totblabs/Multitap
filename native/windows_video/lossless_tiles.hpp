@@ -232,7 +232,7 @@ class PayloadBuilder {
 class Compositor {
  public:
   enum class Outcome { notTile, accepted, ignored };
-  struct Stats { uint64_t packets = 0, addedTiles = 0, droppedTiles = 0, bytes = 0; uint32_t presentTiles = 0; bool poisoned = false; uint64_t moves = 0; };
+  struct Stats { uint64_t packets = 0, addedTiles = 0, droppedTiles = 0, bytes = 0; uint32_t presentTiles = 0; bool poisoned = false; uint64_t moves = 0, restarts = 0; };
   // `width` x `height` is the decoded video. With `allowScaledSource` (legacy
   // single output only) the first tile packet may declare a larger unscaled
   // source; tiles then live in source coordinates and every composition
@@ -246,6 +246,15 @@ class Compositor {
   }
   Outcome Accept(const uint8_t* payload, size_t size) {
     if (!isTilePayload(payload, size)) return Outcome::notTile;
+    // tiles-resync-v1: packet 1 of a source the Host started again (the client
+    // asks for that while poisoned: over UDP an unrepaired loss or a path switch
+    // drops tile packets until the next key frame, and the gap poisons). What
+    // came before it is gone; the new source starts with no tile present here.
+    if (video_width_ && size >= headerBytes && read32(payload + 8) == 1 && (poisoned_ || sequence_ != 0)) {
+      const auto restarts = stats_.restarts + 1;
+      Configure(video_width_, video_height_, allow_scaled_);
+      stats_.restarts = restarts;
+    }
     if (poisoned_ || (!count_ && !allow_scaled_) || !video_width_) return Outcome::ignored;
     if (!parse(payload, size)) { poison(); return Outcome::ignored; }
     return Outcome::accepted;

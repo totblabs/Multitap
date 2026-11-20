@@ -177,6 +177,7 @@ class RemoteEngine {
   uint32_t lossless_present_ = 0;
   double lossless_compose_ms_ = 0, lossless_republish_ms_ = 0;
   bool lossless_poisoned_ = false, lossless_scaled_ = false;
+  uint64_t lossless_restarts_ = 0;  // tiles-resync-v1: sources the Host started again
   flutter::TextureRegistrar* registrar_;
   Options options_;
   // Chosen at Start (UI thread), before the worker runs.

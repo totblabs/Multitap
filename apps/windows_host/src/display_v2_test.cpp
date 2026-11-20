@@ -1236,6 +1236,16 @@ int interleaveCases(){
     require(order==std::vector<std::string>{"stream.lossless","ping","stream.tracks.ready","stream.bitrate"}&&backlog.deferred==5,"Kept packets lost their order or the opt-in was not coalesced");
     for(size_t i=0;i<WorkerPipeBacklog::limit;++i)require(backlog.defer(JsonParser::parse(R"({"type":"ping","id":"x"})")),"Backlog refused below its limit");
     require(!backlog.defer(JsonParser::parse(R"({"type":"ping","id":"x"})")),"Backlog grew past its limit");++passed;}
+  // tiles-resync-v1: a restart request is an event. The opt-in that replaces it
+  // during an RPC keeps it; a pause that replaces it does not.
+  {WorkerPipeBacklog backlog;
+    require(backlog.defer(JsonParser::parse(R"({"type":"stream.lossless","protocol":"tiles-v1","moves":true,"resync":true})"))&&backlog.defer(JsonParser::parse(R"({"type":"stream.lossless","protocol":"tiles-v1","moves":true})")),"Opt-ins were not kept");
+    const auto kept=backlog.next();
+    require(kept&&!backlog.next()&&kept->get("moves").boolean()&&std::holds_alternative<bool>(kept->get("resync").value)&&kept->get("resync").boolean(),"A later opt-in during an RPC lost the restart request");
+    WorkerPipeBacklog paused;
+    require(paused.defer(JsonParser::parse(R"({"type":"stream.lossless","protocol":"tiles-v1","resync":true})"))&&paused.defer(JsonParser::parse(R"({"type":"stream.lossless","protocol":"tiles-v1","on":false})")),"Pause was not kept");
+    const auto last=paused.next();
+    require(last&&!last->get("on").boolean()&&std::holds_alternative<std::nullptr_t>(last->get("resync").value),"A pause carried a restart request");++passed;}
   // The opt-in is a state: a pause (게임 마우스) that arrives during an RPC
   // after an opt-in replaces it in place, and an opt-in after it wins again.
   {WorkerPipeBacklog backlog;

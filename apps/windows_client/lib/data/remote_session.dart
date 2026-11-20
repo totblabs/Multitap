@@ -84,6 +84,27 @@ abstract interface class LosslessMoveMedia {
 
 const losslessTilesMovesMark = 'm';
 
+/// tiles-resync-v1: an engine whose compositor starts over on a restarted
+/// source's packet 1. Only it asks for restarts: another one (Android's
+/// compositor) would stay poisoned and the Host would resend every tile again
+/// and again.
+abstract interface class LosslessResyncMedia {
+  bool get losslessResync;
+}
+
+/// tiles-resync-v1: the engine's tiles are poisoned (a sequence gap: over UDP an
+/// unrepaired loss or a path switch drops tile packets until the next key
+/// frame), so the screen is plain video while the Host believes every tile
+/// is there. The opt-in then carries this mark after the moves mark
+/// (`lt1-mr<n>`): the Host starts its tile source again and the engine's
+/// compositor starts over with that source's packet 1. A Host without it reads
+/// the plain opt-in. Asked after [losslessResyncInterval]; while the tiles stay
+/// poisoned each wait doubles up to [losslessResyncLongest] (a poison a restart
+/// does not end would otherwise resend every tile every few seconds).
+const losslessTilesResyncMark = 'r';
+const losslessResyncInterval = Duration(seconds: 3);
+const losslessResyncLongest = Duration(seconds: 60);
+
 /// The same session asks for no tiles now (게임 마우스 holds the mouse).
 /// Hosts without it read a plain ping and keep their tiles.
 const losslessTilesPausePrefix = 'lt0-';
@@ -162,6 +183,7 @@ class NativeRemoteMedia
         RemoteTrackMedia,
         LosslessTileMedia,
         LosslessMoveMedia,
+        LosslessResyncMedia,
         InputFrameWatchMedia,
         RemoteCursorMedia,
         RemoteThumbnailPrivacy,
@@ -214,6 +236,9 @@ class NativeRemoteMedia
   // (lossless_tiles.hpp, gpu_lossless.h).
   @override
   bool get losslessMoves => losslessTiles;
+  // Both runner engines take a restarted source (lossless_tiles.hpp).
+  @override
+  bool get losslessResync => losslessTiles;
   @override
   bool udpPathRule = false;
   int _generation = 0;
@@ -1361,6 +1386,45 @@ class RemoteSession extends ChangeNotifier {
       _media is LosslessTileMedia &&
       (_media as LosslessTileMedia).losslessTiles;
 
+  /// tiles-resync-v1: the engine said its tiles are poisoned; the next opt-in
+  /// asks the Host to start them again (see [losslessTilesResyncMark]).
+  bool _losslessResyncWanted = false;
+  int? _losslessResyncAtUs;
+  Duration _losslessResyncWait = losslessResyncInterval;
+
+  /// Resync requests sent in this session, and the restarted tile sources
+  /// the engine took (stream statistics; null from an engine without them).
+  int losslessResyncs = 0;
+  int? losslessRestarts;
+
+  void _noteLosslessPoisoned(bool poisoned, int now) {
+    if (!poisoned) {
+      _losslessResyncWait = losslessResyncInterval;
+      return;
+    }
+    if (!_losslessTilesSession ||
+        _losslessPaused ||
+        !_losslessOffered ||
+        _media is! LosslessResyncMedia ||
+        !(_media as LosslessResyncMedia).losslessResync) {
+      return;
+    }
+    final last = _losslessResyncAtUs;
+    if (last != null && now - last < _losslessResyncWait.inMicroseconds) {
+      return;
+    }
+    if (last != null) {
+      final doubled = _losslessResyncWait * 2;
+      _losslessResyncWait = doubled > losslessResyncLongest
+          ? losslessResyncLongest
+          : doubled;
+    }
+    _losslessResyncWanted = true;
+    // At once with a ping of its own, as a pause is; while the display changes
+    // the next periodic ping carries it.
+    if (!_closed && !resizing && _socket != null) _sendPing(now);
+  }
+
   void _sendPing(int now) {
     final tiles = _losslessTilesSession;
     // An engine that stopped compositing after the opt-in (Android: a later
@@ -1375,7 +1439,15 @@ class RemoteSession extends ChangeNotifier {
         !_losslessPaused &&
         _media is LosslessMoveMedia &&
         (_media as LosslessMoveMedia).losslessMoves;
-    _ping = '$prefix${moves ? losslessTilesMovesMark : ''}${++_nonce}';
+    final resync = tiles && !_losslessPaused && _losslessResyncWanted;
+    if (resync) {
+      _losslessResyncWanted = false;
+      _losslessResyncAtUs = now;
+      losslessResyncs++;
+    }
+    _ping =
+        '$prefix${moves ? losslessTilesMovesMark : ''}'
+        '${resync ? losslessTilesResyncMark : ''}${++_nonce}';
     _pingUs = now;
     _send({'type': 'ping', 'id': _ping!});
   }
@@ -3684,6 +3756,9 @@ class RemoteSession extends ChangeNotifier {
           await _fail(l10n.couldntShowScreenSoConnection);
           return;
         }
+        _noteLosslessPoisoned(stats['losslessPoisoned'] == true, statsAt);
+        final restarts = stats['losslessRestarts'];
+        losslessRestarts = restarts is int && restarts >= 0 ? restarts : null;
         if (_tracks != null) {
           final acknowledgement = _tracks.acknowledge(stats, statsAt);
           if (acknowledgement != null) {
@@ -4026,6 +4101,8 @@ class RemoteSession extends ChangeNotifier {
         appliedBitrate: appliedBitrate,
         losslessTiles: losslessTiles,
         losslessMoves: losslessMoves,
+        losslessResyncs: _losslessOffered ? losslessResyncs : null,
+        losslessRestarts: losslessRestarts,
         losslessKbps: losslessKbps,
         host: hostTelemetryFresh ? hostTelemetry : null,
         inputHostP50Ms: inputToHostP50Ms,

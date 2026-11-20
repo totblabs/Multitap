@@ -80,6 +80,18 @@ inline bool UploadAddedTiles(lossless::Compositor& compositor, Overlay& overlay,
   return true;
 }
 
+// A tile packet for a GPU picture: the compositor takes it, and the tiles it added
+// go to the overlay texture. A restarted source (tiles-resync-v1, its packet 1
+// restarts the compositor) begins a new added list, shorter than the one before
+// it may be: then every add on it is new. False: the overlay could not be sized.
+inline bool AcceptTiles(lossless::Compositor& compositor, Overlay* overlay, const uint8_t* payload, size_t size) {
+  size_t added_before = compositor.addedTiles().size();
+  const auto restarts = compositor.stats().restarts;
+  compositor.Accept(payload, size);
+  if (compositor.stats().restarts != restarts) added_before = 0;
+  return !overlay || UploadAddedTiles(compositor, *overlay, added_before);
+}
+
 // New tiles appear now instead of at the next video frame: a copy of the newest
 // frame (which already has every earlier tile) plus the added tiles. False: the
 // newest frame is not a GPU frame of a matching size; `out` is then untouched.

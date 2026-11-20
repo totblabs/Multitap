@@ -69,6 +69,8 @@ const streamStatsFields = <String>{
   'losslessTiles',
   'losslessKbps',
   'losslessMoves',
+  'losslessResyncs',
+  'losslessRestarts',
   'inputHostP50Us',
   'inputHostP95Us',
   'inputFrameP50Us',
@@ -277,6 +279,8 @@ class StreamStatsSample {
     this.losslessTiles,
     this.losslessKbps,
     this.losslessMoves,
+    this.losslessResyncs,
+    this.losslessRestarts,
     this.host,
     this.inputHostP50Ms,
     this.inputHostP95Ms,
@@ -397,6 +401,10 @@ class StreamStatsSample {
 
   /// Scrolls the Host sent as a move since the stream began (tiles-v2).
   final int? losslessMoves;
+
+  /// tiles-resync-v1: restarts this client asked for after a poison, and the
+  /// restarted sources its engine took (counts since the stream began).
+  final int? losslessResyncs, losslessRestarts;
   final double? decodedFps, textureFps, receivedMbps, rttMs;
 
   /// The relay's own measurement of the Host leg of the ping (relay -> Host
@@ -640,6 +648,8 @@ class StreamStatsWindow {
       'losslessTiles': _tiles.scaled(1),
       'losslessKbps': _lossless.scaled(1),
       'losslessMoves': last.losslessMoves,
+      'losslessResyncs': last.losslessResyncs,
+      'losslessRestarts': last.losslessRestarts,
       'inputHostP50Us': _latest(_inputHost50),
       'inputHostP95Us': _latest(_inputHost95),
       'inputFrameP50Us': _latest(_inputFrame50),

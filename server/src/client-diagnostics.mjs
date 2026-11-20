@@ -43,7 +43,8 @@ const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samp
   // window, ms), so a slow round trip (rttMaxMs) can be placed on one side of the relay.
   'rttHostMaxMs', 'hostWorkUs', 'hostP95Us', 'hostMaxUs', 'captureUs', 'convertUs', 'encodeUs', 'decodeUs', 'decodeMaxUs', 'queueMaxMs', 'skipped', 'losslessTiles', 'losslessKbps',
   // tiles-v2: scrolls the Host sent as a move since the stream began (a count; absent from a Host without moves).
-  'losslessMoves', 'inputHostP50Us', 'inputHostP95Us', 'inputFrameP50Us', 'inputFrameP95Us',
+  // tiles-resync-v1: tile restarts the client asked for after a poison, and the restarted sources its engine took.
+  'losslessMoves', 'losslessResyncs', 'losslessRestarts', 'inputHostP50Us', 'inputHostP95Us', 'inputFrameP50Us', 'inputFrameP95Us',
   // texture-pacing-v1 clients: decoded -> taken by Flutter wait and
   // Flutter's texture upload (us), frames queued/skipped in the window, the
   // texture path (0 = CPU pixel buffer, 1 = GPU surface) and the composition

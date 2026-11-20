@@ -4,6 +4,8 @@
 // relay or real session is involved. (`--screen`, at the end, is a manual probe
 // that reads the real screen instead; the fixture run never uses it.)
 #include "lossless_tile_source.hpp"
+#include <functional>
+#include <memory>
 #include "capture_scale.hpp"
 #include "frame_encode_policy.hpp"
 #include "media.hpp"
@@ -169,6 +171,8 @@ struct Loop {
   // retired with a forced video frame and then plain video; `force` is a
   // requested IDR; `deliver` false loses this tick's tile packet in transit.
   bool retired = false; std::vector<uint8_t> lastPayload;
+  // Loses the tile packets it says true for (in transit), like `deliver` false.
+  std::function<bool(const std::vector<uint8_t>&)> lose;
   void streamTick(bool wanted, bool force = false, bool deliver = true) {
     now += 16667;
     host::BufferComposedFrame frame(canvas.bgra.data(), canvas.width, canvas.height);
@@ -177,7 +181,7 @@ struct Loop {
     host::FrameEncodeDecision decision;
     if (result) {
       decision = result->decision;
-      if (result->payload) { ++packets; lastPayload = *result->payload; if (deliver) client.offer(*result->payload); }
+      if (result->payload) { ++packets; lastPayload = *result->payload; if (deliver && !(lose && lose(*result->payload))) client.offer(*result->payload); }
     } else { decision = policy.prepare(frameBytes, now, force); encoded = decision.submit; }
     require(decision.submit == encoded, "Encode call does not match the decision");
     if (decision.submit) { require(policy.output(now, !policy.hasUsableIdr(), now, 100), "Synthetic output"); ++videos; client.decoded(Client::video(canvas), now); shown = canvas; }
@@ -549,6 +553,38 @@ void retirement() {
   }
 }
 
+// tiles-resync-v1, field case 2026-11-20 (one 1920x1080 output over UDP, eight
+// unrepaired losses): a tile packet lost in transit poisons the client at the
+// next one, its screen is plain video while the Host counts every tile present.
+// The client asks again; Agent::stream starts the source over (a new one): its
+// packet 1 restarts the client's compositor and the picture becomes exact again.
+void restartAfterLoss() {
+  Loop loop(640, 360, deterministic()); loop.canvas.texture(3);
+  loop.settle(240);
+  require(exact(loop.client, loop.canvas), "Static frame did not become lossless before the loss");
+  // A change: its drops arrive with its video; one later packet that only adds
+  // tiles is lost (a lost drop shows an old tile until the next packet, a cost
+  // this does not change).
+  unsigned lost = 0;
+  loop.lose = [&](const std::vector<uint8_t>& payload) { if (lost || lossless::read16(payload.data() + 20) || !lossless::read16(payload.data() + 22)) return false; ++lost; return true; };
+  loop.canvas.texture(4);
+  for (int n = 0; n < 240 && !lost; ++n) loop.streamTick(true);
+  require(lost == 1, "Fixture: no tile packet was lost");
+  loop.lose = nullptr;
+  for (int n = 0; n < 240 && !loop.client.compositor.poisoned(); ++n) { loop.canvas.texture(6 + n % 2); loop.streamTick(true); }
+  require(loop.client.compositor.poisoned() && loop.client.compositor.presentTiles() == 0, "A lost tile packet did not poison the client");
+  for (int n = 0; n < 60; ++n) loop.streamTick(true);
+  require(!exact(loop.client, loop.canvas) && loop.source.presentTiles() == loop.source.tileCount(), "Fixture: the poisoned client was exact, or the Host did not count every tile present");
+  // The restart (Agent::stream on a changed resync count): a new source and helper.
+  std::destroy_at(&loop.source); std::construct_at(&loop.source, 640u, 360u, deterministic());
+  std::destroy_at(&loop.helper); std::construct_at(&loop.helper); loop.retired = false;
+  loop.settle(240);
+  require(exact(loop.client, loop.canvas) && !loop.client.compositor.poisoned() && loop.client.compositor.stats().restarts == 1, "The restarted source did not make the client exact again");
+  // It goes on as one source: a change later is exact again, no second restart.
+  loop.canvas.texture(5); loop.settle(240);
+  require(exact(loop.client, loop.canvas) && !loop.client.compositor.poisoned() && loop.client.compositor.stats().restarts == 1, "The restarted source did not go on");
+}
+
 // The capture's composed BGRA view stops following the picture the encoder
 // gets (field case, League of Legends: 540 of 540 tiles of
 // the old desktop stayed present while 32 fps of the game were encoded). The
@@ -728,7 +764,7 @@ int screenProbe(int ticks, bool moves) {
 int main(int argc, char** argv) {
   try {
     if (argc >= 3 && std::string(argv[1]) == "--screen") return screenProbe(std::atoi(argv[2]), argc >= 4 && std::string(argv[3]) == "moves");
-    codecRoundTrip(); compositorRules(); upscalerMatchesReference(); scaledCompositorRules(); tileSourceDiffing(); smallChangesAreExactAtOnce(); largeChangeSettlesWhenStill(); candidateVerification(); budgetsAndMotion(); retirement();
+    codecRoundTrip(); compositorRules(); upscalerMatchesReference(); scaledCompositorRules(); tileSourceDiffing(); smallChangesAreExactAtOnce(); largeChangeSettlesWhenStill(); candidateVerification(); budgetsAndMotion(); retirement(); restartAfterLoss();
     pictureAnchorsTiles(); pictureAnchorsScaledTiles(); scrollingStaysExact();
     std::cout << "{\"kind\":\"lossless-tiles-unit\",\"checks\":" << checks << ",\"syntheticPixels\":true,\"encoder\":false,\"realSessionAcceptance\":false}\n";
     return 0;

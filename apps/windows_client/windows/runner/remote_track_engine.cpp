@@ -87,7 +87,7 @@ bool RemoteTrackEngine::Start(const tracks::Configuration& configuration){
     }
     output.id=registrar_->RegisterTexture(output.texture.get());
     if(output.id<0){Stop();return false;}
-  }  {std::lock_guard<std::mutex> lock(mutex_);stalePackets_=waitingPackets_=0;losslessPackets_=losslessRepublishes_=losslessWithPicture_=0;losslessMs_=0;losslessPresent_={};losslessPoisoned_=false;
+  }  {std::lock_guard<std::mutex> lock(mutex_);stalePackets_=waitingPackets_=0;losslessPackets_=losslessRepublishes_=losslessWithPicture_=0;losslessMs_=0;losslessPresent_={};losslessPoisoned_={};losslessRestarts_={};
     audioPts_.reset();for(auto& lane:lanes_){lane.queue.clear();lane.bytes=0;lane.refused=0;lane.ready=false;}}
   error_=S_OK;ready_=false;running_=true;
   // audio-opus-tracks-v1: the shared audio decodes from Opus (with its PLC and timer wait).
@@ -257,7 +257,7 @@ flutter::EncodableMap RemoteTrackEngine::Stats(){
     // tiles that waited and were shown by the decoded picture of their tick.
     {V("losslessPackets"),V(int64_t(losslessPackets_))},{V("losslessPacketMs"),V(losslessMs_)},
     {V("losslessRepublishes"),V(int64_t(losslessRepublishes_))},{V("losslessWithPicture"),V(int64_t(losslessWithPicture_))},
-    {V("losslessPresentTiles"),V(int64_t(losslessPresent_[0]+losslessPresent_[1]))},{V("losslessPoisoned"),V(losslessPoisoned_)}};
+    {V("losslessPresentTiles"),V(int64_t(losslessPresent_[0]+losslessPresent_[1]))},{V("losslessPoisoned"),V(losslessPoisoned_[0]||losslessPoisoned_[1])},{V("losslessRestarts"),V(int64_t(losslessRestarts_[0]+losslessRestarts_[1]))}};
   if(configuration_.audioEnabled)audio_.AppendStats(stats);
   return stats;
 }
@@ -355,7 +355,7 @@ void RemoteTrackEngine::Run(tracks::Configuration configuration,bool power)noexc
           else if(tile){++losslessPackets_;losslessMs_+=work;}  // not a decode call
           else if(packet.kind==tracks::video){auto& output=outputs_[packet.track];++output.decodeCalls;output.decodeTotalMs+=work;
             output.decodeMaxMs=std::max(output.decodeMaxMs,work);output.notifyTotalMs+=notified;output.notifyMaxMs=std::max(output.notifyMaxMs,notifiedMax);}
-          if(packet.kind==tracks::video&&packet.track<2){const auto tiles=decoder.losslessStats(packet.track);losslessPresent_[packet.track]=tiles.presentTiles;losslessPoisoned_=losslessPoisoned_||tiles.poisoned;}}
+          if(packet.kind==tracks::video&&packet.track<2){const auto tiles=decoder.losslessStats(packet.track);losslessPresent_[packet.track]=tiles.presentTiles;losslessPoisoned_[packet.track]=tiles.poisoned;losslessRestarts_[packet.track]=tiles.restarts;}}
       }
       decoder.Close();
     }

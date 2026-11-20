@@ -33,6 +33,14 @@ inline bool losslessTilesMoves(const std::string& nonce) { return nonce.rfind(lo
 // its tiles; a later "lt1-" ping turns them on again.
 inline constexpr const char* losslessTilesPausePrefix = "lt0-";
 inline bool losslessTilesPause(const std::string& nonce) { return nonce.rfind(losslessTilesPausePrefix, 0) == 0; }
+// tiles-resync-v1: the opt-in with an "r" after the moves mark ("lt1-mr<n>",
+// "lt1-r<n>"): the client's tiles are poisoned (over UDP an unrepaired loss or a
+// path switch drops tile packets until the next key frame, and the sequence gap
+// poisons its compositor), so its screen is plain video while this Host counts
+// every tile present. The tile source starts again: its packet 1 restarts the
+// client's compositor, and every tile is sent again as it settles. A Host that
+// does not know it reads the opt-in (and the moves mark) as before.
+inline bool losslessTilesResync(const std::string& nonce) { return nonce.rfind("lt1-r", 0) == 0 || nonce.rfind("lt1-mr", 0) == 0; }
 
 // The composed BGRA frame of the current tick: exactly the pixels converted into
 // the NV12 that the encoder receives, cursor included.

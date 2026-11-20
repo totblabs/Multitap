@@ -274,6 +274,18 @@ target_compile_options(multitap_decoder_prestart_smoke PRIVATE /W4 /WX /permissi
 target_link_libraries(multitap_decoder_prestart_smoke PRIVATE "mfplat.lib" "mf.lib" "mfuuid.lib" "wmcodecdspuuid.lib" "ole32.lib" "oleaut32.lib" "user32.lib" "pdh.lib")
 set_target_properties(multitap_decoder_prestart_smoke PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/qa")
 
+# Lossless tiles on the single-output engine with this PC's real GPU (hardware
+# decoder, shared GPU textures) and the CPU path: the published picture must hold
+# the tiles' exact pixels (field: colour bleed on a still page, 2026-11-20).
+add_executable(multitap_lossless_engine_smoke EXCLUDE_FROM_ALL "../../test/native/lossless_engine_smoke.cpp"
+  "remote_engine.cpp" "remote_track_engine.cpp" "remote_track_decoder.cpp" "remote_decoder.cpp" "remote_audio.cpp")
+target_include_directories(multitap_lossless_engine_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${FLUTTER_MANAGED_DIR}/ephemeral" "${FLUTTER_MANAGED_DIR}/ephemeral/cpp_client_wrapper/include")
+target_compile_definitions(multitap_lossless_engine_smoke PRIVATE NOMINMAX)
+target_compile_features(multitap_lossless_engine_smoke PRIVATE cxx_std_17)
+target_compile_options(multitap_lossless_engine_smoke PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+target_link_libraries(multitap_lossless_engine_smoke PRIVATE "mfplat.lib" "mf.lib" "mfuuid.lib" "wmcodecdspuuid.lib" "ole32.lib" "oleaut32.lib" "user32.lib" "pdh.lib" "dxgi.lib" "d3d11.lib")
+set_target_properties(multitap_lossless_engine_smoke PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/qa")
+
 # Long-session bounds (backlog #60): handles, threads, GDI/USER objects and private
 # bytes across many reconnects, held-picture resizes (CPU and WARP), two-output
 # starts and unused prestarts on the real engines; `cycles=N` per phase.

@@ -479,6 +479,34 @@ struct Still final:host::TrackCapture {
   }
   host::ComposedFrame* composed()override{return view.get();}
 };
+// tiles-resync-v1: a client whose tiles were poisoned (a tile packet lost over
+// UDP) asks for them again. Every output's tile source starts over: its next
+// packet is number 1 (which restarts that output's compositor in the client)
+// and its tiles are added again as they settle; without a new request nothing restarts.
+void restartsTiles(){
+  namespace tiles=multitap::lossless;
+  const auto plan=host::bindOwnedTrackSources(command(),display(),observed());FollowFixture fixture;uint64_t now=0;
+  host::TrackSourcePipeline source(plan,false,[&]{return now;},[&]{return fixture.now();},[&](const auto& output){return std::make_unique<Still>(output,fixture);},[&](const std::wstring& name){return fixture.mode(name);});
+  struct Seen{std::array<std::vector<uint32_t>,2> sequences;std::array<unsigned,2> adds{};};
+  const auto run=[&](uint64_t resync){source.lossless(true,false,resync);now+=33333;Seen seen;
+    for(auto& bytes:source.step()){wire::Packet packet;require(wire::parse(bytes.data(),bytes.size(),packet),"A restart step emitted an invalid packet");
+      if(tiles::isTilePayload(packet.payload,packet.size)){seen.sequences[packet.track].push_back(tiles::read32(packet.payload+8));seen.adds[packet.track]+=tiles::read16(packet.payload+22);}}
+    return seen;};
+  // Still pictures: every tile settles and is sent once, then nothing more.
+  std::array<unsigned,2> added{};
+  for(unsigned n=0;n<240&&(!added[0]||!added[1]);++n){const auto seen=run(0);for(unsigned id=0;id<2;++id)added[id]+=seen.adds[id];}
+  require(added[0]&&added[1],"Fixture: the outputs did not reach lossless tiles");
+  for(unsigned n=0;n<60;++n){const auto seen=run(0);for(unsigned id=0;id<2;++id)added[id]+=seen.adds[id];}
+  const auto settled=added;
+  // The same count again is no new request: nothing is sent again.
+  for(unsigned n=0;n<30;++n){const auto seen=run(0);require(!seen.adds[0]&&!seen.adds[1],"A settled output sent its tiles again without a request");}
+  // A request: each output's next packet is number 1 and its tiles come again.
+  std::array<bool,2> restarted{};std::array<unsigned,2> again{};
+  for(unsigned n=0;n<240&&(again[0]<settled[0]||again[1]<settled[1]);++n){const auto seen=run(1);
+    for(unsigned id=0;id<2;++id){if(!seen.sequences[id].empty()&&!restarted[id]){require(seen.sequences[id].front()==1,"An output's tiles did not start again at packet 1");restarted[id]=true;}if(restarted[id])again[id]+=seen.adds[id];}}
+  require(restarted[0]&&restarted[1]&&again[0]>=settled[0]&&again[1]>=settled[1],"Restarted outputs did not send all their tiles again");
+  for(unsigned n=0;n<30;++n){const auto seen=run(1);require(!seen.adds[0]&&!seen.adds[1],"The same request restarted the tiles twice");}
+}
 void followsOutputs(){
   namespace tiles=multitap::lossless;
   const auto plan=host::bindOwnedTrackSources(command(),display(),observed());FollowFixture fixture;uint64_t now=0;
@@ -571,7 +599,7 @@ int wmain(int argc,wchar_t** argv){
   try{host::Runtime runtime;
     if(argc==2&&std::wstring(argv[1])==L"--benchmark"){benchmark();return 0;}
     if(argc==2&&std::wstring(argv[1])==L"--follow-only"){followsOutputs();std::cout<<"{\"kind\":\"track-follow\",\"checks\":"<<checks<<"}\n";return 0;}
-    contracts();relativeInput();tunnelContracts();liveTunnelResume();opusAndKeyFrames();concurrentOutputs();cursorRecords();followsOutputs();const std::array<Phase,2> phases{pipeline(1),pipeline(2)};
+    contracts();relativeInput();tunnelContracts();liveTunnelResume();opusAndKeyFrames();concurrentOutputs();cursorRecords();followsOutputs();restartsTiles();const std::array<Phase,2> phases{pipeline(1),pipeline(2)};
     if(argc==3&&std::wstring(argv[1])==L"--fixture-output")exportPhases(argv[2],phases);else if(argc==3&&std::wstring(argv[1])==L"--broker")liveRejectedTunnel(argv[2]);else require(argc==1,"Unknown source QA arguments");
     std::cout<<"{\"checks\":"<<checks<<",\"actualSourceEncoders\":4,\"actualClientDecoders\":4,\"gpuPathIdenticalPixels\":true,\"nativeSourcePackets\":32,\"sourceCapture\":\"synthetic owned-output fixture\",\"inputInjection\":\"recorded callback only\",\"actualWindowsCapture\":false,\"actualPhysicalPresentation\":false,\"windowsDisplayChanges\":0}\n";return 0;
   }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

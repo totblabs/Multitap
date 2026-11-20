@@ -291,7 +291,11 @@ class TrackSourcePipeline {
   // tick on. Not wanted (or followed): the output's tiles retire with its next
   // video frame, as in Agent::stream (losslessStreamTick).
   // 'moves': that client also takes tiles-v2 moves; it holds for the sources made from now on.
-  void lossless(bool wanted,bool moves=false){
+  // 'resync' (tiles-resync-v1): the client's count of restarts asked for; when it
+  // changes every output's tile source starts again (its packet 1 restarts that
+  // output's compositor in the client, poisoned by a lost tile packet).
+  void lossless(bool wanted,bool moves=false,uint64_t resync=0){
+    if(resync!=resyncSeen_){resyncSeen_=resync;for(auto& state:states_)if(state->lossless){state->lossless.reset();state->helper.reset();state->losslessRetired=false;}}
     losslessWanted_=wanted;if(!wanted)return;
     for(auto& state:states_)if(state->lossless)state->lossless->moves(moves);
     for(auto& state:states_)if(!state->lossless&&state->tilesAllowed&&state->capture&&state->capture->composed()&&state->output.media.width==state->output.media.sourceWidth&&state->output.media.height==state->output.media.sourceHeight){
@@ -637,7 +641,7 @@ class TrackSourcePipeline {
   }
   TrackSourcePlan plan_;Micros now_;Monitors observed_;CaptureFactory capture_;Modes modes_;std::vector<std::unique_ptr<State>> states_;
   Followed followed_;inline static const std::atomic<bool> never_{false};const std::atomic<bool>* stop_=&never_;
-  bool losslessWanted_=false;Clock::time_point followedAt_{};
+  bool losslessWanted_=false;uint64_t resyncSeen_=0;Clock::time_point followedAt_{};
   // bitrate-adaptive-tracks-v1: automatic rate, and each output's latest share (0: none yet).
   bool adaptive_=false;std::array<int,2> wanted_{};
   std::vector<std::unique_ptr<TrackOutputThread>> threads_;  // threads_[n-1] owns states_[n]

@@ -25,6 +25,24 @@ class MoveMedia extends TileMedia implements LosslessMoveMedia {
   bool get losslessMoves => true;
 }
 
+/// The Windows engine whose tiles a lost packet poisoned (tiles-resync-v1);
+/// `restarts` counts the restarted sources it took. `takesRestarts` false is
+/// an engine like Android's, which reports poison but cannot start over.
+class PoisonedMoveMedia extends MoveMedia implements LosslessResyncMedia {
+  PoisonedMoveMedia({this.takesRestarts = true});
+  final bool takesRestarts;
+  @override
+  bool get losslessResync => takesRestarts;
+  bool poisoned = false;
+  int restarts = 0;
+  @override
+  Future<Map<String, dynamic>> stats() async => {
+    ...await super.stats(),
+    'losslessPoisoned': poisoned,
+    'losslessRestarts': restarts,
+  };
+}
+
 /// Android's engine: composites tiles only while its current start can.
 class SwitchingTileMedia extends SessionMedia implements LosslessTileMedia {
   bool composite = true;
@@ -338,6 +356,106 @@ void main() {
       await remote.close();
       await media.events.close();
     }
+  });
+
+  // Field case 2026-11-20: over UDP a lost tile packet poisoned the engine's
+  // tiles; the screen stayed plain video while the Host counted every tile.
+  test('Poisoned tiles ask the Host to start them again (lt1-mr), at most every '
+      '3 s, and stop asking once restarted', () async {
+    final socket = SessionSocket(), media = PoisonedMoveMedia();
+    final remote = session(socket, media);
+    unawaited(remote.start());
+    await flush();
+    socket.incoming.add(jsonEncode(info));
+    await flush();
+    socket.incoming.add(idr());
+    await flush();
+    List<String> pings() => [
+      for (final event in socket.sent)
+        if (event['type'] == 'ping') event['id'] as String,
+    ];
+    Future<void> answer() async {
+      socket.incoming.add(jsonEncode({'type': 'pong', 'id': pings().last}));
+      await flush();
+    }
+
+    // Pictures keep coming (a session without them ends) and every ping is answered.
+    Future<void> run(int ms) async {
+      final end = DateTime.now().add(Duration(milliseconds: ms));
+      while (DateTime.now().isBefore(end)) {
+        socket.incoming.add(idr());
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await answer();
+      }
+    }
+
+    await answer();
+    // Healthy tiles: plain opt-ins only.
+    await run(1050);
+    expect(pings().every((id) => RegExp(r'^lt1-m\d+$').hasMatch(id)), isTrue);
+    expect(remote.losslessResyncs, 0);
+    // Poisoned: the next ping asks again, the moves mark first.
+    media.poisoned = true;
+    await run(2100);
+    final asked = pings().where((id) => id.startsWith('lt1-mr')).toList();
+    expect(asked, hasLength(1), reason: pings().join(' '));
+    expect(RegExp(r'^lt1-mr\d+$').hasMatch(asked.single), isTrue);
+    expect(asked.single.length, lessThanOrEqualTo(64));
+    expect(remote.losslessResyncs, 1);
+    // Still poisoned 1 s later: not again yet (one request per 3 s).
+    await run(1050);
+    expect(pings().where((id) => id.startsWith('lt1-mr')), hasLength(1));
+    // Still poisoned after 3 s: asked once more.
+    await run(3100);
+    expect(pings().where((id) => id.startsWith('lt1-mr')), hasLength(2));
+    // Still poisoned: the next wait is twice as long (6 s), so none 2.5 s on
+    // (without the doubling one would come about 3 s after the last).
+    await run(2500);
+    expect(pings().where((id) => id.startsWith('lt1-mr')), hasLength(2));
+    // The Host restarted the source: no more requests, the count is reported.
+    media
+      ..poisoned = false
+      ..restarts = 1;
+    await run(4200);
+    expect(pings().where((id) => id.startsWith('lt1-mr')), hasLength(2));
+    expect(remote.losslessResyncs, 2);
+    expect(remote.losslessRestarts, 1);
+    // 마우스 잠금 pauses: a poisoned engine does not ask while paused.
+    media.poisoned = true;
+    remote.pauseLosslessTiles(true);
+    await flush();
+    await answer();
+    await run(4200);
+    expect(pings().where((id) => id.startsWith('lt1-mr')), hasLength(2));
+    expect(pings().last.startsWith(losslessTilesPausePrefix), isTrue);
+    await remote.close();
+    await media.events.close();
+  }, timeout: const Timeout(Duration(seconds: 60)));
+
+  test('An engine that cannot start its tiles over never asks for it', () async {
+    final socket = SessionSocket(),
+        media = PoisonedMoveMedia(takesRestarts: false)..poisoned = true;
+    final remote = session(socket, media);
+    unawaited(remote.start());
+    await flush();
+    socket.incoming.add(jsonEncode(info));
+    await flush();
+    socket.incoming.add(idr());
+    for (var n = 0; n < 4; ++n) {
+      await Future<void>.delayed(const Duration(milliseconds: 1050));
+      final last = socket.sent.lastWhere((event) => event['type'] == 'ping');
+      socket.incoming.add(jsonEncode({'type': 'pong', 'id': last['id']}));
+      await flush();
+    }
+    final ids = [
+      for (final event in socket.sent)
+        if (event['type'] == 'ping') event['id'] as String,
+    ];
+    expect(ids.length, greaterThan(2));
+    expect(ids.any((id) => id.startsWith('lt1-mr')), isFalse, reason: ids.join(' '));
+    expect(remote.losslessResyncs, 0);
+    await remote.close();
+    await media.events.close();
   });
 
   test('A media that never composited sends plain pings', () async {

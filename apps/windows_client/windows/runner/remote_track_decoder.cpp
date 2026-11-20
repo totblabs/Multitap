@@ -153,11 +153,9 @@ HRESULT RemoteTrackDecoder::Push(const uint8_t* bytes,size_t size,const FrameCal
       if(lossless::isTilePayload(packet.payload,packet.size)){
         // ToTBSeamless tiles-v1 (an opted-in client only): never H.264.
         auto& compositor=state->lossless[packet.track];
-        const size_t addedBefore=compositor.addedTiles().size();
-        compositor.Accept(packet.payload,packet.size);
         auto* converter=state->converters[packet.track];auto* overlay=state->overlays[packet.track];
         // A GPU output keeps the tile pixels in its overlay texture.
-        if(converter&&overlay)gpu::UploadAddedTiles(compositor,*overlay,addedBefore);
+        gpu::AcceptTiles(compositor,converter?overlay:nullptr,packet.payload,packet.size);
         State::republish(state,track,packet.topology,emit,latest);
       }else hr=decoder->Decode(packet.payload,packet.size,packet.pts,[state,track,topology=packet.topology,emit](DecodedFrame&& value){State::deliver(state,track,topology,emit,std::move(value));});
     }

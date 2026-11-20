@@ -154,7 +154,7 @@ int64_t RemoteEngine::Start(uint32_t width, uint32_t height, bool audio_enabled,
   texture_id_ = registrar_->RegisterTexture(texture_.get());
   if (texture_id_ < 0) { texture_.reset(); converter_.reset(); overlay_.reset(); return -1; }
   { std::lock_guard<std::mutex> lock(mutex_); decode_calls_=texture_notify_calls_=texture_remarks_=rgba_buffer_reuses_=0; decode_total_ms_=decode_max_ms_=0; texture_notify_total_ms_=texture_notify_max_ms_=0;
-    lossless_packets_=lossless_republishes_=lossless_deferred_=0; lossless_present_=0; lossless_compose_ms_=lossless_republish_ms_=0; lossless_poisoned_=lossless_scaled_=false; watched_.clear(); signal_->remark=signal_->reveal=false; deferred_=0;
+    lossless_packets_=lossless_republishes_=lossless_deferred_=0; lossless_present_=0; lossless_compose_ms_=lossless_republish_ms_=0; lossless_poisoned_=lossless_scaled_=false; lossless_restarts_=0; watched_.clear(); signal_->remark=signal_->reveal=false; deferred_=0;
     hardware_decode_=decoder_prestarted_=false; decode_tier_=0; decode_vendor_=0; decoder_fallbacks_=gpu_dropped_=0; decoder_fallback_reason_=0; gpu_convert_total_ms_=gpu_convert_max_ms_=0;
     since_={}; stalls_.clear(); stall_serial_=0; publishing_key_=false; }
   error_ = S_OK; running_ = true; audio_enabled_=audio_enabled;
@@ -315,6 +315,7 @@ flutter::EncodableMap RemoteEngine::Stats() {
       {V("losslessComposeMs"), V(lossless_compose_ms_)},
       {V("losslessPacketMs"), V(lossless_republish_ms_)},
       {V("losslessPoisoned"), V(lossless_poisoned_)},
+      {V("losslessRestarts"), V(static_cast<int64_t>(lossless_restarts_))},
       {V("losslessScaledSource"), V(lossless_scaled_)},
       // input-latency-v1: watched video PTS and its queued -> handed-to-texture
       // microseconds (decoder work + publication; not display scan-out).
@@ -557,14 +558,11 @@ HRESULT RemoteEngine::ComposeGpu(lossless::Compositor& compositor, GpuWorker& gp
 }
 void RemoteEngine::AcceptLossless(lossless::Compositor& compositor, const std::vector<uint8_t>& packet, bool republish, GpuWorker& gpu_worker) {
   const auto began = std::chrono::steady_clock::now();
-  const size_t added_before = compositor.addedTiles().size();
-  compositor.Accept(packet.data() + 12, packet.size() - 12);
-  if (gpu_worker.overlay && compositor.width()) {
-    // The tiles go to the overlay texture once, when they arrive; a scaled
-    // source makes the decoder produce source-size pictures from now on.
-    gpu::UploadAddedTiles(compositor, *gpu_worker.overlay, added_before);
-    if (gpu_worker.decoder && compositor.scaled()) gpu_worker.decoder->SetOutputSize(compositor.width(), compositor.height());
-  }
+  // The tiles go to the overlay texture once, when they arrive (a restarted
+  // source's too); a scaled source makes the decoder produce source-size
+  // pictures from now on.
+  gpu::AcceptTiles(compositor, gpu_worker.overlay, packet.data() + 12, packet.size() - 12);
+  if (gpu_worker.overlay && gpu_worker.decoder && compositor.width() && compositor.scaled()) gpu_worker.decoder->SetOutputSize(compositor.width(), compositor.height());
   bool republished = false, deferred = false;
   if (compositor.republishPending()) {
     if (republish && !hidden_) republished = RepublishLossless(compositor, gpu_worker);
@@ -573,7 +571,7 @@ void RemoteEngine::AcceptLossless(lossless::Compositor& compositor, const std::v
   const double elapsed = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now() - began).count();
   std::lock_guard<std::mutex> lock(mutex_);
   ++lossless_packets_; lossless_republishes_ += republished ? 1 : 0; lossless_deferred_ += deferred ? 1 : 0; lossless_republish_ms_ += elapsed;
-  lossless_present_ = compositor.presentTiles(); lossless_poisoned_ = compositor.poisoned(); lossless_scaled_ = compositor.scaled();
+  lossless_present_ = compositor.presentTiles(); lossless_poisoned_ = compositor.poisoned(); lossless_scaled_ = compositor.scaled(); lossless_restarts_ = compositor.stats().restarts;
 }
 bool RemoteEngine::RepublishLossless(lossless::Compositor& compositor, GpuWorker& gpu_worker) {
   // New tiles appear now instead of at the next video frame: a copy of the

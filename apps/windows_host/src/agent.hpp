@@ -372,6 +372,7 @@ class Agent {
   // A worker's tiles opt-in state for a session (what its capture loop reads).
   bool losslessTestRequested(const std::string& session)const{return losslessRequested(session);}
   bool losslessMovesTestRequested(const std::string& session)const{return losslessMoves(session);}
+  uint64_t losslessResyncTestCount(const std::string& session)const{return losslessResync(session);}
   // The send loop's diagnostics step, and the wait the connection end does.
   void diagnosticsTestTick(){collectDiagnostics();}
   void diagnosticsTestJoin(){joinDiagnostics();}
@@ -522,7 +523,7 @@ class Agent {
           // tracks-resume-v1: the relay restarts every output at an IDR after a resume.
           if(keyFrameRequested_.exchange(false))pipeline->keyFrame();
           if(auto rates=takeTrackRates())pipeline->retarget(rates->first,rates->second);
-          pipeline->lossless(losslessRequested(plan.sessionId),losslessMoves(plan.sessionId));pipeline->composeRequested(cursorCompose_.wanted());
+          pipeline->lossless(losslessRequested(plan.sessionId),losslessMoves(plan.sessionId),losslessResync(plan.sessionId));pipeline->composeRequested(cursorCompose_.wanted());
           auto packets=pipeline->step();if(pipeline->keysReady())input->encodedReady();
           if(!packets.empty())lastWork=began;
           for(auto& packet:packets){if(streamStop_||stopped_)break;enqueue({false,std::move(packet)});}
@@ -727,16 +728,24 @@ class Agent {
   // nonce prefix "lt1-") and did not pause them since ("lt0-": 게임 마우스
   // holds the mouse). Both survive the legacy resize restart of the same session.
   // losslessMoves_: that client also takes moves and rectangles ("lt1-m", tiles-v2).
-  mutable std::mutex losslessMutex_; std::string losslessSession_; bool losslessOn_ = false, losslessMoves_ = false;
+  // losslessResync_: restarts that client asked for ("lt1-mr", tiles-resync-v1); a
+  // stream starts its tile source again whenever it sees this count change.
+  mutable std::mutex losslessMutex_; std::string losslessSession_; bool losslessOn_ = false, losslessMoves_ = false; uint64_t losslessResync_ = 0;
   bool losslessRequested(const std::string& session) const { std::lock_guard lock(losslessMutex_); return !session.empty() && session == losslessSession_ && losslessOn_; }
   bool losslessMoves(const std::string& session) const { std::lock_guard lock(losslessMutex_); return !session.empty() && session == losslessSession_ && losslessMoves_; }
-  void requestLossless(bool on = true, bool moves = false) {
+  uint64_t losslessResync(const std::string& session) const { std::lock_guard lock(losslessMutex_); return !session.empty() && session == losslessSession_ ? losslessResync_ : 0; }
+  void requestLossless(bool on = true, bool moves = false, bool resync = false) {
     // Session0 answers pings itself; the worker owning the encoder needs the opt-in.
-    if (bridge_) { bridge_->control(JsonParser::parse(!on ? R"({"type":"stream.lossless","protocol":"tiles-v1","on":false})" : moves ? R"({"type":"stream.lossless","protocol":"tiles-v1","moves":true})" : R"({"type":"stream.lossless","protocol":"tiles-v1"})")); return; }
+    if (bridge_) {
+      std::string control = !on ? R"({"type":"stream.lossless","protocol":"tiles-v1","on":false)" : moves ? R"({"type":"stream.lossless","protocol":"tiles-v1","moves":true)" : R"({"type":"stream.lossless","protocol":"tiles-v1")";
+      if (on && resync) control += R"(,"resync":true)";
+      bridge_->control(JsonParser::parse(control + '}')); return;
+    }
     std::lock_guard lock(losslessMutex_);
     // A pause says nothing about moves; an opt-in says which entries the client takes.
-    if (losslessSession_ != sessionId_) losslessMoves_ = false;
+    if (losslessSession_ != sessionId_) { losslessMoves_ = false; losslessResync_ = 0; }
     losslessSession_ = sessionId_; losslessOn_ = on; if (on) losslessMoves_ = moves;
+    if (on && resync) ++losslessResync_;
   }
 #ifdef MULTITAP_TRACK_SOURCE_TEST
   TrackSourcePipeline::Monitors trackMonitors_;TrackSourcePipeline::CaptureFactory trackCapture_;std::optional<TrackDesktop> trackDesktop_;
@@ -1178,7 +1187,7 @@ class Agent {
           if (key && cursorChannel) cursorChannel->keyFrame(); };
         // Lossless tiles start only after this session's client opted in.
         // losslessRetired: the client was told to drop every tile (losslessStreamTick).
-        std::unique_ptr<LosslessTileSource> lossless;std::unique_ptr<ParallelWork> losslessHelper;CapturedComposedFrame<Capture> composed(capture);bool losslessRetired=false;
+        std::unique_ptr<LosslessTileSource> lossless;std::unique_ptr<ParallelWork> losslessHelper;CapturedComposedFrame<Capture> composed(capture);bool losslessRetired=false;uint64_t losslessResyncSeen=losslessResync(session);
         uint64_t losslessBytes=0,losslessPackets=0;double losslessMs=0;
         // A software encoder's overload may pace capture below the requested rate (EncodeScaleController::fps).
         auto period = std::chrono::microseconds(1000000 / fps); FramePacer pacer;
@@ -1436,6 +1445,10 @@ class Agent {
           // invalidation) or is an IDR, and is marked as the answer.
           if(const uint64_t lost=recoverRequested_.exchange(0)){answerLoss=true;if(!keyFrame&&!encoder.recover(lost-1))encoder.requestKeyFrame();}
           const bool force=keyFrame||answerLoss;
+          // tiles-resync-v1: the client's tiles are poisoned and it asked for them
+          // again. A new source numbers its packets from 1, which restarts the
+          // client's compositor, and assumes no tile there (true once it restarted).
+          if(const auto resync=losslessResync(session);resync!=losslessResyncSeen){losslessResyncSeen=resync;if(lossless){lossless.reset();losslessHelper.reset();}}
           // Tiles always describe the unscaled source (also when the encoded
           // video is downscaled); a capture without that view (scaled GDI) or a
           // source beyond the tile limits keeps plain video.
@@ -1697,8 +1710,8 @@ class Agent {
         if (local_) if (const auto report = inputLatency_.injected(message, injected, hostMonotonicUs(), frameCandidate)) text(*report);
       }
     }
-    else if (type == "ping") { const auto nonce = message.get("id").string(); if (nonce.size() <= 128) { if (losslessTilesOptIn(nonce)) requestLossless(true, losslessTilesMoves(nonce)); else if (losslessTilesPause(nonce)) requestLossless(false); text("{\"type\":\"pong\",\"id\":" + jsonQuote(nonce) + '}'); } }
-    else if (type == "stream.lossless") { if (!bridge_ && message.get("protocol").string() == "tiles-v1") { const auto* on = std::get_if<bool>(&message.get("on").value); const auto* moves = std::get_if<bool>(&message.get("moves").value); requestLossless(!on || *on, moves && *moves); } }
+    else if (type == "ping") { const auto nonce = message.get("id").string(); if (nonce.size() <= 128) { if (losslessTilesOptIn(nonce)) requestLossless(true, losslessTilesMoves(nonce), losslessTilesResync(nonce)); else if (losslessTilesPause(nonce)) requestLossless(false); text("{\"type\":\"pong\",\"id\":" + jsonQuote(nonce) + '}'); } }
+    else if (type == "stream.lossless") { if (!bridge_ && message.get("protocol").string() == "tiles-v1") { const auto* on = std::get_if<bool>(&message.get("on").value); const auto* moves = std::get_if<bool>(&message.get("moves").value); const auto* resync = std::get_if<bool>(&message.get("resync").value); requestLossless(!on || *on, moves && *moves, resync && *resync); } }
     // display-scale-v1: the worker owning the output applies it (service.hpp).
     else if (type == "display.scale") { if (bridge_) bridge_->control(message); }
     // caret-v1: the service hands it to the worker, which owns the user session.

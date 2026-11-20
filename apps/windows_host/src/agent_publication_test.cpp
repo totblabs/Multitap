@@ -117,7 +117,20 @@ int main(){try{
     worker.localControl(R"({"type":"stream.lossless","protocol":"tiles-v1","moves":true})");require(worker.losslessMovesTestRequested(session),"A forwarded moves opt-in was not taken");
     {Fixture f;f.agent.localControl(R"({"type":"ping","id":"lt1-m9"})");
       require(f.drain()&&f.sent.size()==1&&f.sent[0].get("id").string()=="lt1-m9"&&f.bridge.controls.size()==1&&f.bridge.controls[0].get("protocol").string()=="tiles-v1"&&std::holds_alternative<bool>(f.bridge.controls[0].get("moves").value)&&f.bridge.controls[0].get("moves").boolean(),"Session0 did not forward the moves opt-in");}
-    worker.localControl(R"({"type":"stream.lossless","protocol":"tiles-v1","on":true})");require(worker.losslessTestRequested(session),"Explicit opt-in was not applied");++checks;}
+    worker.localControl(R"({"type":"stream.lossless","protocol":"tiles-v1","on":true})");require(worker.losslessTestRequested(session),"Explicit opt-in was not applied");
+    // tiles-resync-v1: "lt1-mr" / "lt1-r" (or the forwarded "resync") counts one
+    // restart each; moves stay as the mark says; a pause or plain opt-in counts none.
+    require(worker.losslessResyncTestCount(session)==0,"A restart was counted without a request");
+    worker.localControl(R"({"type":"ping","id":"lt1-mr10"})");require(worker.losslessResyncTestCount(session)==1&&worker.losslessMovesTestRequested(session)&&worker.losslessTestRequested(session),"A restart request with moves was not taken");
+    worker.localControl(R"({"type":"ping","id":"lt1-11"})");worker.localControl(R"({"type":"ping","id":"lt0-12"})");require(worker.losslessResyncTestCount(session)==1,"A plain opt-in or a pause counted a restart");
+    worker.localControl(R"({"type":"ping","id":"lt1-r13"})");require(worker.losslessResyncTestCount(session)==2&&!worker.losslessMovesTestRequested(session),"A restart request without moves was not taken");
+    worker.localControl(R"({"type":"stream.lossless","protocol":"tiles-v1","moves":true,"resync":true})");require(worker.losslessResyncTestCount(session)==3&&worker.losslessMovesTestRequested(session),"A forwarded restart request was not taken");
+    worker.localControl(R"({"type":"stream.lossless","protocol":"tiles-v1","on":false,"resync":true})");require(worker.losslessResyncTestCount(session)==3&&!worker.losslessTestRequested(session),"A pause counted a restart");
+    require(worker.losslessResyncTestCount("00000000-0000-0000-0000-000000000002")==0,"Restarts not bound to their session");
+    {Fixture f;f.agent.localControl(R"({"type":"ping","id":"lt1-mr14"})");
+      require(f.drain()&&f.sent.size()==1&&f.sent[0].get("id").string()=="lt1-mr14"&&f.bridge.controls.size()==1&&f.bridge.controls[0].get("moves").boolean()&&std::holds_alternative<bool>(f.bridge.controls[0].get("resync").value)&&f.bridge.controls[0].get("resync").boolean(),"Session0 did not forward the restart request");
+      f.agent.localControl(R"({"type":"ping","id":"lt1-m15"})");require(f.drain()&&f.bridge.controls.size()==2&&std::holds_alternative<std::nullptr_t>(f.bridge.controls[1].get("resync").value),"A plain opt-in was forwarded as a restart");}
+    ++checks;}
   // Adaptive bitrate (bitrate-adaptive-v1) in the socket-owning Agent: the
   // relay's arrival feedback drives the controller and its target reaches the
   // bridge; stats are annotated; a fixed session is untouched.

@@ -64,8 +64,15 @@ struct WorkerPipeBacklog {
     if(!deferrable(type))return false;
     ++deferred;
     // The opt-in is a state ("on":false pauses tiles while 게임 마우스 holds the
-    // mouse): one pending copy, the latest, is enough.
-    if(type=="stream.lossless")if(const auto kept=std::find_if(items.begin(),items.end(),[](const Json& item){return item.get("type").string()=="stream.lossless";});kept!=items.end()){*kept=value;return true;}
+    // mouse): one pending copy, the latest, is enough. A restart asked for
+    // ("resync", tiles-resync-v1) is an event: it stays with that copy unless
+    // the latest pauses the tiles.
+    if(type=="stream.lossless")if(const auto kept=std::find_if(items.begin(),items.end(),[](const Json& item){return item.get("type").string()=="stream.lossless";});kept!=items.end()){
+      const auto* resync=std::get_if<bool>(&kept->get("resync").value);const bool asked=resync&&*resync;
+      *kept=value;
+      const auto* on=std::get_if<bool>(&value.get("on").value);
+      if(asked&&(!on||*on))if(auto* fields=std::get_if<Json::Object>(&kept->value))(*fields)["resync"].value=true;
+      return true;}
     if(items.size()>=limit)return false;
     items.push_back(value);return true;
   }

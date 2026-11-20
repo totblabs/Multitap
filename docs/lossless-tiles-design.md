@@ -47,6 +47,37 @@ rebuilt from fixed fields. Therefore:
   the worker's RPC backlog). A Host without pause support reads `lt0-` as a
   plain ping and keeps its tiles.
 
+## Restart after a lost tile packet (tiles-resync-v1)
+
+Over UDP (udp-media-v1) a loss that NACKs cannot repair, or a path switch,
+drops every message until the next key frame, tile packets included. The next
+tile packet then shows a sequence gap and poisons the client's compositor:
+plain video from then on, while the Host still counts every tile present and
+sends none again (field case 2026-11-20: one 1920×1080 output, eight
+unrepaired losses, a still page with 4:2:0 colour bleed on every coloured
+label).
+
+- The Windows engines report `losslessPoisoned` (and `losslessRestarts`) in
+  their stats. While it is true the session sends a ping of its own marked
+  `lt1-mr<n>` (`lt1-r<n>` without moves): after 3 s, and while the tiles stay
+  poisoned each wait doubles up to 60 s. Only an engine that takes a restart
+  (`LosslessResyncMedia`) asks; Android's compositor does not.
+- Session0 forwards `"resync":true` with the opt-in; the worker's RPC backlog
+  keeps it when a later opt-in replaces the pending one (not when a pause does).
+  The worker counts the requests per session.
+- `Agent::stream` and `TrackSourcePipeline::lossless` start the tile source
+  again when that count changes: a new source, whose first packet is number 1
+  and which knows no tile on the client.
+- The client compositor restarts on a packet numbered 1 when it is poisoned or
+  has taken packets before: everything earlier is gone, the new source's tiles
+  come as they settle. A GPU output uploads every add of the restarted source
+  (`gpu::AcceptTiles`).
+- A Host without it reads the plain opt-in and the client stays poisoned, as
+  before. Stream statistics: `losslessResyncs`, `losslessRestarts`.
+
+A lost packet that carried drops still shows an old tile over newer video until
+the next tile packet arrives (which poisons, then restarts).
+
 ## Retirement under a running client decoder
 
 The client clears its tiles only with a new engine (epoch, topology, stream-size
@@ -149,9 +180,10 @@ client, C++17).
   before publication. A stale tile is therefore never composited on the video
   frame that carries its change, nor on any later frame.
 - A malformed payload, size mismatch or sequence gap poisons the compositor: no
-  tile is ever composited again in this engine (plain video), never a stale
-  tile. Within an epoch the transport is ordered and lossless (an overflow ends
-  the session), so a gap is defence in depth.
+  tile is composited (plain video), never a stale tile, until the Host's
+  restarted source arrives (tiles-resync-v1, above). WebSocket media is ordered
+  and lossless within an epoch; UDP media is not (a loss NACKs cannot repair
+  drops messages until the next key frame), so gaps do occur there.
 - Scaled stream (single output only): the first tile packet declares the
   source size, never smaller than the video and bounded by the wire, stride and
   memory checks. While any tile is present every published frame is source

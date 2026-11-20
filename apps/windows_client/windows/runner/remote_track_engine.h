@@ -141,7 +141,10 @@ class RemoteTrackEngine {
   // Shared audio (UI thread, under mutex_): played once every output has a
   // picture, timestamps strictly increasing like the tracks gate requires.
   std::optional<uint64_t> audioPts_;
-  uint64_t losslessPackets_=0,losslessRepublishes_=0,losslessWithPicture_=0;double losslessMs_=0;std::array<uint32_t,2> losslessPresent_{};bool losslessPoisoned_=false;
+  uint64_t losslessPackets_=0,losslessRepublishes_=0,losslessWithPicture_=0;double losslessMs_=0;std::array<uint32_t,2> losslessPresent_{};
+  // Each output's compositor now (tiles-resync-v1: a source the Host started
+  // again ends a poison, so this is no longer once-and-for-all).
+  std::array<bool,2> losslessPoisoned_{};std::array<uint64_t,2> losslessRestarts_{};
   RemoteAudio audio_;
 };
 }

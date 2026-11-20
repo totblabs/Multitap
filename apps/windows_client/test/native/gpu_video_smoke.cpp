@@ -249,6 +249,46 @@ std::string movesOnOverlay(const std::shared_ptr<gpu::Device>& device) {
   return "{\"case\":\"movesOnOverlay\",\"exactOnItsFrame\":true}";
 }
 
+// tiles-resync-v1 on the GPU path: a restarted source's packet 1 arrives while
+// the old source's adds still wait for a picture (a longer added list than the
+// new one). Its tiles must reach the overlay, never the old pixels.
+std::string restartOnOverlay(const std::shared_ptr<gpu::Device>& device) {
+  constexpr uint32_t w = 256, h = 192;  // 4 x 3 tiles
+  const auto picture = [&](uint8_t seed) {
+    std::vector<uint8_t> bgra(size_t(w) * h * 4);
+    for (size_t n = 0; n < bgra.size(); n += 4) { bgra[n] = uint8_t(seed + n / 4 * 3); bgra[n + 1] = uint8_t(seed * 7 + n / 4 / w); bgra[n + 2] = uint8_t(255 - seed); bgra[n + 3] = 255; }
+    return bgra;
+  };
+  const auto old = picture(10), fresh = picture(200);
+  const auto packet = [&](const std::vector<uint8_t>& from, uint32_t sequence, uint32_t tiles) {
+    lossless::PayloadBuilder builder(w, h, sequence, lossless::noDrop, {});
+    for (uint32_t i = 0; i < tiles; ++i) { const auto r = lossless::tileRect(i, w, h); builder.add(uint16_t(i), &from[(size_t(r.y) * w + r.x) * 4], size_t(w) * 4); }
+    return builder.finish();
+  };
+  gpu::Converter converter(device); gpu::Overlay overlay(device);
+  lossless::Compositor compositor; require(compositor.Configure(w, h), "Compositor");
+  const auto first = packet(old, 1, 12), second = packet(old, 2, 12), restart = packet(fresh, 1, 3);
+  require(gpu::AcceptTiles(compositor, &overlay, first.data(), first.size()) && gpu::AcceptTiles(compositor, &overlay, second.data(), second.size()), "Old source's packets");
+  require(compositor.addedTiles().size() == 24 && !compositor.stats().restarts, "Fixture: the old adds do not wait");
+  require(gpu::AcceptTiles(compositor, &overlay, restart.data(), restart.size()), "Restarted source's packet 1");
+  require(compositor.stats().restarts == 1 && compositor.presentTiles() == 3 && compositor.addedTiles().size() == 3 && !compositor.poisoned(), "The compositor did not start over");
+  std::vector<uint8_t> nv12(size_t(w) * h * 3 / 2, uint8_t(128));
+  std::shared_ptr<gpu::Frame> video; std::vector<uint8_t> plain;
+  require(SUCCEEDED(converter.FromSystem(nv12.data(), w, h, w, h, w, h, gpu::Colour{}, video)) && video->ReadRgba(plain), "Video frame");
+  DecodedFrame frame; frame.width = w; frame.height = h; frame.pts_us = 10; frame.gpu = video;
+  require(SUCCEEDED(gpu::ComposeDecoded(compositor, converter, overlay, frame)), "GPU composition");
+  std::vector<uint8_t> got; require(frame.gpu->ReadRgba(got), "Readback");
+  for (uint32_t i = 0; i < 12; ++i) {
+    const auto r = lossless::tileRect(i, w, h);
+    for (uint32_t y = r.y; y < r.y + r.height; ++y) for (uint32_t x = r.x; x < r.x + r.width; ++x) {
+      const size_t at = (size_t(y) * w + x) * 4;
+      if (i < 3) require(got[at] == fresh[at + 2] && got[at + 1] == fresh[at + 1] && got[at + 2] == fresh[at], "A restarted tile showed other pixels than its own");
+      else require(got[at] == plain[at] && got[at + 1] == plain[at + 1] && got[at + 2] == plain[at + 2], "A tile of the old source survived the restart");
+    }
+  }
+  return "{\"case\":\"restartOnOverlay\",\"pendingAddsBefore\":24,\"exact\":true}";
+}
+
 std::string selection() {
   gpu::SelectionOptions options; options.warp_render = true; options.allow_software_render = true;
   auto result = gpu::Select(nullptr, 1920, 1080, options);
@@ -319,8 +359,8 @@ int main() {
     HRESULT failure = S_OK;
     const auto device = gpu::Device::Create(nullptr, true, &failure);
     if (!device) { std::cout << "{\"kind\":\"gpu-video-smoke\",\"skipped\":\"no D3D11 WARP device\",\"hr\":" << failure << "}\n"; return 0; }
-    const auto a = conversion(device), b = sharing(device), c = scalingAndOverlay(device), m = movesOnOverlay(device), t = textureInput(device), d = selection(), e = trackSelection(device);
-    std::cout << "{\"kind\":\"gpu-video-smoke\",\"checks\":" << checks << ",\"adapter\":\"warp\",\"cases\":[" << a << ',' << b << ',' << c << ',' << m << ',' << t << ',' << d << ',' << e << "],\"realGpu\":false}\n";
+    const auto a = conversion(device), b = sharing(device), c = scalingAndOverlay(device), m = movesOnOverlay(device), r = restartOnOverlay(device), t = textureInput(device), d = selection(), e = trackSelection(device);
+    std::cout << "{\"kind\":\"gpu-video-smoke\",\"checks\":" << checks << ",\"adapter\":\"warp\",\"cases\":[" << a << ',' << b << ',' << c << ',' << m << ',' << r << ',' << t << ',' << d << ',' << e << "],\"realGpu\":false}\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << "gpu video smoke: " << error.what() << '\n'; return 1; }
 }
