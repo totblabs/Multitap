@@ -448,7 +448,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
                 gate.attach(0, null)
                 releaseInput(); ownership.end(current); sizeObservation.changed()
                 activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                preferStreamRefresh(false)
+                preferStreamRefresh(null)
                 worker.post { closeEngine(); main.post { if (!disposed) result.success(null) } }
             }
             else -> result.notImplemented()
@@ -514,14 +514,14 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             TrackLane(track, AndroidMedia(activity, engine, gate, false), gate)
         })
         trackState = state
-        targetFps = fps; display = currentDisplay(); preferStreamRefresh(true)
+        display = currentDisplay(); preferStreamRefresh(fps)
         activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         var remaining = state.lanes.size
         var answered = false
         fun failed(code: String, message: String?) {
             if (answered) return
             answered = true
-            if (trackState === state) { closeTracks(); ownership.end(next); sizeObservation.changed(); preferStreamRefresh(false) }
+            if (trackState === state) { closeTracks(); ownership.end(next); sizeObservation.changed(); preferStreamRefresh(null) }
             result.error(code, message, null)
         }
         for (lane in state.lanes) {
@@ -630,7 +630,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
                     result.error("session_replaced", null, null)
                 } else if (!supported) {
                     releaseInput(); ownership.end(next); sizeObservation.changed()
-                    activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); preferStreamRefresh(false)
+                    activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); preferStreamRefresh(null)
                     worker.post { if (lease == 0L) closeEngine() }
                     result.error("decoder_size_unsupported", null, null)
                 } else createSurface(call, result, request, next, exact)
@@ -650,7 +650,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             catch (failure: Exception) { entry.release(); throw failure }
         } catch (_: Exception) {
             releaseInput(); ownership.end(next); sizeObservation.changed()
-            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); preferStreamRefresh(false)
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); preferStreamRefresh(null)
             worker.post { if (lease == 0L) closeEngine() }
             result.error("surface_failed", null, null); return
         }
@@ -658,7 +658,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         val nextAudioEnabled = call.argument<Boolean>("audioEnabled") == true
         val nextAudioOpus = call.argument<Any>("audioFormat") == "opus"
         activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        display = currentDisplay(); preferStreamRefresh(true)
+        display = currentDisplay(); preferStreamRefresh(track.fps)
         val posted = worker.post {
             if (disposed || lease != next) {
                 nextSurface.release(); main.post { entry.release(); result.error("session_replaced", null, null) }; return@post
@@ -1289,7 +1289,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     } catch (_: Exception) { null }
 
     // Main thread: what the refresh request last applied (see refreshChanged).
-    private var streamingRefresh = false
+    private var streamingRefreshFps: Int? = null
     private var appliedMode: Int? = null
     private var appliedSurfaces: Int? = null
     private var displayListener: DisplayManager.DisplayListener? = null
@@ -1303,16 +1303,16 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
      * request is applied again by [refreshChanged]; the previous preference and
      * frame rate return when the stream ends.
      */
-    private fun preferStreamRefresh(streaming: Boolean) {
+    private fun preferStreamRefresh(fps: Int?) {
         if (!registerChannels) return
+        streamingRefreshFps = fps
         // With the display request: the stream's Wi-Fi lock is held while it runs and is shown.
-        wifi?.streaming(streaming)
-        thermal?.streaming(streaming)
+        wifi?.streaming(fps != null)
+        thermal?.streaming(fps != null)
         try {
             val window = activity.window
             val attributes = window.attributes
-            streamingRefresh = streaming
-            if (!streaming) {
+            if (fps == null) {
                 stopDisplayListener()
                 applySurfaceFrameRate(null)
                 appliedMode = null; appliedSurfaces = null
@@ -1327,14 +1327,14 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             val mode = shown.mode
             val current = AndroidDisplayMode(mode.modeId, mode.physicalWidth, mode.physicalHeight, mode.refreshRate)
             val modes = shown.supportedModes.map { AndroidDisplayMode(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate) }
-            val wanted = androidStreamHoldMode(current, modes, targetFps)
+            val wanted = androidStreamHoldMode(current, modes, fps)
             if (wanted != null && attributes.preferredDisplayModeId != wanted) {
                 if (replacedMode == null) replacedMode = attributes.preferredDisplayModeId
                 attributes.preferredDisplayModeId = wanted
                 window.attributes = attributes
             }
             appliedMode = wanted
-            applySurfaceFrameRate(androidStreamFrameRate(modes, current, targetFps))
+            applySurfaceFrameRate(androidStreamFrameRate(modes, current, fps))
         } catch (_: Exception) {}
     }
 
@@ -1345,17 +1345,18 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
      * (androidRefreshNeedsReapply).
      */
     fun refreshChanged() {
-        if (disposed || !streamingRefresh) return
+        if (disposed) return
+        val fps = streamingRefreshFps ?: return
         try {
             display = currentDisplay()
             val shown = display ?: return
             val mode = shown.mode
             val current = AndroidDisplayMode(mode.modeId, mode.physicalWidth, mode.physicalHeight, mode.refreshRate)
             val modes = shown.supportedModes.map { AndroidDisplayMode(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate) }
-            val wanted = androidStreamHoldMode(current, modes, targetFps)
+            val wanted = androidStreamHoldMode(current, modes, fps)
             val surfaces = surfaceViews().map { System.identityHashCode(it.holder.surface) }.fold(0) { a, b -> a * 31 + b }
             if (androidRefreshNeedsReapply(appliedMode, appliedSurfaces, wanted, surfaces, activity.window.attributes.preferredDisplayModeId)) {
-                preferStreamRefresh(true)
+                preferStreamRefresh(fps)
             }
         } catch (_: Exception) {}
     }
@@ -1403,7 +1404,9 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
                 }
                 if (rate != null && hookedSurfaces.put(view, true) == null) {
                     view.holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) { if (streamingRefresh) main.post { preferStreamRefresh(true) } }
+                        override fun surfaceCreated(holder: SurfaceHolder) {
+                            main.post { streamingRefreshFps?.let(::preferStreamRefresh) }
+                        }
                         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
                         override fun surfaceDestroyed(holder: SurfaceHolder) {}
                     })
@@ -1447,7 +1450,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         gate.attach(0, null)
         releaseInput(); disposed = true; ownership.clear(); sizeObservation.changed(); sink = null
         if (registerChannels) messenger.setMessageHandler(MEDIA_CHANNEL, null)
-        preferStreamRefresh(false)
+        preferStreamRefresh(null)
         releaseRetired()
         // The setup thread first releases what closeEngine handed it.
         worker.post { closeEngine(); setupThread.quitSafely(); thread.quitSafely() }
