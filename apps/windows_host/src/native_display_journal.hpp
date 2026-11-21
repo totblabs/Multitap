@@ -2,7 +2,7 @@
 #include "native_display_change.hpp"
 #include "owned_output_size.hpp"
 namespace host {
-struct NativeRuntimeOutput {std::string id;DWORD width=0,height=0;friend bool operator==(const NativeRuntimeOutput&,const NativeRuntimeOutput&)=default;};
+struct NativeRuntimeOutput {std::string id;DWORD width=0,height=0,refreshHz=60;friend bool operator==(const NativeRuntimeOutput&,const NativeRuntimeOutput&)=default;};
 struct NativeRuntimeRecord {
   std::string instance,phase;uint32_t generation=0;std::vector<NativeRuntimeOutput> outputs;std::string baselineHash;
   bool uncertain()const{return phase=="starting"||phase=="changing"||phase=="recovery";}
@@ -15,11 +15,11 @@ inline NativeRuntimeRecord parseNativeRuntimeRecord(const std::string& bytes){
   if(!object||!((schema==1&&object->size()==6)||(schema==2&&object->size()==7))||value.get("provider").string()!="libvirtualdisplay-1.6.4"||!nativeDisplayInstanceId(record.instance)||!nativeDisplayInteger(generation,1,UINT32_MAX)||!outputs||outputs->empty()||outputs->size()>2||(record.phase!="stable"&&record.phase!="stopped"&&record.phase!="starting"&&record.phase!="changing"&&record.phase!="recovery")||(!record.baselineHash.empty()&&(record.baselineHash.size()!=64||record.baselineHash.find_first_not_of("0123456789abcdef")!=std::string::npos||record.phase=="stable"||record.phase=="stopped")))throw std::runtime_error("native_display_journal_invalid");
   record.generation=uint32_t(generation);
   for(size_t i=0;i<outputs->size();++i){const auto& item=(*outputs)[i];const auto* fields=std::get_if<Json::Object>(&item.value);const auto id=item.get("id").string();const auto width=item.get("width").number(),height=item.get("height").number();
-    if(!fields||fields->size()!=3||id!=std::to_string(i)||!nativeDisplayInteger(width,320,ownedOutputMaxSide)||!nativeDisplayInteger(height,180,ownedOutputMaxSide)||!ownedOutputSize(uint64_t(width),uint64_t(height)))throw std::runtime_error("native_display_journal_invalid");record.outputs.push_back({id,DWORD(width),DWORD(height)});
+    if(!fields||fields->size()!=(fields->contains("refreshHz")?4u:3u)||id!=std::to_string(i)||!nativeDisplayInteger(width,320,ownedOutputMaxSide)||!nativeDisplayInteger(height,180,ownedOutputMaxSide)||!ownedOutputSize(uint64_t(width),uint64_t(height)))throw std::runtime_error("native_display_journal_invalid");record.outputs.push_back({id,DWORD(width),DWORD(height),nativeDisplayRefresh(item)});
   }return record;
 }
 inline std::string nativeRuntimeBytes(const NativeRuntimeRecord& record){
-  std::string outputs="[";for(const auto& output:record.outputs){if(outputs.size()>1)outputs+=',';outputs+="{\"id\":"+jsonQuote(output.id)+",\"width\":"+std::to_string(output.width)+",\"height\":"+std::to_string(output.height)+'}';}
+  std::string outputs="[";for(const auto& output:record.outputs){if(outputs.size()>1)outputs+=',';outputs+="{\"id\":"+jsonQuote(output.id)+",\"width\":"+std::to_string(output.width)+",\"height\":"+std::to_string(output.height)+nativeRefreshField(output.refreshHz)+'}';}
   auto bytes="{\"schema\":2,\"provider\":\"libvirtualdisplay-1.6.4\",\"deviceInstanceId\":"+jsonQuote(record.instance)+",\"generation\":"+std::to_string(record.generation)+",\"phase\":"+jsonQuote(record.phase)+",\"baselineSha256\":"+jsonQuote(record.baselineHash)+",\"outputs\":"+outputs+"]}";(void)parseNativeRuntimeRecord(bytes);return bytes;
 }
 inline uint32_t nativeDisplayCleanupRuntimeGeneration(const std::string& instance,uint32_t heldGeneration,const std::optional<std::string>& bytes){

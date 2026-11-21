@@ -151,8 +151,8 @@ internal fun interface TileSink {
  *  - every shown decoded frame first applies due drops ([applyDecoded]), then
  *    gets every present tile, so a tile is never shown on the frame carrying
  *    its change or later;
- *  - a malformed packet, a size mismatch or a sequence gap poisons it: no tile
- *    is shown again (plain video), never a stale tile.
+ *  - a malformed packet, a size mismatch or a sequence gap clears the tiles.
+ *    Plain video continues until a restarted source supplies packet 1.
  * With [allowScaledSource] (a single start only) the first tile packet may
  * declare a larger unscaled source, never smaller than the video: the tiles
  * then live in source coordinates ([width] x [height]) and the picture is
@@ -204,6 +204,8 @@ internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, pri
         private set
     var poisoned = false
         private set
+    var restarts = 0L
+        private set
     var packets = 0L
         private set
     var addedTiles = 0L
@@ -229,9 +231,24 @@ internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, pri
      */
     fun accept(payload: ByteArray, offset: Int, length: Int, sink: TileSink): Outcome {
         if (!LosslessTiles.isTilePayload(payload, offset, length)) return Outcome.NOT_TILE
+        val restarting = valid && (poisoned || sequence != 0L) && length in LosslessTiles.HEADER..LosslessTiles.MAX_PAYLOAD &&
+            length <= payload.size - offset && LosslessTiles.u32(payload, offset + 8) == 1L
+        if (restarting) {
+            // The Host restarted its tile source. Queued drops, moves and mask
+            // bits belong to the old source, including when the size is equal.
+            poison()
+            sequence = 0L
+            width = 0; height = 0; columns = 0; count = 0
+            presentMask = ByteArray(0); dropAt = LongArray(0)
+            layer = ByteArray(0); touched = BooleanArray(0)
+            if (!allowScaledSource) establish(videoWidth, videoHeight)
+            poisoned = false
+            maskVersion++
+        }
         if (poisoned || (count == 0 && !allowScaledSource) || !valid) return Outcome.IGNORED
         val parsed = try { parse(payload, offset, length, sink) } catch (_: RuntimeException) { false }
         if (!parsed) { poison(); return Outcome.IGNORED }
+        if (restarting) restarts++
         return Outcome.ACCEPTED
     }
 
@@ -252,7 +269,7 @@ internal class LosslessCompositor(val videoWidth: Int, val videoHeight: Int, pri
     /** The shown picture was redrawn with every present tile (a republish). */
     fun clearAdded() = added.clear()
 
-    /** No tile is shown again in this engine (e.g. the renderer cannot place one). */
+    /** Clear this source's tiles (e.g. the renderer cannot place one). */
     fun poison() {
         poisoned = true
         added.clear(); ops.clear()

@@ -41,6 +41,13 @@ struct Transport:api::ControlTransport {
 };
 int main(){try{
   api::OwnerCapability owner{};owner.bytes[0]=42;const Output original{71,1920,1080};int passed=0;
+  {Transport t;t.foreign();api::ControlClient client(t);Controller controller(client,ownedLease,owner);
+   const Output dual[]{original,{72,1280,720,144}};check(controller.start(dual));
+   const auto verify=[&](unsigned a,unsigned b){check(t.store.find_temporary_display(71)->refresh_rate_millihz==a*1000&&t.store.find_temporary_display(72)->refresh_rate_millihz==b*1000);};
+   verify(60,144);const auto other=controller.state().targets[1].target_id;
+   for(const auto hz:{120u,240u,60u}){Output changed[]{dual[0],dual[1]};changed[0].refreshHz=hz;check(controller.reconfigure(changed));verify(hz,144);check(controller.state().targets[1].target_id==other);}
+   Output invalid[]{dual[0],dual[1]};invalid[0].refreshHz=241;const auto removed=t.removes;check(!controller.reconfigure(invalid)&&t.removes==removed);
+   t.failCreate=t.creates+1;Output refused[]{dual[0],dual[1]};refused[0].refreshHz=165;check(!controller.reconfigure(refused)&&controller.state().leaseActive);verify(60,144);t.preserved();++passed;}
   {Transport t;t.foreign();api::ControlClient client(t);Controller controller(client,ownedLease,owner);check(controller.start({&original,1}));const auto first=controller.state().targets[0].target_id;
    const Output dual[]{original,{72,1280,720}};check(controller.reconfigure(dual)&&controller.state().targets[0].target_id==first&&t.removes==0&&t.releases==0);
    check(controller.reconfigure({&original,1})&&controller.state().targets[0].target_id==first&&t.removes==1&&t.releases==0);t.preserved();++passed;}

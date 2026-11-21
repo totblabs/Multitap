@@ -84,7 +84,7 @@ class AmfEncoder final : public EncoderImplementation {
       : state_(std::make_unique<State>()), width_(width), height_(height), fps_(fps), bitrate_(bitrate) {
     static_assert(sizeof(void*) == 8, "The installed AMF runtime path is64bit only");
     if (adapter.vendorId != 0x1002) throw Failure(encoderGpuVendorUnsupported, "Selected adapter is not an AMD GPU");
-    if (width < 16 || height < 16 || fps < 1 || fps > 60 || bitrate < encoderMinimumBitrate || bitrate > encoderMaximumBitrate ||
+    if (width < 16 || height < 16 || fps < 1 || fps > 240 || bitrate < encoderMinimumBitrate || bitrate > encoderMaximumBitrate ||
         !checkedFrameLayout(uint64_t(width), uint64_t(height))) throw Failure(encoderGpuCapabilityUnsupported, "AMF input representation is invalid");
     validateFrameMemory(width, height, 0, 12);
     Com<IDXGIFactory1> factory;

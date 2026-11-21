@@ -9,7 +9,8 @@
 
 namespace multitap::vdisplay {
 namespace api=virtual_display::driver;
-struct Output {uint64_t identity;uint32_t width,height;friend bool operator==(const Output&,const Output&)=default;};
+struct Output {uint64_t identity;uint32_t width,height,refreshHz=60;friend bool operator==(const Output&,const Output&)=default;};
+inline constexpr bool supportedRefresh(uint32_t hz){return hz>=60&&hz<=240;}
 // Geometry representation/alignment only; the selected SDK mode ABI is
 // checked independently before any working target is removed.
 inline bool ownedOutputSize(uint32_t width,uint32_t height,uint32_t minimumHeight=180){
@@ -36,7 +37,7 @@ struct LiveLeaseRecoveryResult {LiveLeaseLocation location=LiveLeaseLocation::un
 inline bool validLiveLeaseRecoveryPlan(const LiveLeaseRecoveryPlan& plan){
   if(plan.previous<api::kMinOpaqueLeaseId||plan.replacement<api::kMinOpaqueLeaseId||plan.previous==plan.replacement||plan.outputs.empty()||plan.outputs.size()>2||plan.targets.size()!=plan.outputs.size())return false;
   for(size_t i=0;i<plan.outputs.size();++i){const auto& output=plan.outputs[i];const auto& target=plan.targets[i];
-    if(!output.identity||!ownedOutputSize(output.width,output.height,200)||target.api_namespace!=api::kApiNamespaceGuid||target.lease_id!=plan.previous||target.display_id!=output.identity||target.target_id==UINT32_MAX||target.connector_index==UINT32_MAX||(!target.os_adapter_luid.low_part&&!target.os_adapter_luid.high_part)||target.reserved)return false;
+    if(!output.identity||!supportedRefresh(output.refreshHz)||!ownedOutputSize(output.width,output.height,200)||target.api_namespace!=api::kApiNamespaceGuid||target.lease_id!=plan.previous||target.display_id!=output.identity||target.target_id==UINT32_MAX||target.connector_index==UINT32_MAX||(!target.os_adapter_luid.low_part&&!target.os_adapter_luid.high_part)||target.reserved)return false;
     for(size_t j=0;j<i;++j)if(output.identity==plan.outputs[j].identity||target.connector_index==plan.targets[j].connector_index||(target.os_adapter_luid==plan.targets[j].os_adapter_luid&&target.target_id==plan.targets[j].target_id))return false;
   }return true;
 }
@@ -65,7 +66,7 @@ inline LiveLeaseLocation inspectLiveLeaseRecovery(api::ControlClient& client,con
     const auto index=size_t(expected-plan.outputs.begin());
     // Match the physical panel orientation used by Session::start/append.
     const bool portrait=expected->height>expected->width;
-    if(seen[index]||entry.connector_index!=plan.targets[index].connector_index||entry.width!=expected->width||entry.height!=expected->height||entry.refresh_rate_millihz!=60000||entry.physical_width_mm!=(portrait?340u:600u)||entry.physical_height_mm!=(portrait?600u:340u))return LiveLeaseLocation::unknown;
+    if(seen[index]||entry.connector_index!=plan.targets[index].connector_index||entry.width!=expected->width||entry.height!=expected->height||entry.refresh_rate_millihz!=expected->refreshHz*1000u||entry.physical_width_mm!=(portrait?340u:600u)||entry.physical_height_mm!=(portrait?600u:340u))return LiveLeaseLocation::unknown;
     seen[index]=true;
   }
   if(temporary!=state.value.temporary_display_count||permanent!=state.value.permanent_display_count||(active&&std::find(seen.begin(),seen.end(),false)!=seen.end()))return LiveLeaseLocation::unknown;

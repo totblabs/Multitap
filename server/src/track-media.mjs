@@ -3,7 +3,7 @@ import { HttpError } from './errors.mjs';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { aggregatePixels, videoGeometry, videoPlacement } from './video-geometry.mjs';
-import { streamSizeProtocolV2, withinDecoderLimits, validDecoderLimits } from './stream-size.mjs';
+import { streamFrameRate, streamSizeProtocolV2, withinDecoderLimits, validDecoderLimits } from './stream-size.mjs';
 
 export const trackProtocol = 'tracks-v1';
 export const trackTransport = 'media-tracks-v1';
@@ -76,6 +76,7 @@ export class TrackStream {
     Object.assign(this,{sessionId,requests,options,now,prepareMs,readyMs,mediaMs,sizeProtocol,decoderLimits});this.allowRestored=allowRestored===true;this.audioOpus=audioOpus===true;
     // bitrate-adaptive-tracks-v1: the statistics may carry the session's rate.
     this.adaptive=adaptive===true;
+    this.maxStreamFps=Math.max(60, options.fps);
     this.pending={topologyEpoch:1,epochs:new Map(requests.map(t=>[t.id,1])),tracks:requests,fps:options.fps};
     this.deadline=now()+prepareMs;this.info=null;this.video=new Map();this.audioPts=null;this.clientReady=false;
   }
@@ -177,7 +178,7 @@ export class TrackStream {
   resize(value) {
     if(!shape(value,['type','requestId','topologyEpoch','tracks','fps'],this.sizeProtocol===streamSizeProtocolV2?['decoderLimits']:[]) ||
        (value.decoderLimits!==undefined && (this.sizeProtocol!==streamSizeProtocolV2 || !validDecoderLimits(value.decoderLimits,streamSizeProtocolV2))) || value.type!=='stream.tracks.resize' ||
-       typeof value.requestId!=='string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value.requestId) || !integer(value.topologyEpoch,1,u32) || ![30,60].includes(value.fps))return {reason:'invalid_track_request'};
+       typeof value.requestId!=='string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value.requestId) || !integer(value.topologyEpoch,1,u32) || !streamFrameRate(value.fps,this.maxStreamFps))return {reason:'invalid_track_request'};
     const tracks=trackRequests(value.tracks,this.sizeProtocol);
     if(!tracks || !this.info || tracks.length!==this.info.tracks.length || tracks.some((t,n)=>t.id!==this.info.tracks[n].id))return {reason:'invalid_track_request'};
     if(value.topologyEpoch!==this.info.topologyEpoch)return {reason:'stale_topology'};

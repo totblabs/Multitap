@@ -69,6 +69,33 @@ function frame({ epoch = 1, key = true } = {}) { const b = Buffer.alloc(16); b[0
 async function ready(f, c, changes) { f.host.json(info(c, changes)); const applied = await c.client.take(v => v.type === 'stream.info'); f.host.send(frame()); await c.client.take(Buffer.isBuffer); return applied; }
 const code = fn => { try { fn(); return 'accepted'; } catch (error) { return error.code; } };
 
+test('high refresh reaches the Host and viewer only within the advertised limit', async t => {
+  const v2 = 'stream-size-v2';
+  const caps = {...capable(), streamSizeProtocols:[streamSizeProtocol,v2]};
+  const f = await fixture(t, caps);
+  const ask = fps => body({width:1920,height:1080,fps},
+    {options:{...options,fps},streamSizeProtocol:v2});
+  assert.equal((await f.call(ask(120))).status,400);
+  await f.advertise({...caps,maxStreamFps:144});
+  assert.equal((await f.inventory()).host.capabilities.maxStreamFps,144);
+  assert.equal((await f.call(ask(165))).status,400);
+  assert.equal((await f.call(ask(120.5))).status,400);
+  const connected = await f.connect(ask(120));
+  assert.equal(connected.start.fps,120);
+  assert.equal(connected.start.initialViewport.fps,120);
+  assert.equal((await ready(f,connected,{fpsTarget:120})).fpsTarget,120);
+  for (const fps of [60,120]) {
+    connected.client.json({type:'stream.resize',requestId:'rate-'+fps,width:1920,height:1080,fps,monitor:'0'});
+    const resize=await f.host.take(v=>v.type==='stream.resize');
+    assert.equal(resize.fps,fps);
+    const pending=await connected.client.take(v=>v.type==='stream.resizing');
+    f.host.json({...info(connected),...pending,type:'stream.info',sessionId:connected.session.sessionId,fpsTarget:fps});
+    assert.equal((await connected.client.take(v=>v.type==='stream.info')).fpsTarget,fps);
+    f.host.send(frame({epoch:pending.epoch}));
+    await connected.client.take(Buffer.isBuffer);
+  }
+});
+
 test('Size, limit, capability, request and report rules are exact', () => {
   assert.equal(ownedOutputSize(1080, 2400), false, 'released bounds: at most 2160 rows');
   assert.equal(ownedOutputSize(1080, 2400, true), true);

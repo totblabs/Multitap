@@ -20,6 +20,31 @@ void main() {
         {...raw as Map, 'accepted': accepted, 'reason': reason},
     ],
   };
+  test('automatic refresh preserves both pictures and limits the rate to the display and Host', () async {
+    const screens = [StreamSourceSize(1920, 1080), StreamSourceSize(1280, 720)];
+    final tried = <int>[];
+    Future<DecoderAdmission> query(List<StreamSourceSize> sizes, int hz) async {
+      tried.add(hz);
+      if (hz > 144) throw const StreamCapacityException('unsupported_rate');
+      return DecoderAdmission(DecoderLimits.safeDefault, hz == 144 ? [sizes.first, const StreamSourceSize(640, 360)] : sizes);
+    }
+    expect((await admitDisplayRefresh(screens, 60, 165, 240, query)).$1, 120);
+    expect(tried, [165, 144, 120]);
+    tried.clear();
+    expect((await admitDisplayRefresh(screens, 60, 240, 90, query)).$1, 90);
+    expect((await admitDisplayRefresh(screens, 60, 60, 144, query)).$1, 60);
+    expect((await admitDisplayRefresh(screens, 30, 240, 144, query)).$1, 30);
+    expect(tried, [90, 60, 30]);
+  });
+  test('a high-rate native capability check tests only the requested size', () async {
+    var probes = 0;
+    await expectLater(nativeStreamAdmission([const StreamSourceSize(1920, 1080)], 120,
+      fullSizeOnly: true, probe: (request) async {
+        probes++;
+        return reply(request, false, reason: 'unsupported_rate');
+      }), throwsA(isA<StreamCapacityException>()));
+    expect(probes, 1);
+  });
   test('native accepted 5K, ultrawide and portrait requests retain exact workspace', () async {
     for (final source in [
       const StreamSourceSize(5120, 2880),

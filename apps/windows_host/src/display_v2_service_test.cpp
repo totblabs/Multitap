@@ -172,7 +172,7 @@ struct CountHarness {
       const auto reply=host::dispatchDisplayV2(host::JsonParser::parse(message),true,
         [this](const std::string& monitor,DWORD width,DWORD height){return f.service->setOwnedSizeV2(monitor,width,height);},
         [this](int requested)->std::optional<std::string>{++countCalls;if(!host::displayV2CountAuthorized(requested,operationCount,true,cancelled,true,true,true))return {};return f.service->setOwnedCountV2(requested);},
-        [this](std::span<const host::DisplayV2Output> outputs){++sizesCalls;std::vector<host::NativeRuntimeOutput> sizes;for(const auto& o:outputs)sizes.push_back({o.id,o.width,o.height});return f.service->setOwnedSizesV2(sizes);});
+        [this](std::span<const host::DisplayV2Output> outputs){++sizesCalls;std::vector<host::NativeRuntimeOutput> sizes;for(const auto& o:outputs)sizes.push_back({o.id,o.width,o.height,o.refreshHz});return f.service->setOwnedSizesV2(sizes);});
       require(reply.handled&&!reply.response.empty(),"v2 RPC was not handled");inbound.push_back(host::JsonParser::parse(reply.response));return true;};
     const auto read=[this](DWORD)->std::optional<host::Json>{if(inbound.empty())return {};auto value=inbound.front();inbound.erase(inbound.begin());return value;};
     a.resize=[write,read](const std::string& monitor,DWORD width,DWORD height){return host::displayV2SizeRpc({host::utf8(host::randomName()),monitor,width,height},write,read,{},5000);};
@@ -222,6 +222,14 @@ int countSessionCases(){
 // ------------------------------------------ independent outputs (v2 group)
 int sizesSdkCases(){
   using namespace host;int passed=0;
+  {Fixture f(true);const std::vector<NativeRuntimeOutput> fast{{"0",1920,1080,144}};
+    const auto changed=f.service->setOwnedSizesV2(fast);
+    require(changed&&nativeDisplayTargets(JsonParser::parse(*changed)).front().refreshHz==144&&f.runtime().outputs.front().refreshHz==144,"Refresh-only change missing from lease or recovery record");
+    const auto renewed=f.transport.store.find_temporary_display(71);
+    require(renewed&&renewed->refresh_rate_millihz==144000,"Driver mode did not follow refresh-only request");
+    const auto restored=f.service->setOwnedSizeV2("0",1920,1080);
+    require(restored&&nativeDisplayTargets(JsonParser::parse(*restored)).front().refreshHz==60&&f.runtime().outputs.front().refreshHz==60,"Original rate missing after restore");
+    f.transport.checkForeign();++passed;}
   // Both outputs in one SDK reconfiguration (one generation step).
   {Fixture f(true);require(f.service->setOwnedCountV2(2).has_value(),"Fixture count failed");const auto generation=f.state().get("generation").number();const auto creates=f.transport.creates;
     const std::vector<NativeRuntimeOutput> sizes{{"0",1600,900},{"1",1280,720}};
@@ -233,7 +241,7 @@ int sizesSdkCases(){
     f.transport.checkForeign();++passed;}
   // Refusals: duplicate, unknown or absent output, invalid sizes, empty; v1 mode.
   {Fixture f(true);const auto creates=f.transport.creates;
-    for(const auto& bad:std::vector<std::vector<NativeRuntimeOutput>>{{},{{"0",1600,900},{"0",1280,720}},{{"1",1600,900}},{{"2",1600,900}},{{"0",1601,900}},{{"0",1600,178}},{{"0",UINT32_MAX-1u,900}},{{"0",1600,900},{"1",1280,720},{"1",1280,720}}})
+    for(const auto& bad:std::vector<std::vector<NativeRuntimeOutput>>{{},{{"0",1600,900},{"0",1280,720}},{{"1",1600,900}},{{"2",1600,900}},{{"0",1601,900}},{{"0",1600,178}},{{"0",1600,900,241}},{{"0",UINT32_MAX-1u,900}},{{"0",1600,900},{"1",1280,720},{"1",1280,720}}})
       require(!f.service->setOwnedSizesV2(bad),"Invalid v2 sizes request was accepted");
     require(f.transport.creates==creates&&!f.transport.removes,"Invalid v2 sizes request reached the SDK");
     Fixture v1(false);const std::vector<NativeRuntimeOutput> one{{"0",1600,900}};require(!v1.service->setOwnedSizesV2(one)&&!v1.transport.removes,"v1 mode accepted a v2 sizes request");++passed;}

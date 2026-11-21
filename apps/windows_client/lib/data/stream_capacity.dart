@@ -6,6 +6,7 @@ import 'decode_settings.dart';
 import 'stream_size.dart';
 import 'video_geometry.dart';
 import '../l10n/l10n.dart';
+import '../models/stream_options.dart';
 
 class StreamSourceSize {
   const StreamSourceSize(this.width, this.height);
@@ -69,6 +70,31 @@ const _reasonAliases = {
   'stream_decoder_type': 'decoder_unsupported',
 };
 
+/// Try the viewing display's rate at the original resolution before accepting
+/// a lower rate. Only a definitive format rejection allows another probe.
+Future<(int, DecoderAdmission)> admitDisplayRefresh(
+  List<StreamSourceSize> sources, int preference, int maximum, int displayHz,
+  StreamAdmissionQuery query,
+) async {
+  final base = preference == 30 ? 30 : 60;
+  final top = math.min(displayHz, maximum).clamp(60, 240);
+  if (base == 60 && top > 60) {
+    for (final hz in [top, 165, 144, 120, 90, 75].toSet()) {
+      if (hz > top) continue;
+      try {
+        final fast = await query(sources, hz);
+        if (fast.pictures.length == sources.length && sources.indexed.every((entry) =>
+            fast.pictures[entry.$1].width == entry.$2.width &&
+            fast.pictures[entry.$1].height == entry.$2.height)) return (hz, fast);
+      } on StreamCapacityException catch (error) {
+        if (!const {'unsupported_rate','unsupported_size','decoder_unsupported',
+                    'gpu_unsupported','memory_budget'}.contains(error.reason)) rethrow;
+      }
+    }
+  }
+  return (base, await query(sources, base));
+}
+
 /// Every returned picture was accepted by the actual selected decoder at the
 /// requested FPS. Workspace sizes are always retained, including during fit.
 /// This is type/resource admission, never proof of a decoded/displayed frame.
@@ -76,11 +102,12 @@ Future<DecoderAdmission> nativeStreamAdmission(
   List<StreamSourceSize> sources,
   int fps, {
   ExactStreamProbe? probe,
+  bool fullSizeOnly = false,
   bool? hardware,
 }) async {
   if (sources.isEmpty ||
       sources.length > 2 ||
-      ![30, 60].contains(fps) ||
+      !validStreamFps(fps) ||
       sources.any(
         (s) => !videoGeometry(
           s.width,
@@ -175,6 +202,7 @@ Future<DecoderAdmission> nativeStreamAdmission(
       }.contains(lastReason)) {
         throw StreamCapacityException(lastReason);
       }
+      if (fullSizeOnly) throw StreamCapacityException(lastReason);
       upper = scale;
       scale = lower == 0 ? scale / 2 : (lower + upper) / 2;
     }
@@ -197,7 +225,7 @@ Future<DecoderAdmission> nativeStreamAdmission(
       maxWidth: width,
       maxHeight: height,
       maxPixels: pixels,
-      maxPixelRate: 0,
+      maxPixelRate: fps > 60 ? pixels * fps : 0,
     ),
     List.unmodifiable(accepted),
     hardwareDecode: useHardware,

@@ -29,7 +29,7 @@ inline uint64_t streamMacroblocks(int width,int height){return width>0&&height>0
 // macroblock rate (subject to the DWORD NV12 buffer length).
 inline std::pair<int,int> streamEncodeSize(int sourceWidth,int sourceHeight,int boxWidth,int boxHeight,int fps,uint64_t budget){
   if(sourceWidth<16||sourceHeight<16)return {std::max(16,sourceWidth&~1),std::max(16,sourceHeight&~1)};
-  fps=std::clamp(fps,1,60);budget=std::clamp(budget,streamPixelBudgetMinimum,streamPixelBudgetMaximum);
+  fps=std::clamp(fps,1,240);budget=std::clamp(budget,streamPixelBudgetMinimum,streamPixelBudgetMaximum);
   const uint64_t frameBudget=std::min<uint64_t>(budget*60/uint64_t(fps),streamPixelBudgetMaximum);
   const uint64_t frameMacroblocks=frameBudget/256;
   const double pixels=double(sourceWidth)*sourceHeight;

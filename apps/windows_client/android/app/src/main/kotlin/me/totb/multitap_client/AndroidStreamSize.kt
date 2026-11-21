@@ -35,7 +35,7 @@ internal fun streamSizeRequest(value: Any?): StreamSizeRequest? {
         val w = integer(track["width"]) ?: return null
         val h = integer(track["height"]) ?: return null
         val fps = integer(track["fps"]) ?: return null
-        if (w < 2 || h < 2 || w % 2 != 0 || h % 2 != 0 || fps !in 1..60) return null
+        if (w < 2 || h < 2 || w % 2 != 0 || h % 2 != 0 || fps !in 1..240) return null
         val sw = if (source) integer(track["sourceWidth"]) ?: return null else null
         val sh = if (source) integer(track["sourceHeight"]) ?: return null else null
         if (source) {

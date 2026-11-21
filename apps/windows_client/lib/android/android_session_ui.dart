@@ -716,7 +716,7 @@ class _AndroidStreamSettingsPanelState
             for (final fps in const [30, 60])
               AndroidPanelItem(
                 key: Key('stream-fps-$fps'),
-                label: '$fps fps',
+                label: fps == 60 ? l10n.auto : '$fps fps',
                 selected: _choice.fps == fps,
                 onPressed: () => _set(fps: fps),
               ),

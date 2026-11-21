@@ -320,7 +320,7 @@ void validateStreamMemory(std::span<const StreamMemoryShape> shapes){
 }
 namespace {
 void validateEncoderFormat(int width, int height, int fps, int bitrate) {
-  if (!encodedPictureSize(uint64_t(std::max(width, 0)), uint64_t(std::max(height, 0))) || fps < 1 || fps > 60 || bitrate < encoderMinimumBitrate || bitrate > encoderMaximumBitrate) throw std::runtime_error("Unsupported capture format");
+  if (!encodedPictureSize(uint64_t(std::max(width, 0)), uint64_t(std::max(height, 0))) || fps < 1 || fps > 240 || bitrate < encoderMinimumBitrate || bitrate > encoderMaximumBitrate) throw std::runtime_error("Unsupported capture format");
 }
 bool defaultTuning(const EncoderTuning& tuning) { return tuning.profile == eAVEncH264VProfile_Base && tuning.qualityVsSpeed == -1 && !tuning.cabac; }
 }
@@ -367,14 +367,27 @@ Encoder::Encoder(int width, int height, int fps, int bitrate, EncoderTuning tuni
     else if (backend == EncoderBackend::qsvMft) selection.mode = gpu::Mode::qsv;
     if (selection.mode != gpu::Mode::disabled) {
       try {
-        auto candidate = gpu::createEncoder(width, height, fps, bitrate, selection, captureAdapter, captureDevice);
+        // The new viewport may be larger than the size seen in the idle probe.
+        // Keep its resolution and try a lower hardware rate on a format refusal.
+        std::unique_ptr<EncoderImplementation> candidate;
+        for (;;) {
+          try {
+            candidate = gpu::createEncoder(width, height, fps_, bitrate, selection, captureAdapter, captureDevice);
+            break;
+          } catch (const gpu::Failure& error) {
+            if (fps_ <= 60 || error.code() != encoderGpuCapabilityUnsupported) throw;
+            for (const int step : {165, 144, 120, 90, 75, 60}) {
+              if (step < fps_) { fps_ = step; break; }
+            }
+          }
+        }
         const auto observed = candidate->hardwareInfo();
         if (!observed.initialized) throw gpu::Failure(encoderGpuInitializationFailed, "GPU backend did not complete initialization");
         const auto active = gpu::backendForVendor(observed.vendorId);
         impl_ = std::move(candidate); backend_ = active;
         // encoder_gpu_retry.hpp: the same selection again, on the encoder's own
         // device (the capture's device may be gone by then; pictures are read back).
-        gpuReopen_ = [width, height, fps, selection, captureAdapter](int rate) { return gpu::createEncoder(width, height, fps, rate, selection, captureAdapter, nullptr); };
+        gpuReopen_ = [width, height, fps = fps_, selection, captureAdapter](int rate) { return gpu::createEncoder(width, height, fps, rate, selection, captureAdapter, nullptr); };
       }
       catch (const std::exception& error) {
         gpuFallback_ = gpu::failureCode(error); gpuFailure_ = gpu::failureInfo(error);
@@ -386,9 +399,10 @@ Encoder::Encoder(int width, int height, int fps, int bitrate, EncoderTuning tuni
     }
   }
 
+  if (!impl_) fps_ = std::min(fps_, 60);
   if (!impl_ && (wanted == EncoderBackend::x264 || hardwareEncoderBackend(wanted))) {
 #ifdef MULTITAP_X264
-    try { impl_ = createX264Encoder(width, height, fps, bitrate, configuredX264Settings()); backend_ = EncoderBackend::x264; }
+    try { impl_ = createX264Encoder(width, height, fps_, bitrate, configuredX264Settings()); backend_ = EncoderBackend::x264; }
     catch (const std::exception& error) { if (strict_) throw; fallback_ = x264FailureCode(error); }
     catch (...) { if (strict_) throw; fallback_ = encoderFallbackX264Unknown; }
     if (fallback_) notifyFallback(fallback_);
@@ -396,10 +410,11 @@ Encoder::Encoder(int width, int height, int fps, int bitrate, EncoderTuning tuni
     if (strict_) throw std::runtime_error("This host was built without the x264 encoder");
 #endif
   }
-  if (!impl_) { impl_ = std::make_unique<MftEncoder>(width, height, fps, bitrate, tuning); backend_ = EncoderBackend::mft; }
+  if (!impl_) { impl_ = std::make_unique<MftEncoder>(width, height, fps_, bitrate, tuning); backend_ = EncoderBackend::mft; }
 }
 Encoder::Encoder(int width, int height, int fps, int bitrate, const X264Settings& settings) : width_(width), height_(height), fps_(fps), bitrate_(bitrate) {
   validateEncoderFormat(width, height, fps, bitrate);
+  if (fps > 60) throw std::invalid_argument("CPU encoder supports up to 60 fps");
   strict_ = true;
 
 #ifdef MULTITAP_X264
@@ -414,7 +429,7 @@ void Encoder::fallBack(uint32_t code) {
   // SPS/PPS at the pts of the frame x264 failed on, so the epoch continues.
   impl_.reset(); ++outputGeneration_; backend_ = EncoderBackend::mft; fallback_ = code ? code : encoderFallbackX264Unknown;
   notifyFallback(fallback_);
-  impl_ = std::make_unique<MftEncoder>(width_, height_, fps_, bitrate_, EncoderTuning{});
+  impl_ = std::make_unique<MftEncoder>(width_, height_, std::min(fps_,60), bitrate_, EncoderTuning{});
 }
 uint64_t Encoder::gpuRetryNow() const {
   if (gpuRetryClock_) return gpuRetryClock_();
@@ -491,12 +506,12 @@ void Encoder::fallBackGpu(uint32_t code, EncoderGpuFailure detail) {
   gpuRetry_.left(bool(gpuReopen_) && gpuRetryTransient(gpuFallback_, false), gpuRetryNow());
 
 #ifdef MULTITAP_X264
-  try { impl_ = createX264Encoder(width_, height_, fps_, bitrate_, configuredX264Settings()); backend_ = EncoderBackend::x264; return; }
+  try { impl_ = createX264Encoder(width_, height_, std::min(fps_,60), bitrate_, configuredX264Settings()); backend_ = EncoderBackend::x264; return; }
   catch (const std::exception& error) { fallback_ = x264FailureCode(error); }
   catch (...) { fallback_ = encoderFallbackX264Unknown; }
   notifyFallback(fallback_);
 #endif
-  impl_ = std::make_unique<MftEncoder>(width_, height_, fps_, bitrate_, EncoderTuning{}); backend_ = EncoderBackend::mft;
+  impl_ = std::make_unique<MftEncoder>(width_, height_, std::min(fps_,60), bitrate_, EncoderTuning{}); backend_ = EncoderBackend::mft;
 }
 void Encoder::encode(const uint8_t* nv12, uint64_t ptsUs, const std::function<void(Frame)>& output) {
   pending_.clear();

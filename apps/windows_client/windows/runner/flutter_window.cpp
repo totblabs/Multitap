@@ -1167,6 +1167,18 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->messenger(), "multitap/window", &flutter::StandardMethodCodec::GetInstance());
   update_worker_=std::make_unique<multitap::ProductUpdateTask>(GetHandle());
   window_channel_->SetMethodCallHandler([this](const auto& call, auto result) {
+    if(call.method_name()=="viewRefreshHz") {
+      const auto* both=std::get_if<bool>(call.arguments());
+      int rate=60;
+      if(both && *both){
+        const auto monitors=multitap::LocalMonitorLayout();
+        if(monitors.size()==2){
+          rate=240;
+          for(const auto& monitor:monitors)rate=std::min(rate,multitap::localMonitorRefresh(MonitorFromRect(&monitor.bounds,MONITOR_DEFAULTTONULL)));
+        }
+      }else rate=multitap::localMonitorRefresh(MonitorFromWindow(GetHandle(),MONITOR_DEFAULTTONEAREST));
+      result->Success(flutter::EncodableValue(rate));return;
+    }
     if(call.method_name()=="monitorLayout") {
       using V=flutter::EncodableValue;
       const auto monitors=multitap::LocalMonitorLayout();

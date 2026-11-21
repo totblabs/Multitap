@@ -6,20 +6,42 @@
 #include "remote_track_decoder.h"
 #include "../../windows_client/test/native/track_gpu_fixture.hpp"
 #include <iostream>
+#include <fstream>
 #include <random>
 
 namespace {
 void require(bool ok, const char* reason) { if (!ok) throw std::runtime_error(reason); }
+// The optional input comes from tools/dual-output-qa/export-office-sheet.ps1.
+struct OfficeSheet {
+  std::vector<uint8_t> page;
+  explicit OfficeSheet(const char* path) : page(800 * 900 * 4) {
+    std::ifstream input(path, std::ios::binary);
+    require(bool(input.read(reinterpret_cast<char*>(page.data()), page.size())) && input.peek() == EOF, "Invalid Excel raster");
+    size_t ink = 0, colour = 0;
+    for (size_t p = 0; p < page.size(); p += 4) {
+      ink += page[p] < 200;
+      colour += std::abs(int(page[p]) - page[p + 2]) > 32;
+    }
+    require(ink > 5000 && colour > 500, "The Excel page has insufficient text or colour");
+  }
+  std::vector<uint8_t> viewport(int width, int height, int offset) const {
+    std::vector<uint8_t> result(size_t(width) * height * 4);
+    for (int y = 0; y < height; ++y)
+      std::copy_n(page.data() + size_t(y + offset) * 800 * 4, width * 4, result.data() + size_t(y) * width * 4);
+    return result;
+  }
+};
 struct Source final : host::TrackCapture {
   int width, height; std::vector<uint8_t> bgra, nv12; std::unique_ptr<host::BufferComposedFrame> view; bool first = true;
   std::function<void(std::vector<uint8_t>&)> change;  // applied by the capture thread between ticks
   std::mutex* lock;
-  Source(const host::OwnedTrackSource& output, std::mutex& mutex) : width(int(output.media.width)), height(int(output.media.height)), bgra(size_t(width) * height * 4), nv12(size_t(width) * height * 3 / 2), lock(&mutex) {
+  Source(const host::OwnedTrackSource& output, std::mutex& mutex, const OfficeSheet* sheet) : width(int(output.media.width)), height(int(output.media.height)), bgra(size_t(width) * height * 4), nv12(size_t(width) * height * 3 / 2), lock(&mutex) {
     std::mt19937 random(output.media.id + 3);
     for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
       uint8_t* p = &bgra[(size_t(y) * width + x) * 4]; const bool ink = (x / 3 + y / 5) % 7 == 0 && (random() % 3);
       p[0] = uint8_t(ink ? 40 + random() % 60 : 250); p[1] = uint8_t(ink ? 30 + random() % 90 : 248); p[2] = uint8_t(ink ? 90 + random() % 120 : 245); p[3] = 255;
     }
+    if (sheet) bgra = sheet->viewport(width, height, 0);
     host::bgraToNv12(bgra.data(), nv12.data(), width, height);
   }
   host::TrackCapturedFrame frame() override {
@@ -49,13 +71,15 @@ bool exact(const std::vector<uint8_t>& bgra, const std::vector<uint8_t>& rgba) {
 
 // gpu: the client decodes through the GPU presentation path (shared BGRA
 // textures, tiles in a GPU overlay; WARP stands in for a GPU) instead of CPU RGBA.
-int run(bool gpu) {
+int run(bool gpu, const OfficeSheet* sheet) {
   try {
     host::Runtime runtime; std::mutex peer, pixels; host::Agent* agent = nullptr;
     std::unique_ptr<trackgpu::Pipelines> gpuPipelines; if (gpu) gpuPipelines = std::make_unique<trackgpu::Pipelines>();
     std::unique_ptr<multitap::RemoteTrackDecoder> decoder;
     std::array<std::shared_ptr<const multitap::DecodedFrame>, 2> shown; std::array<Source*, 2> sources{};
     std::string current; bool ready = false; uint64_t tilePackets = 0, videoPackets = 0; std::array<uint64_t, 2> lastPts{};
+    std::vector<uint8_t> previousPicture, scrollTarget;
+    std::vector<size_t> scrollDifferences;
     host::Agent source([](const std::wstring&) {},
       [&](bool text, std::vector<uint8_t> bytes) {
         std::lock_guard lock(peer);
@@ -74,13 +98,23 @@ int run(bool gpu) {
         if (multitap::lossless::isTilePayload(packet.payload, packet.size)) { require(!(packet.flags & 1), "Tile packet carried a key flag"); ++tilePackets; } else ++videoPackets;
         host::check(decoder->Push(bytes.data(), bytes.size(), [&](uint8_t id, uint32_t, uint32_t, multitap::DecodedFrame&& frame) { require(gpu ? (frame.gpu && frame.rgba.empty()) : !frame.gpu, "The client delivered the wrong picture kind"); shown[id] = std::make_shared<multitap::DecodedFrame>(std::move(frame)); }, {}, nullptr,
           [&](uint8_t id) { return shown[id]; }), "Client track decode");
+        if (packet.track == 1 && !scrollTarget.empty() && shown[1]) {
+          const auto rgba = trackgpu::rgba(*shown[1]);
+          if (rgba != previousPicture) {
+            size_t differences = 0;
+            for (size_t p = 0; p < rgba.size(); p += 4)
+              differences += rgba[p] != scrollTarget[p + 2] || rgba[p + 1] != scrollTarget[p + 1] || rgba[p + 2] != scrollTarget[p];
+            scrollDifferences.push_back(differences);
+            scrollTarget.clear();
+          }
+        }
         if (decoder->ready() && !ready) {
           ready = true;
           agent->localControl("{\"type\":\"stream.tracks.ready\",\"sessionId\":" + host::jsonQuote(current) + ",\"topologyEpoch\":1,\"tracks\":[{\"id\":\"0\",\"epoch\":1},{\"id\":\"1\",\"epoch\":1}]}");
         }
       },
       [](INPUT&) -> UINT { return 1; }, observed,
-      [&](const host::OwnedTrackSource& output) -> std::unique_ptr<host::TrackCapture> { auto value = std::make_unique<Source>(output, pixels); std::lock_guard guard(pixels); sources[output.media.id] = value.get(); return value; },
+      [&](const host::OwnedTrackSource& output) -> std::unique_ptr<host::TrackCapture> { auto value = std::make_unique<Source>(output, pixels, sheet); std::lock_guard guard(pixels); sources[output.media.id] = value.get(); return value; },
       [] { return RECT{-1920, -200, 1920, 1080}; });
     agent = &source;
     // Waits on the condition it checks, with a generous ceiling: the actual
@@ -113,9 +147,25 @@ int run(bool gpu) {
     // The plain session's `ready` must not satisfy this one's start.
     require(waitFor([&] { return ready && current == id; }, ceilingMs), "Lossless session did not start");
     const auto optedIn = host::Clock::now();
-    source.localControl("{\"type\":\"ping\",\"sessionId\":" + host::jsonQuote(id) + ",\"id\":\"lt1-1\"}");
+    source.localControl("{\"type\":\"ping\",\"sessionId\":" + host::jsonQuote(id) + ",\"id\":\"" + (sheet ? "lt1-m1" : "lt1-1") + "\"}");
     require(waitFor([&] { return lossless(); }, ceilingMs), "Opted-in outputs did not become pixel-identical");
     const double firstMs = std::chrono::duration<double, std::milli>(host::Clock::now() - optedIn).count();
+    if (sheet) {
+      for (const int offset : {17, 39, 64, 86, 107, 82, 41, 0}) {
+        {
+          std::scoped_lock guard(peer, pixels);
+          previousPicture = trackgpu::rgba(*shown[1]);
+          scrollTarget = sheet->viewport(800, 600, offset);
+          sources[1]->change = [target = scrollTarget](auto& bgra) { bgra = target; };
+        }
+        require(waitFor([&] { return scrollTarget.empty(); }, ceilingMs), "Excel scroll never changed the decoded picture");
+        require(waitFor(lossless, ceilingMs), "Stationary Excel view did not return to exact pixels on both outputs");
+      }
+      std::cout << "{\"kind\":\"excel-dual-scroll\",\"gpuPresentation\":" << (gpu ? "true" : "false") << ",\"pixelsPerMovingOutput\":480000,\"firstChangedFrameDifferentPixels\":[";
+      for (size_t i = 0; i < scrollDifferences.size(); ++i) std::cout << (i ? "," : "") << scrollDifferences[i];
+      std::cout << "],\"settledDifferentPixelsBothOutputs\":0}\n";
+      require(std::all_of(scrollDifferences.begin(), scrollDifferences.end(), [](size_t n) { return n == 0; }), "Excel scroll lost exact pixels on its first changed frame");
+    }
     { std::lock_guard guard(pixels); sources[1]->change = [](std::vector<uint8_t>& bgra) { for (int y = 100; y < 180; ++y) for (int x = 200; x < 330; ++x) { auto* p = &bgra[(size_t(y) * 800 + x) * 4]; p[0] = 10; p[1] = 200; p[2] = 30; } }; }
     const auto changedAt = host::Clock::now();
     require(waitFor([&] { return lossless(); }, ceilingMs), "Changed output did not return to pixel-identical");
@@ -135,4 +185,13 @@ int run(bool gpu) {
     return 0;
   } catch (const std::exception& error) { std::cerr << "lossless track agent: " << error.what() << '\n'; return 1; }
 }
-int main() { const int cpu = run(false); const int gpu = run(true); return cpu == 0 && gpu == 0 ? 0 : 1; }
+int main(int argc, char** argv) {
+  try {
+    if (argc > 2) throw std::runtime_error("Expected at most one Excel raster path");
+    std::optional<OfficeSheet> sheet;
+    if (argc == 2) sheet.emplace(argv[1]);
+    const int cpu = run(false, sheet ? &*sheet : nullptr);
+    const int gpu = run(true, sheet ? &*sheet : nullptr);
+    return cpu == 0 && gpu == 0 ? 0 : 1;
+  } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+}

@@ -420,7 +420,7 @@ class Agent {
     const bool speakerMute=speakerMuteSessionRequested(command);
     // bitrate-adaptive-tracks-v1: the service sends the outputs' shares (stream.tracks.bitrate).
     const bool adaptiveRate=adaptiveTracksBitrateRequest(command).adaptive;
-    {std::lock_guard lock(trackRateMutex_);trackRates_.reset();}
+    {std::lock_guard lock(trackRateMutex_);trackRates_.reset();trackRepairs_={};}
     capture_=std::thread([this,plan=std::move(plan),input,sizesV2,cursorSeparated,speakerMute,adaptiveRate]{
       std::thread audio;std::atomic<bool> audioGo{false},audioEnabled{false};std::shared_ptr<TrackSourcePipeline> pipeline;
       speakerMuteFlush();
@@ -452,9 +452,9 @@ class Agent {
         });
         const bool available=plan.audio&&ready.wait_for(std::chrono::seconds(3))==std::future_status::ready&&ready.get();
 #ifdef MULTITAP_TRACK_SOURCE_TEST
-        if(trackMonitors_&&trackCapture_)pipeline=std::make_shared<TrackSourcePipeline>(sent,available,micros,trackMonitors_,trackCapture_);else
+        if(trackMonitors_&&trackCapture_)pipeline=std::make_shared<TrackSourcePipeline>(sent,available,micros,trackMonitors_,trackCapture_,currentDisplayModeRect,captureDiagnostic_);else
 #endif
-        pipeline=std::make_shared<TrackSourcePipeline>(sent,available,micros);
+        pipeline=std::make_shared<TrackSourcePipeline>(sent,available,micros,currentCaptureMonitors,windowsTrackCapture,currentDisplayModeRect,captureDiagnostic_);
         if(local_)try{pipeline->enableOutputUsage();}catch(...){ }
         if(adaptiveRate)pipeline->adaptiveRate();
         if(observability_.enabled())pipeline->enableObservability();
@@ -515,7 +515,7 @@ class Agent {
           pipeline->onSecure(std::move(hooks));
         }
         text(trackSourceInfo(sent,available));audioEnabled=available;audioGo=true;
-        auto measured=Clock::now(),next=measured;FramePacer pacer;const auto period=std::chrono::microseconds(1000000/plan.fps);
+        auto measured=Clock::now(),next=measured;FramePacer pacer;
         Clock::time_point lastWork{};  // last tick that emitted media
         cursor::PointerAsk pointerAsk;  // worker.pointer.absent (pointer_device.hpp), as for one output
         while(!streamStop_&&!stopped_){
@@ -523,6 +523,8 @@ class Agent {
           if(local_&&pointerAsk.due(hostMonotonicUs()))text("{\"type\":\"worker.pointer.absent\",\"sessionId\":"+jsonQuote(plan.sessionId)+'}');
           // tracks-resume-v1: the relay restarts every output at an IDR after a resume.
           if(keyFrameRequested_.exchange(false))pipeline->keyFrame();
+          {std::lock_guard lock(trackRateMutex_);
+            for(auto& repair:trackRepairs_)if(repair){pipeline->repair(*repair);repair.reset();}}
           if(auto rates=takeTrackRates())pipeline->retarget(rates->first,rates->second);
           pipeline->lossless(losslessRequested(plan.sessionId),losslessMoves(plan.sessionId),losslessResync(plan.sessionId));pipeline->composeRequested(cursorCompose_.wanted());
           auto packets=pipeline->step();if(pipeline->keysReady())input->encodedReady();
@@ -545,6 +547,7 @@ class Agent {
           // A newly composed frame of any output starts the next tick at once
           // (re-phasing the schedule), never sooner than the frame-rate cap
           // after the last tick that emitted media.
+          const auto period=std::chrono::microseconds(1000000/pipeline->captureFps());
           next+=period;if(next<now)next=now;
           auto wakeEvents=pipeline->frameEvents();if(inputWake_.handle)wakeEvents.push_back(inputWake_.handle);
           if(pacer.wait(next,wakeEvents,lastWork+captureMinimumGap(period)))next=Clock::now();
@@ -572,6 +575,7 @@ class Agent {
   std::atomic<int> requestedBitrate_{0}, autoBitrate_{0}; std::string autoSession_;
   // stream.tracks.bitrate: the latest shares (topology, output id -> bitrate), taken by the track loop.
   std::mutex trackRateMutex_; std::optional<std::pair<uint32_t, std::vector<std::pair<uint8_t, int>>>> trackRates_;
+  std::array<std::optional<TrackRepair>,2> trackRepairs_{};
   std::optional<std::pair<uint32_t, std::vector<std::pair<uint8_t, int>>>> takeTrackRates() { std::lock_guard lock(trackRateMutex_); return std::exchange(trackRates_, std::nullopt); }
   // stream-size-v1 (stream_size.hpp): the client's latest decoder report (and
   // when it arrived), and what this session learned about load across resizes.
@@ -993,7 +997,7 @@ class Agent {
     // Fixed 4-100 Mbps, or auto (bitrate-adaptive-v1) with a start and ceiling.
     // The socket owner (service, or a direct host) runs the controller.
     const auto rate = adaptiveBitrateRequest(control);
-    if (bridge_ || !local_) adaptive_.start(sessionId_, rate, int(std::clamp(control.get("fps").number(60), 1.0, 60.0)), [this](const std::string& session, int value) { if (bridge_) bridge_->bitrate(session, value); else requestedBitrate_.store(value); });
+    if (bridge_ || !local_) adaptive_.start(sessionId_, rate, int(std::clamp(control.get("fps").number(60), 1.0, 240.0)), [this](const std::string& session, int value) { if (bridge_) bridge_->bitrate(session, value); else requestedBitrate_.store(value); });
     udpEligible_ = rate.adaptive && control.get("monitor").string() != "all";udpRelativeAllowed_=relativeMouseSessionRequested(control);
     if (bridge_) { active_ = true; bridge_->start(control, [this](bool isText, std::vector<uint8_t> bytes) { enqueue({isText, std::move(bytes)}); }); return; }
     // A resize restarts the encoder of the same session at its last auto rate.
@@ -1012,7 +1016,7 @@ class Agent {
     const bool sizesV2=streamSizeV2(control);
     const auto limit=[&](const char* key,double fallback,double maximum){const auto n=control.get(key).number(fallback);if(!std::isfinite(n)||n!=std::floor(n)||n<(sizesV2?16:128)||n>maximum)throw std::runtime_error("encoder_format_unsupported");return int(n);};
     const int maximumWidth=limit("width",1920,sizesV2?double(ownedOutputMaxSide):3840.0),maximumHeight=limit("height",1080,sizesV2?double(ownedOutputMaxSide):(sizeLimits?3840.0:2160.0));
-    const int fps = int(std::clamp(control.get("fps").number(60), 1.0, 60.0)), bitrate = rate.bitrate;
+    const int fps = int(std::clamp(control.get("fps").number(60), 1.0, 240.0)), bitrate = rate.bitrate;
     uint64_t pixelBudget = streamPixelBudgetDefault;
     if (viewportLimits && !sizeLimits) { try { pixelBudget = streamPixelBudget(readPublicConfig()); } catch (...) { pixelBudget = streamPixelBudgetDefault; } }
     const auto sourceNumber=[&](const char* key,double minimum,double maximum){const auto n=control.get(key).number(minimum-1);if(!std::isfinite(n)||n!=std::floor(n)||n<minimum||n>maximum)throw std::runtime_error("Validated virtual display geometry required");return int(n);};
@@ -1215,7 +1219,7 @@ class Agent {
         std::unique_ptr<LosslessTileSource> lossless;std::unique_ptr<ParallelWork> losslessHelper;CapturedComposedFrame<Capture> composed(capture);bool losslessRetired=false;uint64_t losslessResyncSeen=losslessResync(session);
         uint64_t losslessBytes=0,losslessPackets=0;double losslessMs=0;
         // A software encoder's overload may pace capture below the requested rate (EncodeScaleController::fps).
-        auto period = std::chrono::microseconds(1000000 / fps); FramePacer pacer;
+        auto period = std::chrono::microseconds(1000000 / encoder.captureFps()); FramePacer pacer;
         report(audioAvailable ? L"원격 세션 연결됨 · CPU H.264 · 시스템 소리" : L"원격 세션 연결됨 · CPU H.264 · 오디오 장치 없음");
         // The owned selection and the device's geometry, re-checked every
         // 100 ms off this thread (it used to run on every tick; see
@@ -1583,7 +1587,7 @@ class Agent {
             // stream-size-v1: a measured overload (or headroom) restarts the
             // encoder at another scale of the same source within this epoch: a
             // new stream.info, then an IDR. At most every few seconds.
-            if(scaler){const bool learnedOnGdi=onGdi();const auto keepScale=[&]{auto memory=scaler->memory();memory.gdi=learnedOnGdi;rememberScale(session,memory);};scaleWindow.seconds=seconds;auto candidate=*scaler;const bool rescale=candidate.observe(scaleWindow,clientDecodeReport(),now,!hardwareEncoderBackend(encoder.backend()));scaleWindow={};
+            if(scaler){const bool learnedOnGdi=onGdi();const auto keepScale=[&]{auto memory=scaler->memory();memory.gdi=learnedOnGdi;rememberScale(session,memory);};scaleWindow.seconds=seconds;auto candidate=*scaler;const bool rescale=candidate.observe(scaleWindow,clientDecodeReport(),now,!hardwareEncoderBackend(encoder.backend()),encoder.captureFps());scaleWindow={};
               if(rescale){
                 const auto picture=candidate.size();
                 const StreamMemoryShape currentMemory{uint32_t(sourceWidth),uint32_t(sourceHeight),uint32_t(width),uint32_t(height),true},nextMemory{uint32_t(sourceWidth),uint32_t(sourceHeight),uint32_t(picture.first),uint32_t(picture.second),true};
@@ -1612,12 +1616,13 @@ class Agent {
                 }
               }else *scaler=std::move(candidate);
               // A software encoder's rate step (no new encoder): the pacing follows it.
-              if(const auto paced=std::chrono::microseconds(1000000/std::clamp(scaler->fps(),1,60));paced!=period){period=paced;keepScale();}}
+              if(1000000/scaler->fps()!=period.count())keepScale();}
           }
           // A newly composed WGC frame starts the next tick at once (and the
           // schedule continues one period after it) instead of waiting for the
           // fixed tick; never sooner than the frame-rate cap after the last
           // tick that captured or submitted a frame (idle ticks do not count).
+          period = std::chrono::microseconds(1000000 / std::min(scaler ? scaler->fps() : fps, encoder.captureFps()));
           next += period; if (next < now) next = now;
           stall.waitBegan = Clock::now(); loopStats.tail(stall.waitBegan - now);
           const HANDLE frameEvent = capture.frameEvent();
@@ -1794,6 +1799,12 @@ class Agent {
     }
     // bitrate-adaptive-tracks-v1: each output's share from the service (track_bitrate.hpp).
     else if (type == "stream.tracks.bitrate") { if (!bridge_ && message.get("sessionId").string() == sessionId_) if (auto rates = trackBitrateCommand(message)) { std::lock_guard lock(trackRateMutex_); trackRates_ = std::move(rates); } }
+    else if (type == "worker.tracks.repair" && local_ && !bridge_ && message.get("sessionId").string()==sessionId_) {
+      if(const auto repair=TrackRepair::parse(message)){
+        std::lock_guard lock(trackRateMutex_);
+        repair->mergeInto(trackRepairs_[repair->track]);
+      }
+    }
     // The service's send queue dropped video of this session (service.hpp
     // forwards it to the worker): the capture loop codes its next frame as an IDR.
     else if (type == "stream.keyframe") { if (bridge_) bridge_->keyFrame(); else { if (const auto* resend = std::get_if<bool>(&message.get("cursor").value); resend && *resend) cursorResend_ = true; keyFrameRequested_ = true; } }

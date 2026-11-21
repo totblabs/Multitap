@@ -9,7 +9,7 @@
 namespace host::gpu::amf_detail {
 struct Timing { int64_t pts = 0, duration = 0; };
 inline constexpr std::optional<Timing> timing(uint64_t ptsUs, uint32_t fps, bool havePrevious, uint64_t previousUs) {
-  if (!fps || fps > 60 || ptsUs > uint64_t(INT64_MAX) / 10 || (havePrevious && ptsUs <= previousUs)) return {};
+  if (!fps || fps > 240 || ptsUs > uint64_t(INT64_MAX) / 10 || (havePrevious && ptsUs <= previousUs)) return {};
   return Timing{int64_t(ptsUs * 10), int64_t(10000000 / fps)}; // AMF uses100ns, media uses microseconds.
 }
 inline constexpr std::optional<uint64_t> macroblocksPerSecond(uint32_t width, uint32_t height, uint32_t fps) {

@@ -186,7 +186,7 @@ inline NativeTopologyPlan planNativeTopology(const NativeCcdData& before,std::sp
     if(path.flags&DISPLAYCONFIG_PATH_SUPPORT_VIRTUAL_MODE){path.sourceInfo.cloneGroupId=DISPLAYCONFIG_PATH_CLONE_GROUP_INVALID;path.sourceInfo.sourceModeInfoIdx=source;path.targetInfo.desktopModeInfoIdx=DISPLAYCONFIG_PATH_DESKTOP_IMAGE_IDX_INVALID;path.targetInfo.targetModeInfoIdx=DISPLAYCONFIG_PATH_TARGET_MODE_IDX_INVALID;}
     else{path.sourceInfo.modeInfoIdx=source;path.targetInfo.modeInfoIdx=DISPLAYCONFIG_PATH_MODE_IDX_INVALID;}
     path.flags|=DISPLAYCONFIG_PATH_ACTIVE;path.flags&=~DISPLAYCONFIG_PATH_BOOST_REFRESH_RATE;
-    path.targetInfo.rotation=DISPLAYCONFIG_ROTATION_IDENTITY;path.targetInfo.scaling=DISPLAYCONFIG_SCALING_IDENTITY;path.targetInfo.refreshRate={60,1};path.targetInfo.scanLineOrdering=DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;ownedPaths[i]=path;
+    path.targetInfo.rotation=DISPLAYCONFIG_ROTATION_IDENTITY;path.targetInfo.scaling=DISPLAYCONFIG_SCALING_IDENTITY;path.targetInfo.refreshRate={target.refreshHz,1};path.targetInfo.scanLineOrdering=DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;ownedPaths[i]=path;
   }
   if(!hasPrimary)fail();
   // Retain the original path priority where the target is still present.
@@ -210,13 +210,13 @@ inline bool nativeTopologyMatches(const NativeTopologyPlan& plan,const NativeCcd
         if(!path.targetInfo.targetAvailable)return fail("native_topology_target_unavailable");
         if(expected==plan.supplied.paths.end()||nativeSourceKey(path)!=nativeSourceKey(*expected))return fail("native_topology_source_changed");
         if(path.targetInfo.rotation!=DISPLAYCONFIG_ROTATION_IDENTITY||path.targetInfo.scaling!=DISPLAYCONFIG_SCALING_IDENTITY)return fail("native_topology_transform_mismatch");
-        if(path.flags&DISPLAYCONFIG_PATH_BOOST_REFRESH_RATE||!path.targetInfo.refreshRate.Denominator||uint64_t(path.targetInfo.refreshRate.Numerator)!=60ull*path.targetInfo.refreshRate.Denominator)return fail("native_topology_refresh_mismatch");
+        if(path.flags&DISPLAYCONFIG_PATH_BOOST_REFRESH_RATE||!path.targetInfo.refreshRate.Denominator||uint64_t(path.targetInfo.refreshRate.Numerator)!=uint64_t(target.refreshHz)*path.targetInfo.refreshRate.Denominator)return fail("native_topology_refresh_mismatch");
         if(path.targetInfo.scanLineOrdering!=DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE)return fail("native_topology_scanline_mismatch");
         const auto& source=nativeCcdSource(after,path);const auto& signal=nativeCcdTarget(after,path).targetVideoSignalInfo;
         if(source.width!=target.width||source.height!=target.height||signal.activeSize.cx!=target.width||signal.activeSize.cy!=target.height)return fail("native_topology_size_mismatch");
         if(source.pixelFormat!=DISPLAYCONFIG_PIXELFORMAT_32BPP)return fail("native_topology_format_mismatch");
         if(source.position.x!=placement.left||source.position.y!=placement.top)return fail("native_topology_placement_mismatch");
-        if(!signal.vSyncFreq.Denominator||uint64_t(signal.vSyncFreq.Numerator)!=60ull*signal.vSyncFreq.Denominator)return fail("native_topology_refresh_mismatch");
+        if(!signal.vSyncFreq.Denominator||uint64_t(signal.vSyncFreq.Numerator)!=uint64_t(target.refreshHz)*signal.vSyncFreq.Denominator)return fail("native_topology_refresh_mismatch");
         if(signal.scanLineOrdering!=DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE)return fail("native_topology_scanline_mismatch");
         ++matches;
       }

@@ -30,7 +30,7 @@ std::vector<host::CaptureMonitor> observed(uint32_t topology=1){
     {L"\\\\.\\DISPLAY2",L"owned-adapter-0",{-1600,300,-960,660},false},
     {L"\\\\.\\DISPLAY3",L"owned-adapter-1",{-960,400,topology==1?-160:0,topology==1?1000:940},false}};
 }
-struct Pixels final:host::TrackCapture {
+struct Pixels:host::TrackCapture {
   std::vector<uint8_t> bytes;uint32_t width,height;uint8_t id;unsigned frameIndex=0;
   explicit Pixels(const host::OwnedTrackSource& source):bytes(size_t(source.media.width)*source.media.height*3/2,128),width(source.media.width),height(source.media.height),id(source.media.id){}
   host::TrackCapturedFrame frame()override{
@@ -262,6 +262,25 @@ void liveTunnelResume(){
 // is sent, and the gate, the service and the wire take an Opus payload of any
 // length only in an Opus stream. tracks-resume-v1: keyFrame() restarts every
 // output at an IDR (the relay's stream.keyframe after a resume).
+void retrySecondaryCapture(){
+  struct Capture final:Pixels{
+    bool gpu;
+    Capture(const host::OwnedTrackSource& output,bool available):Pixels(output),gpu(available){}
+    std::string_view backend()override{return gpu?"wgc":"gdi";}
+    std::string_view backendError()override{return "Windows Graphics Capture unavailable";}
+  };
+  const auto plan=host::bindOwnedTrackSources(command(),display(),observed());
+  bool available=false;std::array<int,2> builds{};std::vector<std::pair<uint32_t,uint32_t>> records;
+  uint64_t pts=1000;
+  host::TrackSourcePipeline source(plan,false,[&]{return pts;},[]{return observed();},
+    [&](const auto& output){++builds[output.media.id];return std::make_unique<Capture>(output,!output.media.id||available);},
+    host::currentDisplayModeRect,[&](uint32_t stage,uint32_t error){records.emplace_back(stage,error);});
+  require(builds[0]==1&&builds[1]==4&&records.size()==1&&records[0]==std::make_pair(host::wgcFailedStage,5u),"Persistent GDI at startup was not recorded once");
+  (void)source.step();available=true;
+  std::this_thread::sleep_for(host::WgcRetry::steps[0]);pts+=600000;
+  (void)source.step();
+  require(builds[0]==1&&builds[1]==5&&records.size()==2&&records[1].first==host::wgcRecoveredStage&&records[1].second>=500,"Secondary capture did not recover while streaming");
+}
 void opusAndKeyFrames(){
   auto granted=command();std::get<host::Json::Object>(granted.value)["audioCodec"].value=std::string("opus");
   const auto opusPlan=host::bindOwnedTrackSources(granted,display(),observed());auto pcmPlan=opusPlan;pcmPlan.audioOpus=false;
@@ -290,6 +309,20 @@ void opusAndKeyFrames(){
     source.keyFrame();
     std::array<unsigned,2> restarted{};for(unsigned step=0;step<3&&(!restarted[0]||!restarted[1]);++step){const auto found=keys();restarted[0]+=found[0];restarted[1]+=found[1];}
     require(restarted[0]==1&&restarted[1]==1,"keyFrame() did not restart every output at exactly one IDR");
+    const auto& output=opusPlan.outputs[1].media;
+    source.repair({output.id,opusPlan.topology,output.epoch,7,false,1});
+    unsigned answers=0;
+    for(unsigned step=0;step<4;++step){
+      now+=33333;
+      for(auto& bytes:source.step()){
+        const auto generation=host::takeTrackRecovery(bytes);
+        wire::Packet packet;
+        require(wire::parse(bytes.data(),bytes.size(),packet,opus),"Recovery marker escaped onto the track wire");
+        if(generation){require(generation==7&&packet.track==output.id&&(packet.flags&1),"Old reference did not produce a scoped recovery IDR");++answers;}
+        if(packet.track!=output.id)require(!(packet.flags&1),"Loss on the other output requested an IDR");
+      }
+    }
+    require(answers==1,"Expected one answer for a lost picture");
   }
 }
 void liveRejectedTunnel(const std::wstring& origin){
@@ -599,7 +632,7 @@ int wmain(int argc,wchar_t** argv){
   try{host::Runtime runtime;
     if(argc==2&&std::wstring(argv[1])==L"--benchmark"){benchmark();return 0;}
     if(argc==2&&std::wstring(argv[1])==L"--follow-only"){followsOutputs();std::cout<<"{\"kind\":\"track-follow\",\"checks\":"<<checks<<"}\n";return 0;}
-    contracts();relativeInput();tunnelContracts();liveTunnelResume();opusAndKeyFrames();concurrentOutputs();cursorRecords();followsOutputs();restartsTiles();const std::array<Phase,2> phases{pipeline(1),pipeline(2)};
+    contracts();relativeInput();tunnelContracts();liveTunnelResume();opusAndKeyFrames();retrySecondaryCapture();concurrentOutputs();cursorRecords();followsOutputs();restartsTiles();const std::array<Phase,2> phases{pipeline(1),pipeline(2)};
     if(argc==3&&std::wstring(argv[1])==L"--fixture-output")exportPhases(argv[2],phases);else if(argc==3&&std::wstring(argv[1])==L"--broker")liveRejectedTunnel(argv[2]);else require(argc==1,"Unknown source QA arguments");
     std::cout<<"{\"checks\":"<<checks<<",\"actualSourceEncoders\":4,\"actualClientDecoders\":4,\"gpuPathIdenticalPixels\":true,\"nativeSourcePackets\":32,\"sourceCapture\":\"synthetic owned-output fixture\",\"inputInjection\":\"recorded callback only\",\"actualWindowsCapture\":false,\"actualPhysicalPresentation\":false,\"windowsDisplayChanges\":0}\n";return 0;
   }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

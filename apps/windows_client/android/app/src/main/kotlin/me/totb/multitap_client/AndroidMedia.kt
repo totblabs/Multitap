@@ -497,7 +497,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
         val fps = udpInteger(call.argument<Any>("fps"))?.toInt() ?: 60
         if (disposed || !registerChannels) { result.error("engine_closed", null, null); return }
         if (sizeStartPending) { result.error("media_operation_pending", null, null); return }
-        if (configuration == null || next <= 0 || fps !in listOf(30, 60)) { result.error("invalid_geometry", null, null); return }
+        if (configuration == null || next <= 0 || (fps != 30 && fps !in 60..240)) { result.error("invalid_geometry", null, null); return }
         if (!ownership.canBegin(next)) { result.error("session_replaced", null, null); return }
         val hardware = call.argument<Boolean>("hardwareDecode") ?: true
         val request = streamSizeRequest(mapOf("schema" to 1, "hardware" to hardware,
@@ -565,7 +565,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
                 value["losslessPoisoned"] = readings.values.any { it["losslessPoisoned"] == true }
                 value["losslessMovesSlow"] = readings.values.any { it["losslessMovesSlow"] == true }
                 for (key in listOf("decodedFrames", "textureFrames", "decodeCalls", "queuedPackets", "queuedBytes", "skippedDecodedFrames",
-                    "losslessPackets", "losslessIgnoredPackets", "losslessRepublishes", "losslessPresentTiles", "losslessTimestampMismatches")) {
+                    "losslessPackets", "losslessIgnoredPackets", "losslessRepublishes", "losslessPresentTiles", "losslessTimestampMismatches", "losslessRestarts")) {
                     value[key] = readings.values.sumOf { (it[key] as? Number)?.toLong() ?: 0L }
                 }
                 for (key in listOf("decodeTotalMs", "decodeBusyMs")) value[key] = readings.values.sumOf { (it[key] as? Number)?.toDouble() ?: 0.0 }
@@ -757,6 +757,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             "losslessRepublishes" to pacer.republishes,
             "losslessPresentTiles" to (tiles?.presentTiles ?: 0),
             "losslessPoisoned" to (tiles?.poisoned == true),
+            "losslessRestarts" to (tiles?.restarts ?: 0L),
             "losslessMoves" to (tiles?.movesApplied ?: 0L),
             "losslessMovesSlow" to losslessMovesSlow,
             "losslessTimestampMismatches" to losslessTimestampMismatches,
@@ -1295,12 +1296,10 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
     private val hookedSurfaces = java.util.WeakHashMap<SurfaceView, Boolean>()
 
     /**
-     * Main thread. While a stream is shown, the panel's highest 60/120 Hz mode
-     * at the same resolution is held as the preferred display mode
-     * (androidStreamHoldMode, also when the display is already in it) and the
-     * Flutter surface declares 60 fps with FRAME_RATE_COMPATIBILITY_FIXED_SOURCE
-     * (Surface.setFrameRate, API 30+), so an adaptive-refresh panel (Samsung)
-     * does not drop to 30 Hz for what it takes to be static content. The
+     * While a stream is shown, prefer a same-resolution display mode for its
+     * negotiated rate and declare that rate on the Flutter surface (API 30+).
+     * Holding the mode prevents an adaptive panel from dropping to 30 Hz for
+     * apparently static content. The
      * request is applied again by [refreshChanged]; the previous preference and
      * frame rate return when the stream ends.
      */
@@ -1328,14 +1327,14 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             val mode = shown.mode
             val current = AndroidDisplayMode(mode.modeId, mode.physicalWidth, mode.physicalHeight, mode.refreshRate)
             val modes = shown.supportedModes.map { AndroidDisplayMode(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate) }
-            val wanted = androidStreamHoldMode(current, modes)
+            val wanted = androidStreamHoldMode(current, modes, targetFps)
             if (wanted != null && attributes.preferredDisplayModeId != wanted) {
                 if (replacedMode == null) replacedMode = attributes.preferredDisplayModeId
                 attributes.preferredDisplayModeId = wanted
                 window.attributes = attributes
             }
             appliedMode = wanted
-            applySurfaceFrameRate(androidStreamFrameRate(modes, current))
+            applySurfaceFrameRate(androidStreamFrameRate(modes, current, targetFps))
         } catch (_: Exception) {}
     }
 
@@ -1353,7 +1352,7 @@ class AndroidMedia internal constructor(private val activity: MainActivity, priv
             val mode = shown.mode
             val current = AndroidDisplayMode(mode.modeId, mode.physicalWidth, mode.physicalHeight, mode.refreshRate)
             val modes = shown.supportedModes.map { AndroidDisplayMode(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate) }
-            val wanted = androidStreamHoldMode(current, modes)
+            val wanted = androidStreamHoldMode(current, modes, targetFps)
             val surfaces = surfaceViews().map { System.identityHashCode(it.holder.surface) }.fold(0) { a, b -> a * 31 + b }
             if (androidRefreshNeedsReapply(appliedMode, appliedSurfaces, wanted, surfaces, activity.window.attributes.preferredDisplayModeId)) {
                 preferStreamRefresh(true)

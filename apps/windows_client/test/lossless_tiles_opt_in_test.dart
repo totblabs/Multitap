@@ -190,10 +190,14 @@ void main() {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     var composite = true;
+    int? restarts;
     messenger.setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'start') return 70;
       if (call.method == 'stats') {
-        return <String, dynamic>{'losslessComposite': composite};
+        return <String, dynamic>{
+          'losslessComposite': composite,
+          'losslessRestarts': ?restarts,
+        };
       }
       return null;
     });
@@ -203,11 +207,16 @@ void main() {
     expect(media.losslessTiles, isFalse, reason: 'nothing reported yet');
     await media.stats();
     expect(media.losslessTiles, isTrue);
+    expect(media.losslessResync, isFalse);
+    restarts = 0;
+    await media.stats();
+    expect(media.losslessResync, isTrue);
     // A later start this device cannot draw tiles for (no GL, GPU or memory room).
     composite = false;
     await media.start(1920, 1080);
     await media.stats();
     expect(media.losslessTiles, isFalse);
+    expect(media.losslessResync, isFalse);
     composite = true;
     await media.stats();
     expect(media.losslessTiles, isTrue);

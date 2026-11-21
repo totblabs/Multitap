@@ -273,6 +273,16 @@ int main() {
     }
     ++checks;
 
+    {
+      const auto start = Clock::now();
+      EncodeScaleController fallback(bounds(1280, 720, phone, 144), {}, start);
+      for (int i = 1; i <= 16; ++i) {
+        fallback.observe(still(), std::nullopt, start + std::chrono::seconds(i), true);
+        require(fallback.fps() == 60 && fallback.size() == std::pair{1280, 720}, "Software fallback must retain full size at 60 fps");
+      }
+    }
+    ++checks;
+
     // Client decoder report hand-over (service latch -> worker).
     {
       const auto packed = streamDecoderReport(parse(R"({"type":"stream.decoder","sessionId":"s","busy":930,"backlogMs":40})"));

@@ -664,7 +664,8 @@ internal fun androidStreamDisplayMode(current: AndroidDisplayMode, modes: List<A
  * to 30 Hz when it takes the picture for static content. Null when no 60/120 Hz
  * mode exists at the current resolution.
  */
-internal fun androidStreamHoldMode(current: AndroidDisplayMode, modes: List<AndroidDisplayMode>): Int? {
+internal fun androidStreamHoldMode(current: AndroidDisplayMode, modes: List<AndroidDisplayMode>, fps: Int = 60): Int? {
+    if (fps > 60) return modes.filter { it.width == current.width && it.height == current.height && it.hz >= fps - 1f }.minByOrNull { it.hz }?.id
     androidStreamDisplayMode(current, modes)?.let { return it }
     fun cadence(hz: Float) = (hz in 59f..61f) || (hz in 119f..121f)
     val best = modes.filter { it.width == current.width && it.height == current.height && cadence(it.hz) }
@@ -674,13 +675,13 @@ internal fun androidStreamHoldMode(current: AndroidDisplayMode, modes: List<Andr
 
 /**
  * The frame rate the stream's surface declares (Surface.setFrameRate with
- * FRAME_RATE_COMPATIBILITY_FIXED_SOURCE): the Host streams at most 60 fps, so
- * a panel that offers 60 Hz or more is told 60 and lets its adaptive logic
- * choose among the multiples (60, 120) but never below. Null where the panel
- * has no such mode.
+ * FRAME_RATE_COMPATIBILITY_FIXED_SOURCE). Request the negotiated stream rate
+ * when a matching display mode exists. Retain the 60 Hz floor for 30 fps.
  */
-internal fun androidStreamFrameRate(modes: List<AndroidDisplayMode>, current: AndroidDisplayMode): Float? =
-    if (modes.any { it.width == current.width && it.height == current.height && it.hz >= 59f }) 60f else null
+internal fun androidStreamFrameRate(modes: List<AndroidDisplayMode>, current: AndroidDisplayMode, fps: Int = 60): Float? {
+    val rate = fps.coerceIn(60, 240)
+    return if (modes.any { it.width == current.width && it.height == current.height && it.hz >= rate - 1f }) rate.toFloat() else null
+}
 
 /**
  * Whether the display request must be applied again: the display mode in

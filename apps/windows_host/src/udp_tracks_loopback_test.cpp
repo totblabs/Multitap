@@ -13,6 +13,7 @@ static std::string base64(std::span<const uint8_t> bytes){
 struct Relay {
   UdpProbeSocket socket;uint16_t port=0;UdpGrant hg,cg;std::array<UdpLegDatagrams,2> proof;std::array<sockaddr_in,2> addresses{};
   std::atomic<bool> stopped{false},blockData{false};std::atomic<uint64_t> forwarded{0};std::mutex mutex;std::thread thread;
+  std::atomic<int> dropHostSize{0};
   explicit Relay(uint8_t seed,bool direct=true){
     require(socket.open(),"relay socket");sockaddr_in own{};int size=sizeof(own);require(!getsockname(socket.handle,reinterpret_cast<sockaddr*>(&own),&size),"relay port");port=ntohs(own.sin_port);
     for(size_t n=0;n<8;++n){hg.id[n]=uint8_t(seed+n);cg.id[n]=uint8_t(seed+11+n);}for(size_t n=0;n<32;++n){hg.ticket[n]=uint8_t(seed+n);cg.ticket[n]=uint8_t(seed+51+n);}
@@ -24,7 +25,7 @@ struct Relay {
   void run(){while(!stopped){std::array<uint8_t,1201> bytes{};sockaddr_in from{};int fromSize=sizeof(from);const int size=recvfrom(socket.handle,reinterpret_cast<char*>(bytes.data()),int(bytes.size()),0,reinterpret_cast<sockaddr*>(&from),&fromSize);if(size==SOCKET_ERROR){Sleep(1);continue;}if(size<9)continue;
     for(size_t n=0;n<2;++n){if(!std::equal(proof[n].id.begin(),proof[n].id.end(),bytes.begin()+1))continue;
       if(size==int(udpBindBytes)&&std::equal(proof[n].bind.begin(),proof[n].bind.end(),bytes.begin())){std::lock_guard lock(mutex);addresses[n]=from;send(proof[n].ack,from);}
-      else if(bytes[0]==udpTypeData&&!blockData){std::lock_guard lock(mutex);if(udpEndpoint(from)==udpEndpoint(addresses[n])&&addresses[1-n].sin_port){send(std::span<const uint8_t>(bytes.data(),size_t(size)),addresses[1-n]);++forwarded;}}
+      else if(bytes[0]==udpTypeData&&!blockData&&!(n==0&&size==dropHostSize)){std::lock_guard lock(mutex);if(udpEndpoint(from)==udpEndpoint(addresses[n])&&addresses[1-n].sin_port){send(std::span<const uint8_t>(bytes.data(),size_t(size)),addresses[1-n]);++forwarded;}}
     }
   }}
   uint16_t peerPort(size_t n){std::lock_guard lock(mutex);return ntohs(addresses[n].sin_port);}
@@ -32,9 +33,11 @@ struct Relay {
 };
 struct Test {
   std::mutex mutex;std::vector<Json> controls,inputs;std::atomic<bool> key{true};std::atomic<uint64_t> invalid{0};
-  UdpTracksSession host{"dual-loopback",{[this](const std::string& text){std::lock_guard lock(mutex);controls.push_back(JsonParser::parse(text));return true;},[this](const Json& input){std::lock_guard lock(mutex);inputs.push_back(input);},[this]{key=true;}},true};
+  UdpTracksSession host{"dual-loopback",{[this](const std::string& text){std::lock_guard lock(mutex);controls.push_back(JsonParser::parse(text));return true;},[this](const Json& input){std::lock_guard lock(mutex);inputs.push_back(input);},{}},true};
   std::array<core::TrackBinding,2> bindings{{{0,7,11,true},{1,7,12,false}}};
   uint64_t pts=1;uint32_t generation=0;
+  std::array<unsigned,2> lossAnswers{};
+  std::array<size_t,2> payloadSizes{1000,1000};
   std::array<std::unique_ptr<Relay>,2> relays;
   std::array<std::shared_ptr<multitap::UdpPathGate>,2> gates;
   std::array<std::unique_ptr<multitap::UdpMediaLeg>,2> clients;
@@ -86,9 +89,17 @@ struct Test {
       core::PublicKey publicKey{};require(udpBase64(message.get("publicKey").string(),publicKey),"Host public key");clients[n]->HostKey(publicKey);keyed[n]=true;
     }
     const bool idr=key.exchange(false);
+    std::array<bool,2> keys{idr,idr};
+    std::array<uint32_t,2> answers{};
+    for(const auto& request:host.takeRepairs()){
+      const auto parsed=TrackRepair::parse(JsonParser::parse(request.command("dual-loopback")));
+      require(parsed&&parsed->track==request.track&&parsed->generation==generation,"Repair scope changed on the worker pipe");
+      keys[request.track]|=request.key;
+      if(request.lastGood){answers[request.track]=request.generation;++lossAnswers[request.track];}
+    }
     for(size_t n=0;n<2;++n){
-      std::vector<uint8_t> payload(1000,uint8_t(30+n)),bytes;require(multitap::tracks::pack({1,uint8_t(idr?1:0),uint8_t(n),bindings[n].topology,bindings[n].epoch,pts,payload.data(),payload.size()},bytes),"video pack");
-      if(host.outgoing(false,bytes))++consumed[n];else{std::vector<uint8_t> normalized;require(core::trackToUdp(bindings[n],bytes,normalized),"WSS video normalization");++wssOffered[n];gates[n]->OfferWss(normalized,false);}
+      std::vector<uint8_t> payload(payloadSizes[n],uint8_t(30+n)),bytes;require(multitap::tracks::pack({1,uint8_t(keys[n]?1:0),uint8_t(n),bindings[n].topology,bindings[n].epoch,pts,payload.data(),payload.size()},bytes),"video pack");
+      if(host.outgoing(false,bytes,answers[n]))++consumed[n];else{std::vector<uint8_t> normalized;require(core::trackToUdp(bindings[n],bytes,normalized),"WSS video normalization");++wssOffered[n];gates[n]->OfferWss(normalized,false);}
     }
     std::array<uint8_t,4> sound{1,2,3,4};std::vector<uint8_t> bytes;require(multitap::tracks::pack({2,0,255,bindings[0].topology,0,pts,sound.data(),sound.size()},bytes),"audio pack");
     if(!host.outgoing(false,bytes)){std::vector<uint8_t> normalized;require(core::trackToUdp(bindings[0],bytes,normalized),"WSS audio normalization");gates[0]->OfferWss(normalized,false);}
@@ -139,6 +150,17 @@ int main(){try{
   const std::array<uint64_t,2> relayBefore{test.udpVideo[0].load(),test.udpVideo[1].load()};test.round(4,false);
   test.until([&]{return test.gates[0]->view().active==1&&test.gates[1]->view().active==1&&test.udpVideo[0]>relayBefore[0]+10&&test.udpVideo[1]>relayBefore[1]+10;},"relay-only encrypted output negotiation failed");
   for(size_t n=0;n<2;++n)require(test.relays[n]->forwarded>10&&test.clients[n]->Read().directPath!=2,"relay-only output claimed P2P");
+  const auto losses=test.lossAnswers;
+  // Lose exactly this video and its repairs; keep TAIL and later pictures flowing.
+  for(unsigned n=0;n<55;++n)test.tick();
+  test.payloadSizes[1]=800;
+  test.relays[1]->dropHostSize=int(core::headerBytes+core::tagBytes+core::fragmentHeaderBytes+12+test.payloadSizes[1]);
+  test.tick();
+  test.payloadSizes[1]=1000;
+  test.until([&]{return test.lossAnswers[1]>losses[1];},"Secondary loss did not request encoder recovery");
+  const auto resumed=test.udpVideo[1].load();
+  test.until([&]{return test.udpVideo[1]>resumed+5;},"Secondary video did not resume after the answer");
+  require(test.lossAnswers[0]==losses[0],"Secondary loss requested primary recovery");
   test.host.close();const auto afterClose=test.inputCount();test.wssInput(7,R"({"type":"input.reset"})");Sleep(30);require(test.inputCount()==afterClose,"closed session accepted input");
   require(test.invalid==0,"track binding corruption");
   std::cout<<"{\"kind\":\"udp-tracks-real-legs\",\"outputs\":2,\"directFramesPerOutput\":40,\"relayForwardingDisabled\":true,\"secondaryFallback\":true,\"fullWssFallback\":true,\"regrantGeneration\":4,\"topologyReset\":true,\"relayOnly\":true,\"orderedInputs\":"<<test.inputCount()<<",\"leaseExpiry\":true,\"realInput\":false}\n";return 0;

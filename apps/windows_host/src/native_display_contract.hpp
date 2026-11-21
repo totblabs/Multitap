@@ -31,10 +31,22 @@ struct NativeDisplayTarget {
   std::string id;
   LUID adapter{};
   UINT32 target=0;
-  DWORD width=0,height=0;
+  DWORD width=0,height=0,refreshHz=60;
 };
 inline bool nativeDisplayInteger(double value,double low,double high) {
   return std::isfinite(value)&&value==std::floor(value)&&value>=low&&value<=high;
+}
+// A missing rate is an installed 60 Hz record from an earlier Host.
+inline DWORD nativeDisplayRefresh(const Json& row) {
+  const auto* fields=std::get_if<Json::Object>(&row.value);
+  if(fields && !fields->contains("refreshHz"))return 60;
+  const double rate=row.get("refreshHz").number(-1);
+  if(!nativeDisplayInteger(rate,60,240))throw std::runtime_error("native_display_refresh_invalid");
+  return DWORD(rate);
+}
+inline std::string nativeRefreshField(DWORD hz){
+  if(hz<60||hz>240)throw std::runtime_error("native_display_refresh_invalid");
+  return hz==60 ? "" : ",\"refreshHz\":"+std::to_string(hz);
 }
 inline std::vector<NativeDisplayTarget> nativeDisplayTargets(const Json& snapshot) {
   const auto* array=std::get_if<Json::Array>(&snapshot.get("targets").value);
@@ -51,7 +63,7 @@ inline std::vector<NativeDisplayTarget> nativeDisplayTargets(const Json& snapsho
        !nativeDisplayInteger(width,320,ownedOutputMaxSide)||!nativeDisplayInteger(height,180,ownedOutputMaxSide)||
        !ownedOutputSize(uint64_t(width),uint64_t(height)))
       throw std::runtime_error("native_display_snapshot_invalid");
-    NativeDisplayTarget entry{id,{DWORD(low),LONG(high)},UINT32(target),DWORD(width),DWORD(height)};
+    NativeDisplayTarget entry{id,{DWORD(low),LONG(high)},UINT32(target),DWORD(width),DWORD(height),nativeDisplayRefresh(value)};
     for(const auto& prior:result)if(prior.id==id||
        (prior.adapter.LowPart==entry.adapter.LowPart&&prior.adapter.HighPart==entry.adapter.HighPart&&prior.target==entry.target))
       throw std::runtime_error("native_display_snapshot_invalid");

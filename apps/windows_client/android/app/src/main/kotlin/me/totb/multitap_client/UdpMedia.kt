@@ -187,6 +187,7 @@ internal class UdpReceiver(private var epoch: Int, nowUs: Long) {
     private var next = 1L    // next ID to deliver
     private var closed = 0L  // the last known sent in full
     private var awaitKey = false
+    private var answerLost = false
     private var held = 0L
     private var received = 0
     private var lost = 0
@@ -243,6 +244,8 @@ internal class UdpReceiver(private var epoch: Int, nowUs: Long) {
         }
         drain(out)
         if (nowUs >= nackDue) nack(nowUs, out)
+        if (answerLost && awaitKey) keyAt = minOf(keyAt, nowUs)
+        answerLost = false
         if (awaitKey && nowUs >= keyAt && !keyArriving()) {
             val plain = ByteArray(Udp.KEYFRAME_BYTES); plain[0] = Udp.KIND_KEYFRAME.toByte(); Udp.put16(plain, 2, epoch)
             out.control.add(plain); keyAt = nowUs + Udp.KEYFRAME_INTERVAL_US; keySentAt = nowUs; ++keyRequests
@@ -268,7 +271,7 @@ internal class UdpReceiver(private var epoch: Int, nowUs: Long) {
      * empty, because a switch back opens with a key frame that may just be arriving.
      */
     fun keyFrameOtherPath() {
-        awaitKey = false; gaps.clear(); nackDue = Long.MAX_VALUE
+        awaitKey = false; answerLost = false; gaps.clear(); nackDue = Long.MAX_VALUE
         if (window.isEmpty()) return
         abandonBefore(next + window.size - 1)
         held -= window.first().reserved(); window[0] = Entry(); closed = next - 1
@@ -330,6 +333,7 @@ internal class UdpReceiver(private var epoch: Int, nowUs: Long) {
     private fun abandonBefore(id: Long) {
         while (next < id && window.isNotEmpty()) {
             val m = window.first()
+            if (awaitKey && answers(m)) answerLost = true
             if (!m.skip) lost += if (m.started()) m.missing() else 1
             held -= m.reserved(); window.removeFirst(); ++next
         }
@@ -338,7 +342,7 @@ internal class UdpReceiver(private var epoch: Int, nowUs: Long) {
     private fun giveUp(id: Long, nowUs: Long) { dropUntilKey(nowUs, STALL_LOSS); abandonBefore(id + 1) }
     private fun deliver(m: Entry, out: Output) {
         if (m.envelope.epoch != epoch) return
-        if (m.envelope.key) awaitKey = false
+        if (m.envelope.key) { awaitKey = false; answerLost = false }
         // Whole and handed on: a whole frame that is dropped must not read as progress.
         highestWhole = next and 0xffffffffL
         out.messages.add(Message(true, m.envelope.key, m.envelope.epoch, m.envelope.pts, m.take()))
@@ -383,9 +387,9 @@ internal class UdpReceiver(private var epoch: Int, nowUs: Long) {
     // Another request now would only send a second IDR after this one. If this one
     // stalls, TAIL closes it, it is given up, and the repeat that was held goes at once.
     private fun keyArriving(): Boolean {
-        for (e in window) if (e.known && !e.skip && e.envelope.key) return true
-        return false
+        return window.any(::answers)
     }
+    private fun answers(e: Entry) = e.known && !e.skip && e.envelope.key
     // Fragment 0 names the message. A message of no use stops costing memory and NACKs.
     // A P-frame stays even while waiting for a key: an older message may be that key,
     // and drain sorts it out.

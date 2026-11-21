@@ -1452,6 +1452,12 @@ int main(int argc,char** argv){
     passed+=restoreVerificationCases();
     passed+=noLatchCases();
     passed+=codecCases();
+    {World w;Memory m;DisplaySessionV2 session(access(w,m),144);
+     require(session.start("high-refresh",w.ownedWidth,w.ownedHeight,true,deadline(w)).ok,"Refresh-only start failed");
+     require(w.primaryHz==144&&w.owned().refreshN==144,"SDK or Windows retained the old refresh");
+     auto wrong=w.query();for(auto& path:wrong.paths)if(nativeSameTarget(path,w.target()))path.targetInfo.refreshRate={60,1};
+     require(!displayV2StreamingSatisfied(wrong,w.target(),{}),"Accepted a 60 Hz path for a 144 Hz request");
+     require(session.restore().ok()&&w.primaryHz==60&&!m.bytes,"Refresh-only restore did not return the saved SDK mode");++passed;}
     passed+=planCases();
     passed+=rpcCases();
     passed+=groupCases();

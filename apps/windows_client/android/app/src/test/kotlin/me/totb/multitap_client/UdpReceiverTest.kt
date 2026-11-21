@@ -311,6 +311,17 @@ class UdpReceiverTest {
     }
 
     @Test fun keyFrameRules() {
+        run {
+            val c = Client(20000)
+            c.feed(split(video, 1, videoMessage(1, 100, true))); c.clear()
+            c.receiver.queueFull(c.now); c.at(c.now); c.clear()
+            val answer = split(video, 2, videoMessage(2, 5000, true))
+            c.feed(answer[0]); c.feed(answer[2])
+            val start = c.now
+            c.at(start + 89999); assertEquals(0, c.controls(Udp.KIND_KEYFRAME))
+            c.at(start + 90000); assertEquals(1, c.controls(Udp.KIND_KEYFRAME))
+            c.clear(); c.at(start + 190000); assertEquals(0, c.controls(Udp.KIND_KEYFRAME))
+        }
         run {  // The repeat waits while a key frame is visibly arriving, however long that takes.
             val c = Client(20000); c.feed(split(video, 1, videoMessage(1, 100, true))); c.clear()
             val lost = split(video, 2, videoMessage(2, 5000)); c.feed(lost[0]); c.feed(lost[2]); c.at(c.now + 90000); assertEquals(1, c.controls(Udp.KIND_KEYFRAME)); c.clear()

@@ -3586,7 +3586,7 @@
   "@restartDesktopUseSoundDevice": {},
   "work": "작업",
   "@work": {},
-  "n60FpsAutoBitrate": "60 fps · 자동 전송률",
+  "n60FpsAutoBitrate": "자동 프레임률 · 자동 전송률",
   "@n60FpsAutoBitrate": {},
   "saver": "절약",
   "@saver": {},

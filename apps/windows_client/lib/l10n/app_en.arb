@@ -1385,7 +1385,7 @@
   "desktopHasNoSoundDevice2": "This desktop has no sound device\nTell your administrator",
   "restartDesktopUseSoundDevice": "Restart the desktop to use the sound device.",
   "work": "Work",
-  "n60FpsAutoBitrate": "60 fps · auto bitrate",
+  "n60FpsAutoBitrate": "Auto frame rate · auto bitrate",
   "saver": "Saver",
   "n30Fps8MbpsUses": "30 fps · 8 Mbps · uses less data and processing",
   "restartNeeded": "Restart needed",

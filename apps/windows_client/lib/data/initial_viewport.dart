@@ -1,4 +1,5 @@
 import 'stream_size.dart';
+import '../models/stream_options.dart';
 
 const initialViewportProtocol = 'epoch-v1';
 const viewportEncoderLimitsProtocol = 'separate-v1';
@@ -40,7 +41,7 @@ class InitialViewport {
     this.preserveEncoderLimits = false,
   }) {
     if (!ownedOutputSize(width, height, portrait: true) ||
-        (fps != 30 && fps != 60)) {
+        !validStreamFps(fps)) {
       throw const FormatException('Invalid initial owned viewport.');
     }
   }

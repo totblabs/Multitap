@@ -27,6 +27,10 @@ struct DisplayV2Console {LUID sourceAdapter{},targetAdapter{};UINT32 source=0,ta
 inline bool displayV2ConsoleTarget(const DISPLAYCONFIG_PATH_INFO& path,const DisplayV2Console& console){
   return nativeSameLuid(path.targetInfo.adapterId,console.targetAdapter)&&path.targetInfo.id==console.target;
 }
+inline bool displayV2RateMatches(const DISPLAYCONFIG_PATH_INFO& path,DWORD hz){
+  const auto rate=path.targetInfo.refreshRate;
+  return rate.Denominator && uint64_t(rate.Numerator)==uint64_t(hz)*rate.Denominator;
+}
 inline bool displayV2Active(const DISPLAYCONFIG_PATH_INFO& path){return (path.flags&DISPLAYCONFIG_PATH_ACTIVE)!=0;}
 // True for an adapter positively identified as a retired Multitap-owned output
 // (an older driver install). Never foreign: it is not saved, restored or counted
@@ -84,14 +88,14 @@ inline NativeCcdData displayV2ActiveCcd(const NativeCcdData& ccd,const DisplayV2
 }
 // The owned output always gets a fresh 32bpp source mode at the requested
 // size/position; Windows chooses its target mode (same as the v1 planner).
-inline void displayV2AddOwned(NativeCcdData& out,DISPLAYCONFIG_PATH_INFO path,DWORD width,DWORD height,LONG left,LONG top,bool front){
+inline void displayV2AddOwned(NativeCcdData& out,DISPLAYCONFIG_PATH_INFO path,DWORD width,DWORD height,LONG left,LONG top,bool front,DWORD refreshHz=60){
   DISPLAYCONFIG_MODE_INFO mode{};mode.infoType=DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;mode.adapterId=path.sourceInfo.adapterId;mode.id=path.sourceInfo.id;
   mode.sourceMode={width,height,DISPLAYCONFIG_PIXELFORMAT_32BPP,{left,top}};
   const auto source=UINT32(out.modes.size());out.modes.push_back(mode);
   if(displayV2VirtualMode(path)){path.sourceInfo.cloneGroupId=DISPLAYCONFIG_PATH_CLONE_GROUP_INVALID;path.sourceInfo.sourceModeInfoIdx=source;path.targetInfo.desktopModeInfoIdx=DISPLAYCONFIG_PATH_DESKTOP_IMAGE_IDX_INVALID;path.targetInfo.targetModeInfoIdx=DISPLAYCONFIG_PATH_TARGET_MODE_IDX_INVALID;}
   else{path.sourceInfo.modeInfoIdx=source;path.targetInfo.modeInfoIdx=DISPLAYCONFIG_PATH_MODE_IDX_INVALID;}
   path.flags|=DISPLAYCONFIG_PATH_ACTIVE;path.flags&=~DISPLAYCONFIG_PATH_BOOST_REFRESH_RATE;
-  path.targetInfo.rotation=DISPLAYCONFIG_ROTATION_IDENTITY;path.targetInfo.scaling=DISPLAYCONFIG_SCALING_IDENTITY;path.targetInfo.refreshRate={60,1};path.targetInfo.scanLineOrdering=DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
+  path.targetInfo.rotation=DISPLAYCONFIG_ROTATION_IDENTITY;path.targetInfo.scaling=DISPLAYCONFIG_SCALING_IDENTITY;path.targetInfo.refreshRate={refreshHz,1};path.targetInfo.scanLineOrdering=DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
   if(front)out.paths.insert(out.paths.begin(),path);else out.paths.push_back(path);
 }
 // Paths only, for SDC_TOPOLOGY_SUPPLIED (Windows picks modes from its database).
@@ -230,7 +234,7 @@ inline NativeCcdData planDisplayV2Streaming(const NativeCcdData& fresh,const Nat
   for(const auto& path:kept)(void)displayV2KeepForeign(plan,copied,taken,fresh,baseline,path,reserved);
   const auto chosen=displayV2OwnedPath(fresh,stream,taken);if(!chosen)throw std::runtime_error("display_v2_owned_target_unavailable");
   displayV2SlideRight(plan,stream.width);
-  displayV2AddOwned(plan,fresh.paths[*chosen],stream.width,stream.height,0,0,true);
+  displayV2AddOwned(plan,fresh.paths[*chosen],stream.width,stream.height,0,0,true,stream.refreshHz);
   return plan;
 }
 inline bool displayV2StreamingSatisfied(const NativeCcdData& ccd,const NativeDisplayTarget& stream,const std::optional<DisplayV2Console>& console,std::string* why=nullptr){
@@ -242,6 +246,7 @@ inline bool displayV2StreamingSatisfied(const NativeCcdData& ccd,const NativeDis
       if(!nativeSameTarget(path,stream))continue;
       const auto& source=nativeCcdSource(ccd,path);
       if(source.width!=stream.width||source.height!=stream.height)return fail("display_v2_owned_size_mismatch");
+      if(stream.refreshHz>60&&!displayV2RateMatches(path,stream.refreshHz))return fail("display_v2_owned_refresh_mismatch");
       if(source.position.x||source.position.y)return fail("display_v2_owned_not_primary");
       owned=displayV2Rect(source);++matches;
     }
@@ -336,7 +341,7 @@ inline NativeCcdData planDisplayV2Count(const NativeCcdData& fresh,const NativeC
   displayV2SlideRight(plan,reach);
   // Owned paths first ("0", then "1"), left to right from the origin.
   LONG left=LONG(reach);
-  for(size_t i=ordered.size();i-->0;){left-=LONG(ordered[i].width);displayV2AddOwned(plan,fresh.paths[chosen[i]],ordered[i].width,ordered[i].height,left,0,true);}
+  for(size_t i=ordered.size();i-->0;){left-=LONG(ordered[i].width);displayV2AddOwned(plan,fresh.paths[chosen[i]],ordered[i].width,ordered[i].height,left,0,true,ordered[i].refreshHz);}
   return plan;
 }
 // The owned side of a settled count change: each owned output active exactly
@@ -374,7 +379,7 @@ inline bool displayV2CountSatisfied(const NativeCcdData& ccd,std::span<const Nat
 // origin; "1" keeps its requested offset from "0" (left, right, above or
 // below; never overlapping). The owned output count is the client's separate
 // prior step (DisplaySessionV2::count); a group names exactly the owned outputs.
-struct DisplayV2Output {std::string id;DWORD width=0,height=0;LONG left=0,top=0;};
+struct DisplayV2Output {std::string id;DWORD width=0,height=0;LONG left=0,top=0;DWORD refreshHz=60;};
 inline RECT displayV2Rect(const DisplayV2Output& output){if(!displayRectangleFits(output.left,output.top,output.width,output.height))throw std::runtime_error("display_v2_layout_bounds");return {output.left,output.top,LONG(int64_t(output.left)+output.width),LONG(int64_t(output.top)+output.height)};}
 // Canonical group: ordered by id ("0" first), translated so "0" sits at (0,0).
 inline std::vector<DisplayV2Output> displayV2GroupLayout(std::span<const DisplayV2Output> outputs){
@@ -427,7 +432,7 @@ inline NativeCcdData planDisplayV2Group(const NativeCcdData& fresh,const NativeC
   }
   displayV2SlideRight(plan,reach,top);
   // Owned paths first ("0", then "1").
-  for(size_t i=group.size();i-->0;)displayV2AddOwned(plan,fresh.paths[chosen[i]],group[i].width,group[i].height,group[i].left,group[i].top,true);
+  for(size_t i=group.size();i-->0;)displayV2AddOwned(plan,fresh.paths[chosen[i]],group[i].width,group[i].height,group[i].left,group[i].top,true,group[i].refreshHz);
   return plan;
 }
 // The owned side of a settled group: each output active exactly once at its
@@ -447,6 +452,7 @@ inline bool displayV2GroupSatisfied(const NativeCcdData& ccd,std::span<const Dis
         if(!displayV2Active(path)||!nativeSameTarget(path,*target))continue;
         const auto& source=nativeCcdSource(ccd,path);
         if(source.width!=output.width||source.height!=output.height)return fail("display_v2_owned_size_mismatch");
+        if(output.refreshHz>60&&!displayV2RateMatches(path,output.refreshHz))return fail("display_v2_owned_refresh_mismatch");
         if(source.position.x!=output.left||source.position.y!=output.top)return fail(output.id=="0"?"display_v2_owned_not_primary":"display_v2_owned_not_placed");
         owned.push_back({displayV2Rect(source),nativeSourceKey(path)});++matches;
       }
@@ -512,7 +518,7 @@ struct DisplayV2RestoreIdentityError:std::runtime_error {
   uint32_t stale;
   explicit DisplayV2RestoreIdentityError(uint32_t count):std::runtime_error("display_v2_restore_identity_unverified"),stale(count){}
 };
-struct DisplayV2Expected {LUID adapter{};UINT32 target=0;bool owned=false;DWORD width=0,height=0;LONG left=0,top=0;};
+struct DisplayV2Expected {LUID adapter{};UINT32 target=0;bool owned=false;DWORD width=0,height=0;LONG left=0,top=0;DWORD refreshHz=0;};
 // Active targets alone do not prove the saved owned source size/placement was restored.
 // SDK resize is best effort; its failure must not turn the current stream size
 // into a successful original-configuration restore.
@@ -520,6 +526,7 @@ inline bool displayV2RestoreTargetsMatch(const NativeCcdData& actual,std::span<c
   for(const auto& item:expected){
     const auto path=std::find_if(actual.paths.begin(),actual.paths.end(),[&](const auto& value){return displayV2Active(value)&&nativeSameLuid(value.targetInfo.adapterId,item.adapter)&&value.targetInfo.id==item.target;});
     if(path==actual.paths.end())return false;
+    if(item.refreshHz&&!displayV2RateMatches(*path,item.refreshHz))return false;
     if(item.owned){const auto& source=nativeCcdSource(actual,*path);if(!item.width||!item.height||source.width!=item.width||source.height!=item.height||source.position.x!=item.left||source.position.y!=item.top)return false;}
   }
   return true;
@@ -532,7 +539,7 @@ inline bool displayV2RestoreTargetsMatch(const NativeCcdData& actual,std::span<c
 inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const NativeCcdData& fresh,std::span<const NativeDisplayTarget> current,std::vector<DisplayV2Expected>* expected=nullptr,const DisplayV2Retired& retired={},bool* ownedOff=nullptr,const NativeCcdData* listed=nullptr){
   const auto identity=preflightDisplayV2Restore(saved,fresh,current,retired,listed);if(!identity.resolved)throw DisplayV2RestoreIdentityError(identity.stale);
   NativeCcdData plan;std::map<UINT32,UINT32> copied;std::set<DisplayV2SourceKey> taken;
-  struct Owned {NativeDisplayTarget target;LONG left=0,top=0;DWORD width=0,height=0;};std::vector<Owned> owned;
+  struct Owned {NativeDisplayTarget target;LONG left=0,top=0;DWORD width=0,height=0,refreshHz=0;};std::vector<Owned> owned;
   std::vector<DISPLAYCONFIG_PATH_INFO> kept;
   if(expected)expected->clear();
   for(const auto& path:saved.ccd.paths){
@@ -541,7 +548,7 @@ inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const Nati
     if(previous!=saved.owned.end()){
       const auto now=std::find_if(current.begin(),current.end(),[&](const auto& target){return target.id==previous->id;});
       if(now==current.end())continue;
-      const auto& source=nativeCcdSource(saved.ccd,path);owned.push_back({*now,source.position.x,source.position.y,source.width,source.height});continue;
+      const auto& source=nativeCcdSource(saved.ccd,path);owned.push_back({*now,source.position.x,source.position.y,source.width,source.height,displayV2RateMatches(path,previous->refreshHz)?previous->refreshHz:0});continue;
     }
     if(std::any_of(current.begin(),current.end(),[&](const auto& target){return nativeSameTarget(path,target);}))continue;
     kept.push_back(path);
@@ -562,15 +569,15 @@ inline NativeCcdData planDisplayV2Restore(const DisplayV2State& saved,const Nati
   if(foreign&&!owned.empty())displayV2CloseOwnedGaps(plan);
   if(!foreign)for(const auto& item:owned){
     const auto chosen=displayV2OwnedPath(fresh,item.target,taken);if(!chosen)continue;
-    displayV2AddOwned(plan,fresh.paths[*chosen],item.width,item.height,item.left,item.top,false);taken.insert(nativeSourceKey(fresh.paths[*chosen]));
-    if(expected)expected->push_back({item.target.adapter,item.target.target,true,item.width,item.height,item.left,item.top});
+    displayV2AddOwned(plan,fresh.paths[*chosen],item.width,item.height,item.left,item.top,false,item.refreshHz?item.refreshHz:item.target.refreshHz);taken.insert(nativeSourceKey(fresh.paths[*chosen]));
+    if(expected)expected->push_back({item.target.adapter,item.target.target,true,item.width,item.height,item.left,item.top,item.refreshHz});
   }
   LONG right=0;for(const auto& path:plan.paths)right=std::max(right,displayV2Rect(nativeCcdSource(plan,path)).right);
   if(plan.paths.empty())for(const auto& target:current){
     if(std::any_of(saved.owned.begin(),saved.owned.end(),[&](const auto& old){return old.id==target.id;}))continue;
     const auto chosen=displayV2OwnedPath(fresh,target,taken);if(!chosen)continue;
     const LONG left=right;
-    displayV2AddOwned(plan,fresh.paths[*chosen],target.width,target.height,left,0,false);taken.insert(nativeSourceKey(fresh.paths[*chosen]));right+=LONG(target.width);
+    displayV2AddOwned(plan,fresh.paths[*chosen],target.width,target.height,left,0,false,target.refreshHz);taken.insert(nativeSourceKey(fresh.paths[*chosen]));right+=LONG(target.width);
     if(expected)expected->push_back({target.adapter,target.target,true,target.width,target.height,left,0});
   }
   if(plan.paths.empty())throw std::runtime_error("display_v2_restore_unavailable");
@@ -677,7 +684,7 @@ inline std::string displayV2StateBytes(const DisplayV2State& state){
   displayV2ValidateCcd(state.ccd);displayV2ValidateTargets(state.owned);
   if(state.session.size()>128||state.session.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-")!=std::string::npos)throw std::runtime_error("display_v2_state_invalid");
   std::string owned="[";
-  for(const auto& t:state.owned){if(owned.size()>1)owned+=',';owned+="{\"id\":"+jsonQuote(t.id)+",\"adapterLow\":"+std::to_string(t.adapter.LowPart)+",\"adapterHigh\":"+std::to_string(t.adapter.HighPart)+",\"target\":"+std::to_string(t.target)+",\"width\":"+std::to_string(t.width)+",\"height\":"+std::to_string(t.height)+'}';}
+  for(const auto& t:state.owned){if(owned.size()>1)owned+=',';owned+="{\"id\":"+jsonQuote(t.id)+",\"adapterLow\":"+std::to_string(t.adapter.LowPart)+",\"adapterHigh\":"+std::to_string(t.adapter.HighPart)+",\"target\":"+std::to_string(t.target)+",\"width\":"+std::to_string(t.width)+",\"height\":"+std::to_string(t.height)+nativeRefreshField(t.refreshHz)+'}';}
   owned+=']';
   std::string console="null";
   if(state.console){const auto& c=*state.console;console="{\"sourceAdapterLow\":"+std::to_string(c.sourceAdapter.LowPart)+",\"sourceAdapterHigh\":"+std::to_string(c.sourceAdapter.HighPart)+",\"source\":"+std::to_string(c.source)+",\"targetAdapterLow\":"+std::to_string(c.targetAdapter.LowPart)+",\"targetAdapterHigh\":"+std::to_string(c.targetAdapter.HighPart)+",\"target\":"+std::to_string(c.target)+'}';}
@@ -693,7 +700,7 @@ inline DisplayV2State parseDisplayV2State(const std::string& bytes){
   DisplayV2State state;state.session=root.get("session").string();
   const auto integer=[&](const Json& value,double low,double high){const auto n=value.number(low-1);if(!nativeDisplayInteger(n,low,high))fail();return n;};
   const auto* owned=std::get_if<Json::Array>(&root.get("owned").value);if(!owned)fail();
-  for(const auto& item:*owned)state.owned.push_back({item.get("id").string(),{DWORD(integer(item.get("adapterLow"),0,4294967295.0)),LONG(integer(item.get("adapterHigh"),-2147483648.0,2147483647.0))},UINT32(integer(item.get("target"),0,4294967295.0)),DWORD(integer(item.get("width"),320,ownedOutputMaxSide)),DWORD(integer(item.get("height"),180,ownedOutputMaxSide))});
+  for(const auto& item:*owned)state.owned.push_back({item.get("id").string(),{DWORD(integer(item.get("adapterLow"),0,4294967295.0)),LONG(integer(item.get("adapterHigh"),-2147483648.0,2147483647.0))},UINT32(integer(item.get("target"),0,4294967295.0)),DWORD(integer(item.get("width"),320,ownedOutputMaxSide)),DWORD(integer(item.get("height"),180,ownedOutputMaxSide)),nativeDisplayRefresh(item)});
   displayV2ValidateTargets(state.owned);
   const auto& console=root.get("console");
   if(std::holds_alternative<Json::Object>(console.value)){
@@ -840,7 +847,7 @@ inline constexpr UINT32 displayV2Supplied=SDC_USE_SUPPLIED_DISPLAY_CONFIG|SDC_VI
 
 class DisplaySessionV2 {
  public:
-  explicit DisplaySessionV2(DisplayV2Access access):access_(std::move(access)){}
+  explicit DisplaySessionV2(DisplayV2Access access,DWORD refreshHz=60):access_(std::move(access)),refreshHz_(refreshHz){if(refreshHz<60||refreshHz>240)throw std::invalid_argument("Invalid stream refresh rate");}
   bool active()const{return active_;}
   const std::vector<NativeDisplayTarget>& owned()const{return owned_;}
   const std::optional<DisplayV2Console>& console()const{return console_;}
@@ -1069,6 +1076,7 @@ class DisplaySessionV2 {
     // Put the owned outputs back to their saved size first (best effort):
     // several in one SDK reconfiguration when available, else one by one.
     std::vector<DisplayV2Output> back;
+    bool restoreRefresh=false;
     for(const auto& old:saved->owned){
       // The SDK's cached target size may differ from the desktop Windows was
       // actually using. Prefer the saved active CCD source, including for old
@@ -1078,14 +1086,20 @@ class DisplaySessionV2 {
         const auto& source=nativeCcdSource(saved->ccd,path);width=source.width;height=source.height;break;
       }
       const auto now=std::find_if(current.begin(),current.end(),[&](const auto& t){return t.id==old.id;});
-      if(now!=current.end()&&(now->width!=width||now->height!=height))back.push_back({old.id,width,height});
+      if(now!=current.end()&&(now->width!=width||now->height!=height||now->refreshHz!=old.refreshHz)){
+        back.push_back({old.id,width,height,0,0,old.refreshHz});
+        restoreRefresh|=now->refreshHz!=old.refreshHz||old.refreshHz!=60;
+      }
     }
-    if(back.size()>1&&access_.sizes)try{if(const auto changed=access_.sizes(back))current=*changed;}catch(...){ }
+    if(access_.sizes&&(back.size()>1||restoreRefresh))try{if(const auto changed=access_.sizes(back))current=*changed;}catch(...){ }
     if(access_.resize)for(const auto& old:back){
       const auto now=std::find_if(current.begin(),current.end(),[&](const auto& t){return t.id==old.id;});
-      if(now==current.end()||(now->width==old.width&&now->height==old.height))continue;
+      if(now==current.end()||old.refreshHz!=60||(now->width==old.width&&now->height==old.height&&now->refreshHz==old.refreshHz))continue;
       try{if(const auto changed=access_.resize(old.id,old.width,old.height))current=*changed;}catch(...){ }
     }
+    const bool ratesRestored=std::none_of(saved->owned.begin(),saved->owned.end(),[&](const auto& old){
+      return std::any_of(current.begin(),current.end(),[&](const auto& t){return t.id==old.id&&t.refreshHz!=old.refreshHz;});
+    });
     owned_=current;
     // The SDK may have recreated targets; wait (bounded) until Windows lists them.
     waitUntil(std::min(deadline,access_.now()+3000),[&](const NativeCcdData& ccd){return std::all_of(current.begin(),current.end(),[&](const auto& t){return displayV2OwnedPath(ccd,t,{}).has_value();});});
@@ -1104,7 +1118,7 @@ class DisplaySessionV2 {
       if(code==ERROR_SUCCESS&&waitUntil(std::min(deadline,access_.now()+2500),[&](const NativeCcdData& ccd){
           out.consoleActive=console&&displayV2ConsoleActive(ccd,*console);
           return displayV2RestoreTargetsMatch(ccd,expected)&&displayV2SameForeign(foreign,displayV2Foreign(ccd,current,std::nullopt))&&(!consoleExpected||out.consoleActive);})){
-        if(removeState()){out.outcome=DisplayV2Outcome::restored;out.error=0;return out;}
+        if(ratesRestored&&removeState()){out.outcome=DisplayV2Outcome::restored;out.error=0;return out;}
         out.stage=displayV2Stage::state;
       }else out.stage=code==ERROR_SUCCESS?displayV2Stage::verify:displayV2Stage::apply;
     }catch(const DisplayV2RestoreIdentityError& error){out.outcome=DisplayV2Outcome::failed;out.stage=displayV2Stage::foreign;out.stale=error.stale;return out;}
@@ -1114,14 +1128,14 @@ class DisplaySessionV2 {
     // Exact restore failed: never leave the VM without its console.
     if(consoleExpected){
       const bool returned=returnConsole(*console,&*saved,deadline);out.fallback=returned?1:2;
-      if(returned){out.consoleActive=true;if(removeState()){out.outcome=DisplayV2Outcome::consoleOnly;return out;}}
+      if(returned){out.consoleActive=true;if(ratesRestored&&removeState()){out.outcome=DisplayV2Outcome::consoleOnly;return out;}}
     }
     out.outcome=DisplayV2Outcome::failed;return out;
   }
 
  private:
   bool modeSupported(DWORD width,DWORD height)const{return !access_.modeSupported||access_.modeSupported(width,height);}
-  DisplayV2Access access_;bool active_=false,identify_=false;std::vector<NativeDisplayTarget> owned_;std::optional<DisplayV2Console> console_;DisplayV2SnapshotEvidence snapshotEvidence_;std::optional<bool> restoreStatePresence_;
+  DisplayV2Access access_;DWORD refreshHz_;bool active_=false,identify_=false;std::vector<NativeDisplayTarget> owned_;std::optional<DisplayV2Console> console_;DisplayV2SnapshotEvidence snapshotEvidence_;std::optional<bool> restoreStatePresence_;
   bool eligible(){try{return !access_.eligible||access_.eligible();}catch(...){return false;}}
   // A display the stream hides (access_.hidden) that is still on. Without a
   // console proof (the broker has none for a QXL/VirtIO/passthrough display, or
@@ -1220,16 +1234,18 @@ class DisplaySessionV2 {
     const auto previous=earlier?*earlier:owned_;
     auto stream=std::find_if(owned_.begin(),owned_.end(),[](const auto& t){return t.id=="0";});
     if(stream==owned_.end()){fail(result,displayV2Stage::ineligible,"display_v2_owned_missing");return;}
-    if(stream->width!=width||stream->height!=height){
+    if(stream->width!=width||stream->height!=height||stream->refreshHz!=refreshHz_){
       DisplayV2Timer sdkTime(result.sdkMs,access_.now);
-      if(!access_.resize){fail(result,displayV2Stage::sdk,"display_v2_sdk_unavailable");return;}
-      const auto changed=sdkCall(result,deadline,[&]{return access_.resize("0",width,height);});
+      const bool useRates=refreshHz_!=60||stream->refreshHz!=60;
+      if(useRates ? !access_.sizes : !access_.resize){fail(result,displayV2Stage::sdk,"display_v2_sdk_unavailable");return;}
+      const DisplayV2Output output{"0",width,height,0,0,refreshHz_};
+      const auto changed=sdkCall(result,deadline,[&]{return useRates ? access_.sizes({&output,1}) : access_.resize("0",width,height);});
       if(!changed){fail(result,displayV2Stage::sdk,"display_v2_sdk_resize_failed");return;}
       owned_=*changed;
     }
     DisplayV2Timer settleTime(result.settleMs,access_.now);
     stream=std::find_if(owned_.begin(),owned_.end(),[](const auto& t){return t.id=="0";});
-    if(stream==owned_.end()||stream->width!=width||stream->height!=height){fail(result,displayV2Stage::sdk,"display_v2_sdk_size_mismatch");return;}
+    if(stream==owned_.end()||stream->width!=width||stream->height!=height||stream->refreshHz!=refreshHz_){fail(result,displayV2Stage::sdk,"display_v2_sdk_size_mismatch");return;}
     const auto target=*stream;
     // Both the old and the new owned targets are ours, never "foreign".
     std::vector<NativeDisplayTarget> ours=previous;ours.insert(ours.end(),owned_.begin(),owned_.end());
@@ -1270,16 +1286,18 @@ class DisplaySessionV2 {
     result.ok=true;result.stage=0;result.error=0;result.reason.clear();
   }
   // `group` is canonical (displayV2GroupLayout) and names exactly owned_.
-  void changeGroup(DisplayV2Result& result,const NativeCcdData& before,std::span<const DisplayV2Output> group,uint64_t deadline,bool resizing,const std::vector<NativeDisplayTarget>* earlier=nullptr){
+  void changeGroup(DisplayV2Result& result,const NativeCcdData& before,std::span<const DisplayV2Output> requested,uint64_t deadline,bool resizing,const std::vector<NativeDisplayTarget>* earlier=nullptr){
+    std::vector<DisplayV2Output> group(requested.begin(),requested.end());
+    for(auto& output:group)output.refreshHz=refreshHz_;
     const auto previous=earlier?*earlier:owned_;
     const auto find=[&](const std::string& id){return std::find_if(owned_.begin(),owned_.end(),[&](const auto& t){return t.id==id;});};
     std::vector<DisplayV2Output> changes;
-    for(const auto& output:group){const auto target=find(output.id);if(target==owned_.end()){fail(result,displayV2Stage::ineligible,"display_v2_owned_missing");return;}if(target->width!=output.width||target->height!=output.height)changes.push_back(output);}
+    for(const auto& output:group){const auto target=find(output.id);if(target==owned_.end()){fail(result,displayV2Stage::ineligible,"display_v2_owned_missing");return;}if(target->width!=output.width||target->height!=output.height||target->refreshHz!=output.refreshHz)changes.push_back(output);}
     if(!changes.empty()){
       // One SDK reconfiguration for both outputs when the service offers it:
       // Windows reacts to every target recreation (it re-activates the console, for one).
       std::optional<std::vector<NativeDisplayTarget>> changed;
-      if(access_.sizes&&(changes.size()>1||!access_.resize)){changed=sdkCall(result,deadline,[&]{return access_.sizes(changes);});if(!changed){fail(result,displayV2Stage::sdk,"display_v2_sdk_resize_failed");return;}owned_=*changed;}
+      if(access_.sizes&&(changes.size()>1||!access_.resize||refreshHz_!=60||find(changes.front().id)->refreshHz!=60)){changed=sdkCall(result,deadline,[&]{return access_.sizes(changes);});if(!changed){fail(result,displayV2Stage::sdk,"display_v2_sdk_resize_failed");return;}owned_=*changed;}
       else{
         if(!access_.resize){fail(result,displayV2Stage::sdk,"display_v2_sdk_unavailable");return;}
         for(const auto& output:changes){changed=sdkCall(result,deadline,[&]{return access_.resize(output.id,output.width,output.height);});if(!changed){fail(result,displayV2Stage::sdk,"display_v2_sdk_resize_failed");return;}owned_=*changed;}
@@ -1287,7 +1305,7 @@ class DisplaySessionV2 {
     }
     std::vector<NativeDisplayTarget> targets;
     if(owned_.size()!=group.size()){fail(result,displayV2Stage::sdk,"display_v2_sdk_size_mismatch");return;}
-    for(const auto& output:group){const auto target=find(output.id);if(target==owned_.end()||target->width!=output.width||target->height!=output.height){fail(result,displayV2Stage::sdk,"display_v2_sdk_size_mismatch");return;}targets.push_back(*target);}
+    for(const auto& output:group){const auto target=find(output.id);if(target==owned_.end()||target->width!=output.width||target->height!=output.height||target->refreshHz!=output.refreshHz){fail(result,displayV2Stage::sdk,"display_v2_sdk_size_mismatch");return;}targets.push_back(*target);}
     // Both the old and the new owned targets are ours, never "foreign".
     std::vector<NativeDisplayTarget> ours=previous;ours.insert(ours.end(),owned_.begin(),owned_.end());
     if(!waitUntil(std::min(deadline,access_.now()+5000),[&](const NativeCcdData& ccd){return std::all_of(targets.begin(),targets.end(),[&](const auto& t){return displayV2OwnedPath(ccd,t,{}).has_value();});})){fail(result,displayV2Stage::target,"display_v2_owned_target_unavailable");return;}

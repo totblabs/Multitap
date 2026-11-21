@@ -112,6 +112,9 @@ class AndroidRemoteMedia extends NativeRemoteMedia
   @override
   bool get losslessTiles => _losslessComposite;
   bool _losslessComposite = false;
+  @override
+  bool get losslessResync =>
+      _losslessComposite && diagnostics['losslessRestarts'] is int;
 
   /// tiles-v2: the Kotlin compositor takes moves whenever it composites
   /// (LosslessTiles.kt), so the opt-in carries the moves mark then.

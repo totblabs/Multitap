@@ -5,7 +5,9 @@
 // and media only: no device, Host, decoder or display is involved.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:multitap_client/android/android_screen.dart'
@@ -18,6 +20,7 @@ import 'package:multitap_client/data/desktop_mapping.dart';
 import 'package:multitap_client/data/initial_viewport.dart';
 import 'package:multitap_client/data/remote_session.dart';
 import 'package:multitap_client/data/stream_size.dart';
+import 'package:multitap_client/data/stream_capacity.dart';
 import 'package:multitap_client/data/stream_stats_report.dart';
 import 'package:multitap_client/data/video_geometry.dart';
 import 'package:multitap_client/models/stream_options.dart';
@@ -438,6 +441,57 @@ void main() {
       );
     },
   );
+
+  test('Windows viewing monitor and decoder rate reach the connection and initial viewport', () async {
+    const channel = MethodChannel('multitap/window');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'viewRefreshHz');
+      expect(call.arguments, false);
+      return 120;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final caps = {
+      ..._caps(),
+      'streamSizeProtocols': ['stream-size-v1', 'stream-size-v2'],
+      'maxStreamFps': 144,
+    };
+    final client = ApiClient()
+      ..responses.add((
+        200,
+        {
+          'desktops': [_desktop(caps)],
+        },
+      ))
+      ..responses.add((
+        200,
+        {
+          ..._response(1920, 1080, options: _box.withFps(120)),
+          'streamSizeProtocol': 'stream-size-v2',
+          'initialViewport': {..._preparation(1920, 1080), 'fps': 120},
+        },
+      ));
+    final api = HttpBrokerApi(
+      origin: Uri.parse(_origin),
+      client: client,
+      streamAdmission: (sources, fps) async {
+        expect(fps, 120);
+        return DecoderAdmission(_windows, sources);
+      },
+    );
+    await api.desktops('fixture');
+    final connection = await api.connectViewport(
+      'fixture',
+      'pve-149',
+      _viewport(1920, 1080),
+      _quality,
+    );
+    final request = jsonDecode(client.requests.last.body.toString()) as Map;
+    expect((request['options'] as Map)['fps'], 120);
+    expect((request['initialViewport'] as Map)['fps'], 120);
+    expect(connection.options.fps, 120);
+  }, skip: !Platform.isWindows);
 
   test('Windows physical requests preserve portrait and square source pixels; legacy compatibility stays separate', () {
     // A 2160x3840 portrait 4K monitor at 200 %.

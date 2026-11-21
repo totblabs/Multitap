@@ -10,6 +10,7 @@
 #include "capture_topology_watch.hpp"
 #include "capture_follow.hpp"
 #include "capture_wgc_retry.hpp"
+#include "track_repair.hpp"
 #include "cursor_channel.hpp"
 #include "media.hpp"
 #include "secure_desktop_notice.hpp"
@@ -67,7 +68,7 @@ inline TrackSourcePlan bindOwnedTrackSources(const Json& request,const DisplaySt
   plan.topology=trackInteger(request.get("topologyEpoch"),1,UINT32_MAX);
   plan.requestId=request.get("requestId").string();plan.resizeId=request.get("resizeId").string();
   if((!plan.requestId.empty()||!plan.resizeId.empty())&&(!displayOperationUuid(plan.resizeId)||plan.requestId.empty()||plan.requestId.size()>64||plan.requestId.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")!=std::string::npos))throw std::runtime_error("invalid_track_request");
-  plan.fps=int(trackInteger(request.get("fps"),30,60));if(plan.fps!=30&&plan.fps!=60)throw std::runtime_error("invalid_track_request");
+  plan.fps=int(trackInteger(request.get("fps"),30,240));if(plan.fps!=30&&plan.fps<60)throw std::runtime_error("invalid_track_request");
   // Fixed total up to the advertised maxBitrate (bitrate-adaptive-v1); released
   // brokers never send more than 20 Mbps. Independent outputs stay fixed-rate.
   plan.bitrate=int(trackInteger(request.get("bitrate"),4000000,uint32_t(encoderMaximumBitrate)));
@@ -176,6 +177,7 @@ class TrackCapture {
   virtual cursor::Observation cursorSample(){return {};}
   // "wgc" or "gdi" (empty: unknown); a follow retries a WGC capture that came back as GDI.
   virtual std::string_view backend(){return {};}
+  virtual std::string_view backendError(){return {};}
 };
 class WindowsTrackCapture final:public TrackCapture {
  public:
@@ -188,19 +190,11 @@ class WindowsTrackCapture final:public TrackCapture {
   void composeCursor(bool enabled)override{capture_.composeCursor(enabled);}
   cursor::Observation cursorSample()override{const auto& seen=capture_.cursorSample();return {seen.known,seen.flags,seen.handle,seen.position};}
   std::string_view backend()override{return capture_.backend();}
+  std::string_view backendError()override{return capture_.backendError();}
  private:Capture capture_;CapturedComposedFrame<Capture> composed_{capture_};
 };
-// capture_wgc_retry.hpp: WGC made while Windows still applies a new mode can fail and leave a GDI copy (17-33 ms a
-// frame). An output's capture tries again a few times before it is used (start, resume, follow). A try that throws
-// keeps the capture already made.
 inline std::unique_ptr<TrackCapture> windowsTrackCapture(const OwnedTrackSource& output){
-  std::unique_ptr<TrackCapture> made=std::make_unique<WindowsTrackCapture>(output);
-  for(const auto wait:wgcStartRetries){
-    if(made->backend()!="gdi")break;
-    std::this_thread::sleep_for(wait);
-    try{auto again=std::make_unique<WindowsTrackCapture>(output);made=std::move(again);}catch(...){ }
-  }
-  return made;
+  return std::make_unique<WindowsTrackCapture>(output);
 }
 // One capture/encoder owner thread. Audio only accesses the packet gate under
 // gateMutex_; all public callbacks happen after a complete bounded step returns.
@@ -268,9 +262,10 @@ class TrackSourcePipeline {
   using Micros=std::function<uint64_t()>;
   using Modes=std::function<std::optional<RECT>(const std::wstring&)>;  // a GDI device's current display mode rectangle
   using Followed=std::function<void(uint8_t,RECT)>;
+  using CaptureRecord=std::function<void(uint32_t,uint32_t)>;
   TrackSourcePipeline(TrackSourcePlan plan,bool audioAvailable,Micros now,Monitors observed=currentCaptureMonitors,
-      CaptureFactory capture=[](const auto& output){return windowsTrackCapture(output);},Modes modes=currentDisplayModeRect)
-      :plan_(std::move(plan)),now_(std::move(now)),observed_(std::move(observed)),capture_(capture),modes_(std::move(modes)){
+      CaptureFactory capture=windowsTrackCapture,Modes modes=currentDisplayModeRect,CaptureRecord record={})
+      :plan_(std::move(plan)),now_(std::move(now)),observed_(std::move(observed)),capture_(capture),modes_(std::move(modes)),record_(std::move(record)){
     if(!now_||!observed_||!capture||!modes_||!multitap::tracks::valid(plan_.media(audioAvailable)))throw std::runtime_error("invalid_track_request");
     std::array<StreamMemoryShape,2> memory{};size_t memoryCount=0;
     for(const auto& output:plan_.outputs){const auto& t=output.media;memory[memoryCount++]={t.sourceWidth,t.sourceHeight,t.width,t.height,t.width==t.sourceWidth&&t.height==t.sourceHeight};}
@@ -279,9 +274,16 @@ class TrackSourcePipeline {
     if(gate_.configure(plan_.media(audioAvailable))!=multitap::tracks::Configured::changed)throw std::runtime_error("invalid_track_request");
     try{
       for(const auto& output:plan_.outputs){
-        if(states_.empty()){states_.push_back(std::make_unique<State>(output,capture(output),plan_.fps));continue;}
+        const auto make=[&]{
+          WgcRetry retry;
+          auto made=startCapture(output,retry);
+          auto state=std::make_unique<State>(output,std::move(made),plan_.fps);
+          state->wgcRetry=retry;
+          return state;
+        };
+        if(states_.empty()){states_.push_back(make());continue;}
         auto& thread=threads_.emplace_back(std::make_unique<TrackOutputThread>());std::unique_ptr<State> state;
-        thread->run([&]{state=std::make_unique<State>(output,capture(output),plan_.fps);});states_.push_back(std::move(state));
+        thread->run([&]{state=make();});states_.push_back(std::move(state));
       }
     }catch(...){release();throw;}
     topology_=std::move(topology);
@@ -290,6 +292,11 @@ class TrackSourcePipeline {
   TrackSourcePipeline(const TrackSourcePipeline&)=delete;
   TrackSourcePipeline& operator=(const TrackSourcePipeline&)=delete;
   const TrackSourcePlan& plan()const{return plan_;}
+  int captureFps()const {
+    int fps=plan_.fps;
+    for(const auto& state:states_)fps=std::min(fps,state->encoder.captureFps());
+    return fps;
+  }
   // Captured only after an actual output passes the track packet gate. Agent
   // sends this after media commits to the private pipe; stats are untouched.
   void enableOutputUsage(){for(size_t i=0;i<states_.size();++i){auto* state=states_[i].get();state->encoder.setOutputObserver([this,state,i](const EncoderOutputObservation& output){outputUsage_[i]=EncoderDiagnosticTrack{std::to_string(state->output.media.id),state->output.media.epoch,encoderDiagnostic(output.backend,output.hardware,output.softwareFallbackCode)};});}}
@@ -401,6 +408,11 @@ class TrackSourcePipeline {
   // tracks-resume-v1 (stream.keyframe on the track tunnel): every output codes
   // its next frame as an IDR. Call between step()s, on the stepping thread.
   void keyFrame(){for(auto& state:states_)state->keyFrame=true;}
+  void repair(const TrackRepair& request){
+    if(request.topology!=plan_.topology)return;
+    for(auto& state:states_)if(state->output.media.id==request.track&&state->output.media.epoch==request.epoch)
+      request.mergeInto(state->repair);
+  }
   // bitrate-adaptive-tracks-v1 (track_bitrate.hpp): the session's rate is the
   // service's controller's; each output takes its share from its next tick on.
   // Call before the first step / between steps, on the stepping thread.
@@ -420,6 +432,7 @@ class TrackSourcePipeline {
  private:
   struct State {
     OwnedTrackSource output;std::unique_ptr<TrackCapture> capture;Encoder encoder;FrameEncodePolicy policy;
+    WgcRetry wgcRetry;
     std::unique_ptr<LosslessTileSource> lossless;std::unique_ptr<ParallelWork> helper;
     uint64_t captured=0,encoded=0,bytes=0,losslessBytes=0;
     // This tick's packets (in gate order) and readback time, taken by step().
@@ -428,6 +441,9 @@ class TrackSourcePipeline {
     // it need not); tiles are never made again once it followed; the client was
     // told to drop every tile (losslessStreamTick); the next tick codes an IDR.
     std::string followReason;bool tilesAllowed=true,losslessRetired=false,keyFrame=false;
+    std::optional<TrackRepair> repair;
+    uint32_t answerGeneration=0;
+    uint64_t answerFromPts=0;
     // Secure desktop: this tick's capture failed because of it; this output's capture was made again after the
     // desktop returned; the notice at this output's coded size.
     bool secureLost=false,secureRebuilt=false;std::vector<uint8_t> noticeNv12;
@@ -437,9 +453,58 @@ class TrackSourcePipeline {
     State(OwnedTrackSource source,std::unique_ptr<TrackCapture> input,int fps):output(std::move(source)),capture(std::move(input)),
       encoder(int(output.media.width),int(output.media.height),fps,output.bitrate,EncoderTuning{},EncoderBackend::automatic,capture?capture->adapterLuid():std::nullopt),policy(size_t(output.media.width)*output.media.height*3/2,FrameRefinement::forCbr(output.bitrate,fps)){if(!capture)throw std::runtime_error("capture_failed");}
   };
+  void noteCapture(TrackCapture& capture,WgcRetry& retry){
+    const bool entered=retry.built(capture.backend()=="gdi",Clock::now());
+    const auto recovered=retry.takeRecovered();
+    if(!record_)return;
+    try{
+      if(entered)record_(wgcFailedStage,wgcFailureCode(capture.backendError()));
+      if(recovered)record_(wgcRecoveredStage,uint32_t(std::clamp<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(*recovered).count(),0,INT32_MAX)));
+    }catch(...){ }
+  }
+  std::unique_ptr<TrackCapture> startCapture(const OwnedTrackSource& output,WgcRetry& retry){
+    auto made=capture_(output);
+    if(!made)throw std::runtime_error("capture_failed");
+    noteCapture(*made,retry);
+    for(const auto wait:wgcStartRetries){
+      if(!retry.onGdi()||*stop_)break;
+      std::this_thread::sleep_for(wait);
+      try{if(auto next=capture_(output)){made=std::move(next);noteCapture(*made,retry);}}catch(...){ }
+    }
+    return made;
+  }
+  void retryCapture(State& state){
+    if(!state.wgcRetry.due(Clock::now()))return;
+    try{
+      auto next=capture_(state.output);
+      if(next&&next->backend()!="gdi"){
+        if(cursor_)next->composeCursor(cursor_->composeFallback());
+        next->observeReadback(observability_);
+        (void)next->frame();
+        state.capture=std::move(next);
+        noteCapture(*state.capture,state.wgcRetry);
+        return;
+      }
+    }catch(...){ }
+    state.wgcRetry.failed(Clock::now());
+  }
+  static bool forcePicture(State& state,uint64_t pts){
+    bool key=std::exchange(state.keyFrame,false);
+    if(const auto request=std::exchange(state.repair,std::nullopt)){
+      key|=request->key;
+      if(request->lastGood){
+        if(!key&&!state.encoder.recover(*request->lastGood))key=true;
+        state.answerGeneration=request->generation;
+        state.answerFromPts=pts;
+      }
+    }
+    if(key)state.encoder.requestKeyFrame();
+    return key||state.answerGeneration!=0;
+  }
   // One output's capture and encode, on the thread that owns that output. Only
   // the gate is shared (under gateMutex_; its order rules are per output).
   void tick(State& state){
+    retryCapture(state);
     // bitrate-adaptive-tracks-v1: a live target change on this output's own encoder (no IDR), here on its thread.
     if(adaptive_){
       if(const int wanted=state.output.media.id<wanted_.size()?wanted_[state.output.media.id]:0;wanted&&wanted!=state.output.bitrate&&state.encoder.setBitrate(wanted)){
@@ -459,7 +524,7 @@ class TrackSourcePipeline {
     const auto pts=now_();
     const auto push=[&](uint8_t flags,uint64_t packetPts,const std::vector<uint8_t>& payload,bool video){pushPacket(state,flags,packetPts,payload,video);};
     const auto emit=[&](Frame frame){emitFrame(state,std::move(frame));};
-    const bool keyFrame=std::exchange(state.keyFrame,false);if(keyFrame)state.encoder.requestKeyFrame();
+    const bool keyFrame=forcePicture(state,pts);
     // Tile packet (pts T-1) strictly before this tick's video (pts T). No
     // longer wanted (paused, or the output followed): one packet drops every
     // tile with this tick's video, then plain video.
@@ -480,7 +545,10 @@ class TrackSourcePipeline {
     const auto& t=state.output.media;multitap::tracks::Packet packet{multitap::tracks::video,flags,t.id,plan_.topology,t.epoch,packetPts,payload.data(),payload.size()};
     std::vector<uint8_t> bytes;{std::lock_guard lock(gateMutex_);const auto decision=gate_.accept(packet);if(decision==multitap::tracks::Decision::awaitingKey)return;if(decision!=multitap::tracks::Decision::accepted||!multitap::tracks::pack(packet,bytes))throw std::runtime_error("encoder_failed");}
     if(state.packets.size()>=8)throw std::runtime_error("track_output_backpressure");
-    (video?state.bytes:state.losslessBytes)+=bytes.size();state.packets.push_back(std::move(bytes));
+    (video?state.bytes:state.losslessBytes)+=bytes.size();
+    if(video&&state.answerGeneration&&packetPts>=state.answerFromPts)
+      markTrackRecovery(bytes,std::exchange(state.answerGeneration,0u));
+    state.packets.push_back(std::move(bytes));
   }
   // Automatic rate: the tile share is this output's share minus its video of the last 0.5 s.
   static void shareTiles(State& state,size_t frameBytes){
@@ -521,7 +589,7 @@ class TrackSourcePipeline {
   // an IDR on request); the first one drops every tile of the capture with its video.
   void still(State& state,const std::vector<uint8_t>& nv12){
     const auto pts=now_();
-    const bool keyFrame=std::exchange(state.keyFrame,false);if(keyFrame)state.encoder.requestKeyFrame();
+    const bool keyFrame=forcePicture(state,pts);
     std::vector<Frame> outputs;std::optional<LosslessTick> tiled;
     if(state.lossless)tiled=losslessRetireTick(*state.lossless,state.losslessRetired,[&](bool forced){return state.policy.prepare(nv12,pts,forced);},pts,
       [&]{state.encoder.encode(nv12.data(),pts,[&](Frame frame){outputs.push_back(std::move(frame));});},keyFrame);
@@ -539,7 +607,7 @@ class TrackSourcePipeline {
     for(size_t n=0;n<states_.size();++n){
       auto& state=*states_[n];if(state.secureRebuilt)continue;
       const auto rebuild=[&]{
-        state.capture.reset();state.capture=capture_(state.output);if(!state.capture)throw std::runtime_error("capture_failed");
+        state.capture.reset();state.capture=startCapture(state.output,state.wgcRetry);
         if(cursor_)state.capture->composeCursor(cursor_->composeFallback());
         if(observability_)state.capture->observeReadback(true);
         (void)state.capture->frame();
@@ -626,7 +694,7 @@ class TrackSourcePipeline {
         if(!changed[n]&&state.capture&&sameRect(rect,state.output.capture.bounds))continue;
         auto source=state.output;source.capture.bounds=rect;source.capture.monitors.front().bounds=rect;
         const auto rebuild=[&]{
-          state.capture.reset();state.capture=capture_(source);if(!state.capture)throw std::runtime_error("capture_failed");
+          state.capture.reset();state.capture=startCapture(source,state.wgcRetry);
           if(cursor_)state.capture->composeCursor(cursor_->composeFallback());
           if(observability_)state.capture->observeReadback(true);
           // WGC created while Windows still changes the mode can fall back to GDI.
@@ -653,6 +721,7 @@ class TrackSourcePipeline {
     threads_.clear();states_.clear();
   }
   TrackSourcePlan plan_;Micros now_;Monitors observed_;CaptureFactory capture_;Modes modes_;std::vector<std::unique_ptr<State>> states_;
+  CaptureRecord record_;
   Followed followed_;inline static const std::atomic<bool> never_{false};const std::atomic<bool>* stop_=&never_;
   bool losslessWanted_=false;uint64_t resyncSeen_=0;Clock::time_point followedAt_{};
   // bitrate-adaptive-tracks-v1: automatic rate, and each output's latest share (0: none yet).

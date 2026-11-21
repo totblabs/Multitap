@@ -110,7 +110,7 @@ inline std::string displayV2SizeReplyBytes(const std::string& nonce,const std::o
 struct DisplayV2SizesRequest {std::string nonce;std::vector<DisplayV2Output> outputs;};
 inline std::string displayV2SizesRequestBytes(const DisplayV2SizesRequest& request){
   std::string outputs="[";
-  for(const auto& o:request.outputs){if(outputs.size()>1)outputs+=',';outputs+="{\"id\":"+jsonQuote(o.id)+",\"width\":"+std::to_string(o.width)+",\"height\":"+std::to_string(o.height)+'}';}
+  for(const auto& o:request.outputs){if(outputs.size()>1)outputs+=',';outputs+="{\"id\":"+jsonQuote(o.id)+",\"width\":"+std::to_string(o.width)+",\"height\":"+std::to_string(o.height)+nativeRefreshField(o.refreshHz)+'}';}
   return "{\"type\":\"worker.v2.display.sizes\",\"nonce\":"+jsonQuote(request.nonce)+",\"outputs\":"+outputs+"]}";
 }
 inline std::optional<DisplayV2SizesRequest> parseDisplayV2SizesRequest(const Json& value){
@@ -119,10 +119,11 @@ inline std::optional<DisplayV2SizesRequest> parseDisplayV2SizesRequest(const Jso
   DisplayV2SizesRequest request{value.get("nonce").string()};const auto* rows=std::get_if<Json::Array>(&value.get("outputs").value);
   if(!displayV2Nonce(request.nonce)||!rows||rows->empty()||rows->size()>2)return {};
   for(const auto& row:*rows){
-    const auto* item=std::get_if<Json::Object>(&row.value);if(!item||item->size()!=3)return {};
+    const auto* item=std::get_if<Json::Object>(&row.value);if(!item||item->size()!=(item->contains("refreshHz")?4u:3u))return {};
     DisplayV2Output output{row.get("id").string()};const auto width=row.get("width").number(-1),height=row.get("height").number(-1);
     if((output.id!="0"&&output.id!="1")||!nativeDisplayInteger(width,320,ownedOutputMaxSide)||!nativeDisplayInteger(height,180,ownedOutputMaxSide)||!ownedOutputSize(uint64_t(width),uint64_t(height)))return {};
     if(std::any_of(request.outputs.begin(),request.outputs.end(),[&](const auto& o){return o.id==output.id;}))return {};
+    try{output.refreshHz=nativeDisplayRefresh(row);}catch(...){return {};}
     output.width=DWORD(width);output.height=DWORD(height);request.outputs.push_back(std::move(output));
   }
   return request;
@@ -250,7 +251,7 @@ inline std::optional<std::vector<NativeDisplayTarget>> displayV2SizesRpc(const D
       auto targets=nativeDisplayTargets(value->get("snapshot"));
       for(const auto& output:request.outputs){
         const auto changed=std::find_if(targets.begin(),targets.end(),[&](const auto& target){return target.id==output.id;});
-        if(changed==targets.end()||changed->width!=output.width||changed->height!=output.height)return {};
+        if(changed==targets.end()||changed->width!=output.width||changed->height!=output.height||changed->refreshHz!=output.refreshHz)return {};
       }
       return targets;
     }

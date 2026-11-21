@@ -156,8 +156,8 @@ class NativeDisplayService {
       auto desired=outputs_;bool seen[2]{};
       for(const auto& size:sizes){
         const size_t index=size.id=="0"?0:size.id=="1"?1:SIZE_MAX;if(index>=outputs_.size()||seen[index])return {};seen[index]=true;
-        if(!ownedOutputSize(size.width,size.height)||!multitap::vdisplay::ownedOutputModeSupported(size.width,size.height))return {};
-        desired[index].width=size.width;desired[index].height=size.height;
+        if(!multitap::vdisplay::supportedRefresh(size.refreshHz)||!ownedOutputSize(size.width,size.height)||!multitap::vdisplay::ownedOutputModeSupported(size.width,size.height))return {};
+        desired[index].width=size.width;desired[index].height=size.height;desired[index].refreshHz=size.refreshHz;
       }
       const auto before=controller_->state();if(!before.leaseActive||before.recoveryRequired)return {};
       if(desired!=outputs_&&!applyOutputsLocked(desired)){
@@ -582,7 +582,7 @@ class NativeDisplayService {
         if(!renderPreferenceAttempted_){renderPreferenceAttempted_=true;renderPreference_=preferNativeRenderAdapter(*client_,chooseNativeRenderHardware);}
         controller=std::make_unique<multitap::vdisplay::Controller>(*client_,owner.lease,owner.owner);
         }
-        std::vector<multitap::vdisplay::Output> outputs;for(size_t i=0;i<committed_.size();++i)outputs.push_back({publicIdentities_[i],committed_[i].width,committed_[i].height});
+        std::vector<multitap::vdisplay::Output> outputs;for(size_t i=0;i<committed_.size();++i)outputs.push_back({publicIdentities_[i],committed_[i].width,committed_[i].height,committed_[i].refreshHz});
         if(generation_==UINT32_MAX)throw std::runtime_error("native_display_generation_exhausted");
         if(!persistRuntimeLocked("starting",committed_,generation_+1)){viewportRecovery_=true;snapshot(false,true);return;}++generation_;
         const bool started=controller->start(outputs);if(!started){diagnosticFailure_="controller_start_failed";controller.reset();client_.reset();transport_.reset();viewportRecovery_=true;persistRuntimeLocked("recovery",committed_,generation_);snapshot(false,true);return;}outputs_=outputs;controller_=std::move(controller);activationRecovery_=false;activationWorkerExited_=false;viewportRecovery_=false;
@@ -1113,7 +1113,7 @@ class NativeDisplayService {
       const auto bound=[&]{try{recoveryBaseline_=baseline_.load(instance);if(!recoveryBaseline_||baseline_.digest()!=recoveryHash_||recoveryBaseline_->generation>generation_||recoveryBaseline_->topology.targets.size()!=committed_.size())return false;for(size_t i=0;i<committed_.size();++i)if(recoveryBaseline_->topology.targets[i].id!=committed_[i].id||recoveryBaseline_->topology.targets[i].width!=committed_[i].width||recoveryBaseline_->topology.targets[i].height!=committed_[i].height)return false;return true;}catch(...){if(!v2_)throw;return false;}}();
       if(!bound){if(!v2_)throw std::runtime_error("native_baseline_binding_invalid");recoveryHash_.clear();recoveryBaseline_.reset();}}}else for(size_t i=0;i<size_t(count);++i)committed_.push_back({std::to_string(i),1920,1080});runtimeLoaded_=true;return true;
   }
-  std::vector<NativeRuntimeOutput> publicOutputsLocked()const{std::vector<NativeRuntimeOutput> result;for(size_t i=0;i<outputs_.size();++i)result.push_back({std::to_string(i),outputs_[i].width,outputs_[i].height});return result;}
+  std::vector<NativeRuntimeOutput> publicOutputsLocked()const{std::vector<NativeRuntimeOutput> result;for(size_t i=0;i<outputs_.size();++i)result.push_back({std::to_string(i),outputs_[i].width,outputs_[i].height,outputs_[i].refreshHz});return result;}
   bool persistRuntimeLocked(const std::string& phase,const std::vector<NativeRuntimeOutput>& outputs,uint32_t generation)noexcept{try{return runtimeLoaded_&&runtime_.store({instance_,phase,generation,outputs,(phase=="stable"||phase=="stopped")?"":recoveryHash_});}catch(...){return false;}}
   bool applyOutputsLocked(std::span<const multitap::vdisplay::Output> desired,bool* attempted=nullptr){
     if(attempted)*attempted=false;
@@ -1158,7 +1158,7 @@ class NativeDisplayService {
         const int publicId=target.display_id==publicIdentities_[0]?0:target.display_id==publicIdentities_[1]?1:-1;
         if(publicId<0||output==outputs_.end())throw std::runtime_error("native_display_snapshot_invalid");
         if(targets.size()>1)targets+=',';
-        targets+="{\"id\":"+jsonQuote(std::to_string(publicId))+",\"width\":"+std::to_string(output->width)+",\"height\":"+std::to_string(output->height)+",\"adapterLow\":"+std::to_string(target.os_adapter_luid.low_part)+",\"adapterHigh\":"+std::to_string(target.os_adapter_luid.high_part)+",\"target\":"+std::to_string(target.target_id)+'}';
+        targets+="{\"id\":"+jsonQuote(std::to_string(publicId))+",\"width\":"+std::to_string(output->width)+",\"height\":"+std::to_string(output->height)+nativeRefreshField(output->refreshHz)+",\"adapterLow\":"+std::to_string(target.os_adapter_luid.low_part)+",\"adapterHigh\":"+std::to_string(target.os_adapter_luid.high_part)+",\"target\":"+std::to_string(target.target_id)+'}';
       }
       return "{\"schema\":1,\"provider\":\"libvirtualdisplay-1.6.4\",\"deviceInstanceId\":"+jsonQuote(instance_)+",\"servicePid\":"+std::to_string(GetCurrentProcessId())+",\"generation\":"+std::to_string(generation_)+",\"tick\":"+std::to_string(GetTickCount64())+",\"installed\":"+(transport_?"true":"false")+",\"started\":"+(transport_?"true":"false")+",\"leaseActive\":"+(active?"true":"false")+",\"countControlAvailable\":"+(active&&!recovery&&!profileBlockedLocked()&&!pending_&&!countPending_&&runtime_.record()&&runtime_.record()->phase=="stable"&&publicIdentities_[0]&&publicIdentities_[1]&&publicIdentities_[0]!=publicIdentities_[1]?"true":"false")+",\"activationVerified\":"+(runtime_.record()&&runtime_.record()->phase=="stable"&&!recovery&&!preparation_?"true":"false")+",\"recoveryBaselineAvailable\":"+(runtimeLoaded_&&runtime_.record()&&runtime_.record()->uncertain()&&runtime_.record()->baselineHash==recoveryHash_&&recoveryBaseline_&&!recoveryHash_.empty()?"true":"false")+",\"recoveryScopeAvailable\":"+(runtimeLoaded_&&runtime_.record()&&runtime_.record()->uncertain()&&runtime_.record()->baselineHash==recoveryHash_&&recoveryBaseline_&&recoveryBaseline_->scope&&nativeRecoveryScopeComplete(*recoveryBaseline_->scope)?"true":"false")+",\"configurationPending\":"+(pending_||(countPending_&&!countPending_->completed)?"true":"false")+",\"recoveryRequired\":"+(recovery?"true":"false")+",\"targets\":"+targets+"],\"renderPreference\":"+nativeRenderPreferenceJson(renderPreference_)+"}";
   }

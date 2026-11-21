@@ -263,7 +263,7 @@ void main() {
       await _tap(t, find.byKey(const Key('android-c-use-recommended')));
       expect(
         t.widget<Text>(find.byKey(const Key('android-c-stream-summary'))).data,
-        contains('60 fps'),
+        startsWith('목표 프레임 자동'),
       );
       expect(find.byKey(const Key('android-c-stream-audio')), findsNothing);
       await _tap(t, find.widgetWithText(TextButton, '취소'));

@@ -79,7 +79,7 @@ class TrackBitrateSession {
   void start(const std::string& session, const AdaptiveBitrateRequest& request, int fps, Wake wake) {
     std::lock_guard lock(mutex_); reset();
     if (!request.adaptive) return;
-    controller_.emplace(request.bitrate, request.maximum, fps); session_ = session; wake_ = std::move(wake); origin_ = Clock::now(); fps_ = std::clamp(fps, 1, 60);
+    controller_.emplace(request.bitrate, request.maximum, fps); session_ = session; wake_ = std::move(wake); origin_ = Clock::now(); fps_ = std::clamp(fps, 1, 240);
   }
   void stop() { std::lock_guard lock(mutex_); reset(); }
   // Tests: a simulated clock in microseconds (above 0); kept across sessions.
@@ -198,7 +198,7 @@ class TrackBitrateSession {
     const auto* rows = std::get_if<Json::Array>(&value.get("tracks").value);
     if (!rows || rows->empty() || rows->size() > 2 || !std::isfinite(topology) || topology < 1 || topology > 4294967295.0 || std::floor(topology) != topology) return;
     std::vector<Output> next; int floor = 0;
-    if (std::isfinite(fps) && fps >= 1 && fps <= 60) fps_ = int(fps);
+    if (std::isfinite(fps) && fps >= 1 && fps <= 240) fps_ = int(fps);
     for (const auto& row : *rows) {
       const auto id = row.get("id").string(); const auto width = row.get("width").number(), height = row.get("height").number();
       if ((id != "0" && id != "1") || !std::isfinite(width) || !std::isfinite(height) || width < 16 || height < 16 || width > 16384 || height > 16384) return;

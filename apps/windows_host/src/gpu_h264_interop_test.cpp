@@ -1,6 +1,6 @@
 // Explicit actual-hardware test, run separately on the selected
 // physical Host. Never part of an automatic GPU-less smoke-test run.
-#include "gpu_h264.hpp"
+#include "stream_refresh.hpp"
 #include "remote_decoder.h"
 #include <algorithm>
 #include <chrono>
@@ -19,7 +19,7 @@ uint32_t number(const char* text) {
 int main(int argc, char** argv) {
   try {
     host::gpu::Selection selection; selection.mode = host::gpu::Mode::disabled;
-    int width = 1280, height = 720;
+    int width = 1280, height = 720, fps = 60, frameCount = 12;
     for (int index = 1; index < argc; ++index) {
       const std::string option(argv[index]); if (++index >= argc) throw std::runtime_error("Test argument requires a value");
       if (option == "--backend") {
@@ -32,20 +32,46 @@ int main(int argc, char** argv) {
         selection.adapterLuid = host::gpu::parseAdapterLuid(argv[index]); if (!selection.adapterLuid) throw std::runtime_error("Invalid adapter LUID");
       } else if (option == "--width") width = int(number(argv[index]));
       else if (option == "--height") height = int(number(argv[index]));
+      else if (option == "--frames") {
+        frameCount = int(number(argv[index]));
+        require(frameCount >= 12 && frameCount <= 3600, "Invalid test frame count");
+      } else if (option == "--fps") {
+        if (std::string_view(argv[index]) == "auto") fps = 0;
+        else { fps = int(number(argv[index])); require(fps >= 30 && fps <= 240, "Invalid test rate"); }
+      }
       else throw std::runtime_error("Unknown hardware test option");
     }
     if (selection.mode == host::gpu::Mode::disabled) throw std::runtime_error("Use an explicit --backend; this test is never a default VM smoke test");
     host::Runtime runtime; host::validateFrameMemory(width, height, 0, 12);
-    constexpr int fps = 60, bitrate = 8000000;
+    constexpr int bitrate = 8000000;
+    if (!fps) {
+      fps = host::StreamRefreshProbe::supportedRate({{width, height}}, selection);
+      // A viewport may grow after the idle check. Exercise the same Encoder
+      // that the session worker opens, then compare with the format probe.
+      if (!selection.adapterLuid && fps > 60) {
+        const auto backend = selection.mode == host::gpu::Mode::nvenc ? host::EncoderBackend::nvenc :
+          selection.mode == host::gpu::Mode::amf ? host::EncoderBackend::amf : host::EncoderBackend::qsvMft;
+        host::Encoder production(width, height, 240, bitrate, {}, backend);
+        std::vector<uint8_t> sample(size_t(width) * height * 3 / 2, uint8_t{128});
+        bool firstIdr = false;
+        production.encode(sample.data(), 0, [&](host::Frame frame) { firstIdr = frame.key; });
+        require(firstIdr && production.hardwareInfo().hardwareVerified && production.captureFps() <= fps &&
+                production.captureFps() >= 60, "Session encoder did not retain the GPU within the verified rate");
+        std::cout << "{\"kind\":\"session-encoder-refresh\",\"requestedFps\":240,\"probeCeiling\":" << fps
+                  << ",\"captureFps\":" << production.captureFps() << ",\"actualHardwareIdr\":true}\n";
+      }
+    }
     auto encoder = host::gpu::createEncoder(width, height, fps, bitrate, selection);
     require(encoder->hardwareInfo().initialized && !encoder->hardwareInfo().hardwareVerified, "Hardware initialization was reported as successful encoding");
-    multitap::RemoteDecoder decoder; host::check(decoder.Initialize(UINT(width), UINT(height)), "Initialize actual client software decoder");
+    multitap::RemoteDecoder::Options options; options.fps = UINT(fps);
+    multitap::RemoteDecoder decoder; host::check(decoder.Initialize(UINT(width), UINT(height), options), "Initialize actual client software decoder");
     require(!decoder.hardware(), "Interop witness must use the actual software decoder");
     std::vector<uint64_t> submitted, decoded, keys;
     size_t totalBytes = 0, largest = 0;
     const auto receive = [&](multitap::DecodedFrame&& frame) { require(frame.width == UINT(width) && frame.height == UINT(height), "Actual decoded geometry differs from the requested picture"); decoded.push_back(frame.pts_us); };
     std::vector<uint8_t> pixels(size_t(width) * size_t(height) * 3 / 2, 128);
-    for (int index = 0; index < 12; ++index) {
+    const auto started = std::chrono::steady_clock::now();
+    for (int index = 0; index < frameCount; ++index) {
       for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) pixels[size_t(y) * size_t(width) + size_t(x)] = uint8_t(16 + (int64_t(x) + y + index * 11) % 210);
       if (index == 3) encoder->requestKeyFrame();
       if (index == 6) require(encoder->setBitrate(12000000), "Selected hardware refused its live bitrate target");
@@ -61,16 +87,17 @@ int main(int argc, char** argv) {
     }
     std::vector<host::Frame> trailing; encoder->finish(trailing); require(trailing.empty(), "Hardware unexpectedly retained delayed pictures");
     host::check(decoder.Drain(receive), "Drain actual client decoder");
-    require(submitted == decoded && decoded.size() == 12, "Actual client decoder did not preserve every hardware picture and timestamp");
-    require(std::find(keys.begin(), keys.end(), 0) != keys.end() && std::find(keys.begin(), keys.end(), 50000) != keys.end(), "Requested recovery IDR was not encoded at its input timestamp");
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    require(submitted == decoded && decoded.size() == size_t(frameCount), "Actual client decoder did not preserve every hardware picture and timestamp");
+    require(std::find(keys.begin(), keys.end(), 0) != keys.end() && std::find(keys.begin(), keys.end(), uint64_t(3) * 1000000 / fps) != keys.end(), "Requested recovery IDR was not encoded at its input timestamp");
     // udp-media-v1 LOSS on this hardware: frames 20-27 never reach one decoder, then
     // recover(frame 19). With reference invalidation (NVENC) frame 28 is a P-frame and that
     // decoder shows every frame from it like one that lost nothing; without it, an IDR.
     // Also the encode time per frame, submission to locked output, on this GPU.
     auto lossEncoder = host::gpu::createEncoder(width, height, fps, bitrate, selection);
     multitap::RemoteDecoder whole, lossy;
-    host::check(whole.Initialize(UINT(width), UINT(height)), "Initialize actual client software decoder");
-    host::check(lossy.Initialize(UINT(width), UINT(height)), "Initialize actual client software decoder");
+    host::check(whole.Initialize(UINT(width), UINT(height), options), "Initialize actual client software decoder");
+    host::check(lossy.Initialize(UINT(width), UINT(height), options), "Initialize actual client software decoder");
     std::map<uint64_t, std::vector<uint8_t>> wholeFrames, lossyFrames; std::vector<double> encodeMs; bool recovered = false, widened = false; size_t answerBytes = 0, pBytes = 0;
     for (int index = 0; index < 40; ++index) {
       for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) pixels[size_t(y) * size_t(width) + size_t(x)] = uint8_t(16 + (int64_t(x) * 3 + y + index * 7) % 210);
@@ -98,7 +125,7 @@ int main(int argc, char** argv) {
     const auto info = encoder->hardwareInfo(); const char* backend = info.vendorId == 0x10de ? "nvenc" : info.vendorId == 0x1002 ? "amf" : "qsv-mft";
     std::cout << "{\"kind\":\"gpu-h264-interop\",\"backend\":\"" << backend << "\",\"adapterLuid\":\"" << host::gpu::adapterLuidText(info.adapterLuid)
       << "\",\"vendorId\":" << info.vendorId << ",\"deviceId\":" << info.deviceId << ",\"width\":" << width << ",\"height\":" << height
-      << ",\"encoded\":" << submitted.size() << ",\"decoded\":" << decoded.size() << ",\"totalBytes\":" << totalBytes << ",\"largestFrameBytes\":" << largest
+      << ",\"fpsTarget\":" << fps << ",\"encoded\":" << submitted.size() << ",\"decoded\":" << decoded.size() << ",\"unpacedSeconds\":" << seconds << ",\"totalBytes\":" << totalBytes << ",\"largestFrameBytes\":" << largest
       << ",\"actualGpu\":true,\"actualClientDecoder\":true,\"syntheticPixels\":true,\"capture\":false,\"relay\":false,\"displayedFrames\":false,\"performanceAcceptance\":false,\"passed\":true}\n";
     return 0;
   } catch (const std::exception& error) {

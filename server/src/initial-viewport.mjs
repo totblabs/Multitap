@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { HttpError } from './errors.mjs';
-import { ownedOutputSize } from './stream-size.mjs';
+import { ownedOutputSize, streamFrameRate } from './stream-size.mjs';
 
 export const initialViewportProtocol = 'epoch-v1';
 export const streamProfileViewportProtocol = 'epoch-v1';
@@ -21,7 +21,7 @@ export function requestedInitialViewport(mode, protocol, value, options, resizeP
   if (protocol === undefined && value === undefined) return null;
   if (mode !== 'stream' || protocol !== initialViewportProtocol || resizeProtocol !== 'epoch-v1' || tracks ||
       !object(value) || Object.keys(value).sort().join(',') !== 'fps,height,monitor,width' ||
-      value.monitor !== '0' || options?.monitor !== '0' || value.fps !== options.fps || ![30,60].includes(value.fps) ||
+      value.monitor !== '0' || options?.monitor !== '0' || value.fps !== options.fps || !streamFrameRate(value.fps, 240) ||
       !ownedOutputSize(value.width, value.height, portrait)) throw new HttpError(400, 'invalid_initial_viewport');
   return Object.freeze({ monitor:'0', width:value.width, height:value.height, fps:value.fps });
 }

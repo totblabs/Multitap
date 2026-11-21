@@ -54,7 +54,7 @@ class Controller {
     // stable across viewport/count changes and no global manifest is changed.
     if(outputs.empty()||outputs.size()>2)return false;
     for(size_t i=0;i<outputs.size();++i){const auto& output=outputs[i];
-      if(!output.identity||!ownedOutputSize(output.width,output.height)||!ownedOutputModeSupported(output.width,output.height))return false;
+      if(!output.identity||!supportedRefresh(output.refreshHz)||!ownedOutputSize(output.width,output.height)||!ownedOutputModeSupported(output.width,output.height))return false;
       for(size_t j=0;j<i;++j)if(outputs[j].identity==output.identity)return false;
     }
     const auto previous=requested_;const std::vector<Output> desired(outputs.begin(),outputs.end());

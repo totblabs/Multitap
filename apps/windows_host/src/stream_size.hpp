@@ -93,7 +93,7 @@ struct StreamSizeBounds {
   int maxHeight() const { return std::min({boxHeight, decoder.maxHeight, int(ownedOutputMaxSide)}); }
   // Whole macroblocks per frame: decoders count frame size and rate in them.
   uint64_t macroblocks() const {
-    const uint64_t rate = uint64_t(std::clamp(fps, 1, 60));
+    const uint64_t rate = uint64_t(std::clamp(fps, 1, 240));
     uint64_t limit = std::min<uint64_t>(decoder.maxPixels, streamPixelBudgetMaximum) / 256;
     if (decoder.maxPixelRate) limit = std::min(limit, decoder.maxPixelRate / 256 / rate);
     if (adminCap) limit = std::min(limit, std::min<uint64_t>(*adminCap * 60 / rate, streamPixelBudgetMaximum) / 256);
@@ -119,7 +119,7 @@ inline std::pair<int, int> streamPictureAt(const StreamSizeBounds& b, double sca
 struct EncodeCeiling { double scale = 1; EncodeLimit reason = EncodeLimit::none; };
 inline EncodeCeiling streamEncodeCeiling(const StreamSizeBounds& b) {
   EncodeCeiling ceiling;
-  const double pixels = double(std::max(1, b.sourceWidth)) * std::max(1, b.sourceHeight), fps = std::clamp(b.fps, 1, 60);
+  const double pixels = double(std::max(1, b.sourceWidth)) * std::max(1, b.sourceHeight), fps = std::clamp(b.fps, 1, 240);
   const auto take = [&](double scale, EncodeLimit reason) { if (scale < ceiling.scale - 1e-9) { ceiling.scale = scale; ceiling.reason = reason; } };
   take(std::min(double(b.maxWidth()) / std::max(1, b.sourceWidth), double(b.maxHeight()) / std::max(1, b.sourceHeight)), EncodeLimit::decoderSize);
   take(std::sqrt(double(std::min<uint64_t>(b.decoder.maxPixels, streamPixelBudgetMaximum)) / pixels), EncodeLimit::decoderSize);
@@ -132,7 +132,7 @@ inline EncodeCeiling streamEncodeCeiling(const StreamSizeBounds& b) {
 // The released safe budget (4,194,304 pixels at 60 fps, H.264 level 5.1) as
 // a scale of this source: where a decoder without a declared rate starts.
 inline double streamSafeScale(const StreamSizeBounds& b) {
-  const uint64_t fps = uint64_t(std::clamp(b.fps, 1, 60));
+  const uint64_t fps = uint64_t(std::clamp(b.fps, 1, 240));
   const double budget = double(std::min<uint64_t>(streamPixelBudgetDefault * 60 / fps, streamPixelBudgetMaximum));
   return std::min(1.0, std::sqrt(budget / (double(std::max(1, b.sourceWidth)) * std::max(1, b.sourceHeight))));
 }
@@ -188,11 +188,11 @@ class EncodeScaleController {
   static constexpr int overloadClientBusy = 900, targetClientBusy = 750, upClientBusy = 700;
   static constexpr uint32_t measuredFrames = 5;
   static constexpr auto downInterval = std::chrono::seconds(3), upInterval = std::chrono::seconds(2), upAfterDown = std::chrono::seconds(10);
-  static constexpr int softwareRates[] = {45, 30};
+  static constexpr int softwareRates[] = {240, 165, 144, 120, 90, 75, 60, 45, 30};
   static constexpr double softwareKeepScale = 0.75, softwareMinimumScale = 0.5;
 
   EncodeScaleController(const StreamSizeBounds& bounds, EncodeScaleMemory memory = {}, Clock::time_point now = Clock::now())
-      : bounds_(bounds), ceiling_(streamEncodeCeiling(bounds)), safe_(bounds.decoder.maxPixelRate ? 1.0 : streamSafeScale(bounds)), lastChange_(now), fps_(std::clamp(bounds.fps, 1, 60)) {
+      : bounds_(bounds), ceiling_(streamEncodeCeiling(bounds)), safe_(bounds.decoder.maxPixelRate ? 1.0 : streamSafeScale(bounds)), lastChange_(now), fps_(std::clamp(bounds.fps, 1, 240)) {
     target_ = std::min(ceiling_.scale, safe_);
     reason_ = safe_ < ceiling_.scale ? EncodeLimit::decoderRate : ceiling_.reason;
     const double pixels = double(std::max(1, bounds.sourceWidth)) * std::max(1, bounds.sourceHeight);
@@ -215,7 +215,9 @@ class EncodeScaleController {
 
   // One window; true when the picture size changed (restart the encoder).
   // software: the encoder is x264 or the MFT, so a frame rate step relieves it.
-  bool observe(const EncodeHostWindow& host, std::optional<ClientDecodeReport> client, Clock::time_point now, bool software = false) {
+  bool observe(const EncodeHostWindow& host, std::optional<ClientDecodeReport> client, Clock::time_point now, bool software = false, int encoderFps = 240) {
+    const int maximumRate = std::clamp(bounds_.fps, 1, std::clamp(encoderFps, 1, software ? 60 : 240));
+    if (fps_ > maximumRate) { fps_ = maximumRate; settleReason(); }
     const double period = 1000.0 / fps_;
     const bool measured = host.frames >= measuredFrames && host.seconds > 0;
     const double fixed = measured ? host.fixedMs / host.frames : 0, scalable = measured ? host.scalableMs / host.frames : 0;
@@ -232,7 +234,6 @@ class EncodeScaleController {
     // decoder too, whose work also follows the rate). No new encoder: the capture pacing follows fps().
     // Host: the highest rung the measured work fits at 75 %. Client: the rung its busy share fits at 750 per
     // mille (one rung when it reports only a backlog).
-    (void)software;
     if (overloaded_ >= 2 && now - lastChange_ >= downInterval && (hostOverloaded || clientOverloaded) && fps_ > lowestRate()) {
       int next = lowestRate();
       for (const int rate : softwareRates) {
@@ -298,8 +299,8 @@ class EncodeScaleController {
     }
     // The size is back at its cap: then the rate, one rung, when the measured work
     // fits the shorter period with the same headroom a size step up asks for.
-    if (calm_ >= 2 && fps_ < bounds_.fps && target_ >= cap - 1e-9 && now - lastChange_ >= upInterval && (!lastDown_ || now - *lastDown_ >= upAfterDown)) {
-      int next = std::clamp(bounds_.fps, 1, 60);
+    if (calm_ >= 2 && fps_ < maximumRate && target_ >= cap - 1e-9 && now - lastChange_ >= upInterval && (!lastDown_ || now - *lastDown_ >= upAfterDown)) {
+      int next = maximumRate;
       for (const int rate : softwareRates) if (rate > fps_ && rate < next) next = rate;
       if (!measured || fixed + scalable <= upWork * 1000.0 / next) {
         fps_ = next; lastChange_ = now; memory_.fps = fps_ < bounds_.fps ? fps_ : 0;
@@ -317,7 +318,7 @@ class EncodeScaleController {
     if (size == size_) return false;
     size_ = size; lastChange_ = now; return true;
   }
-  int lowestRate() const { return std::min(softwareRates[1], std::clamp(bounds_.fps, 1, 60)); }
+  int lowestRate() const { return std::min(30, std::clamp(bounds_.fps, 1, 240)); }
   void settleReason() {
     if (size_.first >= (bounds_.sourceWidth & ~1) && size_.second >= (bounds_.sourceHeight & ~1)) { reason_ = fps_ < bounds_.fps ? (downReason_ != EncodeLimit::none ? downReason_ : EncodeLimit::hostCpu) : EncodeLimit::none; return; }
     if (target_ >= ceiling_.scale - 1e-9) reason_ = ceiling_.reason == EncodeLimit::none ? EncodeLimit::decoderSize : ceiling_.reason;

@@ -4,6 +4,12 @@
 #include <vector>
 
 namespace multitap {
+inline int localMonitorRefresh(HMONITOR handle) {
+  MONITORINFOEXW info{}; info.cbSize=sizeof(info);
+  DEVMODEW mode{}; mode.dmSize=sizeof(mode);
+  if(!GetMonitorInfoW(handle,&info)||!EnumDisplaySettingsW(info.szDevice,ENUM_CURRENT_SETTINGS,&mode)||mode.dmDisplayFrequency<2)return 60;
+  return int(std::min<DWORD>(240,mode.dmDisplayFrequency));
+}
 struct LocalMonitorSurface { RECT bounds{}; bool primary=false; UINT dpi=96; };
 inline std::vector<LocalMonitorSurface> LocalMonitorLayout() {
   std::vector<LocalMonitorSurface> monitors;

@@ -67,7 +67,7 @@ internal fun sharpPicturePlan(
     val baseWidth = request.baseWidth
     val baseHeight = request.baseHeight
     fun base(reason: String, fallback: Boolean) = SharpPicturePlan(baseWidth, baseHeight, 100, reason, fallback)
-    if (baseWidth < 2 || baseHeight < 2 || baseWidth % 2 != 0 || baseHeight % 2 != 0 || request.fps !in 1..60 ||
+    if (baseWidth < 2 || baseHeight < 2 || baseWidth % 2 != 0 || baseHeight % 2 != 0 || request.fps !in 1..240 ||
         request.panelWidth < 2 || request.panelHeight < 2 || request.panelWidth > 32768 || request.panelHeight > 32768) {
         return base("invalid_request", fallback = true)
     }

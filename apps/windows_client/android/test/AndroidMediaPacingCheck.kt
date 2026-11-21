@@ -215,6 +215,10 @@ fun main() {
     verify(androidStreamHoldMode(mode(1, 60f, w = 720, h = 1600), modes) == 4, "hold: same resolution only")
     verify(androidStreamFrameRate(modes, mode(1, 60f)) == 60f, "the stream surface declares 60 fps on a 60/120 Hz panel")
     verify(androidStreamFrameRate(listOf(mode(8, 30f)), mode(8, 30f)) == null, "no declaration without a 60 Hz mode")
+    verify(androidStreamHoldMode(mode(2, 90f), modes, 120) == 3, "120 fps uses the 120 Hz mode")
+    verify(androidStreamHoldMode(mode(3, 120f), modes, 144) == 5, "144 fps uses the 144 Hz mode")
+    verify(androidStreamFrameRate(modes, mode(3, 120f), 120) == 120f, "the stream surface declares its high rate")
+    verify(androidStreamFrameRate(modes, mode(3, 120f), 240) == null, "no 240 fps declaration on this panel")
     // The request is made again after a fold/rotation/new surface, and only then.
     verify(!androidRefreshNeedsReapply(3, 77, 3, 77, 3), "unchanged: no new request")
     verify(androidRefreshNeedsReapply(3, 77, 3, 78, 3), "a new surface: request again")

@@ -70,6 +70,7 @@
 #include "native_display_trust.hpp"
 #include "render_observation.hpp"
 #include "gpu_h264.hpp"
+#include "stream_refresh.hpp"
 #include <dxgi1_4.h>
 #include "qemu_console.hpp"
 #include "qemu_console_protocol.hpp"
@@ -740,7 +741,14 @@ class ServiceBridge final : public AgentBridge {
     try{const auto observation=observeStreamConsoleRecovery([this](DWORD id){return capabilityInputs_.identity(id);});consoleRecovery=observation.native;consolePlan=planStreamConsoleRecovery(observation);}catch(...){ }
 #endif
     const auto signinFields=signinRuntime_?signinRuntime_->capabilityFields():std::string();
-    const auto consoleFields=signinFields+",\"consoleRecoverySupported\":"+std::string(consoleRecovery?"true":"false")+",\"consoleRecoveryAvailable\":"+(!maintenance&&!consoleRunning_&&consolePlan.eligible?"true":"false")+",\"consoleRecoveryReason\":"+jsonQuote(consolePlan.ready?"console_ready":safeStreamConsoleReason(consolePlan.reason))+nativeStreamProfileCapabilityFields(profileViewport)+nativeStreamProfileTracksCapabilityFields(profileTracks,profileViewport)+(v2Mode()&&nativeDisplaySelected()?",\"qemuConsoleProtocol\":"+jsonQuote(qemuConsoleProtocol):std::string())+startPrimaryCapabilityFields(v2Mode()&&nativeDisplaySelected())+(probeNoDesktop&&console?",\"secureDesktop\":true":"");
+    int maxStreamFps=60;
+    if(viewport&&v2Mode()&&nativeDisplaySelected()){
+      StreamRefreshProbe::Shapes shapes;
+      for(const auto& m:display.monitors)shapes.emplace_back(m.width,m.height);
+      try{maxStreamFps=refreshProbe_.maximum(shapes,!streaming_);}catch(...){ }
+    }
+    const auto refreshFields=maxStreamFps>60?",\"maxStreamFps\":"+std::to_string(maxStreamFps):std::string();
+    const auto consoleFields=signinFields+refreshFields+",\"consoleRecoverySupported\":"+std::string(consoleRecovery?"true":"false")+",\"consoleRecoveryAvailable\":"+(!maintenance&&!consoleRunning_&&consolePlan.eligible?"true":"false")+",\"consoleRecoveryReason\":"+jsonQuote(consolePlan.ready?"console_ready":safeStreamConsoleReason(consolePlan.reason))+nativeStreamProfileCapabilityFields(profileViewport)+nativeStreamProfileTracksCapabilityFields(profileTracks,profileViewport)+(v2Mode()&&nativeDisplaySelected()?",\"qemuConsoleProtocol\":"+jsonQuote(qemuConsoleProtocol):std::string())+startPrimaryCapabilityFields(v2Mode()&&nativeDisplaySelected())+(probeNoDesktop&&console?",\"secureDesktop\":true":"");
     std::string monitors="[";for(const auto& monitor:display.monitors){if(monitors.size()>1)monitors+=',';monitors+="{\"id\":"+jsonQuote(monitor.id)+",\"width\":"+std::to_string(monitor.width)+",\"height\":"+std::to_string(monitor.height)+",\"primary\":"+(monitor.primary?"true":"false");if(viewport)monitors+=advertisedOwnedModes(monitor.width,monitor.height);monitors+='}';}monitors+=']';
     // The thumbnail permission uses the same view, taken after the privacy
     // ticket: a WTS change counted before the ticket made the view read afresh,
@@ -1166,6 +1174,7 @@ class ServiceBridge final : public AgentBridge {
       nativeProbeLock.lock();probeStopped_=true;if(probe_.joinable())probe_.join();
       try{const auto snapshot=nativeDisplayLeaseSnapshot();profileSnapshot=snapshot;profileLease=nativeDisplayLeaseKey(snapshot);nativeReady=nativeActivationPublished(snapshot)&&nativeActivationGate_.readinessAllowed(std::to_string(interactiveSession())+":"+profileLease);}catch(...){nativeReady=false;}
     }
+    refreshProbe_.yieldToStream();
     pendingBitrate_=0;pendingScale_=0;pendingCaret_=0;pendingCursorEcho_=0;pendingCursorCompose_=0;pendingBackground_=0;pendingKeyFrame_=false;pendingCursorResend_=false;pendingRecover_=0;send_ = std::move(send); id_ = request.get("sessionId").string(); streaming_ = true;sessionModeIsStream_=streaming_;rejectedStream_.reset();workerCreatedForSession_=false;sessionHadProfile_=false;v2Session_=false;nativeStopGuard_=sessionModeIsStream_&&nativeDisplaySelected();nativeStopInstance_=profileSnapshot.get("deviceInstanceId").string();if(sessionModeIsStream_)lastSessionStop_.reset();epochMedia_=request.get("resizeProtocol").string()=="epoch-v1";streamSizesV2_=streamSizeV2(request);streamMonitor_=request.get("monitor").string();currentEpoch_=0;
     sessionActivity_=std::move(activity);
     try{pendingEncoderLimits_.reset();encoderLimits_=viewportEncoderLimits(request);if(encoderLimits_&&!hasInitialViewport(request))throw std::runtime_error("initial_viewport_invalid");}catch(...){unavailable("virtual_display_required");return;}
@@ -1190,7 +1199,7 @@ class ServiceBridge final : public AgentBridge {
     // independent outputs. It sees the tunnel's queue and writes; a new target or
     // split wakes the relay loop, which hands the shares to the worker.
     {const auto trackRate=trackSession?adaptiveTracksBitrateRequest(request):AdaptiveBitrateRequest{};
-      pendingTrackRate_=false;trackRate_.start(id_,trackRate,int(std::clamp(request.get("fps").number(60),1.0,60.0)),[this]{pendingTrackRate_=true;if(relayWake_.value)SetEvent(relayWake_.value);});
+      pendingTrackRate_=false;trackRate_.start(id_,trackRate,int(std::clamp(request.get("fps").number(60),1.0,240.0)),[this]{pendingTrackRate_=true;if(relayWake_.value)SetEvent(relayWake_.value);});
       // hostAction 262: the tunnel's queue was full and its connection ended as lost
       // (stage 1: tracks-resume-v1 dials again; stage 2: no resume, the stream ends).
       const bool resumable=request.get("trackResumeProtocol").string()==trackResumeProtocol;
@@ -1201,7 +1210,7 @@ class ServiceBridge final : public AgentBridge {
       try{tracks_.start(credentials_,id_,request.get("tunnelUrl").string(),
         [this,expected=id_](const std::string& message){
           trackControl(message,expected);
-        },[this]{if(auto udp=udpTracks_.load())udp->suspend();if(!stopped_.exchange(true)){if(const auto pipe=pipe_.load())CancelIoEx(pipe,nullptr);unavailable("worker_failed");}},&request,
+        },[this]{trackTunnelClosed();},&request,
         // tracks-resume-v1 (track_tunnel.hpp): the worker keeps streaming through a
         // lost tunnel; nothing the client held stays pressed meanwhile.
         request.get("trackResumeProtocol").string()==trackResumeProtocol,
@@ -1212,7 +1221,7 @@ class ServiceBridge final : public AgentBridge {
       try{udpTracks_.store(std::make_shared<UdpTracksSession>(id_,UdpTracksSession::Callbacks{
         [this](const std::string& value){return tracks_.send(true,{value.begin(),value.end()});},
         [this,expected=id_](const Json& value){trackControl(jsonObject(value),expected,true);},
-        [this]{pendingKeyFrame_=true;SetEvent(relayWake_.value);},
+        [this]{SetEvent(relayWake_.value);},
         [this](const std::string& track,uint64_t rtt,uint32_t received,uint32_t lost){return trackRate_.udpFeedback(track,rtt,received,lost);},
         [this](const std::string& track,bool onUdp){return trackRate_.udpPath(track,onUdp);},
         [this]{trackRate_.udpBacklog();}},relativeMouseTrackSessionRequested(request)));}catch(...){ }
@@ -1483,7 +1492,15 @@ class ServiceBridge final : public AgentBridge {
             if(!stopping_&&!pendingTrack_&&!initialCompletion_.pending()&&pendingTrackRate_.exchange(false))
               if(const auto command=trackRate_.takeCommand())if(!sendCommand(*command))return false;
           }
-          if(trackSession||prepareStage<10||terminal)return true;
+          if(trackSession){
+            if(!terminal)if(const auto udp=udpTracks_.load()){
+              std::lock_guard lock(resizeMutex_);
+              if(!stopping_&&!pendingTrack_&&!initialCompletion_.pending())
+                for(const auto& repair:udp->takeRepairs())if(!sendCommand(repair.command(id_)))return false;
+            }
+            return true;
+          }
+          if(prepareStage<10||terminal)return true;
           if(!pendingBitrate_.load()&&!pendingKeyFrame_.load()&&!pendingRecover_.load()&&!pendingDecoder_.load()&&!pendingScale_.load()&&!pendingCaret_.load()&&!pendingCursorEcho_.load()&&!pendingCursorCompose_.load()&&!pendingBackground_.load())return true;
           std::lock_guard lock(resizeMutex_);
           if(stopping_||pendingResize_||pendingTrack_||initialCompletion_.pending())return true;
@@ -1503,6 +1520,7 @@ class ServiceBridge final : public AgentBridge {
         };
         const PipeWake pendingWake{relayWake_.value,deliverPending};
         while (!stopped_ && (relayRead=readPipePacket(pipe, text, bytes, stopped_,std::chrono::seconds(15),&resizeDeadline_,relayWake_.value?&pendingWake:nullptr))) {
+          uint32_t trackRecovery=0;
           const auto deadline=resizeDeadline_.load();if(deadline>0&&deadline<=streamMonotonicMillis()){relayFacts.ended(WorkerRelayCause::resizeExpired);break;}
           if (text && bytes.size() > 65536){relayFacts.ended(WorkerRelayCause::controlTooLarge);break;}
           bool handledControl=false;
@@ -1551,13 +1569,13 @@ class ServiceBridge final : public AgentBridge {
               return ControlAction::forward;
             };
             const auto action=dispatch();if(action==ControlAction::invalid||action==ControlAction::ended){relayFacts.ended(action==ControlAction::ended?WorkerRelayCause::workerStopAck:WorkerRelayCause::controlDispatchFailed);break;}handledControl=action==ControlAction::handled;
-          }else if(trackSession){const auto packet=trackWorkerPacket(bytes,trackCursor,trackOpus);if(packet==TrackWorkerPacket::invalid){relayFacts.ended(WorkerRelayCause::trackPacketInvalid);break;}if(packet==TrackWorkerPacket::video)lastVideo=Clock::now();}
+          }else if(trackSession){trackRecovery=takeTrackRecovery(bytes);const auto packet=trackWorkerPacket(bytes,trackCursor,trackOpus);if(packet==TrackWorkerPacket::invalid){relayFacts.ended(WorkerRelayCause::trackPacketInvalid);break;}if(packet==TrackWorkerPacket::video)lastVideo=Clock::now();}
           else if(initialPending()){relayFacts.ended(WorkerRelayCause::initialMediaPending);break;}
           else if(bytes.size()>=12&&bytes[0]==1){lastVideo=Clock::now();if(prepareStage<10){prepareStage=10;firstVideo=true;stages.frame=ConnectStages::Clock::now();}}
           if(!streamWorkerVideoAlive(lastVideo,Clock::now(),resizeDeadline_.load(),streamMonotonicMillis())){relayFacts.ended(WorkerRelayCause::videoWatchdog);break;}
           if(handledControl)continue;
           if(stopping_)continue;
-          if(trackSession){trackRate_.outgoing(text,bytes);const auto udp=udpTracks_.load();if(!(udp&&udp->outgoing(text,bytes))&&!tracks_.send(text,std::move(bytes))){relayFacts.ended(WorkerRelayCause::trackSendFailed);break;}}else send_(text, std::move(bytes));
+          if(trackSession){trackRate_.outgoing(text,bytes);const auto udp=udpTracks_.load();if(!(udp&&udp->outgoing(text,bytes,trackRecovery))&&!tracks_.send(text,std::move(bytes))){relayFacts.ended(WorkerRelayCause::trackSendFailed);break;}}else send_(text, std::move(bytes));
           // Its flushed log record follows the first video instead of delaying it.
           if(firstVideo){firstVideo=false;recordHostEvent("hostAction",{{"action",uint32_t(200)},{"ok",true},{"stage",uint32_t(10)},{"error",uint32_t(0)},
             {"admitMs",ConnectStages::logged(stages.admitMs())},{"workerMs",ConnectStages::logged(stages.workerMs())},{"displayMs",ConnectStages::logged(stages.displayMs())},
@@ -1744,6 +1762,7 @@ class ServiceBridge final : public AgentBridge {
   ThumbnailShooter thumbnailShooter_{
     [] { ThumbnailSession value; value.id = interactiveSession(); value.unlocked = sessionUnlocked(value.id); value.console = sameInteractiveConsole(value.id); return value; },
     [](DWORD session) { return drive::runDriveMountHelper(session, "{}", thumbnailHelperTimeoutMs, L"--thumbnail-capture"); }};
+  StreamRefreshProbe refreshProbe_;
   EncoderDiagnosticCache encoderDiagnostics_;EncoderUsageJournalPolicy encoderUsage_;uint32_t encoderDiagnosticEpoch_=0;
   void observeEncoderStats(const Json& value,EncoderDiagnosticCache::Ticket ticket){
     const auto type=value.get("type").string();
@@ -1789,11 +1808,19 @@ class ServiceBridge final : public AgentBridge {
   InitialProfileTrackCompletion initialGroupCompletion_;
   bool initialPending(){std::lock_guard lock(resizeMutex_);return initialCompletion_.pending();}
   std::optional<NativeTrackResize> currentTrack_,pendingTrack_;bool trackMedia_=false,trackMetadataReady_=false,trackResizeVerified_=false,initialTrack_=false;
+  void trackTunnelClosed(){
+    if(auto udp=udpTracks_.load())udp->suspend();
+    // The broker closes the track socket when it sends session.stop. The
+    // worker pipe must stay open until its display restoration is acknowledged.
+    if(stopping_||stopped_.exchange(true))return;
+    if(const auto pipe=pipe_.load())CancelIoEx(pipe,nullptr);
+    unavailable("worker_failed");
+  }
   void trackControl(const std::string& message,const std::string& expected,bool ordered=false){
     const auto value=JsonParser::parse(message);const auto pipe=pipe_.load();if(value.get("sessionId").string()!=expected||!pipe||stopped_||stopping_)return;auto command=value;const auto type=value.get("type").string();
     // Role::secure: worker.secure.* exists only between this service and its worker. A client's tunnel never
     // carries one to the worker (its worker.secure.ready names handles the worker would adopt).
-    if(secure::secureControlConsumed(type)||type.rfind(sysinput::controlPrefix,0)==0)return;
+    if(secure::secureControlConsumed(type)||type.rfind(sysinput::controlPrefix,0)==0||type=="worker.tracks.repair")return;
     if(!ordered){
       if(const auto udp=udpTracks_.load();udp&&udp->control(value))return;
       if(type.starts_with("udp.tracks."))return;
@@ -2055,7 +2082,7 @@ class ServiceBridge final : public AgentBridge {
   DisplayV2Dispatch displayV2Packet(const Json& value,bool authorized,DWORD session){
     if(auto state=displayV2StatePacket(value,authorized,session);state.handled)return state;
     return dispatchDisplayV2(value,authorized&&v2Mode(),[this](const std::string& monitor,DWORD width,DWORD height){return nativeDisplay_->setOwnedSizeV2(monitor,width,height);},{},
-      [this](std::span<const DisplayV2Output> outputs){std::vector<NativeRuntimeOutput> sizes;for(const auto& o:outputs)sizes.push_back({o.id,o.width,o.height});return nativeDisplay_->setOwnedSizesV2(sizes);});
+      [this](std::span<const DisplayV2Output> outputs){std::vector<NativeRuntimeOutput> sizes;for(const auto& o:outputs)sizes.push_back({o.id,o.width,o.height,o.refreshHz});return nativeDisplay_->setOwnedSizesV2(sizes);});
   }
   static std::optional<DisplayV2State> displayV1ProfileState(const std::string& bytes){
     const auto record=parseNativeStreamProfileRecord(bytes);
@@ -2937,7 +2964,7 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
         // media_warmup.hpp: the capture device, Windows Graphics Capture and the
         // loopback endpoint warm up beside the display change (nothing captured).
         worker.warmMedia(source.get("audio").boolean(true));
-        displayV2=std::make_unique<DisplaySessionV2>(displayV2Access(proof));
+        displayV2=std::make_unique<DisplaySessionV2>(displayV2Access(proof),DWORD(std::clamp(source.get("fps").number(60),60.0,240.0)));
         if(request){streamField(prepared,"requestId",request->requestId);streamField(prepared,"resizeId",request->resizeId);streamField(prepared,"epoch",double(request->epoch));std::get<Json::Object>(prepared.value).erase("initialViewport");}
         // Plain starts keep the broker's command; capture is bound by session.start.
         // The capture proof is part of the change (re-planned when it fails).
@@ -2976,7 +3003,7 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
       DisplayV2Result result;DisplayState display;bool ok=false;
       try{
         worker.suspendStreaming();v2RpcTimeout=15000;
-        displayV2=std::make_unique<DisplaySessionV2>(displayV2Access(proof));displayV2Tracks=true;
+        displayV2=std::make_unique<DisplaySessionV2>(displayV2Access(proof),DWORD(std::clamp(source.get("fps").number(60),60.0,240.0)));displayV2Tracks=true;
         const auto outputs=displayV2TrackOutputs(*request);
         std::optional<TrackSourcePlan> bound;std::optional<DisplayState> observed;
         const auto confirm=[&]{bound.reset();observed=displayV2TrackCapture(source,*request,bound);return observed.has_value()&&bound.has_value();};

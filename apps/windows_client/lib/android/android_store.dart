@@ -30,8 +30,7 @@ class AndroidStreamQuality {
   const AndroidStreamQuality({this.fps = 60, this.bitrate = automatic});
   final int fps, bitrate;
 
-  /// Used only without a valid saved choice; a saved choice is kept. 60 fps
-  /// with the automatic rate, like Windows.
+  /// A saved value of 60 selects the viewing display's frame rate when supported.
   static const recommended = AndroidStreamQuality();
 
   /// [bitrate] value for the automatic rate (bitrate-adaptive-v1 where the
@@ -79,7 +78,9 @@ class AndroidStreamQuality {
   static String bitrateLabel(int value) =>
       value == automatic ? l10n.auto : '$value Mbps';
 
-  String get label => '$fps fps · ${bitrateLabel(bitrate)}';
+  static String frameRateLabel(int fps) => fps == 60 ? '${l10n.targetFrameRate} ${l10n.auto}' : '$fps fps';
+
+  String get label => '${frameRateLabel(fps)} · ${bitrateLabel(bitrate)}';
 
   /// A saved choice; its `audio` (an earlier version's, possibly false) is
   /// read past and never applied.

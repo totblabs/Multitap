@@ -3,6 +3,7 @@
 #include "direct_input.hpp"
 #include "direct_input_validation.hpp"
 #include "json_object.hpp"
+#include "track_repair.hpp"
 #include "../../../native/windows_video/udp_track_media.hpp"
 #include <map>
 
@@ -36,7 +37,7 @@ class UdpTracksSession {
   struct Callbacks {
     std::function<bool(const std::string&)> send;
     std::function<void(const Json&)> input;
-    std::function<void()> keyFrame;
+    std::function<void()> repairReady;
     // bitrate-adaptive-tracks-v1 (track_bitrate.hpp): a leg's round trip and losses,
     // its path, a pacer backlog. Each returns that output's share (0: keep its own rate).
     std::function<int(const std::string&,uint64_t,uint32_t,uint32_t)> rateFeedback;
@@ -53,7 +54,7 @@ class UdpTracksSession {
   void suspend()noexcept{try{std::lock_guard operation(operation_);clearLegs();input_.pause();}catch(...){ }}
   // Called only on the worker's validated outbound track messages. False
   // leaves the exact original packet on its existing authenticated WSS tunnel.
-  bool outgoing(bool text,std::vector<uint8_t>& bytes)noexcept{
+  bool outgoing(bool text,std::vector<uint8_t>& bytes,uint32_t recoveryGeneration=0)noexcept{
     try{
       if(closed_)return false;
       if(text){const auto value=JsonParser::parse(std::string(bytes.begin(),bytes.end()));if(value.get("type").string()=="stream.tracks.info")observe(value);return false;}
@@ -64,7 +65,7 @@ class UdpTracksSession {
       {std::lock_guard lock(mutex_);for(const auto& [id,current]:legs_)if(packet.kind==multitap::tracks::video?current.scope.binding.track==packet.track:current.scope.binding.primary){row=current;break;}}
       if(!row||!row->leg)return false;
       std::vector<uint8_t> normalized;if(!multitap::udp::trackToUdp(row->scope.binding,bytes,normalized,opus))return false;
-      return row->leg->outgoing(false,normalized);
+      return row->leg->outgoing(false,normalized,recoveryGeneration==row->scope.generation);
     }catch(...){return false;}
   }
   // All calls arrive on the track tunnel, in the same order as ready/reset.
@@ -99,8 +100,25 @@ class UdpTracksSession {
     }catch(...){ }
     return ours;
   }
+  std::vector<TrackRepair> takeRepairs(){
+    std::vector<TrackRepair> result;
+    if(!repairPending_.exchange(false))return result;
+    std::lock_guard lock(mutex_);
+    for(auto& [id,row]:legs_)if(row.repair){result.push_back(*row.repair);row.repair.reset();}
+    return result;
+  }
  private:
-  struct Row {UdpTrackScope scope;std::shared_ptr<UdpProbeLeg> leg;std::shared_ptr<std::atomic<bool>> onUdp;std::string clientKey,reply;};
+  struct Row {UdpTrackScope scope;std::shared_ptr<UdpProbeLeg> leg;std::shared_ptr<std::atomic<bool>> onUdp;std::string clientKey,reply;std::optional<TrackRepair> repair;};
+  void requestRepair(const UdpTrackScope& scope,bool key,std::optional<uint64_t> pts){
+    {
+      std::lock_guard lock(mutex_);
+      const auto it=legs_.find(scope.track);
+      if(closed_||it==legs_.end()||it->second.scope.generation!=scope.generation)return;
+      TrackRepair{scope.binding.track,scope.binding.topology,scope.binding.epoch,scope.generation,key,pts}.mergeInto(it->second.repair);
+      repairPending_=true;
+    }
+    if(callbacks_.repairReady)callbacks_.repairReady();
+  }
   struct Output {multitap::udp::TrackBinding binding;int bitrate=0;};
   void emitInput(const DirectInputItem& item){
     if(closed_)return;auto value=JsonParser::parse(item.body);if(value.get("type").string()=="input.fence")return;
@@ -142,14 +160,15 @@ class UdpTracksSession {
     clearLegs();input_.pause();{std::lock_guard lock(mutex_);generation_=*generation;}
     for(auto& [id,item]:ready){
       const auto scope=item.first;const auto up=std::make_shared<std::atomic<bool>>(false);UdpProbeLegOptions options;
-      options.media.keyFrame=[this]{if(!closed_&&callbacks_.keyFrame)callbacks_.keyFrame();};
+      options.media.keyFrame=[this,scope]{requestRepair(scope,true,{});};
+      options.media.recover=[this,scope](uint64_t pts){requestRepair(scope,false,pts);};
       options.media.feedback=[this,id=scope.track,rate=scope.bitrate](uint64_t rtt,uint32_t received,uint32_t lost){int share=0;try{if(!closed_&&callbacks_.rateFeedback)share=callbacks_.rateFeedback(id,rtt,received,lost);}catch(...){ }return share>0?share:rate;};
       options.media.path=[this,up,id=scope.track,rate=scope.bitrate](bool value){*up=value;int share=0;try{if(!closed_&&callbacks_.ratePath)share=callbacks_.ratePath(id,value);}catch(...){ }return share>0?share:rate;};
       options.media.backlog=[this]{try{if(!closed_&&callbacks_.rateBacklog)callbacks_.rateBacklog();}catch(...){ }};
       options.media.local=[this,scope](const std::string& address,uint16_t port){send(scoped("udp.tracks.local",scope,",\"protocol\":\"udp-direct-v1\",\"address\":"+jsonQuote(address)+",\"port\":"+std::to_string(port)));};
       options.media.reflexive=[this,scope](const std::string& address,uint16_t port){send(scoped("udp.tracks.local",scope,",\"protocol\":\"udp-direct-v1\",\"candidateType\":\"srflx\",\"address\":"+jsonQuote(address)+",\"port\":"+std::to_string(port)));};
       options.media.input=[this,scope](uint32_t sequence,uint16_t epoch,const std::string& body){try{if(closed_||epoch!=scope.binding.epoch)return;{std::lock_guard lock(mutex_);if(scope.generation!=generation_||scope.binding.topology!=topology_||!legs_.contains(scope.track))return;}if(validDirectTrackInput(JsonParser::parse(body),scope,relative_))input_.submit(false,{sequence,body,udpProbeNowUs()});}catch(...){ }};
-      if(auto leg=UdpProbeLeg::start(std::move(item.second),std::move(options))){leg->wssHeard();std::lock_guard lock(mutex_);legs_.emplace(id,Row{scope,std::move(leg),up,{},{}});}
+      if(auto leg=UdpProbeLeg::start(std::move(item.second),std::move(options))){leg->wssHeard();std::lock_guard lock(mutex_);legs_.emplace(id,Row{scope,std::move(leg),up,{},{},{}});}
     }
   }
   void replyKey(const std::string& id){
@@ -164,6 +183,7 @@ class UdpTracksSession {
     send(copy->reply);
   }
   const std::string session_;Callbacks callbacks_;bool relative_=false;std::atomic<bool> closed_{false};
+  std::atomic<bool> repairPending_{false};
   std::mutex operation_,mutex_;std::map<std::string,Output> outputs_;std::map<std::string,Row> legs_;uint32_t topology_=0,generation_=0;bool opus_=false;
   DirectInputDispatcher input_;
 };

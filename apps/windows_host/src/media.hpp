@@ -9,6 +9,7 @@
 #include <strmif.h>
 #include <mferror.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -235,6 +236,7 @@ class Encoder {
   // The actual current backend (never automatic). hardwareInfo separately
   // distinguishes successful initialization from validated encoded output.
   EncoderBackend backend() const { return backend_; }
+  int captureFps() const { return hardwareEncoderBackend(backend_) ? fps_ : std::min(fps_, 60); }
   const char* backendName() const { return backend_ == EncoderBackend::x264 ? "x264" : backend_ == EncoderBackend::nvenc ? "nvenc" : backend_ == EncoderBackend::amf ? "amf" : backend_ == EncoderBackend::qsvMft ? "qsv-mft" : "mft"; }
   EncoderHardwareInfo hardwareInfo() const;
   using OutputObserver = std::function<void(const EncoderOutputObservation&)>;

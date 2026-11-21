@@ -5239,7 +5239,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get work => 'Work';
 
   @override
-  String get n60FpsAutoBitrate => '60 fps · auto bitrate';
+  String get n60FpsAutoBitrate => 'Auto frame rate · auto bitrate';
 
   @override
   String get saver => 'Saver';

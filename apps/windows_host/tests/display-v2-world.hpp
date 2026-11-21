@@ -44,8 +44,9 @@ struct World {
   Display& second(){return *find(ownedAdapter,secondTarget);}
   Display& extra(){return *find(extraAdapter,extraTarget);}
   bool hasSecond()const{return secondTarget!=0;}
-  NativeDisplayTarget target()const{return {"0",ownedAdapter,ownedTarget,ownedWidth,ownedHeight};}
-  std::vector<NativeDisplayTarget> targets()const{std::vector<NativeDisplayTarget> out{target()};if(secondTarget)out.push_back({"1",ownedAdapter,secondTarget,secondWidth,secondHeight});return out;}
+  DWORD primaryHz=60,secondaryHz=60;
+  NativeDisplayTarget target()const{return {"0",ownedAdapter,ownedTarget,ownedWidth,ownedHeight,primaryHz};}
+  std::vector<NativeDisplayTarget> targets()const{std::vector<NativeDisplayTarget> out{target()};if(secondTarget)out.push_back({"1",ownedAdapter,secondTarget,secondWidth,secondHeight,secondaryHz});return out;}
   // The SDK size an owned target exposes (Windows cannot pick another mode).
   std::pair<DWORD,DWORD> sdkSize(UINT32 target)const{if(secondTarget&&target==secondTarget)return {secondWidth,secondHeight};return {ownedWidth,ownedHeight};}
   NativeCcdData query()const{
@@ -144,8 +145,8 @@ struct World {
     for(const auto& o:outputs)if((o.id!="0"&&o.id!="1")||(o.id=="1"&&!secondTarget))return {};
     bool changed=false;
     for(const auto& o:outputs){
-      if(o.id=="0"&&(o.width!=ownedWidth||o.height!=ownedHeight)){ownedDeparted(removeTarget(ownedTarget));++ownedTarget;ownedWidth=o.width;ownedHeight=o.height;appendOwned();changed=true;}
-      if(o.id=="1"&&(o.width!=secondWidth||o.height!=secondHeight)){ownedDeparted(removeTarget(secondTarget));secondTarget=nextSecond++;secondWidth=o.width;secondHeight=o.height;appendOwned(1,secondTarget,o.width,o.height);changed=true;}
+      if(o.id=="0"&&(o.width!=ownedWidth||o.height!=ownedHeight||o.refreshHz!=primaryHz)){primaryHz=o.refreshHz;ownedDeparted(removeTarget(ownedTarget));++ownedTarget;ownedWidth=o.width;ownedHeight=o.height;appendOwned();changed=true;}
+      if(o.id=="1"&&(o.width!=secondWidth||o.height!=secondHeight||o.refreshHz!=secondaryHz)){secondaryHz=o.refreshHz;ownedDeparted(removeTarget(secondTarget));secondTarget=nextSecond++;secondWidth=o.width;secondHeight=o.height;appendOwned(1,secondTarget,o.width,o.height);changed=true;}
     }
     if(changed&&afterResize)afterResize(*this);
     return targets();

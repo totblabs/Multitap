@@ -316,7 +316,7 @@ class TrackStream {
         !ready ||
         preparing ||
         topology == _u32 ||
-        ![30, 60].contains(targetFps) ||
+        !validStreamFps(targetFps) ||
         !RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(requestId) ||
         requested.outputs.length != tracks.length ||
         requested.outputs.indexed.any((p) => p.$2.id != tracks[p.$1].id)) {

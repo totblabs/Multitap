@@ -18,6 +18,7 @@ import 'package:multitap_client/android/android_sharp_picture.dart';
 import 'package:multitap_client/android/android_store.dart';
 import 'package:multitap_client/android/android_stream_preparation.dart';
 import 'package:multitap_client/data/broker_api.dart';
+import 'package:multitap_client/data/initial_viewport.dart';
 import 'package:multitap_client/data/remote_session.dart';
 import 'package:multitap_client/data/stream_size.dart';
 import 'package:multitap_client/models/stream_options.dart';
@@ -98,6 +99,7 @@ Future<_Harness> _open(
   WidgetTester tester, {
   AndroidResolution resolution = AndroidResolution.auto,
   bool hostScale = true,
+  bool initialViewport = false,
   void Function(_Engine engine)? prepare,
 }) async {
   tester.view.physicalSize = const Size(1080, 2160);
@@ -126,8 +128,26 @@ Future<_Harness> _open(
         load: (options, _, scale) async {
           h.requested.add(options);
           h.scales.add(scale);
+          const id = '00000000-0000-0000-0000-000000000001';
+          InitialViewportPreparation? prepared;
+          if (initialViewport) {
+            final viewport = InitialViewport(
+              width: options.maxWidth,
+              height: options.maxHeight,
+              fps: options.fps,
+            );
+            prepared = InitialViewportPreparation.fromJson({
+              ...viewport.toJson(),
+              'protocol': initialViewportProtocol,
+              'sessionId': id,
+              'requestId': '10000000-0000-0000-0000-000000000001',
+              'resizeId': '20000000-0000-0000-0000-000000000001',
+              'epoch': 1,
+            }, sessionId: id, requested: viewport);
+          }
           return BrokerConnection(
-            sessionId: 'android-session',
+            sessionId: prepared?.sessionId ?? 'android-session',
+            initialViewport: prepared,
             webSocketUrl: Uri.parse(_sessionUrl),
             options: options,
             epochMedia: hostScale,
@@ -169,9 +189,17 @@ Future<void> _picture(
   Size? source,
   String? limit,
 }) async {
+  final initial = h.session.connection.initialViewport;
   h.socket.incoming.add(
     jsonEncode({
       'type': 'stream.info',
+      if (initial != null) ...{
+        'sessionId': initial.sessionId,
+        'requestId': initial.requestId,
+        'resizeId': initial.resizeId,
+        'epoch': 1,
+        'fpsTarget': initial.viewport.fps,
+      },
       'codec': 'h264',
       'width': width,
       'height': height,
@@ -181,7 +209,9 @@ Future<void> _picture(
     }),
   );
   await tester.pump(const Duration(milliseconds: 20));
-  h.socket.incoming.add(_video(16667, key: true));
+  final frame = _video(16667, key: true);
+  if (initial != null) frame[2] = 1;
+  h.socket.incoming.add(frame);
   for (var i = 0; i < 6; i++) {
     await tester.pump(const Duration(milliseconds: 40));
   }
@@ -832,7 +862,11 @@ void main() {
 
   testWidgets('A picture the desktop encodes smaller than the planned size is '
       'not sharper: the automatic size, counted', (tester) async {
-    final h = await _open(tester, resolution: AndroidResolution.sharp);
+    final h = await _open(
+      tester,
+      resolution: AndroidResolution.sharp,
+      initialViewport: true,
+    );
     try {
       expect(h.engine.fallbacks, isEmpty);
       final automatic = h.engine.asked.single.base;
@@ -842,6 +876,22 @@ void main() {
         ..height = 1620
         ..encodeLimit = EncodeLimit.hostCpu
         ..notifyListeners();
+      await _frames(tester);
+      expect(h.engine.fallbacks, isEmpty);
+      await tester.pump(const Duration(seconds: 10));
+      h.session
+        ..width = 1080
+        ..height = 2160
+        ..encodeLimit = EncodeLimit.none
+        ..notifyListeners();
+      await tester.pump(const Duration(seconds: 6));
+      expect(h.engine.fallbacks, isEmpty);
+      h.session
+        ..width = 810
+        ..height = 1620
+        ..encodeLimit = EncodeLimit.hostCpu
+        ..notifyListeners();
+      await tester.pump(const Duration(seconds: 15));
       await _frames(tester);
       expect(h.engine.fallbacks, ['host_reduced']);
       expect(find.text('선명하게를 쓸 수 없어 자동 크기로 보여요'), findsOneWidget);

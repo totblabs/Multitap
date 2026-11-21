@@ -85,9 +85,8 @@ abstract interface class LosslessMoveMedia {
 const losslessTilesMovesMark = 'm';
 
 /// tiles-resync-v1: an engine whose compositor starts over on a restarted
-/// source's packet 1. Only it asks for restarts: another one (Android's
-/// compositor) would stay poisoned and the Host would resend every tile again
-/// and again.
+/// source's packet 1. Engines report this capability when they can consume
+/// the restarted source.
 abstract interface class LosslessResyncMedia {
   bool get losslessResync;
 }

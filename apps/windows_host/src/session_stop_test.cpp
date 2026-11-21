@@ -8,6 +8,11 @@
 
 namespace host {
 struct SessionStopTestAccess {
+  static bool closedTrackTunnelStopsWorker(ServiceBridge& bridge,bool requested){
+    bridge.stopped_=false;bridge.stopping_=requested;
+    bridge.trackTunnelClosed();
+    return bridge.stopped_;
+  }
   static void state(ServiceBridge& bridge,const std::string& id,bool quiescent){
     bridge.id_=id;bridge.sessionModeIsStream_=true;bridge.workerQuiescent_=quiescent;
     bridge.nativeStopGuard_=false;bridge.profileSession_=false;
@@ -120,6 +125,8 @@ void agentCases(){
 }
 void serviceCases(){
   ServiceBridge service(Credentials{});
+  stopCheck(!SessionStopTestAccess::closedTrackTunnelStopsWorker(service,true),"A track socket closing during stop cancelled the worker's restore");
+  stopCheck(SessionStopTestAccess::closedTrackTunnelStopsWorker(service,false),"A track socket closing unexpectedly left the worker running");
   SessionStopTestAccess::state(service,stopSessionId,false);
   stopCheck(!service.stopSession(stopSessionId).workerQuiescent,"Nonjoinable thread was mistaken for verified worker-process exit");
   SessionStopTestAccess::state(service,stopSessionId,true);

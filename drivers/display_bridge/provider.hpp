@@ -28,7 +28,7 @@ class Session {
     if(lease_||lease<api::kMinOpaqueLeaseId||outputs.empty()||outputs.size()>2||
       std::all_of(owner.bytes.begin(),owner.bytes.end(),[](uint8_t b){return b==0;}))return false;
     for(size_t i=0;i<outputs.size();++i){const auto& o=outputs[i];
-      if(!o.identity||!ownedOutputSize(o.width,o.height)||!ownedOutputModeSupported(o.width,o.height))return false;
+      if(!o.identity||!supportedRefresh(o.refreshHz)||!ownedOutputSize(o.width,o.height)||!ownedOutputModeSupported(o.width,o.height))return false;
       for(size_t j=0;j<i;++j)if(outputs[j].identity==o.identity)return false;
     }
     if(!client_.check_protocol_compatible().ok())return false;
@@ -43,7 +43,7 @@ class Session {
       d.width=outputs[i].width;d.height=outputs[i].height;
       // A portrait output is a portrait panel (its EDID size follows it).
       d.physical_width_mm=d.height>d.width?340:600;d.physical_height_mm=d.height>d.width?600:340;
-      d.refresh_rate_millihz=60000;d.requested_timeout_ms=15000;
+      d.refresh_rate_millihz=outputs[i].refreshHz*1000u;d.requested_timeout_ms=15000;
       const char* label=i==0?"Multitap 1":"Multitap 2";
       std::memcpy(d.display_name,label,std::strlen(label)+1);
       const auto result=client_.create_temporary_display_owned(request);
@@ -67,13 +67,13 @@ class Session {
       result.value.temporary_display_count==count_&&!result.value.pending_departure_count;
   }
   bool append(const api::OwnerCapability& owner,const Output& output,size_t ordinal){
-    if(!lease_||!active_||count_>=2||ordinal>1||!output.identity||
+    if(!lease_||!active_||count_>=2||ordinal>1||!output.identity||!supportedRefresh(output.refreshHz)||
        !ownedOutputSize(output.width,output.height)||!ownedOutputModeSupported(output.width,output.height)||
        std::any_of(outputs_.begin(),outputs_.begin()+count_,[&](const auto& value){return value.display_id==output.identity;}))return false;
     api::CreateTemporaryDisplayOwnedRequest request{};request.owner_capability=owner;
     auto& display=request.display;display.lease_id=lease_;display.display_id=output.identity;
     display.width=output.width;display.height=output.height;display.physical_width_mm=output.height>output.width?340:600;display.physical_height_mm=output.height>output.width?600:340;
-    display.refresh_rate_millihz=60000;display.requested_timeout_ms=15000;
+    display.refresh_rate_millihz=output.refreshHz*1000u;display.requested_timeout_ms=15000;
     const char* label=ordinal==0?"Multitap 1":"Multitap 2";
     std::memcpy(display.display_name,label,std::strlen(label)+1);
     const auto result=client_.create_temporary_display_owned(request);

@@ -11,6 +11,10 @@ import { videoGeometry, boundedInteger, maximumGeometrySide, maximumWireInteger 
 // advertised it and whose broker granted it; released peers never see it.
 export const streamSizeProtocol = 'stream-size-v1';
 export const streamSizeProtocolV2 = 'stream-size-v2';
+// Rates above 60 require a Host capability from this broker's inventory.
+export function streamFrameRate(fps, maximum = 60) {
+  return fps === 30 || boundedInteger(fps, 60, maximum);
+}
 export const maximumSide = 3840;
 export const maximumPixels = 8294400;
 // Released single-output bound: 3840x2160.
@@ -92,7 +96,7 @@ function macroblocks(width, height) { return Math.ceil(width / 16) * Math.ceil(h
 // limits (frame size in whole macroblocks, as decoders count it).
 export function withinDecoderLimits(info, limits, fps) {
   if (!limits) return true;
-  if (!videoGeometry(info.width, info.height) || !boundedInteger(fps, 1, 60)) return false;
+  if (!videoGeometry(info.width, info.height) || !boundedInteger(fps, 1, 240)) return false;
   const blocks = macroblocks(info.width, info.height);
   return blocks <= Math.floor(maximumWireInteger / 256) && info.width <= limits.maxWidth && info.height <= limits.maxHeight &&
     blocks <= Math.floor(limits.maxPixels / 256) && (limits.maxPixelRate === 0 || blocks <= Math.floor(limits.maxPixelRate / 256 / fps));

@@ -2606,6 +2606,8 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   /// resize, or a picture encoded smaller): the automatic size until 선명하게
   /// is chosen again.
   bool _sharpRefused = false;
+  Timer? _sharpReductionTimer;
+  (RemoteSession, AndroidSharpPlan)? _sharpReduction;
 
   /// Windows' scale as the person set it, relative to the automatic size
   /// (1.0 = 100 % there): the scale asked of Windows follows the picture's
@@ -2738,22 +2740,28 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
   /// behind): that is not sharper, only smaller.
   void _watchSharp(RemoteSession? session) {
     final plan = _sharpActive;
-    if (plan == null ||
-        session == null ||
-        session.closed ||
-        session.resizing ||
-        !session.frameReady) {
-      return;
-    }
-    final limit = session.encodeLimit;
-    if (limit != null &&
-        limit != EncodeLimit.none &&
+    final reduced = plan != null &&
+        session != null &&
+        !session.closed &&
+        !session.resizing &&
+        session.frameReady &&
+        session.encodeLimit != null &&
+        session.encodeLimit != EncodeLimit.none &&
         session.sourceWidth == plan.width &&
         session.sourceHeight == plan.height &&
         session.width > 0 &&
-        session.width < plan.width) {
-      _sharpFellBack('host_reduced');
-    }
+        session.width < plan.width;
+    final current = reduced ? (session, plan) : null;
+    if (_sharpReduction == current) return;
+    _sharpReductionTimer?.cancel();
+    _sharpReduction = current;
+    if (current == null) return;
+    // The Host may restore the original encode size after ten seconds.
+    _sharpReductionTimer = Timer(const Duration(seconds: 15), () {
+      if (!mounted) return;
+      _watchSharp(_session);
+      if (_sharpReduction == current) _sharpFellBack('host_reduced');
+    });
   }
 
   /// 화면 방향 for this kind of screen while the session is shown.
@@ -4379,6 +4387,7 @@ class _AndroidRemoteViewState extends State<AndroidRemoteView>
 
   @override
   void dispose() {
+    _sharpReductionTimer?.cancel();
     _poorLatency.dispose();
     _tvInput.currentState?.cancel();
     _forgetGamepads();

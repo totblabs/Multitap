@@ -6,8 +6,7 @@ import '../l10n/l10n.dart';
 /// Said wherever a desktop has no sound device: the Host can only send the
 /// sound Windows plays on a device. Multitap does not add one: the
 /// administrator adds an audio device in Proxmox.
-String get audioDeviceMissingText =>
-    l10n.desktopHasNoSoundDevice2;
+String get audioDeviceMissingText => l10n.desktopHasNoSoundDevice2;
 
 /// The desktop tile's 다시 시작 필요 badge: a sound device was added in
 /// Proxmox and takes effect on the desktop's next restart.
@@ -16,6 +15,8 @@ String get audioDevicePendingText => l10n.restartDesktopUseSoundDevice;
 /// How the streaming bitrate is chosen. `auto` (bitrate-adaptive-v1) lets the
 /// host follow what the relay path carries; `fixed` is the released behaviour.
 enum StreamBitrateMode { fixed, auto }
+
+bool validStreamFps(int fps) => fps == 30 || (fps >= 60 && fps <= 240);
 
 class StreamOptions {
   // Product name; existing stream/media-epoch-v1 negotiation stays compatible.
@@ -26,9 +27,8 @@ class StreamOptions {
       legacyMaximumBitrate = 20000000,
       adaptiveMaximumBitrate = 100000000;
 
-  /// New sessions start at 60 fps with automatic bitrate: only changed
-  /// frames are sent, and a GPU-less VM streams one 1920x1080 output at 60.
-  /// Explicit choices keep their requested FPS.
+  /// New sessions use automatic bitrate and follow the viewing monitor when
+  /// the Host and decoder support it. Older peers and CPU Hosts use 60 fps.
   /// [negotiated] uses fixed 20 Mbps where automatic bitrate is unsupported.
   static const recommended = StreamOptions(
     fps: 60,
@@ -63,14 +63,17 @@ class StreamOptions {
 
   bool get automaticBitrate => bitrateMode == StreamBitrateMode.auto;
 
+  StreamOptions withFps(int value) => value == fps ? this : _with(rate: value);
+
   StreamOptions _with({
+    int? rate,
     int? bitrate,
     StreamBitrateMode? mode,
     String? monitor,
   }) => StreamOptions(
     maxWidth: maxWidth,
     maxHeight: maxHeight,
-    fps: fps,
+    fps: rate ?? fps,
     bitrate: bitrate ?? this.bitrate,
     audio: audio,
     monitor: monitor ?? this.monitor,
@@ -165,7 +168,7 @@ class StreamOptions {
         maxHeight < 16 ||
         maxHeight > maximumGeometrySide ||
         maxHeight.isOdd ||
-        ![30, 60].contains(fps) ||
+        !validStreamFps(fps) ||
         bitrate < minimumBitrate ||
         bitrate > adaptiveMaximumBitrate ||
         !['0', '1', 'all'].contains(monitor)) {
@@ -208,10 +211,8 @@ class StreamOptions {
 }
 
 /// Quality modes (backlog #99). A mode sets only the frame rate and the
-/// bitrate: sound, decoding and 마우스 잠금 stay as they are. No 게임 mode
-/// yet: the broker and Host take 30 or 60 fps only, every connection already
-/// prefers UDP and the Host always encodes for low latency, so it would ask
-/// for exactly what 작업 asks for.
+/// bitrate. The work preset uses the automatic display rate on a capable Host.
+/// Both presets preserve sound, decoder and mouse choices.
 enum StreamPreset {
   /// The new-connection default.
   work(StreamOptions.recommended),

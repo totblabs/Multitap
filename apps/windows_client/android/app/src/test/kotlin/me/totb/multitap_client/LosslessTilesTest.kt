@@ -173,7 +173,7 @@ class LosslessTilesTest {
     }
 
     @Test
-    fun aDamagedPacketPoisonsAndNoTileIsShownAgain() {
+    fun aDamagedPacketHidesTilesUntilTheSourceRestarts() {
         val payload = hex(vectors().steps.first { it[0] == "packet" }[1])
         for (damage in listOf("truncated", "longer", "size", "codec", "index")) {
             val compositor = LosslessCompositor(144, 80)
@@ -188,9 +188,12 @@ class LosslessTilesTest {
             assertTrue(damage, compositor.poisoned)
             assertEquals(damage, 0, compositor.presentTiles)
             assertFalse(damage, compositor.republishPending)
-            // Even a good packet is ignored from now on.
-            assertEquals(damage, LosslessCompositor.Outcome.IGNORED, compositor.accept(payload, 0, payload.size) { _, _, _, _, _, _ -> })
+            val later = payload.copyOf().also { it[8] = 2 }
+            assertEquals(damage, LosslessCompositor.Outcome.IGNORED, compositor.accept(later, 0, later.size) { _, _, _, _, _, _ -> })
             assertTrue(damage, compositor.presentMask.all { it.toInt() == 0 })
+            assertEquals(damage, LosslessCompositor.Outcome.ACCEPTED, compositor.accept(payload, 0, payload.size) { _, _, _, _, _, _ -> })
+            assertFalse(damage, compositor.poisoned)
+            assertEquals(damage, 1L, compositor.restarts)
         }
     }
 

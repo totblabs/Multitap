@@ -5233,7 +5233,7 @@ class _AndroidStreamDialogState extends State<AndroidStreamDialog> {
         ),
         const SizedBox(height: 12),
         KeepAllText(
-          '$_fps fps · ${AndroidStreamQuality.bitrateLabel(_bitrate)}',
+          '${AndroidStreamQuality.frameRateLabel(_fps)} · ${AndroidStreamQuality.bitrateLabel(_bitrate)}',
           key: const Key('android-c-stream-summary'),
           style: uiText(size: 12.5, weight: FontWeight.w600, color: p.ink),
         ),
@@ -5252,7 +5252,7 @@ class _AndroidStreamDialogState extends State<AndroidStreamDialog> {
               child: _choice<int>(
                 p,
                 keyPrefix: 'fps',
-                options: const [(30, '30 fps'), (60, '60 fps')],
+                options: [(30, '30 fps'), (60, l10n.auto)],
                 selected: _fps,
                 onSelected: (v) => _fps = v,
               ),

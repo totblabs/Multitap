@@ -4910,7 +4910,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get work => '작업';
 
   @override
-  String get n60FpsAutoBitrate => '60 fps · 자동 전송률';
+  String get n60FpsAutoBitrate => '자동 프레임률 · 자동 전송률';
 
   @override
   String get saver => '절약';

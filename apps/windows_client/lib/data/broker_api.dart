@@ -1,6 +1,10 @@
 import 'broker_transport.dart';
 
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
+
+import 'package:flutter/services.dart'
+    show MethodChannel, PlatformException, MissingPluginException;
 
 import 'broker_probe.dart';
 import 'same_pc.dart';
@@ -630,6 +634,7 @@ class BrokerDesktop {
     this.driveFs = false,
     this.driveUnavailable,
     this.printUnavailable,
+    this.maxStreamFps = 60,
     this.streamSize = false,
     this.streamSizeV2 = false,
     this.print = false,
@@ -701,6 +706,7 @@ class BrokerDesktop {
   /// Why the VM cannot offer its PC printer although this account may print
   /// (print_spooler_unavailable / print_driver_unavailable). Null otherwise.
   final String? printUnavailable;
+  final int maxStreamFps;
 
   /// The host advertises stream-size-v1 (full-size encoding within this
   /// client's decoder limits, portrait outputs up to 2160x3840) through a
@@ -1003,6 +1009,11 @@ class BrokerDesktop {
       'print_spooler_unavailable' => 'print_spooler_unavailable',
       'print_driver_unavailable' => 'print_driver_unavailable',
       _ => null,
+    },
+    maxStreamFps: switch (((data['host'] as Map?)?['capabilities']
+        as Map?)?['maxStreamFps']) {
+      final int hz when hz > 60 && hz <= 240 => hz,
+      _ => 60,
     },
     streamSize: streamSizeAdvertised((data['host'] as Map?)?['capabilities']),
     streamSizeV2: streamSizeV2Advertised(
@@ -2141,7 +2152,7 @@ class HttpBrokerApi
        decoderLimits = decoderLimits ?? nativeDecoderLimits,
        streamAdmission =
            streamAdmission ??
-           ((sources, fps) => nativeStreamAdmission(sources, fps)) {
+           ((sources, fps) => nativeStreamAdmission(sources, fps, fullSizeOnly: fps > 60)) {
     try {
       _transportToken = BrokerTransport.token(origin);
     } catch (_) {
@@ -2266,15 +2277,37 @@ class HttpBrokerApi
   final Future<DecoderLimits?> Function() decoderLimits;
   final Future<DecoderAdmission> Function(List<StreamSourceSize>, int)
   streamAdmission;
-  Future<DecoderAdmission> _capacity(
+  Future<(int, DecoderAdmission)> _connectionCapacity(
+    String token,
+    String desktopId,
     List<StreamSourceSize> sources,
-    int fps,
+    int preference,
   ) async {
+    final ceiling = _inventoryToken == token ? _refreshCeilings[desktopId] ?? 60 : 60;
+    final displayHz = ceiling > 60 && preference != 30
+        ? await _viewRefreshRate(sources.length > 1)
+        : 60;
     try {
-      return await streamAdmission(sources, fps);
+      return await admitDisplayRefresh(sources, preference, ceiling, displayHz, streamAdmission);
     } on StreamCapacityException catch (error) {
       throw BrokerException("decoder_${error.reason}", 409);
     }
+  }
+
+  Future<int> _viewRefreshRate(bool both) async {
+    if (Platform.isWindows) {
+      try {
+        return await const MethodChannel('multitap/window')
+                .invokeMethod<int>('viewRefreshHz', both) ??
+            60;
+      } on MissingPluginException {
+        return 60;
+      } on PlatformException {
+        return 60;
+      }
+    }
+    final rate = PlatformDispatcher.instance.implicitView?.display.refreshRate;
+    return rate != null && rate.isFinite ? rate.round() : 60;
   }
 
   /// Ask for print-v1 where the inventory advertises it (a client that prints
@@ -2832,6 +2865,7 @@ class HttpBrokerApi
   // stream-size-v1: the same rule (a released broker rejects the fields).
   Set<String> _streamSizeDesktops = {};
   Set<String> _streamSizeV2Desktops = {};
+  Map<String, int> _refreshCeilings = {};
   bool _streamSizeAdvertised(String token, String desktopId) =>
       _inventoryToken == token && _streamSizeDesktops.contains(desktopId);
   bool _streamSizeV2Advertised(String token, String desktopId) =>
@@ -3301,11 +3335,13 @@ class HttpBrokerApi
     );
     tracks.checkOptions(options);
     final v2 = _streamSizeV2Advertised(token, desktopId);
-    final admission = v2
-        ? await _capacity([
+    final capacity = v2
+        ? await _connectionCapacity(token, desktopId, [
             for (final t in tracks.outputs) StreamSourceSize(t.width, t.height),
           ], options.fps)
         : null;
+    final admission = capacity?.$2;
+    options = options.withFps(capacity?.$1 ?? (options.fps == 30 ? 30 : 60));
     final size = admission?.limits;
     if (!v2 && !tracks.legacyCompatible) {
       throw const BrokerException('stream_size_unavailable', 409);
@@ -3371,7 +3407,7 @@ class HttpBrokerApi
       data = await request();
     } on BrokerException catch (error) {
       if (!_bitrateRefused(error, options)) rethrow;
-      options = requested.negotiated(null, independentOutputs: true);
+      options = options.negotiated(null, independentOutputs: true);
       data = await request();
     }
     return BrokerConnection.fromJson(
@@ -3420,11 +3456,13 @@ class HttpBrokerApi
     );
     tracks.checkOptions(options);
     final v2 = _streamSizeV2Advertised(token, desktopId);
-    final admission = v2
-        ? await _capacity([
+    final capacity = v2
+        ? await _connectionCapacity(token, desktopId, [
             for (final t in tracks.outputs) StreamSourceSize(t.width, t.height),
           ], options.fps)
         : null;
+    final admission = capacity?.$2;
+    options = options.withFps(capacity?.$1 ?? (options.fps == 30 ? 30 : 60));
     final size = admission?.limits;
     if (!v2 && !tracks.legacyCompatible) {
       throw const BrokerException('stream_size_unavailable', 409);
@@ -3490,7 +3528,7 @@ class HttpBrokerApi
       data = await request();
     } on BrokerException catch (error) {
       if (!_bitrateRefused(error, options)) rethrow;
-      options = requested.negotiated(null, independentOutputs: true);
+      options = options.negotiated(null, independentOutputs: true);
       data = await request();
     }
     return BrokerConnection.fromJson(
@@ -3961,6 +3999,11 @@ class HttpBrokerApi
         for (final desktop in desktops)
           if (desktop.streamSize) desktop.id,
       };
+      _refreshCeilings = {
+        for (final desktop in desktops)
+          if (desktop.streamSizeV2 && desktop.maxStreamFps > 60)
+            desktop.id: desktop.maxStreamFps,
+      };
       _streamSizeV2Desktops = {
         for (final desktop in desktops)
           if (desktop.streamSizeV2) desktop.id,
@@ -4115,6 +4158,7 @@ class HttpBrokerApi
       _driveFsDesktops = {};
       _streamSizeDesktops = {};
       _streamSizeV2Desktops = {};
+      _refreshCeilings = {};
       _printDesktops = {};
       _usbDesktops = {};
       _udpMediaDesktops = {};
@@ -4201,11 +4245,23 @@ class HttpBrokerApi
         initialViewport != null &&
         initialViewport.preserveEncoderLimits &&
         _streamSizeV2Advertised(token, desktopId);
-    final admission = v2
-        ? await _capacity([
+    final capacity = v2
+        ? await _connectionCapacity(token, desktopId, [
             StreamSourceSize(initialViewport.width, initialViewport.height),
           ], (options ?? const StreamOptions()).fps)
         : null;
+    final admission = capacity?.$2;
+    final rate = capacity?.$1 ?? (options?.fps == 30 ? 30 : 60);
+    if (options?.fps != rate)
+      options = (options ?? const StreamOptions()).withFps(rate);
+    if (initialViewport != null && initialViewport.fps != rate) {
+      initialViewport = InitialViewport(
+        width: initialViewport.width,
+        height: initialViewport.height,
+        fps: rate,
+        preserveEncoderLimits: initialViewport.preserveEncoderLimits,
+      );
+    }
     final DecoderLimits? size = v2
         ? admission!.limits
         : mode == 'stream' &&
@@ -4640,6 +4696,7 @@ class HttpBrokerApi
     _hostReadyDesktops = {};
     _streamSizeDesktops = {};
     _streamSizeV2Desktops = {};
+    _refreshCeilings = {};
     _printDesktops = {};
     _http.close(force: true);
   }

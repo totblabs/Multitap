@@ -71,7 +71,7 @@ class BitrateController {
   static constexpr uint64_t ceilingWaitFirstUs = 2000000, ceilingWaitLongestUs = 32000000, ceilingMemoryUs = 300000000;
 
   BitrateController(int start, int maximum, int fps = 60)
-      : maximum_(std::clamp(maximum, adaptiveMinimumBitrate, adaptiveMaximumBitrate)), floor_(adaptiveMinimumBitrate), fps_(std::clamp(fps, 1, 60)) {
+      : maximum_(std::clamp(maximum, adaptiveMinimumBitrate, adaptiveMaximumBitrate)), floor_(adaptiveMinimumBitrate), fps_(std::clamp(fps, 1, 240)) {
     target_ = std::clamp(double(start), double(floor_), double(maximum_)); published_ = int(target_);
   }
   int target() const { return published_; }
@@ -85,7 +85,7 @@ class BitrateController {
 
   // The encoder geometry of a (new) media epoch; the floor follows it.
   std::optional<int> geometry(int width, int height, int fps) {
-    fps_ = std::clamp(fps, 1, 60);
+    fps_ = std::clamp(fps, 1, 240);
     floor_ = std::min(adaptiveBitrateFloor(width, height, fps_), maximum_);
     target_ = std::clamp(target_, double(floor_), double(maximum_));
     idleRestore_ = std::min(idleRestore_, double(maximum_));
@@ -94,7 +94,7 @@ class BitrateController {
   // Independent outputs (bitrate-adaptive-tracks-v1): the floor is the sum of
   // the outputs' own floors (each encoder's limit holds at its own geometry).
   std::optional<int> geometryFloor(int floor, int fps) {
-    fps_ = std::clamp(fps, 1, 60);
+    fps_ = std::clamp(fps, 1, 240);
     floor_ = std::clamp(floor, adaptiveMinimumBitrate, maximum_);
     target_ = std::clamp(target_, double(floor_), double(maximum_));
     idleRestore_ = std::min(idleRestore_, double(maximum_));

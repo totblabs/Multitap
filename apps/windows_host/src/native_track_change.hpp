@@ -20,7 +20,7 @@ inline NativeTrackResize nativeTrackResizeRequest(const Json& value){
   const auto integer=[&](const Json& field,int64_t minimum,int64_t maximum){const auto number=field.number(double(minimum)-1);if(!std::isfinite(number)||number!=std::floor(number)||number<double(minimum)||number>double(maximum))fail();return int64_t(number);};
   NativeTrackResize result;result.sessionId=value.get("sessionId").string();result.requestId=value.get("requestId").string();result.resizeId=value.get("resizeId").string();
   if(!displayOperationUuid(result.sessionId)||!displayOperationUuid(result.resizeId)||result.requestId.empty()||result.requestId.size()>64||result.requestId.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")!=std::string::npos)fail();
-  result.topologyEpoch=uint32_t(integer(value.get("topologyEpoch"),1,UINT32_MAX));result.fps=int(integer(value.get("fps"),30,60));if(result.fps!=30&&result.fps!=60)fail();
+  result.topologyEpoch=uint32_t(integer(value.get("topologyEpoch"),1,UINT32_MAX));result.fps=int(integer(value.get("fps"),30,240));if(result.fps!=30&&result.fps<60)fail();
   const auto* rows=std::get_if<Json::Array>(&value.get("tracks").value);if(!rows||rows->empty()||rows->size()>2)fail();
   multitap::tracks::Configuration media;media.topology=result.topologyEpoch;
   for(const auto& row:*rows){

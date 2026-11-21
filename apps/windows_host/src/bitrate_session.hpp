@@ -62,7 +62,7 @@ class AdaptiveBitrateSession {
       try {
         const auto value = JsonParser::parse(std::string(bytes.begin(), bytes.end()));
         const auto width = value.get("width").number(), height = value.get("height").number(), fps = value.get("fpsTarget").number();
-        if(std::isfinite(width)&&std::isfinite(height)&&width>=16&&width<=ownedOutputMaxSide&&height>=16&&height<=INT32_MAX&&width==std::floor(width)&&height==std::floor(height)&&encodedPictureSize(uint64_t(width),uint64_t(height))&&fps>=1&&fps<=60)apply(controller_->geometry(int(width),int(height),int(fps)));
+        if(std::isfinite(width)&&std::isfinite(height)&&width>=16&&width<=ownedOutputMaxSide&&height>=16&&height<=INT32_MAX&&width==std::floor(width)&&height==std::floor(height)&&encodedPictureSize(uint64_t(width),uint64_t(height))&&fps>=1&&fps<=240)apply(controller_->geometry(int(width),int(height),int(fps)));
       } catch (...) { }
     }
   }
