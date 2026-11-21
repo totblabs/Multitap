@@ -9,6 +9,7 @@
 #include "stream_observability.hpp"
 #include "capture_topology_watch.hpp"
 #include "capture_follow.hpp"
+#include "capture_wgc_retry.hpp"
 #include "cursor_channel.hpp"
 #include "media.hpp"
 #include "secure_desktop_notice.hpp"
@@ -189,6 +190,18 @@ class WindowsTrackCapture final:public TrackCapture {
   std::string_view backend()override{return capture_.backend();}
  private:Capture capture_;CapturedComposedFrame<Capture> composed_{capture_};
 };
+// capture_wgc_retry.hpp: WGC made while Windows still applies a new mode can fail and leave a GDI copy (17-33 ms a
+// frame). An output's capture tries again a few times before it is used (start, resume, follow). A try that throws
+// keeps the capture already made.
+inline std::unique_ptr<TrackCapture> windowsTrackCapture(const OwnedTrackSource& output){
+  std::unique_ptr<TrackCapture> made=std::make_unique<WindowsTrackCapture>(output);
+  for(const auto wait:wgcStartRetries){
+    if(made->backend()!="gdi")break;
+    std::this_thread::sleep_for(wait);
+    try{auto again=std::make_unique<WindowsTrackCapture>(output);made=std::move(again);}catch(...){ }
+  }
+  return made;
+}
 // One capture/encoder owner thread. Audio only accesses the packet gate under
 // gateMutex_; all public callbacks happen after a complete bounded step returns.
 // The same bounded topology monitor used by the single-output capture loop.
@@ -256,7 +269,7 @@ class TrackSourcePipeline {
   using Modes=std::function<std::optional<RECT>(const std::wstring&)>;  // a GDI device's current display mode rectangle
   using Followed=std::function<void(uint8_t,RECT)>;
   TrackSourcePipeline(TrackSourcePlan plan,bool audioAvailable,Micros now,Monitors observed=currentCaptureMonitors,
-      CaptureFactory capture=[](const auto& output){return std::make_unique<WindowsTrackCapture>(output);},Modes modes=currentDisplayModeRect)
+      CaptureFactory capture=[](const auto& output){return windowsTrackCapture(output);},Modes modes=currentDisplayModeRect)
       :plan_(std::move(plan)),now_(std::move(now)),observed_(std::move(observed)),capture_(capture),modes_(std::move(modes)){
     if(!now_||!observed_||!capture||!modes_||!multitap::tracks::valid(plan_.media(audioAvailable)))throw std::runtime_error("invalid_track_request");
     std::array<StreamMemoryShape,2> memory{};size_t memoryCount=0;

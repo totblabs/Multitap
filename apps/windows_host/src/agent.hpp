@@ -32,6 +32,7 @@
 #include "speaker_mute_native.hpp"
 #include "capture_topology_watch.hpp"
 #include "capture_follow.hpp"
+#include "capture_wgc_retry.hpp"
 #include "stream_priority.hpp"
 #include "stream_gpu_priority.hpp"
 #include "gpu_capture.hpp"
@@ -1054,7 +1055,9 @@ class Agent {
         // stream-size-v1: the scale controller owns the picture size (and may
         // restart the encoder at another scale; see the statistics below).
         std::optional<EncodeScaleController> scaler;
-        if (sizeLimits) scaler.emplace(StreamSizeBounds{sourceWidth, sourceHeight, fps, maximumWidth, maximumHeight, *sizeLimits, pixelCap}, recallScale(session));
+        // A reduction learned on a GDI copy (17-33 ms a frame) says nothing about a WGC capture (capture_wgc_retry.hpp).
+        EncodeScaleMemory recalled = recallScale(session); if (recalled.gdi) recalled = {};
+        if (sizeLimits) scaler.emplace(StreamSizeBounds{sourceWidth, sourceHeight, fps, maximumWidth, maximumHeight, *sizeLimits, pixelCap}, recalled);
         const std::pair<int, int> encodeSize = scaler ? scaler->size() : viewportLimits
             ? streamEncodeSize(sourceWidth, sourceHeight, maximumWidth, maximumHeight, fps, pixelBudget)
             : std::pair<int, int>{std::max(16, int(sourceWidth * boxScale) & ~1), std::max(16, int(sourceHeight * boxScale) & ~1)};
@@ -1100,6 +1103,28 @@ class Agent {
         RECT current=source;CaptureSelection selection=selectedCapture;
         auto stages=resizeStages.value_or(ResizeStages{});auto stageBegan=std::chrono::steady_clock::now();
         failureReason="capture_failed";captureStage=2;validateCaptureSelection(selectedCapture,currentCaptureMonitors());captureStage=3;captureSlot.emplace(width, height, source, captureDevices_.take());Capture& capture=*captureSlot;
+        // capture_wgc_retry.hpp: WGC made while Windows still applies the new mode can fail and leave a GDI copy (17-33 ms a
+        // frame). A start or a resize tries again a few times before the encoder opens on the capture's device; a capture
+        // still on GDI tries WGC now and then while it streams. Records: hostAction 200 stage 251 (on GDI; the WGC failure)
+        // and 252 (WGC again; ms on GDI).
+        WgcRetry wgcRetry;
+        const auto onGdi=[&]{return std::string_view(capture.backend())=="gdi";};
+        const auto noteCapture=[&]{
+          const auto record=[&](uint32_t stage,uint32_t value){if(captureDiagnostic_)try{captureDiagnostic_(stage,value);}catch(...){ }};
+          if(wgcRetry.built(onGdi(),Clock::now()))record(wgcFailedStage,wgcFailureCode(capture.backendError()));
+          if(const auto lasted=wgcRetry.takeRecovered())record(wgcRecoveredStage,uint32_t(std::clamp<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(*lasted).count(),0,INT32_MAX)));
+        };
+        // A try that throws gets the capture back as it was made the first time (it throws as before when that fails too).
+        const auto retryWgcStart=[&](RECT rect){
+          noteCapture();
+          for(const auto wait:wgcStartRetries){
+            if(!onGdi()||streamStop_||stopped_)break;
+            std::this_thread::sleep_for(wait);
+            try{captureSlot.reset();captureSlot.emplace(width,height,rect,captureDevices_.take());}catch(...){captureSlot.reset();captureSlot.emplace(width,height,rect,std::shared_ptr<ID3D11Device>{});}
+            noteCapture();
+          }
+        };
+        retryWgcStart(source);
         stages.captureMs=resizeStageMs(stageBegan,std::chrono::steady_clock::now());stageBegan=std::chrono::steady_clock::now();
         failureReason="encoder_failed";captureStage=4;encoderSlot.emplace(width, height, fps, applied,EncoderTuning{},EncoderBackend::automatic,capture.adapterLuid(),capture.gpuDevice());Encoder& encoder=*encoderSlot;
         stages.encoderMs=resizeStageMs(stageBegan,std::chrono::steady_clock::now());
@@ -1246,7 +1271,7 @@ class Agent {
               // WGC created while Windows still changes the mode can fall back to GDI.
               if(wgc&&std::string_view(capture.backend())=="gdi"&&Clock::now()+captureFollowStep<deadline)throw std::runtime_error("capture_backend_changed");
               (void)capture.frame();  // the new mode's first frame; throws while it still changes
-              rebuilt=true;
+              rebuilt=true;noteCapture();
             }catch(const std::exception&){if(Clock::now()+captureFollowStep>=deadline)throw std::runtime_error(reason);}
             if(!rebuilt){std::this_thread::sleep_for(captureFollowStep);continue;}
             current=*settled;selection.bounds=current;selection.monitors.front().bounds=current;
@@ -1377,6 +1402,7 @@ class Agent {
           failureReason="capture_failed";captureStage=3;
           try{captureSlot.reset();captureSlot.emplace(width,height,current,keep);}
           catch(const std::exception&){if(!interactiveDesktopAvailable()&&ownSessionUnlocked())return false;throw;}
+          noteCapture();
           if(cursorSeparated)capture.composeCursor(false);
           capture.observeReadback(observability_.enabled());raiseCaptureGpu();armGpu();
           topology.emplace(topologyCheck(selection,current),std::chrono::milliseconds(100));
@@ -1400,6 +1426,18 @@ class Agent {
           // background-video-v1 (background_video.hpp): while the client's view is hidden, one tick a second
           // captures and encodes, at an idle screen's pace; the others only wait, so a return is seen at once.
           if(!backgroundPace.due(streamBackground_.load(),Clock::now())){std::this_thread::sleep_for(BackgroundPace::idleWait);loopStats.skipped(CaptureLoopStats::Skip::background,Clock::now()-iteration);continue;}
+          // capture_wgc_retry.hpp: still on GDI. A WGC capture of the same output is tried aside; only one that works
+          // replaces it (same picture, so no IDR; an encoder on another device takes its bytes).
+          if(wgcRetry.due(iteration)){
+            bool wgc=false;
+            try{std::optional<Capture> trial;trial.emplace(width,height,current,std::shared_ptr<ID3D11Device>{});wgc=std::string_view(trial->backend())!="gdi";}catch(...){ }
+            if(wgc){
+              captureSlot.reset();captureSlot.emplace(width,height,current,std::shared_ptr<ID3D11Device>{});
+              if(cursorSeparated)capture.composeCursor(false);
+              capture.observeReadback(observability_.enabled());raiseCaptureGpu();armGpu();
+            }
+            if(onGdi())wgcRetry.failed(Clock::now());else noteCapture();
+          }
           const auto captureBegan = Clock::now();
           // The client wants tiles now (opted in, not paused by 게임 마우스) and the
           // capture still describes the announced source (no follow since).
@@ -1545,7 +1583,7 @@ class Agent {
             // stream-size-v1: a measured overload (or headroom) restarts the
             // encoder at another scale of the same source within this epoch: a
             // new stream.info, then an IDR. At most every few seconds.
-            if(scaler){scaleWindow.seconds=seconds;auto candidate=*scaler;const bool rescale=candidate.observe(scaleWindow,clientDecodeReport(),now,!hardwareEncoderBackend(encoder.backend()));scaleWindow={};
+            if(scaler){const bool learnedOnGdi=onGdi();const auto keepScale=[&]{auto memory=scaler->memory();memory.gdi=learnedOnGdi;rememberScale(session,memory);};scaleWindow.seconds=seconds;auto candidate=*scaler;const bool rescale=candidate.observe(scaleWindow,clientDecodeReport(),now,!hardwareEncoderBackend(encoder.backend()));scaleWindow={};
               if(rescale){
                 const auto picture=candidate.size();
                 const StreamMemoryShape currentMemory{uint32_t(sourceWidth),uint32_t(sourceHeight),uint32_t(width),uint32_t(height),true},nextMemory{uint32_t(sourceWidth),uint32_t(sourceHeight),uint32_t(picture.first),uint32_t(picture.second),true};
@@ -1559,7 +1597,7 @@ class Agent {
                 // no guessed reclaimed bytes are added to the system budget.
                 if(memoryAdmitted){
                 encoderSlot.reset();captureDevices_.keep(captureSlot->sharedDevice());captureSlot.reset();width=picture.first;height=picture.second;
-                failureReason="capture_failed";captureStage=3;captureSlot.emplace(width,height,current,captureDevices_.take());if(cursorSeparated)capture.composeCursor(false);capture.observeReadback(observability_.enabled());raiseCaptureGpu();
+                failureReason="capture_failed";captureStage=3;captureSlot.emplace(width,height,current,captureDevices_.take());retryWgcStart(current);if(cursorSeparated)capture.composeCursor(false);capture.observeReadback(observability_.enabled());raiseCaptureGpu();
                 floorBitrate=std::min(adaptiveBitrateFloor(width,height,fps),rate.maximum);if(rate.adaptive){applied=std::clamp(applied,floorBitrate,rate.maximum);autoBitrate_=applied;}
                 failureReason="encoder_failed";captureStage=4;encoderSlot.emplace(width,height,fps,applied,EncoderTuning{},EncoderBackend::automatic,capture.adapterLuid(),capture.gpuDevice());
                 if(local_)try{encoder.setOutputObserver(observeEncoderOutput);encoder.setGpuRetryObserver(observeGpuRetry);}catch(...){ }
@@ -1567,14 +1605,14 @@ class Agent {
                 policySlot.emplace(size_t(width)*height*3/2,FrameRefinement::forCbr(applied,fps));
                 // Tiles describe the source; the client's new decoder starts without them.
                 lossless.reset();losslessHelper.reset();
-                *scaler=std::move(candidate);rememberScale(session,scaler->memory());
+                *scaler=std::move(candidate);keepScale();
                 // cursor-v1: the client's new decoder knows no shape or state (cursor_channel.hpp).
                 if(cursorChannel)cursorChannel->pictureRestart();
                 announce();
                 }
               }else *scaler=std::move(candidate);
               // A software encoder's rate step (no new encoder): the pacing follows it.
-              if(const auto paced=std::chrono::microseconds(1000000/std::clamp(scaler->fps(),1,60));paced!=period){period=paced;rememberScale(session,scaler->memory());}}
+              if(const auto paced=std::chrono::microseconds(1000000/std::clamp(scaler->fps(),1,60));paced!=period){period=paced;keepScale();}}
           }
           // A newly composed WGC frame starts the next tick at once (and the
           // schedule continues one period after it) instead of waiting for the

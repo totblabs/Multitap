@@ -71,7 +71,13 @@ if (-not $SkipTests) {
     # A registration copied with the disk (full clone) is not used on another machine (host-machine-v1).
     'MultitapHostCredentialBindingTest','MultitapHostPendingConnectionTest',
     # The server connection Host settings shows: acknowledgement age, a reload that says connecting, a dial that turns stale.
-    'MultitapHostBrokerStatusTest','MultitapHostAgentPublicationTest','MultitapHostCaptureLoopStatsTest','MultitapHostScrollDetectTest','MultitapHostLosslessMovesTest')
+    'MultitapHostBrokerStatusTest','MultitapHostAgentPublicationTest','MultitapHostCaptureLoopStatsTest','MultitapHostScrollDetectTest','MultitapHostLosslessMovesTest',
+    # A capture left on GDI tries WGC again (capture_wgc_retry.hpp).
+    'MultitapHostCaptureWgcRetryTest',
+    # UDP media and the automatic rate: none ran here before 1.1.37; two had failed unseen since before 1.1.55.
+    'MultitapHostUdpMediaTest','MultitapHostUdpMediaPathTest','MultitapHostUdpMediaLoopbackTest','MultitapHostUdpProbeTest','MultitapHostUdpProbeLoopbackTest',
+    'MultitapHostUdpDirectTest','MultitapHostUdpDirectLoopbackTest','MultitapHostUdpTrackMediaTest','MultitapHostUdpTracksSessionTest','MultitapHostUdpTracksLoopbackTest',
+    'MultitapHostBitrateControllerTest')
   & $cmake --build $tree --config Release --parallel $Parallel --target @tests; if ($LASTEXITCODE) { throw 'test build failed' }
   foreach ($t in $tests) { & (Join-Path $tree "$t.exe") | Out-Null; if ($LASTEXITCODE) { throw "test failed: $t" }; "ok $t" }
 }

@@ -162,7 +162,8 @@ inline std::string streamDecoderMessage(const std::string& session, uint64_t pac
 // What a session learned about load: the pixels per frame the slower side
 // sustained after its last step down (0 = nothing), kept across resizes.
 // fps: the capture rate a software encoder's overload settled at (0 = the requested rate).
-struct EncodeScaleMemory { uint64_t pixels = 0; EncodeLimit reason = EncodeLimit::none; int fps = 0; };
+// gdi: learned while the capture was a GDI copy (capture_wgc_retry.hpp), which a WGC capture does not share.
+struct EncodeScaleMemory { uint64_t pixels = 0; EncodeLimit reason = EncodeLimit::none; int fps = 0; bool gdi = false; };
 
 // Steps the picture scale down on measured overload and back up with
 // hysteresis. Each change restarts the encoder (a new IDR), so changes are

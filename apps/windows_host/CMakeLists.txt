@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.36 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.37 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -810,6 +810,10 @@ target_compile_features(MultitapHostScrollDetectTest PRIVATE cxx_std_20)
 target_compile_options(MultitapHostScrollDetectTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostCaptureLoopStatsTest EXCLUDE_FROM_ALL src/capture_loop_stats_test.cpp)
 target_compile_options(MultitapHostCaptureLoopStatsTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# A capture left on GDI by a WGC that failed to start: when it tries WGC again, and the failure code it records.
+add_executable(MultitapHostCaptureWgcRetryTest EXCLUDE_FROM_ALL src/capture_wgc_retry_test.cpp)
+target_compile_features(MultitapHostCaptureWgcRetryTest PRIVATE cxx_std_20)
+target_compile_options(MultitapHostCaptureWgcRetryTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostCapturePacingBenchmark EXCLUDE_FROM_ALL src/capture_pacing_benchmark.cpp)
 target_link_libraries(MultitapHostCapturePacingBenchmark PRIVATE host_engine)
 target_compile_options(MultitapHostCapturePacingBenchmark PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
