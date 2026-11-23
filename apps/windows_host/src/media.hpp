@@ -184,12 +184,14 @@ class EncoderImplementation {
   // The next encode() codes an IDR (with SPS/PPS).
   virtual void requestKeyFrame() = 0;
   // udp-media-v1 LOSS: the next encode() references only the frame of `lastGoodPts` or
-  // older frames of this instance's current IDR period (reference invalidation). False
+  // older frames of this instance's current IDR period that the client decoded (x264:
+  // reference invalidation; NVENC: a long-term reference, reference_history.hpp). False
   // when this encoder cannot: the caller asks for an IDR instead.
   virtual bool recover(uint64_t) { return false; }
   // A client that sent LOSS gets older references kept from the next frame on, which is
-  // an IDR with the larger DPB in its SPS. Every other client keeps the stream it had: a
-  // larger DPB lets some decoders hold frames back (unmeasured on Android). False: no change.
+  // an IDR with the larger DPB in its SPS (x264: up to 16 frames; NVENC: one frame and up
+  // to four long-term ones). Every other client keeps the stream it had: a larger DPB lets
+  // some decoders hold frames back (unmeasured on Android). False: no change.
   virtual bool widenReferences() { return false; }
   virtual EncoderHardwareInfo hardwareInfo() const { return {}; }
 };

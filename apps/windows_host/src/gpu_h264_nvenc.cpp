@@ -3,6 +3,7 @@
 #include "gpu_h264.hpp"
 #include "gpu_h264_nvenc_policy.hpp"
 #include "gpu_h264_nvenc_config.hpp"
+#include "gpu_h264_nvenc_testing.hpp"
 #include "owned_output_size.hpp"
 #include <nvEncodeAPI.h>
 #include <optional>
@@ -16,6 +17,7 @@
 #include <utility>
 
 namespace host::gpu {
+namespace nvenctesting { std::atomic<int> longTermSlots{0}; }
 namespace {
 void requireNv(NVENCSTATUS value, uint32_t code, const char* operation,
     EncoderGpuFailureSite site = EncoderGpuFailureSite::nvencInitialize) {
@@ -237,7 +239,7 @@ class NvencEncoder final : public EncoderImplementation {
     if (!pictureFits(limits, uint32_t(width), uint32_t(height), uint32_t(fps)) || !cap(NV_ENC_CAPS_ASYNC_ENCODE_SUPPORT) || !cap(NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE))
       throw Failure(encoderGpuCapabilityUnsupported, "Selected GPU cannot satisfy the requested low-latency H264 picture");
     dynamicBitrate_ = cap(NV_ENC_CAPS_SUPPORT_DYN_BITRATE_CHANGE, true) != 0;
-    caps_ = {cap(NV_ENC_CAPS_SUPPORT_REF_PIC_INVALIDATION, true) != 0 && api.nvEncInvalidateRefFrames, cap(NV_ENC_CAPS_SUPPORT_MULTIPLE_REF_FRAMES, true) != 0};
+    caps_ = {int(std::min<uint32_t>(cap(NV_ENC_CAPS_NUM_MAX_LTR_FRAMES, true), 16))};
     uint32_t count = 0, actual = 0;
     requireNv(api.nvEncGetEncodeProfileGUIDCount(state_->encoder, NV_ENC_CODEC_H264_GUID, &count), encoderGpuCapabilityUnsupported, "Query GPU H264 profiles");
     if (!count || count > 256) throw Failure(encoderGpuCapabilityUnsupported, "GPU H264 profile inventory is invalid");
@@ -254,7 +256,7 @@ class NvencEncoder final : public EncoderImplementation {
     NV_ENC_PRESET_CONFIG preset{}; preset.version = NV_ENC_PRESET_CONFIG_VER; preset.presetCfg.version = NV_ENC_CONFIG_VER;
     requireNv(api.nvEncGetEncodePresetConfigEx(state_->encoder, NV_ENC_CODEC_H264_GUID, NV_ENC_PRESET_P1_GUID, NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY, &preset),
       encoderGpuCapabilityUnsupported, "Query GPU low-latency H264 preset");
-    config_ = preset.presetCfg; nvencStreamingConfig(config_, width, height, fps, bitrate, caps_);
+    config_ = preset.presetCfg; nvencStreamingConfig(config_, fps, bitrate);
     init_.version = NV_ENC_INITIALIZE_PARAMS_VER; init_.encodeGUID = NV_ENC_CODEC_H264_GUID; init_.presetGUID = NV_ENC_PRESET_P1_GUID;
     init_.encodeWidth = uint32_t(width); init_.encodeHeight = uint32_t(height); init_.darWidth = uint32_t(width); init_.darHeight = uint32_t(height);
     init_.frameRateNum = uint32_t(fps); init_.frameRateDen = 1; init_.enableEncodeAsync = 1; init_.enablePTD = 1;
@@ -336,13 +338,31 @@ class NvencEncoder final : public EncoderImplementation {
     return detail;
   }
   void submit(NV_ENC_INPUT_PTR inputBuffer, NV_ENC_BUFFER_FORMAT format, uint32_t pitch, uint64_t ptsUs, std::vector<Frame>& output, NvencObservedInput input) {
+    if (code(inputBuffer, format, pitch, ptsUs, output, input)) return;
+    // The answer to a LOSS was coded from something else than the slot asked for (the encoder's
+    // own report), so the client could not rebuild it. It is not published: the same picture
+    // is coded again as an IDR, and this encoder marks and uses no slot any more.
+    longTerm_.reset(); longTermEnded_ = true; keyRequested_ = true;
+    if (!code(inputBuffer, format, pitch, ptsUs, output, input)) throw Failure(encoderGpuOutputContract, "GPU H264 recovery IDR is missing", failureDetail(EncoderGpuFailureSite::nvencOutputLongTerm));
+  }
+  // False, with nothing published and no frame counted: a recovery frame the encoder did not
+  // code from its slot.
+  bool code(NV_ENC_INPUT_PTR inputBuffer, NV_ENC_BUFFER_FORMAT format, uint32_t pitch, uint64_t ptsUs, std::vector<Frame>& output, NvencObservedInput input) {
     auto& api = state_->api; auto& slot = state_->slots[size_t(frameCount_ % state_->slots.size())];
     const bool forceIdr = frameCount_ == 0 || keyRequested_;
+    // udp-media-v1 LOSS (reference_history.hpp): the slot this picture is marked into, and for
+    // the answer to a LOSS the one slot it is coded from. An IDR answers any LOSS by itself.
+    const auto mark = longTerm_ ? longTerm_->due(ptsUs, forceIdr) : std::nullopt;
+    const auto from = forceIdr ? std::nullopt : recoverFrom_;
+    recoverFrom_.reset();
     NV_ENC_PIC_PARAMS picture{}; picture.version = NV_ENC_PIC_PARAMS_VER; picture.inputBuffer = inputBuffer; picture.outputBitstream = slot.output;
     picture.completionEvent = slot.event; picture.inputWidth = uint32_t(width_); picture.inputHeight = uint32_t(height_); picture.inputPitch = pitch;
     picture.bufferFmt = format; picture.pictureStruct = NV_ENC_PIC_STRUCT_FRAME;
     picture.inputTimeStamp = ptsUs; picture.inputDuration = uint64_t(1000000 / fps_); picture.frameIdx = uint32_t(frameCount_ & UINT32_MAX);
     if (forceIdr) picture.encodePicFlags = NV_ENC_PIC_FLAG_FORCEIDR | NV_ENC_PIC_FLAG_OUTPUT_SPSPPS;
+    auto& longTerm = picture.codecPicParams.h264PicParams;
+    if (mark) { longTerm.ltrMarkFrame = 1; longTerm.ltrMarkFrameIdx = *mark; }
+    if (from) { longTerm.ltrUseFrames = 1; longTerm.ltrUseFrameBitmap = uint32_t(1) << *from; }
     state_->pictureMayBePending = true;
     const NVENCSTATUS submitted = api.nvEncEncodePicture(state_->encoder, &picture);
     // Queued/delayed pictures cannot be replayed honestly by this synchronous
@@ -366,7 +386,7 @@ class NvencEncoder final : public EncoderImplementation {
     if (locked.expired) throw Failure(encoderGpuOutputTimeout, "GPU H264 output lock did not complete before its deadline",
       observedFailure(EncoderGpuFailureSite::nvencOutputLock, locked.nativeStatus));
     requireNv(NVENCSTATUS(locked.nativeStatus), encoderGpuOutputContract, "Read GPU H264 output", EncoderGpuFailureSite::nvencOutputLock);
-    Frame frame;
+    Frame frame; const NvencLongTermOutput marking{encoded.ltrFrame != 0, encoded.ltrFrameIdx, encoded.ltrFrameBitmap}; bool honored = true;
     try {
       const auto metadata = nvencOutputMetadataFailure(encoded.bitstreamBufferPtr != nullptr,
         encoded.bitstreamSizeInBytes, encoderMaximumFrameBytes, encoded.outputTimeStamp, ptsUs, uint32_t(encoded.pictureType));
@@ -387,37 +407,46 @@ class NvencEncoder final : public EncoderImplementation {
         failureDetail(EncoderGpuFailureSite::nvencOutputHeaders));
       if (unit.sps && unit.spsProfile != 66) throw Failure(encoderGpuOutputContract, "GPU H264 Baseline profile is missing",
         failureDetail(EncoderGpuFailureSite::nvencOutputBaseline));
+      honored = nvencRecoveryHonored(from, unit.idr, marking);
+      // The level the encoder was opened at: its DPB holds what that level allows (widenReferences).
+      if (unit.sps && !level_) level_ = unit.spsLevel;
       frame.bytes.assign(bytes.begin(), bytes.end()); frame.ptsUs = ptsUs; frame.key = unit.idr;
     } catch (...) { api.nvEncUnlockBitstream(state_->encoder, slot.output); throw; }
     requireNv(api.nvEncUnlockBitstream(state_->encoder, slot.output), encoderGpuOutputContract, "Release GPU H264 output", EncoderGpuFailureSite::nvencOutputUnlock);
     state_->pictureMayBePending = false;
-    if (history_) history_->encoded(ptsUs, frame.key);
+    if (!honored) { if (state_->observation) state_->observation->output(); return false; }
+    if (longTerm_) {
+      // A mark the encoder did not make ends the use of that slot; a frame it marked is in it.
+      const auto marked = nvencMarkedSlot(mark, marking);
+      if (mark && !marked) longTerm_->refused(*mark);
+      longTerm_->encoded(ptsUs, frame.key, marked);
+    }
     output.push_back(std::move(frame));
     if (state_->observation) state_->observation->output();
     // GPU inventory and successful initialization alone never set this flag.
     info_.hardwareVerified = true; havePts_ = true; lastPts_ = ptsUs; ++frameCount_; keyRequested_ = false;
-  }
- public:
-  // NVENC marks each stale reference, and what was reconstructed from it, unusable, and codes
-  // the next frame from older ones, intra when none is left (nvEncodeAPI.h). inputTimeStamp
-  // is the PTS, so the client's PTS names the frame.
-  bool recover(uint64_t lastGood) override {
-    const auto stale = history_ ? history_->after(lastGood) : std::nullopt;
-    if (!stale) return false;
-    for (const uint64_t pts : *stale) if (state_->api.nvEncInvalidateRefFrames(state_->encoder, pts) != NV_ENC_SUCCESS) return false;
     return true;
   }
-  // The larger DPB through a reconfiguration that resets the encoder at an IDR (NVIDIA lists
-  // GOP, sync mode, maximum size and PTD as what cannot change; not run on a GPU here). A
-  // refusal keeps the running configuration: every LOSS then costs an IDR, as before.
+ public:
+  // The next picture is a P-frame coded only from a long-term reference frame the client
+  // holds (submit). False when no slot holds one: the caller asks for an IDR.
+  bool recover(uint64_t lastGood) override {
+    recoverFrom_ = longTerm_ ? longTerm_->recover(lastGood) : std::nullopt;
+    return recoverFrom_.has_value();
+  }
+  // Long-term references through a reconfiguration that resets the encoder at an IDR (NVIDIA
+  // lists GOP, sync mode, maximum size and PTD as what cannot change). A refusal keeps the
+  // running configuration: every LOSS then costs an IDR.
   bool widenReferences() override {
-    if (history_ || !nvencRecovers(caps_)) return false;
-    auto next = config_; nvencStreamingConfig(next, width_, height_, fps_, bitrate_, caps_, true);
+    const int forced = nvenctesting::longTermSlots.load();
+    const int slots = forced ? forced : nvencLongTermSlots(caps_, level_, width_, height_);
+    if (longTerm_ || longTermEnded_ || slots <= 0) return false;
+    auto next = config_; nvencStreamingConfig(next, fps_, bitrate_, slots);
     NV_ENC_RECONFIGURE_PARAMS request{}; request.version = NV_ENC_RECONFIGURE_PARAMS_VER; request.reInitEncodeParams = init_; request.reInitEncodeParams.encodeConfig = &next;
     request.resetEncoder = 1; request.forceIDR = 1;
     if (state_->api.nvEncReconfigureEncoder(state_->encoder, &request) != NV_ENC_SUCCESS) return false;
     config_ = next; init_.encodeConfig = &config_; keyRequested_ = true;
-    history_.emplace(config_.encodeCodecConfig.h264Config.maxNumRefFrames);
+    longTerm_.emplace(size_t(slots));
     return true;
   }
   void finish(std::vector<Frame>&) override { /* Every accepted input already produced its exact output. */ }
@@ -437,9 +466,11 @@ class NvencEncoder final : public EncoderImplementation {
  private:
   std::unique_ptr<State> state_;
   int width_, height_, fps_, bitrate_;
-  bool dynamicBitrate_ = false, keyRequested_ = false, havePts_ = false, sharedDevice_ = false, textureInput_ = false;
+  bool dynamicBitrate_ = false, keyRequested_ = false, havePts_ = false, sharedDevice_ = false, textureInput_ = false, longTermEnded_ = false;
+  uint8_t level_ = 0;  // level_idc of the first SPS
   NvencCaps caps_;
-  std::optional<ReferenceHistory> history_;  // only once widened (widenReferences)
+  std::optional<LongTermReferences> longTerm_;  // only once a client sent a LOSS (widenReferences)
+  std::optional<uint32_t> recoverFrom_;         // the slot the next picture answers a LOSS from
   uint64_t frameCount_ = 0, lastPts_ = 0;
   NV_ENC_CONFIG config_{};
   NV_ENC_INITIALIZE_PARAMS init_{};

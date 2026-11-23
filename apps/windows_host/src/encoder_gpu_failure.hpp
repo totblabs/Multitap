@@ -18,7 +18,7 @@ enum class EncoderGpuFailureSite : uint32_t {
   nvencOutputHardwareStatus = 112, nvencOutputBuffer = 113,
   nvencOutputTimestamp = 114, nvencOutputPictureType = 115,
   nvencOutputBaseline = 116, nvencOutputHeaders = 117,
-  nvencOutputForcedIdr = 118,
+  nvencOutputForcedIdr = 118, nvencOutputLongTerm = 119,
 };
 inline constexpr bool validEncoderGpuFailureSite(uint32_t site) {
   // Fixed provider ranges; unused slots stay reserved for source-defined
