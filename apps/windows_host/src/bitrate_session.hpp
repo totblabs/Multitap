@@ -77,9 +77,9 @@ class AdaptiveBitrateSession {
     udp_ = on; if (controller_) controller_->pathChanged();
   }
   // Datagrams since the last call; the pacing target that follows, 0 with no controller.
-  int udpFeedback(uint64_t rttUs, uint32_t received, uint32_t lost) {
+  int udpFeedback(uint64_t rttUs, uint32_t received, uint32_t lost, uint32_t arrivedBytes = 0, uint32_t sentBytes = 0) {
     std::lock_guard lock(mutex_); if (!controller_) return 0;
-    apply(controller_->udpFeedback(micros(), rttUs, received, lost)); return controller_->target();
+    apply(controller_->udpFeedback(micros(), rttUs, received, lost, arrivedBytes, sentBytes)); return controller_->target();
   }
   void udpBacklog() { std::lock_guard lock(mutex_); if (controller_) apply(controller_->udpBacklog(micros())); }
   void written(size_t bytes) {

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.38 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.39 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -620,6 +620,10 @@ add_executable(MultitapHostBrokerRouteTest EXCLUDE_FROM_ALL src/broker_route_tes
 target_compile_options(MultitapHostBrokerRouteTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # UDP media core (native/windows_video/udp_media*.hpp): vectors, framing, repair logic and a simulated link. No sockets.
 add_executable(MultitapHostUdpMediaTest EXCLUDE_FROM_ALL src/udp_media_test.cpp)
+# The UDP media core and the bitrate controller in one loop over a modelled link (a rate, a queue, a round trip).
+add_executable(MultitapHostUdpRateLoopTest EXCLUDE_FROM_ALL src/udp_rate_loop_test.cpp)
+target_compile_definitions(MultitapHostUdpRateLoopTest PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_options(MultitapHostUdpRateLoopTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostUdpDirectTest EXCLUDE_FROM_ALL src/udp_direct_test.cpp)
 add_executable(MultitapHostUdpTrackMediaTest EXCLUDE_FROM_ALL ../../native/windows_video/udp_track_media_test.cpp)
 target_compile_options(MultitapHostUdpTrackMediaTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)

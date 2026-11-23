@@ -77,7 +77,7 @@ if (-not $SkipTests) {
     # UDP media and the automatic rate: none ran here before 1.1.37; two had failed unseen since before 1.1.55.
     'MultitapHostUdpMediaTest','MultitapHostUdpMediaPathTest','MultitapHostUdpMediaLoopbackTest','MultitapHostUdpProbeTest','MultitapHostUdpProbeLoopbackTest',
     'MultitapHostUdpDirectTest','MultitapHostUdpDirectLoopbackTest','MultitapHostUdpTrackMediaTest','MultitapHostUdpTracksSessionTest','MultitapHostUdpTracksLoopbackTest',
-    'MultitapHostBitrateControllerTest')
+    'MultitapHostBitrateControllerTest','MultitapHostUdpRateLoopTest')
   & $cmake --build $tree --config Release --parallel $Parallel --target @tests; if ($LASTEXITCODE) { throw 'test build failed' }
   foreach ($t in $tests) { & (Join-Path $tree "$t.exe") | Out-Null; if ($LASTEXITCODE) { throw "test failed: $t" }; "ok $t" }
 }

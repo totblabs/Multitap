@@ -57,9 +57,9 @@ struct Client {
 };
 struct Link {
   int keyFrames=0,backlogs=0,inputs=0,target=20000000;std::vector<bool> paths;std::vector<std::pair<uint32_t,uint32_t>> records;std::vector<uint32_t> causes;std::vector<uint64_t> recoveries;
-  struct Sample {uint64_t rtt;uint32_t received,lost;};std::vector<Sample> samples;
+  struct Sample {uint64_t rtt;uint32_t received,lost;};std::vector<Sample> samples;std::vector<std::pair<uint32_t,uint32_t>> arrived;  // per FEEDBACK: bytes arrived, bytes sent
   UdpMediaPath path;Client client;uint64_t now=10000000,upDelayUs=0;size_t wire=0;bool upCut=false,downCut=false,wssFeedback=false;std::function<bool(size_t)> dropDown;std::deque<std::pair<uint64_t,Bytes>> flying;
-  UdpMediaHooks hooks(){UdpMediaHooks out{[this]{++keyFrames;},[this](uint64_t rtt,uint32_t received,uint32_t lost){samples.push_back({rtt,received,lost});return target;},[this]{++backlogs;},[this](bool onUdp){paths.push_back(onUdp);return target;},[this](uint64_t lastGood){recoveries.push_back(lastGood);}};out.input=[this](uint32_t,uint16_t,const std::string&){++inputs;};return out;}
+  UdpMediaHooks hooks(){UdpMediaHooks out{[this]{++keyFrames;},[this](uint64_t rtt,uint32_t received,uint32_t lost,uint32_t arrivedBytes,uint32_t sentBytes){samples.push_back({rtt,received,lost});arrived.push_back({arrivedBytes,sentBytes});return target;},[this]{++backlogs;},[this](bool onUdp){paths.push_back(onUdp);return target;},[this](uint64_t lastGood){recoveries.push_back(lastGood);}};out.input=[this](uint32_t,uint16_t,const std::string&){++inputs;};return out;}
   explicit Link(bool direct=false):path(hostLeg,hooks(),[this](uint32_t stage,uint32_t reason,uint32_t cause){records.push_back({stage,reason});causes.push_back(cause);},direct){}
   void step(int milliseconds=1){
     for(int n=0;n<milliseconds;++n){
@@ -214,6 +214,19 @@ void fallback(){
     play(link,2000,pts);require(link.stat("udpPath")==1,"Fixture: the hold");link.wssFeedback=true;const auto back=link.now;
     uint64_t left=0;for(int ms=0;ms<2500&&!left;ms+=16){pts+=16667;if(!route(link,video(pts)))left=link.now;link.step(16);}
     require(left&&left-back<=1300000&&link.records.back()==std::pair{udpPathOnWss,uint32_t(udpPathSilent)},"UDP stayed dead under a live WSS and did not leave");++passed;}
+  // Datagrams arrive but no picture is made whole (the path carries a fraction of what is sent): a key frame
+  // again, twice, each with its own second, and only then WebSocket. Each try is recorded as held, cause 3.
+  {Link link;auto pts=onUdp(link);play(link,500,pts);link.step(100);link.dropDown=[](size_t n){return n%8!=0;};const int before=link.keyFrames;const auto cut=link.now;
+    uint64_t left=0;for(int ms=0;ms<6000&&!left;ms+=16){pts+=16667;if(!route(link,video(pts,false,12000)))left=link.now;link.step(16);}
+    const auto tries=std::count(link.records.begin(),link.records.end(),std::pair{udpPathHeld,uint32_t(udpPathSilent)});
+    require(left&&tries==2&&link.causes.back()==3&&link.records.back()==std::pair{udpPathOnWss,uint32_t(udpPathSilent)},"A path that carries a fraction did not get its two key frames before WebSocket");
+    require(left-cut>=2700000&&left-cut<=3700000&&link.keyFrames>=before+3,"The tries did not each get a second, or asked for no key frame");++passed;}
+  // The same, but the path carries the stream again during the first try: UDP stays, and the tries are whole again for the next time.
+  {Link link;auto pts=onUdp(link);play(link,500,pts);link.step(100);link.dropDown=[](size_t n){return n%8!=0;};
+    for(int ms=0;ms<1400;ms+=16){pts+=16667;require(route(link,video(pts,false,12000)),"The first try left UDP");link.step(16);}
+    require(std::count(link.records.begin(),link.records.end(),std::pair{udpPathHeld,uint32_t(udpPathSilent)})==1,"Fixture: one try");
+    link.dropDown=nullptr;pts+=1000;require(route(link,video(pts,true)),"The key frame of the try left UDP");play(link,3000,pts);
+    require(link.stat("udpPath")==1&&link.stat("udpFallbacks")==0,"A path that came back during a try still left UDP");++passed;}
   // Every other reason records no cause.
   {Link link;onUdp(link);require(link.causes==std::vector<uint32_t>{0},"The switch to UDP carried a cause");++passed;}
 }
@@ -358,6 +371,17 @@ void bitrate(){
    asked.path.received(asked.client.seal(keyframePlain(1)),asked.now);asked.step(5);
    require(asked.keyFrames==before+1&&asked.stat("udpClientKeys")==1&&asked.stat("udpBacklogKeys")==0,"A client KEYFRAME request was not counted");++passed;}
 }
+// What arrived, for the rate controller: the bytes sent since the last FEEDBACK and the share of them the client counted.
+void arrival(){
+  Link link;auto pts=onUdp(link);link.arrived.clear();
+  for(int n=0;n<60;++n){pts+=16667;route(link,video(pts,false,24000));link.step(16);}
+  uint64_t sent=0,got=0;for(size_t n=2;n<link.arrived.size();++n){got+=link.arrived[n].first;sent+=link.arrived[n].second;}
+  require(link.arrived.size()>=8&&sent>=1000000&&double(got)>=0.93*double(sent)&&double(got)<=1.07*double(sent),"A clean path did not report about everything sent as arrived");
+  link.dropDown=[](size_t n){return n%2==0;};link.arrived.clear();
+  for(int n=0;n<40;++n){pts+=16667;route(link,video(pts,false,24000));link.step(16);}
+  sent=got=0;for(size_t n=2;n<link.arrived.size();++n){got+=link.arrived[n].first;sent+=link.arrived[n].second;}
+  require(sent>=300000&&double(got)>=0.4*double(sent)&&double(got)<=0.6*double(sent),"Half the datagrams lost was not reported as half arrived");++passed;
+}
 void statistics(){
   Link link;const auto clean=textBytes(R"({"type":"stream.stats","encodedFps":60})");auto text=clean;link.path.probePassed();link.step(5);require(!link.path.outgoing(true,text)&&text==clean,"Stats changed with no key exchange");
   auto other=textBytes(R"({"type":"stream.info"})");require(!link.path.outgoing(true,other),"Text was taken");
@@ -385,7 +409,7 @@ void sessionSignals(){
 }
 int main(){
   try{
-    for(const auto& scenario:{exchangeRules,proofRequired,switching,firstIdrStaysOnWss,directInputGates,staleProof,fallback,retry,legEnds,tooLarge,stalledLeg,hostile,keyframeRequests,lossAnswers,bitrate,statistics,exhausted,sessionSignals})scenario();
+    for(const auto& scenario:{exchangeRules,proofRequired,switching,firstIdrStaysOnWss,directInputGates,staleProof,fallback,retry,legEnds,tooLarge,stalledLeg,hostile,keyframeRequests,lossAnswers,bitrate,arrival,statistics,exhausted,sessionSignals})scenario();
     std::cout<<"{\"kind\":\"udp-media-path\",\"passed\":"<<passed<<",\"link\":\"simulated\",\"sockets\":false}\n";return 0;
   }catch(const std::exception& error){std::cerr<<"UDP media path check failed: "<<error.what()<<"\n";return 1;}
 }

@@ -446,6 +446,54 @@ int main(int argc, char** argv) {
       // Round trips and arrival clocks are different numbers: neither floor survives a change of path.
       { Udp u; u.run(30, 200000, 400, 0); u.controller.pathChanged(); const int before = u.controller.target(); u.run(10, 2000, 400, 0); u.cuts = 0; u.run(10, 8000, 400, 0); require(u.cuts == 0 && u.controller.target() >= before, "UDP: a new path inherited the old floor"); }
       std::cout << "{\"kind\":\"bitrate-controller-udp\",\"passed\":9}\n";
+      // What arrived (arrivedBytes against sentBytes), the remembered limit and the way back after a deep cut.
+      // One report: 100 ms of video at the target, `share` of its bytes arrived, `lost` datagrams given up.
+      struct Told {
+        host::BitrateController controller{50000000, 100000000}; uint64_t now = 1000000, pts = 0;
+        Told() { controller.geometry(1920, 1080, 60); controller.pathChanged(); run(20, 1, 0); }
+        void run(int reports, double share, uint64_t lost, uint64_t rttUs = 20000) {
+          for (int n = 0; n < reports; ++n) {
+            for (int frame = 0; frame < 6; ++frame) { now += 16667; controller.sent(now, true, 1, pts += 16667, size_t(double(controller.target()) / 8 / 60)); }
+            const uint64_t sent = uint64_t(double(controller.target()) / 80), datagrams = sent / 1200;
+            (void)controller.udpFeedback(now, rttUs, datagrams - std::min(lost, datagrams), lost, uint64_t(double(sent) * share), sent);
+          }
+        }
+      };
+      {  // Late loss reports while everything sent arrives: the episode is over, 5 %, not the share reported lost.
+        Told t; const int before = t.controller.target(); t.run(1, 1, 150); t.run(1, 1, 150);
+        require(t.controller.target() >= int(0.8 * before) && t.controller.target() < before, "Arrival: reports of an episode already over cut deep");
+      }
+      {  // Two reports in a row with 40 % arrived: the path carries that, decided on the second report, with or without a second lossy one.
+        Told t; const int before = t.controller.target(); t.run(1, 0.4, 0); t.run(1, 0.4, 60);
+        require(t.controller.target() <= int(0.42 * before) && t.controller.target() >= int(0.33 * before), "Arrival: a path that carries 40 % was not cut to it at the first report of loss");
+      }
+      {  // One short report between two whole ones is a blip: at most the 15 % of one report with loss.
+        Told t; const int before = t.controller.target(); t.run(1, 1, 0); t.run(1, 0.3, 40);
+        require(t.controller.target() >= int(0.84 * before), "Arrival: one short report cut like a path that carries less");
+      }
+      {  // Almost nothing arrives: an outage is no capacity. At most 15 %, once, however long it lasts.
+        Told t; const int before = t.controller.target(); t.run(8, 0.02, 200);
+        require(t.controller.target() >= int(0.84 * before), "Arrival: an outage was cut like a capacity");
+      }
+      {  // The way back: a deep cut, then a clear path. Half the old rate at once, 90 % of it within three seconds.
+        Told t; const int before = t.controller.target(); t.run(1, 0.2, 0); t.run(1, 0.2, 100); const int cut = t.controller.target();
+        require(cut <= int(0.35 * before), "Way back: fixture, the deep cut");
+        t.run(13, 1, 0); require(t.controller.target() >= int(0.5 * before), "Way back: a clear second after a deep cut did not bring half the rate back");
+        t.run(20, 1, 0); require(t.controller.target() >= int(0.88 * before), "Way back: the rate from before a dip was not back within three seconds");
+      }
+      {  // The change lasts: the try is cut, and no second try follows it for ten seconds (plain probing only).
+        Told t; const int before = t.controller.target(); t.run(1, 0.2, 0); t.run(1, 0.2, 100); t.run(13, 1, 0);
+        require(t.controller.target() >= int(0.5 * before), "Way back: fixture, the try");
+        t.run(1, 0.4, 0); t.run(1, 0.4, 100); const int again = t.controller.target(); t.run(11, 1, 0);
+        require(again <= int(0.3 * before) && t.controller.target() <= int(1.25 * again), "Way back: a failed try was tried again at once");
+      }
+      {  // The later cuts of one episode start from a rate already cut. The rate is not held at what they left
+         // (field 2026-11-23: minutes at the floor of a path that carried 58 Mbps).
+        Told t; const int before = t.controller.target(); t.run(1, 0.6, 0); t.run(1, 0.6, 80); t.run(4, 1, 0); t.run(1, 1, 40); t.run(1, 1, 40);
+        const int low = t.controller.target(); require(low < int(0.62 * before), "Limit: fixture, the cuts");
+        t.run(60, 1, 0); require(t.controller.target() >= int(0.9 * before), "Limit: the rate stayed where the later cuts of one episode left it");
+      }
+      std::cout << "{\"kind\":\"bitrate-controller-arrival\",\"passed\":7}\n";
     }
     udpLossPatterns();
     std::cout << "{\"kind\":\"bitrate-controller-sim-summary\",\"passed\":true,\"simulatedLink\":true,\"realRelay\":false,\"realEncoder\":false}\n";

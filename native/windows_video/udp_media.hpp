@@ -386,7 +386,8 @@ class Sender {
   struct Admission { bool queued = false, requestKey = false, tooLarge = false; };
   // loss: a LOSS to act on, with the message ID given up and the decoder's newest frame.
   struct Control { bool feedback = false, keyFrame = false, loss = false; uint16_t epoch = 0; uint32_t highestWhole = 0, received = 0, lost = 0, lostId = 0; uint64_t rttUs = 0, lastGood = 0; };
-  struct Stats { uint64_t datagrams = 0, videoBytes = 0, repairs = 0, repairBytes = 0, refused = 0, tails = 0, mergedKeys = 0, recoveries = 0; };
+  // wireBytes: every datagram emitted (media, repairs, TAIL), as it goes on the wire.
+  struct Stats { uint64_t datagrams = 0, videoBytes = 0, repairs = 0, repairBytes = 0, refused = 0, tails = 0, mergedKeys = 0, recoveries = 0, wireBytes = 0; };
 
   Sender(int targetBps, uint64_t nowUs, std::function<uint64_t()> random)
       : random_(std::move(random)), at_(nowUs), alive_(nowUs), proofAt_(nowUs), challengeAt_(nowUs), challenge_(random_()) { setTarget(targetBps); budget_ = budgetLimit(); credit_ = creditLimit(); }
@@ -447,14 +448,14 @@ class Sender {
     if (stopped_) return false;
     refill(nowUs); expire(nowUs);
     if (tailAt_ && nowUs >= tailAt_ && !queue_.empty()) tailAt_ = 0;  // a newer message is starting
-    if (nowUs >= proofAt_ || (tailAt_ && nowUs >= tailAt_)) { tail(nowUs, out); return emitted(); }
+    if (nowUs >= proofAt_ || (tailAt_ && nowUs >= tailAt_)) { tail(nowUs, out); return emitted(out); }
     // The target is a video rate; audio stays outside it, as in BitrateController.
     if (!audio_.empty()) {
       Item& item = audio_.front();
       if (!item.sent) item.id = audioId_++;
       writeFragment(out, classAudio, item.id, item.bytes, item.sent);
       if (++item.sent == item.count) audio_.pop_front();
-      return emitted();
+      return emitted(out);
     }
     while (!repairs_.empty()) {
       const Repair repair = repairs_.front();
@@ -463,7 +464,7 @@ class Sender {
       writeFragment(out, item->recovery ? classRecovery : classVideo, repair.id, item->bytes, repair.index);
       if (!charge(out.size)) return false;
       repairs_.pop_front(); ++stats_.repairs; stats_.repairBytes += out.size + headerBytes + tagBytes;
-      return emitted();
+      return emitted(out);
     }
     if (queue_.empty()) return false;
     Item& item = queue_.front();
@@ -477,7 +478,7 @@ class Sender {
       kept_.push_back(std::move(item)); queue_.pop_front();
       tailAt_ = nowUs + tailFirstUs; tailsLeft_ = 2;
     }
-    return emitted();
+    return emitted(out);
   }
 
   // Back to WSS at a forced IDR. The contract's rule is FEEDBACK silence, but
@@ -538,7 +539,7 @@ class Sender {
     if (tailAt_ && nowUs >= tailAt_) tailAt_ = tailsLeft_-- > 1 ? nowUs + tailSecondUs : 0;
     proofAt_ = nowUs + proofTailUs; ++stats_.tails;
   }
-  bool emitted() { ++sent_; ++stats_.datagrams; return true; }
+  bool emitted(const Plain& out) { ++sent_; ++stats_.datagrams; stats_.wireBytes += out.size + headerBytes + tagBytes; return true; }
   const Item* find(uint32_t id) const {
     for (const auto& item : kept_) if (item.id == id) return &item;
     return !queue_.empty() && queue_.front().sent && queue_.front().id == id ? &queue_.front() : nullptr;

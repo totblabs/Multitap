@@ -29,8 +29,9 @@ enum UdpPathReason:uint32_t{udpPathProven=1,udpPathNewStream=2,udpPathSilent=3,u
 struct UdpMediaHooks {
   std::function<void()> keyFrame;
   // FEEDBACK while on UDP: round trip (0 none), datagrams received and lost since the
-  // last one. Returns the pacing target.
-  std::function<int(uint64_t,uint32_t,uint32_t)> feedback;
+  // last one, then the wire bytes of what was received (the count at the mean size of what
+  // was sent) and of what was sent since the last one. Returns the pacing target.
+  std::function<int(uint64_t,uint32_t,uint32_t,uint32_t,uint32_t)> feedback;
   std::function<void()> backlog;
   std::function<int(bool)> path;  // media is now on UDP or not; the pacing target
   // A LOSS: every frame after this PTS is lost to the client's decoder. The next frame
@@ -133,7 +134,12 @@ class UdpMediaPath {
     if(control.feedback){
       feedbackAt_=nowUs;
       const uint32_t arrived=control.received-received_,lost=control.lost-lost_;received_=control.received;lost_=control.lost;
-      if(onUdp_){std::lock_guard lock(hookMutex_);if(hooks_.feedback)if(const int target=hooks_.feedback(control.rttUs,arrived,lost);target>0)sender_->setTarget(target);}
+      // What was sent since the last FEEDBACK, and its mean datagram: the client counts datagrams, the rate
+      // controller wants what arrived as a rate (bitrate_controller.hpp, arrival).
+      const auto& sent=sender_->stats();const uint64_t wire=sent.wireBytes-wireAt_,count=sent.datagrams-datagramsAt_;wireAt_=sent.wireBytes;datagramsAt_=sent.datagrams;
+      if(count)meanDatagram_=double(wire)/double(count);
+      const auto bytes=[](double value){return uint32_t(std::clamp(value,0.0,double(UINT32_MAX)));};
+      if(onUdp_){std::lock_guard lock(hookMutex_);if(hooks_.feedback)if(const int target=hooks_.feedback(control.rttUs,arrived,lost,bytes(double(arrived)*meanDatagram_),bytes(double(wire)));target>0)sender_->setTarget(target);}
     }
     // The Sender merges requests only once a key frame reaches it, so the encoder's gap
     // before that needs this limit: a client holding the keys must not turn this into
@@ -210,7 +216,7 @@ class UdpMediaPath {
   uint16_t epoch(){std::lock_guard lock(mutex_);return epoch_;}
   void askKeyFrame(){std::lock_guard lock(hookMutex_);if(hooks_.keyFrame)hooks_.keyFrame();}
   void apply(const Change& change,uint64_t nowUs){
-    onUdp_=change.onUdp;
+    onUdp_=change.onUdp;silentRetries_=0;
     if(change.onUdp)switchedAt_=nowUs;
     else if(change.reason!=udpPathNewStream){++fallbacks_;backoff_.failed(nowUs);}
     if(change.needsKey)askKeyFrame();
@@ -247,9 +253,14 @@ class UdpMediaPath {
         if(dark){if(!holding_){holding_=true;if(record_)record_(udpPathHeld,udpPathSilent,cause);}}
         // Heard again: video gets the second a switch gets for its key frame.
         else if(holding_){holding_=false;switchedAt_=nowUs;}
+        // Datagrams arrive but no picture was made whole (cause 3): the path carries less than was sent, and the
+        // rate has been cut by now. Once more from a key frame at that rate, udpSilentRetries times, before the
+        // stream leaves for WebSocket and its backoff (30 s and more). Closed loop (udp_rate_loop_test.cpp): a
+        // link that fell to an eighth under a 144 fps game, or was gone for 1.5 s, cost 30 to 60 s away from UDP.
+        else if(cause==3&&silentRetries_<udpSilentRetries){++silentRetries_;switchedAt_=nowUs;sender_->recovering(nowUs);askKeyFrame();if(record_)record_(udpPathHeld,udpPathSilent,cause);}
         else leave(udpPathSilent,nowUs,false,cause);
       }
-      else holding_=false;
+      else{holding_=false;if(nowUs-switchedAt_>=udpcore::feedbackSilenceUs)silentRetries_=0;}
       return;
     }
     const bool fresh=feedbackAt_&&nowUs-feedbackAt_<udpcore::feedbackSilenceUs;bool ask=false;
@@ -280,5 +291,7 @@ class UdpMediaPath {
   std::unique_ptr<udpcore::Sender> sender_;std::unique_ptr<udpcore::Sealer> sealer_;std::unique_ptr<udpcore::Opener> opener_;
   udpcore::ProbeBackoff backoff_;std::array<uint8_t,udpcore::maxDatagram> datagram_{};
   bool onUdp_=false,over_=false,holding_=false;uint64_t switchedAt_=0,feedbackAt_=0,keyFrameAt_=0,lossAt_=0;uint32_t received_=0,lost_=0;
+  static constexpr int udpSilentRetries=2;int silentRetries_=0;
+  uint64_t wireAt_=0,datagramsAt_=0;double meanDatagram_=1200;  // the sender's counters at the last FEEDBACK
 };
 }

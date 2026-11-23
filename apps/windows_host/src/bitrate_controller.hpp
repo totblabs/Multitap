@@ -67,7 +67,29 @@ class BitrateController {
   // doubles while the loss keeps coming at the same rate (2 s up to 32 s), climbs gently,
   // and a try that passes it by 5 % without loss moves it up (the path carries more now).
   // Five minutes without loss forget it.
+  // What arrived. A datagram given up is reported 60-600 ms after it was lost, and all at once, so
+  // the loss share of a report says when to act but little about how far (closed loop,
+  // udp_rate_loop_test.cpp: a link that halved under a game was followed in over a second, long
+  // enough for the stream to count as silent and leave UDP for its 30 s backoff). The share of what
+  // was sent that arrived, over this report and the one before it, says how far: a cut goes to
+  // arrivalDrain of it. Two reports in a row under arrivalShort are a path that carries less, not a
+  // blip, and are decided at once. Under arrivalBlackout almost nothing arrives: an outage is no
+  // capacity, the rate is held for when the path is back. A report needs arrivalMinimumBytes sent
+  // to mean anything.
+  static constexpr double arrivalShort = 0.8, arrivalDrain = 0.95, arrivalBlackout = 0.1;
+  static constexpr uint64_t arrivalMinimumBytes = 30000;
   static constexpr double ceilingMargin = 0.97, ceilingRepeat = 1.1, ceilingPassed = 1.05;
+  // Only a loss within ceilingRepeat of the limit, either way, is the same limit again (a longer
+  // wait): one at a rate far below it is another limit, with the first wait. Closed loop
+  // (udp_rate_loop_test.cpp) and field 2026-11-23: after one 300 ms dip the later cuts of the same
+  // episode set the limit to the reduced rate, each counted as a repeat and doubled the wait, so
+  // a path that carried 58 Mbps stayed at its floor for minutes.
+  // A cut to under restoreDeep of the rate before it is as likely a dip as a lasting change, and the
+  // only way to know is to try: once the path is clear again the rate goes back to half of that
+  // rate at once and on at restoreStep per 100 ms up to restoreShare of it. A cut on the way ends
+  // it, and none starts for restoreAgainUs after one that failed (the change lasts: plain probing).
+  static constexpr double restoreDeep = 0.7, restoreShare = 0.9, restoreStep = 1.072;
+  static constexpr uint64_t restoreAgainUs = 10000000, restoreMemoryUs = 30000000;
   static constexpr uint64_t ceilingWaitFirstUs = 2000000, ceilingWaitLongestUs = 32000000, ceilingMemoryUs = 300000000;
 
   BitrateController(int start, int maximum, int fps = 60)
@@ -178,14 +200,30 @@ class BitrateController {
     standingDelayUs_ = standingExcessUs_ = relayExcessUs_ = previousExcessUs_ = cutDelayUs_ = 0;
     losses_.clear(); lossSeenUs_ = lossCutUs_ = lossHoldUs_ = 0; lossCutFraction_ = spikeBase_ = 0; lossStuck_ = false;
     lossCeiling_ = 0; lossCeilingAtUs_ = ceilingTryAtUs_ = 0; ceilingWaitUs_ = ceilingWaitFirstUs;
+    udpAtUs_ = 0; arrival_[0] = arrival_[1] = {}; restoreRate_ = 0; restoreAtUs_ = restoreFailedUs_ = 0; restoreJumped_ = false;
   }
   // One UDP FEEDBACK: the round trip (0 when it echoed no TAIL) and the datagrams
   // received and given up since the last. TAIL skips the pacer, so its round trip
   // above its own floor is network queue alone, with no virtual queue to subtract.
   // A repaired datagram is no loss here: only what the deadline gave up on counts.
-  std::optional<int> udpFeedback(uint64_t nowUs, uint64_t rttUs, uint64_t received, uint64_t lost) {
+  // arrivedBytes / sentBytes: the wire bytes of the datagrams the client counted, and what the
+  // sender put on the wire since the last report (0, 0 from a caller that does not know: then
+  // only the counts decide, as before).
+  std::optional<int> udpFeedback(uint64_t nowUs, uint64_t rttUs, uint64_t received, uint64_t lost, uint64_t arrivedBytes = 0, uint64_t sentBytes = 0) {
     drain(nowUs);
     lastFeedbackUs_ = nowUs;
+    // This report and the one before it: what was sent and what of it arrived.
+    arrival_[0] = arrival_[1]; arrival_[1] = {};
+    if (const uint64_t interval = udpAtUs_ ? nowUs - udpAtUs_ : 0; (arrivedBytes || sentBytes) && interval >= 10000 && interval <= 5000000) {
+      delivered_.push_back({interval, arrivedBytes}); while (delivered_.size() > 5) delivered_.pop_front();
+      if (sentBytes >= arrivalMinimumBytes) arrival_[1] = {sentBytes, std::min(arrivedBytes, sentBytes)};
+    }
+    udpAtUs_ = nowUs;
+    const auto shareOf = [](const Arrival& a) { return a.sent ? double(a.arrived) / double(a.sent) : -1.0; };
+    const bool told = arrival_[1].sent != 0;
+    const double share = told ? double(arrival_[0].arrived + arrival_[1].arrived) / double(arrival_[0].sent + arrival_[1].sent) : -1;
+    const bool shortfall = told && arrival_[0].sent && shareOf(arrival_[0]) < arrivalShort && shareOf(arrival_[1]) < arrivalShort;
+    const bool blackout = told && share < arrivalBlackout;
     if (rttUs) { baseline(nowUs, int64_t(rttUs)); standingDelayUs_ = standingExcessUs_ = std::max<int64_t>(0, int64_t(rttUs) - baseline_); delayAtUs_ = nowUs; }
     if (lost) lossSeenUs_ = nowUs;
     losses_.push_back({nowUs, received, lost});
@@ -202,14 +240,19 @@ class BitrateController {
     if (given && (fraction >= lossCut || lossy >= 3) && nowUs >= lossHoldUs_ && !encoderLimited_ && !lossStuck_) {
       const auto cut = [&](double base, double lowest) {
         cutting(true);
+        // How far: the share that arrives now where the caller says it, else the share reported lost.
+        const double factor = std::clamp(told ? share * arrivalDrain : (1 - fraction) * lossDrain, lowest, 0.95);
+        target_ = std::clamp(std::min(target_, base * factor), double(floor_), double(maximum_));
         remember(nowUs, base);
-        target_ = std::clamp(std::min(target_, base * std::clamp((1 - fraction) * lossDrain, lowest, 0.95)), double(floor_), double(maximum_));
+        restoring(nowUs, base);
         lastOveruseUs_ = nowUs; congestionVideo_ = target_; congestionAtUs_ = nowUs;  // probing comes back gently around it
         return publish();
       };
       // One report with loss: a blackout as likely as an overload, so at most 15 % now. A
       // second one decides from the rate before this cut, which is what it still reports.
-      if (lossy < 2) { if (!spikeBase_) { spikeBase_ = target_; return cut(target_, 0.85); } }
+      // (Two short reports in a row are no blip: that is decided now, like a second report.)
+      // Almost nothing arrives: an outage, whatever its reports say. At most that 15 %, once.
+      if (blackout || (lossy < 2 && !shortfall)) { if (!spikeBase_) { spikeBase_ = target_; return cut(target_, 0.85); } }
       // Loss at the level a cut did not lower is the path's own (a radio, an outage), not our
       // rate: more cuts would only ratchet down to the floor. It holds the rate (no probing
       // either) until the loss stops. Much more loss than that is a new event.
@@ -295,9 +338,16 @@ class BitrateController {
   // A loss cut at `lost` (the rate that lost): the same limit again waits twice as long
   // for its next try, a new one starts over.
   void remember(uint64_t nowUs, double lost) {
-    const bool again = lossCeiling_ > 0 && nowUs - lossCeilingAtUs_ < ceilingMemoryUs && lost <= ceilingRepeat * lossCeiling_;
+    const bool again = lossCeiling_ > 0 && nowUs - lossCeilingAtUs_ < ceilingMemoryUs && lost <= ceilingRepeat * lossCeiling_ && lost * ceilingRepeat >= lossCeiling_;
     ceilingWaitUs_ = again ? std::min(2 * ceilingWaitUs_, ceilingWaitLongestUs) : ceilingWaitFirstUs;
     lossCeiling_ = lost; lossCeilingAtUs_ = nowUs; ceilingTryAtUs_ = nowUs + ceilingWaitUs_;
+  }
+  // After every cut: one below restoreDeep of the rate before it arms the way back (decide); one
+  // made while that way back was being taken ends it.
+  void restoring(uint64_t nowUs, double before) {
+    if (restoreRate_ > 0 && restoreJumped_) { restoreRate_ = 0; restoreFailedUs_ = nowUs; return; }
+    if (target_ >= restoreDeep * before || (restoreFailedUs_ && nowUs - restoreFailedUs_ < restoreAgainUs)) return;
+    restoreRate_ = std::max(restoreRate_, before); restoreAtUs_ = nowUs; restoreJumped_ = false;
   }
   // Overflow guard: at most half, and below what the backed-up leg carries.
   void emergency(uint64_t nowUs, double carried = 0) {
@@ -350,6 +400,7 @@ class BitrateController {
     // Two consecutive growing intervals; an overflow-sized queue on one.
     if ((overuseRuns_ >= 2 || (over && excess > burstExcessUs)) && nowUs >= holdUntilUs_) {
       lastOveruseUs_ = nowUs; overuseRuns_ = 0;
+      if (restoreRate_ > 0 && restoreJumped_) { restoreRate_ = 0; restoreFailedUs_ = nowUs; }
       // After a cut the queue drains for a while; cut again only if it is not
       // shrinking (one reaction per congestion event, not per interval).
       if (cutDelayUs_ && excess < cutDelayUs_ * 85 / 100) { cutDelayUs_ = excess; holdUntilUs_ = nowUs + 200000; return publish(); }
@@ -389,6 +440,16 @@ class BitrateController {
     if (idleRestore_ > target_) { target_ = idleRestore_; idleRestore_ = 0; return publish(); }
     const double used = rate(video_, nowUs, 500000);
     if (used < 0.7 * target_) return publish();  // application-limited: no evidence above it
+    // The way back after a deep cut (restoring): the path is clear here, so it was a dip unless the try says otherwise.
+    if (restoreRate_ > 0 && (nowUs - restoreAtUs_ > restoreMemoryUs || target_ >= restoreShare * restoreRate_)) restoreRate_ = 0;
+    if (restoreRate_ > 0) {
+      const double step = target_ * std::pow(restoreStep, double(elapsed) / 100000);
+      target_ = std::min({double(maximum_), restoreShare * restoreRate_, std::max(step, restoreJumped_ ? 0.0 : 0.5 * restoreRate_)});
+      restoreJumped_ = true;
+      if (lossCeiling_ > 0 && target_ >= ceilingPassed * lossCeiling_) { lossCeiling_ = 0; ceilingWaitUs_ = ceilingWaitFirstUs; }  // a limit the episode's later cuts left under it
+      if (target_ >= idleRestore_) idleRestore_ = 0;
+      return publish();
+    }
     // Gentle only around the last congestion rate; past it the path changed.
     bool gentle = congestionVideo_ > 0 && nowUs - congestionAtUs_ < 30000000 && target_ >= 0.9 * congestionVideo_ && target_ <= 1.15 * congestionVideo_;
     // The rate that lost (remember): below it until the next try, then gently past it.
@@ -420,6 +481,9 @@ class BitrateController {
   std::deque<Loss> losses_;  // UDP FEEDBACK of the last lossWindowUs
   uint64_t lossSeenUs_ = 0, lossCutUs_ = 0, lossHoldUs_ = 0; double lossCutFraction_ = 0, spikeBase_ = 0; bool lossStuck_ = false;
   double lossCeiling_ = 0; uint64_t lossCeilingAtUs_ = 0, ceilingTryAtUs_ = 0, ceilingWaitUs_ = ceilingWaitFirstUs;
+  double restoreRate_ = 0; uint64_t restoreAtUs_ = 0, restoreFailedUs_ = 0; bool restoreJumped_ = false;  // restoring
+  struct Arrival { uint64_t sent = 0, arrived = 0; };
+  uint64_t udpAtUs_ = 0; Arrival arrival_[2];  // udpFeedback: the report before this one, and this one
   double undoTarget_ = 0, undoCongestion_ = 0, limitedRestore_ = 0, idleRestore_ = 0;
   int64_t standingDelayUs_ = 0, standingExcessUs_ = 0, relayExcessUs_ = 0, previousExcessUs_ = 0, cutDelayUs_ = 0, baseline_ = 0;
   int overuseRuns_ = 0;

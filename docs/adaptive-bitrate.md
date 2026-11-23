@@ -141,7 +141,38 @@ fed by the UDP leg (`native/windows_video/udp_media.hpp`):
   carried 35–45 Mbps; probing touched the limit about every 2.5 s, and after the
   30 s gentle window climbed to 69–79 Mbps, with bursts of 0.6 s freezes.
   Simulated on a 40 Mbps link for ten minutes: 245 loss episodes before, 17 after.
+- **What arrived decides how far.** A datagram given up is reported 60–600 ms
+  after it was lost, and all at once, so the loss share of a report says when to
+  act but little about how far. The UDP leg therefore also passes, with every
+  `FEEDBACK`, the wire bytes it sent since the last one and the bytes of what the
+  client counted. Where that is known a cut goes to 0.95 × the share that
+  arrived over the last two reports (at least 0.3 ×). Two reports in a row with
+  under 80 % arrived are a path that carries less and are decided at once,
+  without waiting for a second report of loss. Under 10 % arrived is an outage,
+  which is no capacity: at most the 15 % of a single report, once.
+- **The way back after a deep cut.** A cut to under 70 % of the rate before it
+  is as likely a dip as a lasting change. Once the path is clear again (no loss
+  for a second, no queue) the rate returns to half the old rate at once and on
+  at 7.2 % per 100 ms up to 90 % of it. A cut on the way ends it, and none
+  starts for ten seconds after one that failed.
+- **The same limit again** means a loss within 10 % of the remembered rate,
+  above or below. A loss far below it is another limit with the first wait.
+  Before, the later cuts of one episode (each from a rate already cut) counted
+  as repeats, doubled the wait and left the limit at the reduced rate.
 - **Backlog.** Video refused by the UDP pacer triggers the overflow guard.
+
+These three rules come from `udp_rate_loop_test.cpp`, which runs the real
+Sender, Receiver and controller in one loop over a modelled link, and from the
+field on 2026-11-23 (a 144 fps game; the target fell 78.7 → 25 → 8.3 Mbps and
+stayed at its floor for two minutes on a path that carried 45–58 Mbps right
+after). Five 120 s runs of a game, the released 1.2.1 against this version: a
+link that halves for 40 s, 35.6 s stalled and 78 s on WebSocket against 1.7 s
+and none; a link at an eighth, 159 s and 293 s against 12.7 s and none; a
+1.5 s outage, 155 s and 150 s against 8.6 s and none; a 0.3 s dip every six
+seconds, 11 Mbps arrived (the rate never came back) against 43 Mbps. A dip
+itself still freezes the picture for about its length. The UDP leg also tries
+a key frame again, twice, before it leaves for WebSocket when datagrams arrive
+but no picture is made whole (`udp_media_path.hpp`).
 
 ## Independent outputs (`bitrate-adaptive-tracks-v1`)
 
