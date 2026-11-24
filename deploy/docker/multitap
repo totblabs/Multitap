@@ -24,6 +24,9 @@ IMAGE_DEFAULT=ghcr.io/totblabs/multitap-broker
 DIR=${MULTITAP_DIR:-/opt/multitap}
 # Where systemd units live (another folder only in tests).
 UNITS=${MULTITAP_UNIT_DIR:-/etc/systemd/system}
+# The kernel's socket buffer limits and where they are kept for the next boot (other folders only in tests).
+KERNEL=${MULTITAP_KERNEL_DIR:-/proc/sys/net/core}
+SYSCTLS=${MULTITAP_SYSCTL_DIR:-/etc/sysctl.d}
 # How many of the copies `multitap update` makes by itself are kept (see backup).
 UPDATE_COPIES=3
 
@@ -168,6 +171,41 @@ case "${1:-}" in restore|address) for arg in "${@:2}"; do case "$arg" in -h|--he
 [ "$(id -u)" = 0 ] || fail "$(t "root로 실행해 주세요." "Run this as root.")"
 [ -f "$DIR/.env" ] && [ -f "$DIR/compose.yaml" ] || fail "$(t "$DIR 에 설치된 Multitap 서버가 없어요." "No Multitap server is installed in $DIR.")"
 
+# The relay's UDP socket asks for 4 MB buffers and the kernel grants what
+# net.core.rmem_max and wmem_max allow: 212992 on a stock kernel, 0.4 MB once
+# doubled. A fast picture overruns that in a few milliseconds, and what does not
+# fit is dropped, the picture and the apps' requests alike. The limit belongs to
+# the machine, not to the container, so it is raised here (never lowered) and
+# kept in $SYSCTLS for the next boot. The server takes it at its next start.
+# 0: raised now. 1: nothing to do. 2: this machine may not set it (a container:
+# its node sets it).
+UDP_BUFFER=8388608
+udp_buffers() {
+  local key now raised=1
+  for key in rmem_max wmem_max; do
+    now=$(cat "$KERNEL/$key" 2>/dev/null || true)
+    case "$now" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$now" -lt "$UDP_BUFFER" ] || continue
+    { printf '%s\n' "$UDP_BUFFER" > "$KERNEL/$key"; } 2>/dev/null || return 2
+    raised=0
+  done
+  [ "$raised" = 0 ] || return 1
+  if [ -d "$SYSCTLS" ]; then
+    printf '%s\n' '# Multitap: the UDP media relay asks for 4 MB socket buffers (deploy/docker/multitap).' \
+      "net.core.rmem_max = $UDP_BUFFER" "net.core.wmem_max = $UDP_BUFFER" > "$SYSCTLS/90-multitap-udp.conf" 2>/dev/null || true
+  fi
+  return 0
+}
+udp_buffers_note() { # says what it did; true when the limit was raised now
+  local result=0
+  udp_buffers || result=$?
+  case "$result" in
+    0) note "$(t "UDP 버퍼 한도를 8 MB로 올렸어요 (net.core.rmem_max, wmem_max)." "Raised the UDP buffer limit to 8 MB (net.core.rmem_max, wmem_max).")"; return 0 ;;
+    2) warn "$(t "UDP 버퍼 한도가 작은데 여기서는 올릴 수 없어요. 화면이 끊길 수 있어요." "The UDP buffer limit is small and cannot be raised from here. The picture may stutter.")"
+       note "$(t "이 컨테이너를 돌리는 서버(Proxmox 노드)에서: sysctl -w net.core.rmem_max=$UDP_BUFFER net.core.wmem_max=$UDP_BUFFER" "On the machine that runs this container (the Proxmox node): sysctl -w net.core.rmem_max=$UDP_BUFFER net.core.wmem_max=$UDP_BUFFER")" ;;
+  esac
+  return 1
+}
 compose() { (cd "$DIR" && docker compose "$@"); }
 # Whether somebody can be asked: the terminal has to open, not only be there
 # (without one /dev/tty still passes the permission tests).
@@ -976,6 +1014,7 @@ case "${1:-status}" in
     ;;
   restart)
     say "$(t "다시 시작해요." "Restarting.")"
+    udp_buffers_note || true
     compose restart broker >/dev/null 2>&1 || fail "$(t "다시 시작하지 못했어요. 기록: multitap logs" "Could not restart. Log: multitap logs")"
     wait_ready || { unusable_policy || true; fail "$(t "다시 시작했지만 서버가 응답하지 않아요. 기록: multitap logs" "Restarted, but the server does not answer. Log: multitap logs")"; }
     ok "$(t "다시 시작했어요." "Restarted.")"
@@ -984,6 +1023,7 @@ case "${1:-status}" in
   stop) compose stop broker >/dev/null 2>&1 && ok "$(t "멈췄어요. 다시 켜려면: multitap start" "Stopped. To start it again: multitap start")" ;;
   start)
     say "$(t "시작해요." "Starting.")"
+    udp_buffers_note || true
     compose up -d >/dev/null 2>&1 || fail "$(t "시작하지 못했어요. 기록: multitap logs" "Could not start. Log: multitap logs")"
     wait_ready || { unusable_policy || true; fail "$(t "시작했지만 서버가 응답하지 않아요. 기록: multitap logs" "Started, but the server does not answer. Log: multitap logs")"; }
     ok "$(t "시작했어요." "Started.")"
@@ -993,7 +1033,18 @@ case "${1:-status}" in
     current=$(version)
     target=${2:-$(newest_version)}
     case "$target" in [0-9]*.[0-9]*.[0-9]*) ;; *) fail "$(t "버전을 알 수 없어요: $target" "Unknown version: $target")" ;; esac
-    if [ "$target" = "$current" ] && running; then ok "$(t "이미 $current이에요." "Already on $current.")"; exit 0; fi
+    if [ "$target" = "$current" ] && running; then
+      ok "$(t "이미 $current이에요." "Already on $current.")"
+      # The release is the same, the machine's limit may not be: a server that
+      # started under the small one keeps its small buffer until it starts again.
+      if udp_buffers_note; then
+        say "$(t "새 한도로 서버를 다시 시작해요. 접속 중인 연결은 끊겨요." "Restarting the server under the new limit. Open connections end.")"
+        compose restart broker >/dev/null 2>&1 || fail "$(t "다시 시작하지 못했어요. 기록: multitap logs" "Could not restart. Log: multitap logs")"
+        wait_ready || fail "$(t "다시 시작했지만 서버가 응답하지 않아요. 기록: multitap logs" "Restarted, but the server does not answer. Log: multitap logs")"
+        ok "$(t "다시 시작했어요." "Restarted.")"
+      fi
+      exit 0
+    fi
     # Without a version the newest public release is the target, and it never
     # takes the server back: a server on a newer release than that one stays.
     # Going back is asked for by name (multitap update 1.2.3).
@@ -1037,6 +1088,7 @@ case "${1:-status}" in
       if knows_policy; then drop_env_seed; else write_env_seed "$policy"; fi
     fi
     step 4 5 "$(t "새 버전 시작" "Starting the new version")"
+    udp_buffers_note || true
     compose up -d --quiet-pull >/dev/null 2>&1 || true
     step 5 5 "$(t "새 버전이 응답하기를 기다려요" "Waiting for the new version to answer")"
     if WAIT_CLOCK=yes wait_ready "$target"; then

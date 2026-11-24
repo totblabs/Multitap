@@ -3282,6 +3282,8 @@ export default {
   "server-access.udpSwitchEnvList": "데스크톱 목록",
   "server-access.udpReach": "지금 세션 {sessions}개 · UDP 포트에 닿은 쪽 {bindings}곳\n한 세션은 앱과 Host 두 쪽이 모두 닿아야 UDP로 보낼 수 있어요.",
   "server-access.udpReachNone": "세션이 연결되면 UDP 포트에 닿는지 여기에 보여요.",
+  "server-access.udpBufferSmall": "UDP 버퍼가 작아요 ({size} MB). 화면이 빠르게 바뀔 때 끊길 수 있어요.\n서버에서 sudo multitap restart 를 실행하면 한도를 올리고 다시 시작해요.",
+  "server-access.udpBufferDropped": "서버가 시작한 뒤 버퍼가 넘쳐 버려진 조각: {count}개",
   "server-access.testSwitchOnly": "저장할 수 있어요.\n주소는 그대로라 서버를 다시 시작하지 않고, 연결도 끊기지 않아요.",
   "server-access.saveSwitchOnly": "주소는 그대로예요.\n서버를 다시 시작하지 않고, 연결도 끊기지 않아요.",
   "server-access.followPublicIp": "공인 IP 따라가기",

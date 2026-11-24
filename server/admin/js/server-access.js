@@ -547,6 +547,12 @@ function udpPanel(ctx, model, snapshot, disabled, repaint) {
   // How many of the sessions that were told the relay's address reach it now: seen before media is turned on.
   const sessions = Number.isInteger(udp?.sessions) && udp.sessions >= 0 ? udp.sessions : null, bindings = Number.isInteger(udp?.bindings) && udp.bindings >= 0 ? udp.bindings : null;
   const reach = !used || sessions === null || bindings === null ? null : sessions > 0 ? t('server-access.udpReach', { sessions, bindings }) : t('server-access.udpReachNone');
+  // The relay's receive buffer as the kernel granted it. It asks for 4 MB; a Linux that allows less
+  // (net.core.rmem_max, 0.2 MB on a stock kernel) drops what a fast picture sends past it.
+  const granted = running && Number.isInteger(udp.socket?.recvBuffer) && udp.socket.recvBuffer > 0 ? udp.socket.recvBuffer : null;
+  const dropped = running && Number.isInteger(udp.socket?.drops) && udp.socket.drops > 0 ? udp.socket.drops : null;
+  const small = used && granted !== null && granted < 4 * 1024 * 1024
+    ? t('server-access.udpBufferSmall', { size: (granted / 1048576).toFixed(1) }) + (dropped ? '\n' + t('server-access.udpBufferDropped', { count: dropped.toLocaleString('en-US') }) : '') : null;
   // One endpoint per address in use; an IPv6 address has none (the relay is IPv4).
   const names = snapshot.applied ? [...new Set(['https', 'http'].filter(kind => snapshot.applied[kind].enabled).flatMap(kind => listOf(snapshot.applied[kind]))
     .map(value => (origin(value, 'https') ?? origin(value, 'http'))?.hostname).filter(name => name && !name.startsWith('[')))] : [];
@@ -565,7 +571,8 @@ function udpPanel(ctx, model, snapshot, disabled, repaint) {
     control,
     endpoints ? el('p', { class: 'field-hint', 'data-access-udp-endpoints': '' }, endpoints) : null,
     derivedPort ? el('p', { class: 'field-hint', 'data-access-udp-router': '' }, t('server-access.udpRouter', { port: derivedPort })) : null,
-    reach ? el('p', { class: 'field-hint', 'data-access-udp-reach': '' }, reach) : null);
+    reach ? el('p', { class: 'field-hint', 'data-access-udp-reach': '' }, reach) : null,
+    small ? el('p', { class: 'server-access-warning', 'data-access-udp-buffer': '' }, small) : null);
 }
 function endpointCard(ctx, model, snapshot, kind, edit, redraw, disabled, { editExtra, settle }) {
   const draft = model.draft[kind], secure = kind === 'https', placeholder = secure ? t('server-access.88') : t('server-access.89');

@@ -1103,10 +1103,39 @@ void lossRecovery() {
     Client c(20000); givenUp(c); const uint64_t asked = c.now; c.clear();
     const auto answer = split(classRecovery, 4, video(40, 5000)); c.feed(answer[0]); c.feed(answer[1]);
     c.at(asked + keyframeIntervalUs); require(!c.controls(kindKeyframe) && !c.controls(kindLoss), "The repeat went while a recovery frame was arriving");
-    Client d(20000); givenUp(d); d.clear(); d.at(d.now + keyframeIntervalUs - 1000);
-    require(!d.controls(kindKeyframe) && !d.controls(kindLoss), "With no answer seen, the repeat went before its interval");
-    d.clear(); d.at(d.now + 1000);
+  }
+  {  // No answer shows at all: the request may be what was lost (field 2026-11-24: 0.58 s freezes, a
+     // lost request and the whole interval). A Host that has not answered a LOSS with a recovery
+     // frame keeps the interval, its answer being an IDR.
+    Client d(20000); givenUp(d); const uint64_t first = d.now; d.clear(); d.at(first + keyframeIntervalUs - 1000);
+    require(!d.controls(kindKeyframe) && !d.controls(kindLoss), "With no recovery frame ever seen, the repeat went before its interval");
+    d.clear(); d.at(first + keyframeIntervalUs);
     require(d.controls(kindLoss) == 1 && d.controls(kindKeyframe) == 1 && d.out.control[0][0] == kindLoss, "The repeat dropped LOSS");
+    // The Host answers with a recovery frame. From then on a LOSS left unanswered is asked again
+    // after three round trips and the Host's time to code a frame (RTT 20 ms: 120 ms), once more
+    // a quarter second on, and then every interval.
+    const auto lose = [](Client& c, uint32_t id, uint64_t pts) { c.feed(split(classVideo, id, video(pts))); const auto lost = split(classVideo, id + 1, video(pts + 10, 5000)); c.feed(lost[0]); c.feed(lost[2]); c.clear(); };
+    d.clear(); d.feed(split(classRecovery, 4, video(40, 3000))); require(d.videos() == 1 && !d.receiver.awaitingKey(), "The answer did not end the wait");
+    lose(d, 5, 50); d.at(d.now + 90000); require(d.controls(kindLoss) == 1, "The next loss was not reported"); const uint64_t second = d.now;
+    d.clear(); d.at(second + 119000); require(!d.controls(kindKeyframe) && !d.controls(kindLoss), "The repeat went before an answer could have come");
+    d.clear(); d.at(second + 120000);
+    require(d.controls(kindLoss) == 1 && d.controls(kindKeyframe) == 1 && d.out.control[0][0] == kindLoss, "A LOSS left unanswered was not asked again after three round trips, or the repeat dropped LOSS");
+    d.clear(); d.at(second + 120000 + 249000); require(!d.controls(kindLoss) && !d.controls(kindKeyframe), "The second repeat went before a quarter second");
+    d.at(second + 120000 + 250000); require(d.controls(kindLoss) == 1 && d.controls(kindKeyframe) == 1, "The second repeat did not go a quarter second on");
+    d.clear(); d.at(second + 370000 + 499000); require(!d.controls(kindLoss) && !d.controls(kindKeyframe), "Later repeats lost their interval");
+    d.at(second + 370000 + 500000); require(d.controls(kindLoss) == 1 && d.controls(kindKeyframe) == 1, "Later repeats stopped");
+    // The next wait starts over at the short repeat, and an answer that visibly arrives still holds it.
+    d.clear(); d.feed(split(classRecovery, 7, video(70, 3000))); require(d.videos() == 1 && !d.receiver.awaitingKey(), "The answer did not end the second wait");
+    lose(d, 8, 80); d.at(d.now + 90000); require(d.controls(kindLoss) == 1, "The third loss was not reported"); const uint64_t third = d.now;
+    d.clear(); const auto answer = split(classRecovery, 10, video(100, 5000)); d.feed(answer[0]);
+    d.at(third + 120000); d.at(third + 370000); require(!d.controls(kindLoss) && !d.controls(kindKeyframe), "The short repeat went while a recovery frame was arriving");
+    // The minimum on a fast path (RTT 8 ms: 84 ms would be under it), the interval on a slow one (RTT 200 ms).
+    Client fast(8000); givenUp(fast); fast.clear(); fast.feed(split(classRecovery, 4, video(40, 3000))); lose(fast, 5, 50);
+    fast.at(fast.now + 60000); require(fast.controls(kindLoss) == 1, "Fixture: no LOSS on the fast path"); const uint64_t asked = fast.now; fast.clear();
+    fast.at(asked + 99000); require(!fast.controls(kindLoss), "The repeat went under its minimum"); fast.at(asked + 100000); require(fast.controls(kindLoss) == 1, "The repeat did not go at its minimum");
+    Client slow(200000); slow.feed(split(classVideo, 1, video(10, 100, true))); slow.feed(split(classVideo, 2, video(20))); slow.feed(split(classRecovery, 3, video(30, 3000)));
+    lose(slow, 4, 40); slow.at(slow.now + 600000); require(slow.controls(kindLoss) == 1, "Fixture: no LOSS on the slow path"); const uint64_t late = slow.now;
+    slow.clear(); slow.at(late + 499000); require(!slow.controls(kindLoss), "A slow path was asked again before an answer could have come"); slow.at(late + 500000); require(slow.controls(kindLoss) == 1, "A slow path was not asked again at the interval");
   }
   {  // The answer itself is given up: nothing else is on its way, so the repeat goes at once
      // (field 2026-11-20: 0.6 s freezes, a give-up plus the rest of the interval).
@@ -1393,6 +1422,10 @@ struct Scenario {
   double linkMbps = 100; uint64_t queueUs = 0;
   // A recovery frame's size in P-frames (recoverySimulation).
   double recoveryScale = 6;
+  // A relay whose receive queue is full: for clumpUs in every clumpEveryUs it drops this share of
+  // what comes, from either side (field 2026-11-24: a relay socket held to 0.4 MB by the kernel
+  // dropped 17,862 datagrams in 44 minutes, media and the client's requests alike).
+  double clumpPct = 0; uint64_t clumpEveryUs = 0, clumpUs = 0;
 };
 struct Result {
   int generated = 0, delivered = 0, idrs = 0, keysDelivered = 0, keyRequests = 0, giveUps = 0, recoveries = 0, longWaits = 0;
@@ -1404,6 +1437,7 @@ class Link {
   Link(uint64_t seed, const Scenario& s, double rateBps, bool forward) : random_(seed), s_(s), bytesPerUs_(rateBps / 8e6), forward_(forward) {}
   void send(const uint8_t* data, size_t size, uint64_t now) {
     if ((forward_ && s_.spoofed) || down(now) || uniform() * 100 < s_.lossPct) return;
+    if (s_.clumpEveryUs && now > 2000000 && now % s_.clumpEveryUs < s_.clumpUs && uniform() * 100 < s_.clumpPct) return;
     if (s_.queueUs && free_ > now + s_.queueUs) return;  // tail drop
     free_ = std::max(free_, now) + uint64_t(double(size + 28) / bytesPerUs_);
     uint64_t at = free_ + s_.rttUs / 2 + uint64_t(uniform() * 1000);
@@ -1520,6 +1554,8 @@ void recoverySimulation() {
   // The field case (2026-11-20, a game on a LAN): an 8 ms round trip.
   for (const int loss : {3, 5}) { Scenario s; s.name = "RTT 8 ms, " + std::to_string(loss) + "%"; s.lossPct = loss; s.rttUs = 8000; scenarios.push_back(s); }
   { Scenario s; s.name = "RTT 8 ms, bursts"; s.bursts = true; s.rttUs = 8000; scenarios.push_back(s); }
+  // A relay that drops in clumps, both ways (NVENC sizes, as below).
+  for (const int pct : {15, 30, 60}) { Scenario s; s.name = "RTT 8 ms, clumps " + std::to_string(pct) + "%"; s.rttUs = 8000; s.clumpPct = pct; s.clumpEveryUs = 3000000; s.clumpUs = 400000; s.recoveryScale = 1.5; s.idrBytes = 60000; scenarios.push_back(s); }
   // Congestion: a bottleneck just above the mean video rate (about 16 Mbps with sound) and a short
   // queue. NVENC's one-frame VBV keeps its recovery frame and IDR near a P-frame's size.
   for (const double mbps : {17.0, 18.0, 20.0}) { Scenario s; s.name = "RTT 8 ms, " + std::to_string(int(mbps)) + " Mbps link"; s.rttUs = 8000; s.linkMbps = mbps; s.queueUs = 30000; s.recoveryScale = 1.5; s.idrBytes = 60000; scenarios.push_back(s); }
@@ -1545,6 +1581,11 @@ void recoverySimulation() {
     // frames (a fallback ends a run early, so shares, not counts).
     // (The first LOSS of each run is still an IDR, so runs with one give-up change nothing.)
     if (sum[0].giveUps >= 10) require(sum[1].idrs <= sum[0].idrs && double(sum[1].delivered) / sum[1].generated >= double(sum[0].delivered) / sum[0].generated - 0.03, "Recovery frames did not replace IDRs, or delivered a smaller share of the frames");
+    // A relay dropping in clumps takes requests too. Asked again at the interval only, the recovery
+    // row had 16 waits of 0.4 s and more at 30% and 42 at 60% (five seeds); asked again sooner, 4
+    // and 20, with 14% and 16% less time waited. The Host without recovery is asked as before.
+    if (seeds == 5 && s.name == "RTT 8 ms, clumps 30%") require(sum[1].longWaits <= 8 && sum[1].waitUs <= 18500000, "Lost requests waited out the whole interval again (clumps 30%)");
+    if (seeds == 5 && s.name == "RTT 8 ms, clumps 60%") require(sum[1].longWaits <= 30 && sum[1].waitUs <= 24000000, "Lost requests waited out the whole interval again (clumps 60%)");
   }
   ++cases;
 }

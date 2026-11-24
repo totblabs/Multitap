@@ -3281,6 +3281,8 @@ export default {
   "server-access.udpSwitchEnvList": "a list of desktops",
   "server-access.udpReach": "{sessions} session(s) now · {bindings} side(s) reaching the UDP port\nBoth sides of a session, the app and the Host, have to reach it before UDP can be used.",
   "server-access.udpReachNone": "Once a session connects, this shows whether it reaches the UDP port.",
+  "server-access.udpBufferSmall": "The UDP buffer is small ({size} MB). A fast-changing screen may stutter.\nRun sudo multitap restart on the server: it raises the limit and restarts.",
+  "server-access.udpBufferDropped": "Dropped since the server started because the buffer was full: {count}",
   "server-access.testSwitchOnly": "You can save.\nThe addresses stay, so the server is not restarted and no connection is ended.",
   "server-access.saveSwitchOnly": "The addresses stay as they are.\nThe server is not restarted and no connection is ended.",
   "server-access.followPublicIp": "Follow the public IP",

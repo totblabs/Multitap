@@ -31,6 +31,10 @@ constexpr uint64_t feedbackIntervalUs = 100000, keyframeIntervalUs = 500000, ass
 constexpr uint64_t minimumNackDelayUs = 10000, minimumNackRepeatUs = 20000;
 constexpr unsigned maxNackRepeats = 3;
 constexpr uint64_t giveUpSlackUs = 20000, minimumGiveUpUs = 60000, maximumGiveUpUs = 600000, resendKeepUs = 600000;
+// A LOSS left without an answer is asked again this soon, of a Host that answers one with a
+// recovery frame: three round trips and the Host's time to code a frame, never under the
+// minimum. Then once more a quarter second on, then every keyframeIntervalUs as before.
+constexpr uint64_t answerSlackUs = 60000, minimumAskAgainUs = 100000;
 constexpr uint64_t tailFirstUs = 5000, tailSecondUs = 20000, feedbackSilenceUs = 1000000;
 // A challenge is new at least every second: the next TAIL after this long replaces it.
 constexpr uint64_t proofTailUs = 200000, challengeRotateUs = 800000;
@@ -161,7 +165,18 @@ class Receiver {
         out.control.push_back(std::move(loss));
       }
       std::vector<uint8_t> plain(keyframeBytes); plain[0] = kindKeyframe; put16(&plain[2], epoch_);
-      out.control.push_back(std::move(plain)); keyAt_ = nowUs + keyframeIntervalUs;
+      out.control.push_back(std::move(plain));
+      // The request itself can be lost, and then nothing is on its way. Field 2026-11-24 (a
+      // game through a relay that dropped datagrams in clumps): of 87 requests the Host acted
+      // on 80, and each of the others froze the picture 0.58 s, the whole interval, until the
+      // next one. A Host that answers a LOSS with a recovery frame answers it cheaply, and it
+      // merges one that comes while its answer is still due or on its way
+      // (Sender::keyInFlight), so the first repeat of a loss wait need only outlast an answer's
+      // way here. Where the answer is an IDR the interval stays: a plain key wait, and a Host
+      // that has never sent a recovery frame on this path.
+      fullAt_ = nowUs + keyframeIntervalUs;
+      keyAt_ = nowUs + (lossWait_ && recovers_ ? askAgainDelay() : keyframeIntervalUs);
+      if (asked_ < 2) ++asked_;
     }
     if (nowUs >= feedbackAt_) { feedback(nowUs, out); feedbackAt_ = nowUs + feedbackIntervalUs; }
   }
@@ -179,7 +194,7 @@ class Receiver {
   // The decoder queue refused a message: skip to the next key frame. A decoder that
   // refuses the key frame it asked for gets the next one a key interval later, not at once.
   // What was delivered may never reach the decoder, so only a key frame ends this wait.
-  void queueFull(uint64_t nowUs) { if (!awaitKey_) { awaitKey_ = true; keyAt_ = std::max(keyAt_, nowUs); } lossWait_ = false; }
+  void queueFull(uint64_t nowUs) { if (!awaitKey_) { awaitKey_ = true; asked_ = 0; keyAt_ = std::max(fullAt_, nowUs); } lossWait_ = false; }
 
   bool awaitingKey() const { return awaitKey_; }
   // The wait a recovery frame may end (a LOSS goes with each KEYFRAME).
@@ -202,14 +217,19 @@ class Receiver {
   // Counted from gap detection: a paced IDR can take longer than this with no loss at all.
   uint64_t giveUpDelay() const { return std::clamp<uint64_t>(rtt_ * 7 / 2 + giveUpSlackUs, minimumGiveUpUs, maximumGiveUpUs); }
   uint64_t nackDelay() const { return std::max(rtt_ / 4, minimumNackDelayUs); }
+  // How long after a LOSS the next one goes while no answer shows: see tick.
+  uint64_t askAgainDelay() const {
+    const uint64_t first = std::clamp<uint64_t>(rtt_ * 3 + answerSlackUs, minimumAskAgainUs, keyframeIntervalUs);
+    return asked_ == 0 ? first : asked_ == 1 ? std::max(first, keyframeIntervalUs / 2) : keyframeIntervalUs;
+  }
   uint64_t nackRepeat() const { return std::max(rtt_ * 5 / 4, minimumNackRepeatUs); }
   void addGap(uint32_t id, uint16_t index, bool whole, uint64_t nowUs) { gaps_.push_back({id, index, 0, whole, nowUs, nowUs + nackDelay()}); }
-  void dropUntilKey(uint64_t nowUs) { if (!awaitKey_) { awaitKey_ = true; keyAt_ = nowUs; } lossWait_ = false; }
+  void dropUntilKey(uint64_t nowUs) { if (!awaitKey_) { awaitKey_ = true; asked_ = 0; keyAt_ = nowUs; } lossWait_ = false; }
   // Message `id` is lost to the decoder. With a frame delivered on this path this epoch, a
   // recovery frame may end the wait as well; a wait already running keeps its kind.
   void dropForLoss(uint64_t id, uint64_t nowUs) {
     if (awaitKey_) return;
-    awaitKey_ = true; keyAt_ = nowUs; lossWait_ = haveLast_; lossId_ = uint32_t(id);
+    awaitKey_ = true; asked_ = 0; keyAt_ = nowUs; lossWait_ = haveLast_; lossId_ = uint32_t(id);
   }
   // Ends a wait: a key frame always, a recovery frame only the wait it may end.
   bool ends(const Entry& e) const { return e.known && !e.skip && (e.envelope.key || (lossWait_ && e.recovery)); }
@@ -230,6 +250,7 @@ class Receiver {
     if (m.envelope.epoch != epoch_) return;
     // drain lets a recovery frame through a wait only when it may end it.
     if (m.envelope.key || m.recovery) awaitKey_ = lossWait_ = false;
+    if (m.recovery) recovers_ = true;
     // Whole and handed on: a whole frame that is dropped must not read as progress.
     highestWhole_ = uint32_t(next_);
     auto bytes = m.take();
@@ -360,6 +381,10 @@ class Receiver {
   uint64_t rtt_ = assumedRttUs;
   uint16_t epoch_;
   uint64_t feedbackAt_, keyAt_ = 0, echoUs_ = 0, echoAt_ = 0, challenge_ = 0;
+  // fullAt_: a full decoder queue asks no sooner than this, across waits (queueFull).
+  // asked_: requests sent in this wait, counted to two. recovers_: the Host has answered a
+  // LOSS with a recovery frame.
+  uint64_t fullAt_ = 0; int asked_ = 0; bool recovers_ = false;
   uint64_t next_ = 1, closed_ = 0;  // next ID to deliver, and the last known sent in full
   // lossWait_: the wait a recovery frame may end; lastPts_ the newest video this path delivered.
   // answerLost_: an answer to this wait was given up since the last tick.

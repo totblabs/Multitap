@@ -92,10 +92,14 @@ export class UdpRelay {
   // sessions that were given the relay's address reach it right now
   // (`sessions` with a grant, `bindings` legs bound: one per side of a
   // single-picture session). Not which path a session's media takes.
+  // socket: the receive buffer the kernel granted (the relay asks for 4 MB; Linux grants what
+  // net.core.rmem_max allows and reports twice that) and the datagrams the socket dropped
+  // because that buffer was full, since it was opened. Null where the system does not say.
   describe() {
     return { running: this.running, port: this.limits.port, derivedPort: this.derivedPort, media: this.media === true ? 'on' : this.media instanceof Set ? 'desktops' : 'off',
       sessions: this.grants.size, bindings: this.running ? Math.max(0, this.counts[BINDINGS]) : 0,
-      relays: { host: this.relays.host.map(row => ({ ...row })), client: this.relays.client.map(row => ({ ...row })) }, hostRoute: this.derivedPort !== null ? this.hostRoute : null };
+      relays: { host: this.relays.host.map(row => ({ ...row })), client: this.relays.client.map(row => ({ ...row })) }, hostRoute: this.derivedPort !== null ? this.hostRoute : null,
+      socket: this.running ? { recvBuffer: this.buffers?.recvBuffer ?? null, drops: kernelSocket(this.port)?.drops ?? null } : null };
   }
   // A failed check must neither keep a binding nor throw into a timer.
   allowed(sessionId) { try { return !!this.live(sessionId); } catch { return false; } }

@@ -875,6 +875,19 @@ test('a proxy the test came through is listed and tested again with one press, a
 const udpRelay = (extra = {}) => ({ running: true, port: 18481, derivedPort: 18481, media: 'off', sessions: 0, bindings: 0, relays: { host: [], client: [] }, hostRoute: null, ...extra });
 const udpSwitch = (extra = {}) => ({ saved: false, relay: true, env: null, ...extra });
 
+test('a relay socket the kernel held to a small buffer is said so, with what it dropped and the command that raises the limit', t => {
+  // Seen on a real install (2026-11-24): 425,984 bytes granted of the 4 MB asked for, 17,862 datagrams dropped in 44 minutes.
+  const shown = socket => fixture(t, { snapshot: docker({ udpMedia: udpRelay({ media: 'on', socket }), udpSwitch: udpSwitch({ saved: true }) }) }).find('[data-access-udp-buffer]');
+  const small = shown({ recvBuffer: 425984, drops: 17862 });
+  assert.equal(small.textContent, 'UDP 버퍼가 작아요 (0.4 MB). 화면이 빠르게 바뀔 때 끊길 수 있어요.\n서버에서 sudo multitap restart 를 실행하면 한도를 올리고 다시 시작해요.\n서버가 시작한 뒤 버퍼가 넘쳐 버려진 조각: 17,862개');
+  assert.ok(small.classList.contains('server-access-warning'));
+  // Nothing dropped yet, or a system that does not count: the size alone.
+  for (const drops of [0, null]) assert.equal(shown({ recvBuffer: 425984, drops }).textContent, 'UDP 버퍼가 작아요 (0.4 MB). 화면이 빠르게 바뀔 때 끊길 수 있어요.\n서버에서 sudo multitap restart 를 실행하면 한도를 올리고 다시 시작해요.');
+  // The buffer asked for (Linux reports it doubled, Windows as it is), an unknown size, a relay that does not run: no line.
+  for (const socket of [{ recvBuffer: 8388608, drops: 3 }, { recvBuffer: 4194304, drops: null }, { recvBuffer: null, drops: null }, null, undefined, { recvBuffer: '425984', drops: 1 }]) assert.equal(shown(socket), null, JSON.stringify(socket ?? null));
+  assert.equal(fixture(t, { snapshot: docker({ udpMedia: udpRelay({ running: false, socket: { recvBuffer: 425984, drops: 9 } }), udpSwitch: udpSwitch() }) }).find('[data-access-udp-buffer]'), null);
+});
+
 test('UDP로 화면과 소리 보내기: off until an administrator turns it on, said honestly, and saved by a test and a save that end nobody\'s connection', async t => {
   const answers = { test: null };
   const f = fixture(t, { snapshot: docker({ udpMedia: udpRelay(), udpSwitch: udpSwitch() }), handler: async path => path.endsWith('/test') ? answers.test : { accepted: true, operationId: 'switch-operation', state: 'waiting_idle' } });
@@ -888,6 +901,7 @@ test('UDP로 화면과 소리 보내기: off until an administrator turns it on,
   assert.equal(f.find('[data-access-udp-endpoints]').textContent, '보내는 곳 · 192.0.2.10:18481');
   assert.equal(f.find('[data-access-udp-router]').textContent, '공유기 포트 포워딩 · UDP 18481 → 이 서버\n안 하면 밖에서는 화면이 TCP로 가요.');
   assert.equal(f.find('[data-access-udp-reach]').textContent, '세션이 연결되면 UDP 포트에 닿는지 여기에 보여요.');
+  assert.equal(f.find('[data-access-udp-buffer]'), null, 'nothing is said of a buffer the server did not report');
   assert.equal(f.find('[data-access-save]').disabled, true);
   // Turned on: an edit like any other, tested and saved.
   f.change('udpMedia', true);

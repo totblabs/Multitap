@@ -105,14 +105,19 @@ test('A derived list names the host of the address that leg connects to; no IPv4
   assert.deepEqual(routed.relaysFor('client', 'https://vdi.example.com'), [{ host: 'vdi.example.com', port: 18481 }]);
   assert.deepEqual(routed.relaysFor('host', 'http://192.0.2.10:18480'), [{ host: '192.0.2.10', port: 18481 }], 'the same address once');
   assert.deepEqual(routed.relaysFor('host', 'http://[2001:db8::10]:18480'), [{ host: '192.0.2.10', port: 18481 }]);
-  assert.deepEqual(routed.describe(), { running: true, port: 18481, derivedPort: 18481, media: 'off', sessions: 0, bindings: 0, relays: { host: [], client: [] }, hostRoute: '192.0.2.10' });
+  // socket: what the kernel granted and dropped. Here nothing reported a size, and only Linux counts drops.
+  const noSocket = { recvBuffer: null, drops: null };
+  assert.deepEqual({ ...routed.describe(), socket: null }, { running: true, port: 18481, derivedPort: 18481, media: 'off', sessions: 0, bindings: 0, relays: { host: [], client: [] }, hostRoute: '192.0.2.10', socket: null });
+  assert.deepEqual({ ...routed.describe().socket, drops: null }, noSocket);
+  assert.equal(relayOf({ running: false }).describe().socket, null, 'a relay that does not run has no socket');
+  assert.deepEqual({ ...relayOf({ buffers: { recvBuffer: 425984, sendBuffer: 425984 } }).describe().socket, drops: null }, { recvBuffer: 425984, drops: null });
 
   // Configured lists are everyone's, whatever address they connect to.
   const lists = { host: [{ host: '192.0.2.121', port: 18481 }], client: [{ host: 'vdi.example.com', port: 18482 }] };
   const configured = relayOf({ relays: lists, hostRoute: '192.0.2.10', media: new Set(['pve-101']) });
   assert.equal(configured.available, true);
   assert.deepEqual(configured.relaysFor('client', 'http://192.0.2.10:18480'), lists.client); assert.deepEqual(configured.relaysFor('host', 'http://[2001:db8::10]:18480'), lists.host);
-  assert.deepEqual(configured.describe(), { running: true, port: 18481, derivedPort: null, media: 'desktops', sessions: 0, bindings: 0, relays: lists, hostRoute: null });
+  assert.deepEqual({ ...configured.describe(), socket: null }, { running: true, port: 18481, derivedPort: null, media: 'desktops', sessions: 0, bindings: 0, relays: lists, hostRoute: null, socket: null });
   // Neither derived nor both lists: no grant is possible.
   assert.equal(relayOf({}).available, false); assert.equal(relayOf({ relays: { ...lists, client: [] } }).available, false);
   assert.equal(relayOf({ derivedPort: 18481, running: false }).available, false);
@@ -200,7 +205,9 @@ test('The real broker, media over UDP turned on in .env: a Host inside and a cli
   assert.equal(grants(client)[0].keys, true, 'media, not only the reachability probe'); assert.equal(grants(f.host)[0].keys, true);
   assert.equal(JSON.stringify(client.messages).includes('lan.example.test'), false); assert.equal(JSON.stringify(f.host.messages).includes('203.0.113.7'), false);
   // The console's read-only view.
-  assert.deepEqual(f.server.relay.udp.describe(), { running: true, port: 0, derivedPort: 18481, media: 'on', sessions: 1, bindings: 0, relays: { host: [], client: [] }, hostRoute: null });
+  const described = f.server.relay.udp.describe();
+  assert.deepEqual({ ...described, socket: null }, { running: true, port: 0, derivedPort: 18481, media: 'on', sessions: 1, bindings: 0, relays: { host: [], client: [] }, hostRoute: null, socket: null });
+  assert.ok(Number.isInteger(described.socket.recvBuffer) && described.socket.recvBuffer > 0, 'the size the system granted the running relay');
 });
 
 test('The real broker, nothing said about media: the addresses are still given (the port can be measured), without keys, so picture and sound stay on WebSocket', { timeout: 20000 }, async t => {

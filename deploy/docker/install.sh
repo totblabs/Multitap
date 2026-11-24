@@ -312,6 +312,33 @@ set_env() { # set_env <name> <value>: replaces the line, or adds it
 }
 
 compose() { (cd "$DIR" && docker compose "$@"); }
+# The relay's UDP socket asks for 4 MB buffers and the kernel grants what
+# net.core.rmem_max and wmem_max allow: 212992 on a stock kernel, 0.4 MB once
+# doubled. A fast picture overruns that in a few milliseconds, and what does not
+# fit is dropped. The limit belongs to the machine, not to the container, so it
+# is raised here before the first start (never lowered) and kept for the next
+# boot. The same step as in deploy/docker/multitap, which repeats it on update,
+# start and restart. A container (CT) may not set it: its node does.
+udp_buffers() {
+  local kernel=${MULTITAP_KERNEL_DIR:-/proc/sys/net/core} kept=${MULTITAP_SYSCTL_DIR:-/etc/sysctl.d} limit=8388608 key now raised=no
+  for key in rmem_max wmem_max; do
+    now=$(cat "$kernel/$key" 2>/dev/null || true)
+    case "$now" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$now" -lt "$limit" ] || continue
+    if ! { printf '%s\n' "$limit" > "$kernel/$key"; } 2>/dev/null; then
+      warn "$(t "UDP 버퍼 한도가 작은데 여기서는 올릴 수 없어요. 화면이 끊길 수 있어요." "The UDP buffer limit is small and cannot be raised from here. The picture may stutter.")"
+      note "$(t "이 컨테이너를 돌리는 서버(Proxmox 노드)에서: sysctl -w net.core.rmem_max=$limit net.core.wmem_max=$limit" "On the machine that runs this container (the Proxmox node): sysctl -w net.core.rmem_max=$limit net.core.wmem_max=$limit")"
+      return 0
+    fi
+    raised=yes
+  done
+  [ "$raised" = yes ] || return 0
+  if [ -d "$kept" ]; then
+    printf '%s\n' '# Multitap: the UDP media relay asks for 4 MB socket buffers (deploy/docker/multitap).' \
+      "net.core.rmem_max = $limit" "net.core.wmem_max = $limit" > "$kept/90-multitap-udp.conf" 2>/dev/null || true
+  fi
+  note "$(t "UDP 버퍼 한도를 8 MB로 올렸어요 (net.core.rmem_max, wmem_max)." "Raised the UDP buffer limit to 8 MB (net.core.rmem_max, wmem_max).")"
+}
 
 # What kind of failure Docker's own message names when an image cannot be downloaded.
 pull_reason() { # pull_reason <docker's message>
@@ -521,6 +548,7 @@ main() {
     fi
     fail "$(t "Docker 컨테이너를 실행하지 못했어요. 'docker run hello-world'로 Docker가 되는지 확인해 주세요." "Docker could not run a container. Check Docker with 'docker run hello-world'.")"
   fi
+  udp_buffers
   local started
   started=$(compose up -d --quiet-pull 2>&1) || { printf '%s\n' "$started" >&2; fail "$(t "서버를 시작하지 못했어요." "Could not start the server.")"; }
   say "$(t "서버가 응답하기를 기다려요." "Waiting for the server to answer.")"

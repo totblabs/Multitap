@@ -338,6 +338,21 @@ MULTITAP_UDP_MEDIA=on
 
 **Check:** **Screen streaming over UDP** in **Server access** shows the current state. After you connect by streaming, check the UDP/TCP path under **Connection quality**.
 
+#### The UDP buffer limit
+
+The install command raises Linux's UDP buffer limit (`net.core.rmem_max`, `net.core.wmem_max`) to 8 MB and keeps it in `/etc/sysctl.d/90-multitap-udp.conf`.
+Under a small limit the server drops part of a fast-changing screen, and the picture freezes for a moment at a time.
+`multitap update`, `multitap start` and `multitap restart` make the same check. A larger value that is already set stays.
+
+Inside a CT this limit cannot be changed. When the command says so, run this in the **Proxmox node shell**, then `sudo multitap restart`.
+
+```sh
+sysctl -w net.core.rmem_max=8388608 net.core.wmem_max=8388608
+printf 'net.core.rmem_max = 8388608\nnet.core.wmem_max = 8388608\n' > /etc/sysctl.d/90-multitap-udp.conf
+```
+
+If **Screen streaming over UDP** in **Server access** says "The UDP buffer is small", the server still runs under the small limit.
+
 ### What the server contacts on its own
 
 Without a request from a user, the server connects out only to these.

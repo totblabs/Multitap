@@ -7,11 +7,11 @@
 // Needs bash (Git Bash on Windows); skipped without it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VERSION } from '../src/restore-cli.mjs';
-import { bash, commandMachine } from './docker-command-fixture.mjs';
+import { bash, commandMachine, posix } from './docker-command-fixture.mjs';
 
 const skip = !bash && 'no bash';
 const lan = 'http://192.0.2.20:18480', secure = 'https://vdi.example.com', publicAddress = 'http://203.0.113.7:18480';
@@ -384,4 +384,48 @@ test('update shows its five steps in order; the Linux text console gets English 
   // A language named for this run wins there too.
   const named = m.run(['update', '9.9.9'], { TERM: 'linux', MULTITAP_LANG: 'ko' });
   assert.equal(named.status, 0, named.out); assert.match(named.out, /버전으로 올렸어요/);
+});
+
+test('the machine\'s UDP buffer limit is raised before the server starts, kept for the next boot and never lowered', { skip }, t => {
+  // Seen on a real install (2026-11-24): the relay asked for 4 MB, the kernel granted 425,984 bytes under
+  // net.core.rmem_max 212992, and the socket dropped 17,862 datagrams in 44 minutes.
+  const m = commandMachine(t, { version: VERSION, env: seeded() });
+  const kernel = join(m.root, 'kernel'), kept = join(m.root, 'sysctl.d'), conf = join(kept, '90-multitap-udp.conf'); mkdirSync(kernel); mkdirSync(kept);
+  const limits = () => ['rmem_max', 'wmem_max'].map(name => readFileSync(join(kernel, name), 'utf8').trim());
+  const set = (receive, send) => { writeFileSync(join(kernel, 'rmem_max'), receive + '\n'); writeFileSync(join(kernel, 'wmem_max'), send + '\n'); };
+  const env = { MULTITAP_KERNEL_DIR: posix(kernel), MULTITAP_SYSCTL_DIR: posix(kept), FAKE_LATEST: VERSION };
+  const restarts = result => count(result.calls, /^compose restart /gm);
+  set(212992, 212992);
+  // Already on the release: the limit is raised and the server, which started under the small one, is restarted once.
+  const same = m.run(['update'], env);
+  assert.equal(same.status, 0, same.out); assert.ok(same.out.includes('Already on ' + VERSION), same.out);
+  assert.match(same.out, /Raised the UDP buffer limit to 8 MB \(net\.core\.rmem_max, wmem_max\)\./); assert.match(same.out, /Restarting the server under the new limit\. Open connections end\.[\s\S]*Restarted\./);
+  assert.deepEqual(limits(), ['8388608', '8388608']); assert.equal(restarts(same), 1, same.calls);
+  const written = readFileSync(conf, 'utf8'); assert.match(written, /^net\.core\.rmem_max = 8388608$/m); assert.match(written, /^net\.core\.wmem_max = 8388608$/m);
+  // Once more: nothing to raise, nobody disconnected.
+  const again = m.run(['update'], env);
+  assert.equal(again.status, 0, again.out); assert.doesNotMatch(again.out, /UDP buffer|Restart/); assert.equal(restarts(again), 1, 'no restart for nothing');
+  // A larger limit somebody set stays; the smaller one is raised, here by restart.
+  set(16777216, 212992); rmSync(conf);
+  const restart = m.run(['restart'], env);
+  assert.equal(restart.status, 0, restart.out); assert.match(restart.out, /Raised the UDP buffer limit/); assert.deepEqual(limits(), ['16777216', '8388608']); assert.ok(existsSync(conf));
+  // start and an update to another release raise it before the server starts.
+  for (const args of [['start'], ['update', '9.9.9']]) {
+    set(212992, 212992);
+    const result = m.run(args, env);
+    assert.equal(result.status, 0, result.out); assert.match(result.out, /Raised the UDP buffer limit/, args.join(' ')); assert.deepEqual(limits(), ['8388608', '8388608'], args.join(' '));
+  }
+  // A machine without these files (not Linux) is told nothing, and the commands go on.
+  rmSync(join(kernel, 'rmem_max')); rmSync(join(kernel, 'wmem_max'));
+  const none = m.run(['restart'], env);
+  assert.equal(none.status, 0, none.out); assert.doesNotMatch(none.out, /UDP buffer/);
+  // A container may read the limit and not set it: said with the command its node needs, and the server still starts.
+  // (root writes a read-only file, so this part needs another account.)
+  if (process.getuid?.() !== 0) {
+    set(212992, 212992); chmodSync(join(kernel, 'rmem_max'), 0o444); chmodSync(join(kernel, 'wmem_max'), 0o444);
+    t.after(() => { for (const name of ['rmem_max', 'wmem_max']) try { chmodSync(join(kernel, name), 0o644); } catch { /* gone */ } });
+    const held = m.run(['restart'], env);
+    assert.equal(held.status, 0, held.out); assert.match(held.out, /The UDP buffer limit is small and cannot be raised from here\. The picture may stutter\./);
+    assert.match(held.out, /sysctl -w net\.core\.rmem_max=8388608 net\.core\.wmem_max=8388608/); assert.match(held.out, /Restarted\./); assert.deepEqual(limits(), ['212992', '212992']);
+  }
 });

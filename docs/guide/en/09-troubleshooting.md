@@ -113,6 +113,16 @@ With **The Proxmox certificate changed** or **The Proxmox certificate has expire
 A "service running" status alone does not mean screen streaming is ready.
 If the screen shows no cause, check diagnostics instead of removing drivers on your own.
 
+## A fast-changing screen freezes for a moment at a time
+
+**Where: the admin console and the Linux server**
+
+1. In the admin console, open **Screen streaming over UDP** in **Server access**.
+2. If it says "The UDP buffer is small", run `sudo multitap restart` on the Linux server. Connections end for a moment.
+3. If the command says it cannot raise the limit, raise it on the Proxmox node as in [the UDP buffer limit](02-server-install.md#the-udp-buffer-limit).
+
+If it freezes without that warning, check the path and the delay under **Connection quality** in the streaming window.
+
 ## Console does not open or is black
 
 Console shows the QEMU screen, the default screen of a Proxmox VM.
