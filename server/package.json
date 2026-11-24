@@ -1,6 +1,6 @@
 {
   "name": "multitap-broker",
-  "version": "1.2.13",
+  "version": "1.2.14",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",

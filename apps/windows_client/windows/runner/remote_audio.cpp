@@ -37,6 +37,9 @@ void RemoteAudio::Stop() {
 }
 bool RemoteAudio::Push(uint64_t pts_us, const uint8_t* bytes, size_t size) {
   std::lock_guard<std::mutex> decoding(decode_mutex_);
+  // How late it came is measured before it is decoded: one too late to play
+  // counts too. Not a repeat of a packet that came (the Host sends each again).
+  if (running_ && SUCCEEDED(error_.load()) && (!opus_ || (decoder_.ready() && !decoder_.Stale(bytes, size)))) { std::lock_guard<std::mutex> lock(mutex_); buffer_.Arrived(pts_us, NowUs()); }
   if (opus_) {
     if (!decoder_.ready()) return true;  // Start reported the failure; video goes on.
     const auto before = decoder_.counters();
@@ -45,7 +48,7 @@ bool RemoteAudio::Push(uint64_t pts_us, const uint8_t* bytes, size_t size) {
     const auto& after = decoder_.counters();
     if (running_ && (after.late_concealed != before.late_concealed || after.pauses != before.pauses)) {
       std::lock_guard<std::mutex> lock(mutex_);
-      if (after.late_concealed != before.late_concealed) buffer_.NoteLate(NowUs());
+      if (after.late_concealed != before.late_concealed) buffer_.NoteLate();
       if (after.pauses != before.pauses) buffer_.NotePause();
     }
     return ok;

@@ -141,6 +141,9 @@ void main() {
       remoteSession: true,
       texturePath: 0,
       displayHz: 32,
+      wlanMode: 1,
+      wlanError: 0,
+      wlanScans: queued > 0 ? 1 : 0,
       decodeTier: 2,
       decodeVendor: 0x8086,
     );
@@ -155,6 +158,8 @@ void main() {
     expect(report['textureUploadUs'], 200);
     expect(report['queuedFrames'], 34);
     expect(report['skippedFrames'], 2);
+    // Scans of this PC's Wi-Fi are summed over the window's readings.
+    expect(report['wlanScans'], 2);
     // Render facts come from the window's last reading only.
     expect(report['gpuHardware'], isNull);
     expect(report['remoteSession'], isNull);
@@ -165,6 +170,9 @@ void main() {
     expect(next['remoteSession'], isTrue);
     expect(next['texturePath'], 0);
     expect(next['displayHz'], 32);
+    expect(next['wlanMode'], 1);
+    expect(next['wlanError'], 0);
+    expect(next['wlanScans'], 0);
     expect(next['decodeTier'], 2);
     expect(next['decodeVendor'], 0x8086);
     expect(next['queuedFrames'], 0);

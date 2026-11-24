@@ -108,7 +108,7 @@ class UdpMediaPath {
       // The leg stopped draining, so it would not act on a change: ask from here.
       route_=Route::wss;inbox_.clear();inboxBytes_=0;changes_.push_back({false,udpPathStalled,false});askKeyFrame();return false;
     }
-    inboxBytes_+=size;inbox_.push_back({std::move(bytes),envelope.key,video,video&&recovery});return true;
+    inboxBytes_+=size;inbox_.push_back({std::move(bytes),envelope.key,video,video&&recovery,!video&&audioOpus_});return true;
   }
 
   // Channel's receive thread: the client's stream.feedback arrived on WSS (udpProbeNowUs clock).
@@ -189,7 +189,7 @@ class UdpMediaPath {
  private:
   friend struct UdpMediaPathTest;
   enum class Route:uint8_t{wss,armed,udp};
-  struct Item {std::vector<uint8_t> bytes;bool key=false,video=false,recovery=false;};
+  struct Item {std::vector<uint8_t> bytes;bool key=false,video=false,recovery=false,again=false;};  // again: sound the Sender may send again
   static constexpr uint64_t lossIntervalUs=30000;
   struct Change {bool onUdp=false;uint32_t reason=0;bool needsKey=false;uint32_t cause=0;};
   static std::string udpMediaKeyMessage(const udpcore::PublicKey& key,const std::string& session){
@@ -202,7 +202,10 @@ class UdpMediaPath {
   void observe(std::vector<uint8_t>& text){
     const std::string_view view(reinterpret_cast<const char*>(text.data()),text.size());
     if(view.starts_with(R"({"type":"stream.info")")){
-      std::lock_guard lock(mutex_);firstKey_=firstKeyAsked_=false;
+      // What stream.info says is sent (streamAudioInfoJson): Opus packets carry a number that
+      // every client plays once, so they may be sent again; PCM may not.
+      const bool opus=view.find(R"("format":"opus")")!=std::string_view::npos;
+      std::lock_guard lock(mutex_);firstKey_=firstKeyAsked_=false;audioOpus_=opus;
       if(route_==Route::udp)changes_.push_back({false,udpPathNewStream,false});
       route_=Route::wss;
     }else if(keyed_&&view.starts_with(R"({"type":"stream.stats")")&&view.back()=='}'){
@@ -229,7 +232,7 @@ class UdpMediaPath {
     over_=over_||forever;apply({false,reason,true,cause},nowUs);
   }
   void feed(Item& item,uint64_t nowUs){
-    const auto admission=item.video?sender_->video(std::move(item.bytes),item.key,item.recovery):sender_->audio(std::move(item.bytes));
+    const auto admission=item.video?sender_->video(std::move(item.bytes),item.key,item.recovery):sender_->audio(std::move(item.bytes),item.again);
     if(!item.video)++(admission.queued?audioSent_:audioDropped_);
     if(!admission.requestKey||nowUs-keyFrameAt_<udpcore::keyframeIntervalUs/2)return;
     keyFrameAt_=nowUs;++backlogKeys_;askKeyFrame();
@@ -284,7 +287,7 @@ class UdpMediaPath {
   std::atomic<uint32_t> inputMinimumEpoch_{0};
   std::atomic<uint64_t> datagrams_{0},repairs_{0},fallbacks_{0},wssHeard_{0},recoveries_{0},audioSent_{0},audioDropped_{0},backlogKeys_{0},clientKeys_{0},refused_{0};
   // Guarded by mutex_.
-  std::mutex mutex_;Route route_=Route::wss;bool firstKey_=false,firstKeyAsked_=false,ended_=false;uint16_t epoch_=0;int target_=0;
+  std::mutex mutex_;Route route_=Route::wss;bool firstKey_=false,firstKeyAsked_=false,ended_=false,audioOpus_=false;uint16_t epoch_=0;int target_=0;
   std::unique_ptr<udpcore::SessionKeys> keys_;std::deque<Item> inbox_;size_t inboxBytes_=0;std::vector<Change> changes_;
   // Leg thread. The Sender keeps running after a return to WebSocket: its TAILs are how
   // this grant's binding shows it works again, and message IDs and sequences go on.

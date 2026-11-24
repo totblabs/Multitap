@@ -579,6 +579,12 @@ broker. Framing, fragmentation, NACK and key-frame recovery are in
 uncertain keeps or puts the session back on WSS; UDP is never a reason to
 refuse or end a session.
 
+Sound on UDP is not asked for again. Where `stream.info` says the sound is
+Opus, the Host sends each sound message (one datagram) again, unchanged and
+under its own message ID, right before each of the next two. A client plays
+a packet number once and drops one it already had, so a lost packet arrives
+as its repeat one packet late and in order. PCM sound is sent once.
+
 ### Direct UDP (udp-direct-v1)
 
 This is a bounded IPv4 hole-punching extension to the existing encrypted UDP

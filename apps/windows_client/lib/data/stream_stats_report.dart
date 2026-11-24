@@ -97,6 +97,12 @@ const streamStatsFields = <String>{
   'texturePath',
   'displayHz',
   'remoteSession',
+  // This PC's Wi-Fi while the stream runs: 0 no connected Wi-Fi adapter, 1
+  // streaming mode on and background scans off, 2 one of the two, 3 neither;
+  // the Win32 code of a refusal; scans completed in this window.
+  'wlanMode',
+  'wlanError',
+  'wlanScans',
   // Where H.264 decodes (0 CPU, 1 hardware on the render adapter, 2 another
   // adapter) and its PCI vendor id. Brokers before these fields drop them.
   'decodeTier',
@@ -307,6 +313,9 @@ class StreamStatsSample {
     this.remoteSession,
     this.texturePath,
     this.displayHz,
+    this.wlanMode,
+    this.wlanError,
+    this.wlanScans,
     this.mediaWaits,
     this.videoGapMaxMs,
     this.audioDroppedFrames,
@@ -378,6 +387,9 @@ class StreamStatsSample {
   /// Render facts of the client (see RemoteSession).
   final bool? gpuHardware, remoteSession;
   final int? texturePath, displayHz;
+
+  /// This PC's Wi-Fi (see RemoteSession); wlanScans counts this reading's.
+  final int? wlanMode, wlanError, wlanScans;
 
   /// Where H.264 decodes (0 CPU, 1 hardware on the render adapter, 2 on
   /// another one) and that adapter's PCI vendor id.
@@ -503,7 +515,7 @@ class StreamStatsWindow {
   var _topologyMax = _Max(), _captureMax = _Max();
   var _convertMax = _Max(), _encodeMax = _Max();
   var _wait = _Mean(), _upload = _Mean();
-  var _queued = _Sum(), _skipped = _Sum();
+  var _queued = _Sum(), _skipped = _Sum(), _wlanScans = _Sum();
   var _mediaWaits = _Sum(), _audioDropped = _Sum();
   var _decoderBusy = _Mean();
   var _appCpu = _Mean(), _systemCpu = _Mean(), _gpuDecode = _Mean();
@@ -550,6 +562,7 @@ class StreamStatsWindow {
     _upload.add(sample.textureUploadMs);
     _queued.add(sample.textureQueuedFrames);
     _skipped.add(sample.skippedFrames);
+    _wlanScans.add(sample.wlanScans);
     _mediaWaits.add(sample.mediaWaits);
     _audioDropped.add(sample.audioDroppedFrames);
     _audio.add(sample.audio);
@@ -703,6 +716,9 @@ class StreamStatsWindow {
       'gpuHardware': last.gpuHardware,
       'texturePath': last.texturePath,
       'displayHz': last.displayHz,
+      'wlanMode': last.wlanMode,
+      'wlanError': last.wlanError,
+      'wlanScans': _wlanScans.value,
       'remoteSession': last.remoteSession,
       'decodeTier': last.decodeTier,
       'decodeVendor': last.decodeVendor,
@@ -773,6 +789,7 @@ class StreamStatsWindow {
     _upload = _Mean();
     _queued = _Sum();
     _skipped = _Sum();
+    _wlanScans = _Sum();
     _mediaWaits = _Sum();
     _audioDropped = _Sum();
     _decoderBusy = _Mean();

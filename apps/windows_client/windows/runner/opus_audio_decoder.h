@@ -33,6 +33,10 @@ namespace multitap {
 //  - A packet up to kLateWindow older than the one expected (reordered or
 //    repeated) is too late and dropped. Further back, the Host's encoder
 //    started over (a new capture under the same stream): decoding starts over.
+//    The Host sends each packet again with the next two (udp_media.hpp
+//    audioRepeats): one that was lost comes as its repeat, in order, one
+//    packet late; the repeats of one that came are dropped here, and Stale
+//    says so beforehand, so that when they came is not taken for lateness.
 //  - A packet that is not one 10 ms Opus packet is malformed.
 class OpusAudioDecoder {
  public:
@@ -94,6 +98,15 @@ class OpusAudioDecoder {
     started_ = true; expected_ = uint16_t(sequence + 1); ahead_ = 0; ++counters_.packets;
     emit(pts_us, reinterpret_cast<const uint8_t*>(pcm_.data()), kFrameBytes); next_pts_ = pts_us + kFrameUs;
     return true;
+  }
+  // Whether Decode will drop this packet as a number already played from a
+  // received packet or filled at the next one: a repeat, or one out of order.
+  bool Stale(const uint8_t* payload, size_t size) const {
+    if (!started_ || size < 2) return false;
+    const uint16_t sequence = uint16_t(payload[0] | (payload[1] << 8));
+    if (uint16_t(sequence - expected_) < 0x8000) return false;
+    const uint16_t behind = uint16_t(expected_ - sequence);
+    return behind > ahead_ && behind <= kLateWindow;
   }
   // The render thread: the next packet has not come and the device is about
   // to run dry. Its 10 ms of Opus PLC to `emit` now, with the PTS it would

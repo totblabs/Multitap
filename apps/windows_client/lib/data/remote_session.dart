@@ -1185,6 +1185,13 @@ class RemoteSession extends ChangeNotifier {
   bool? gpuHardware, clientRemoteSession;
   int? texturePath, displayHz;
 
+  /// This PC's Wi-Fi while the stream runs (the runner's wlan_streaming.h):
+  /// what the adapter took (0 no connected Wi-Fi adapter, 1 streaming mode on
+  /// and background scans off, 2 one of the two, 3 neither), the Win32 code of
+  /// a refusal, and the scans that completed in the tick. Null from an engine
+  /// without it.
+  int? wlanMode, wlanError, wlanScansTick;
+
   /// This client's own cost in tenths of a percent (0..1000), read from the
   /// native/Android sampler: this process's CPU, the whole PC's CPU (null on
   /// Android, which hides it), and this process's GPU video-decode / 3D engine.
@@ -4035,6 +4042,15 @@ class RemoteSession extends ChangeNotifier {
         ? vendorKeys
         : null;
     displayHz = hz is int && hz > 0 && hz <= 1000 ? hz : null;
+    final wlan = stats['wlanMode'], refused = stats['wlanError'];
+    final scans = stats['wlanScans'];
+    wlanMode = wlan is int && wlan >= 0 && wlan <= 3 ? wlan : null;
+    wlanError = refused is int && refused >= 0 && refused <= 0xffffffff
+        ? refused
+        : null;
+    wlanScansTick = scans is int && scans >= 0 && scans <= 100000
+        ? scans
+        : null;
     appCpuPct10 = _tenths(stats['appCpuPct10']);
     systemCpuPct10 = _tenths(stats['systemCpuPct10']);
     gpuDecodePct10 = _tenths(stats['gpuDecodePct10']);
@@ -4156,6 +4172,9 @@ class RemoteSession extends ChangeNotifier {
         remoteSession: clientRemoteSession,
         texturePath: texturePath,
         displayHz: displayHz,
+        wlanMode: wlanMode,
+        wlanError: wlanError,
+        wlanScans: wlanScansTick,
         mediaWaits: mediaWaitsTick,
         videoGapMaxMs: videoGapMaxMsTick,
         udpProbe: _udp?.report,

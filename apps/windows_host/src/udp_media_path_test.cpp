@@ -273,6 +273,20 @@ void tooLarge(){
   {Link link;require(!route(link,video(1,true)),"First IDR");link.handshake();link.armed();require(!route(link,video(2,true,huge)),"An oversized key frame switched");link.step(2);const int before=link.keyFrames;link.step(5000);require(link.keyFrames==before,"An oversized key frame did not back off");++passed;}
   {Link link;auto pts=onUdp(link);require(!route(link,media(2,false,pts+1,core::fragmentPayload*core::maxAudioFragments)),"Oversized audio took UDP");require(route(link,video(pts+2)),"Oversized audio moved the path");++passed;}
 }
+// Sound sent again (udp_media.hpp audioRepeats): only where stream.info says the packets are Opus.
+void soundAgain(){
+  const auto info=[](const char* format){return textBytes(std::string(R"({"type":"stream.info","codec":"h264","audio":{"sampleRate":48000,"channels":2,"format":")")+format+R"(","available":true},"epoch":1})");};
+  const auto sounds=[](const Link& link){std::vector<uint64_t> out;for(const auto& message:link.client.delivered)if(!message.video)out.push_back(message.pts);return out;};
+  // Five packets 10 ms apart; everything sent with the third is lost. The fourth brings the second and the third
+  // before itself: the client has the third one packet late and in order (its decoder drops the numbers it had).
+  {Link link;auto opus=info("opus");require(!link.path.outgoing(true,opus),"stream.info was taken");auto pts=onUdp(link);link.client.delivered.clear();
+    for(uint64_t n=1;n<=5;++n){link.downCut=n==3;require(route(link,media(2,false,pts+n,160)),"Sound stayed on WebSocket");link.step(10);}
+    require(sounds(link)==std::vector<uint64_t>({pts+1,pts+1,pts+2,pts+2,pts+3,pts+4,pts+3,pts+4,pts+5}),"Opus sound was not sent again with the next two, oldest first");++passed;}
+  // PCM has no numbers: a second copy would be played twice, so there is none.
+  for(const char* format:{"s16le",""}){Link link;auto plain=*format?info(format):streamInfo;link.path.outgoing(true,plain);auto pts=onUdp(link);link.client.delivered.clear();
+    for(uint64_t n=1;n<=5;++n){require(route(link,media(2,false,pts+n,160)),"Sound stayed on WebSocket");link.step(10);}
+    require(sounds(link)==std::vector<uint64_t>({pts+1,pts+2,pts+3,pts+4,pts+5}),"Sound that is not Opus was sent again");++passed;}
+}
 void stalledLeg(){
   // The leg stops pumping: the pipe reader never waits, and asks for the IDR itself.
   Link link;auto pts=onUdp(link);const int before=link.keyFrames;size_t taken=0;
@@ -409,7 +423,7 @@ void sessionSignals(){
 }
 int main(){
   try{
-    for(const auto& scenario:{exchangeRules,proofRequired,switching,firstIdrStaysOnWss,directInputGates,staleProof,fallback,retry,legEnds,tooLarge,stalledLeg,hostile,keyframeRequests,lossAnswers,bitrate,arrival,statistics,exhausted,sessionSignals})scenario();
+    for(const auto& scenario:{exchangeRules,proofRequired,switching,firstIdrStaysOnWss,directInputGates,staleProof,fallback,retry,legEnds,tooLarge,soundAgain,stalledLeg,hostile,keyframeRequests,lossAnswers,bitrate,arrival,statistics,exhausted,sessionSignals})scenario();
     std::cout<<"{\"kind\":\"udp-media-path\",\"passed\":"<<passed<<",\"link\":\"simulated\",\"sockets\":false}\n";return 0;
   }catch(const std::exception& error){std::cerr<<"UDP media path check failed: "<<error.what()<<"\n";return 1;}
 }

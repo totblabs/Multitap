@@ -54,6 +54,17 @@ constexpr size_t audioPartials = 8, maxAudioFragments = 16;
 // Sender: audio waiting, repairs waiting, sent video kept, and how much pacing
 // time of P-frames may queue (a key frame replaces what waits, so one always fits).
 constexpr size_t maxAudioQueue = 64, maxRepairs = 2048, maxKeptBytes = 16 * 1024 * 1024;
+// Sound is not asked for again: the answer would come a round trip after the next packet
+// showed the loss, later than the 40 ms a client plays from. Instead a sound message of one
+// datagram that the caller marks goes out again, unchanged and under its own message ID,
+// right before each of the next audioRepeats ones (so in order: a client that lost it gets
+// it one packet late, before the packet that would have shown the loss), unless it is older
+// than audioRepeatUs by then (the sound paused). Field 2026-11-24, a game over Wi-Fi: 0.3 to
+// 1.6 % of the sound packets never came, as of the video datagrams, which NACK repaired.
+// Only a message whose receiver plays a number once may be marked (Opus: every client drops
+// a number it had; PCM has no numbers and would play it twice).
+constexpr size_t audioRepeats = 2;
+constexpr uint64_t audioRepeatUs = 100000;
 constexpr uint64_t queuePacingUs = 250000, repairWindowUs = 100000, pacerBurstUs = 6000;
 // FEEDBACK that shows none of this many sent datagrams arrived proves nothing.
 constexpr uint64_t unconfirmedLimit = 16;
@@ -412,7 +423,8 @@ class Sender {
   // loss: a LOSS to act on, with the message ID given up and the decoder's newest frame.
   struct Control { bool feedback = false, keyFrame = false, loss = false; uint16_t epoch = 0; uint32_t highestWhole = 0, received = 0, lost = 0, lostId = 0; uint64_t rttUs = 0, lastGood = 0; };
   // wireBytes: every datagram emitted (media, repairs, TAIL), as it goes on the wire.
-  struct Stats { uint64_t datagrams = 0, videoBytes = 0, repairs = 0, repairBytes = 0, refused = 0, tails = 0, mergedKeys = 0, recoveries = 0, wireBytes = 0; };
+  // audioRepeats: sound datagrams sent again (see audioRepeats above).
+  struct Stats { uint64_t datagrams = 0, videoBytes = 0, repairs = 0, repairBytes = 0, refused = 0, tails = 0, mergedKeys = 0, recoveries = 0, wireBytes = 0, audioRepeats = 0; };
 
   Sender(int targetBps, uint64_t nowUs, std::function<uint64_t()> random)
       : random_(std::move(random)), at_(nowUs), alive_(nowUs), proofAt_(nowUs), challengeAt_(nowUs), challenge_(random_()) { setTarget(targetBps); budget_ = budgetLimit(); credit_ = creditLimit(); }
@@ -441,13 +453,14 @@ class Sender {
   }
   // The caller acts on a LOSS: until its answer is queued, a KEYFRAME that came with it is merged.
   void recovering(uint64_t nowUs) { recoverAt_ = std::max<uint64_t>(nowUs, 1); ++stats_.recoveries; }
-  // Never retransmitted, so it is never kept.
-  Admission audio(std::vector<uint8_t> message) {
+  // Never retransmitted on request. `again`: a receiver plays this message's number once, so
+  // it may go out again with the next ones (audioRepeats); only one datagram's worth does.
+  Admission audio(std::vector<uint8_t> message, bool again = false) {
     Admission result; const size_t count = fragmentCount(message.size());
     if (!proven_) return result;
     if (!count || count > maxAudioFragments) { result.tooLarge = true; return result; }
     if (audio_.size() >= maxAudioQueue) return result;
-    Item item; item.count = uint16_t(count); item.bytes = std::move(message); audio_.push_back(std::move(item)); result.queued = true; return result;
+    Item item; item.count = uint16_t(count); item.again = again && count == 1; item.bytes = std::move(message); audio_.push_back(std::move(item)); result.queued = true; return result;
   }
 
   // An authenticated plaintext from the client. The caller forces an IDR for a
@@ -477,9 +490,21 @@ class Sender {
     // The target is a video rate; audio stays outside it, as in BitrateController.
     if (!audio_.empty()) {
       Item& item = audio_.front();
+      // Before a new one: the ones before it again, oldest first.
+      if (!item.sent && item.again) while (repeatAt_ < sentAudio_.size()) {
+        const Item& old = sentAudio_[repeatAt_++];
+        if (nowUs - old.doneAt > audioRepeatUs) continue;
+        writeFragment(out, classAudio, old.id, old.bytes, 0); ++stats_.audioRepeats;
+        return emitted(out);
+      }
       if (!item.sent) item.id = audioId_++;
       writeFragment(out, classAudio, item.id, item.bytes, item.sent);
-      if (++item.sent == item.count) audio_.pop_front();
+      if (++item.sent == item.count) {
+        repeatAt_ = 0;
+        if (item.again) { item.doneAt = nowUs; sentAudio_.push_back(std::move(item)); if (sentAudio_.size() > audioRepeats) sentAudio_.pop_front(); }
+        else sentAudio_.clear();
+        audio_.pop_front();
+      }
       return emitted(out);
     }
     while (!repairs_.empty()) {
@@ -518,14 +543,14 @@ class Sender {
     return nowUs - heard_ >= feedbackSilenceUs ? 1 : staleEcho_ || !arriving_ ? 2 : 3;
   }
   bool exhausted() const { return videoId_ == UINT32_MAX || audioId_ == UINT32_MAX; }
-  void stop() { stopped_ = true; queue_.clear(); kept_.clear(); audio_.clear(); repairs_.clear(); queuedBytes_ = queuedKeyBytes_ = keptBytes_ = 0; }
+  void stop() { stopped_ = true; queue_.clear(); kept_.clear(); audio_.clear(); sentAudio_.clear(); repairs_.clear(); queuedBytes_ = queuedKeyBytes_ = keptBytes_ = 0; }
 
   const Stats& stats() const { return stats_; }
   size_t heldBytes() const { return queuedBytes_ + keptBytes_; }
   size_t waitingRepairs() const { return repairs_.size(); }
 
  private:
-  struct Item { std::vector<uint8_t> bytes; uint32_t id = 0; uint16_t count = 0, sent = 0; bool key = false, recovery = false; uint64_t doneAt = 0; };
+  struct Item { std::vector<uint8_t> bytes; uint32_t id = 0; uint16_t count = 0, sent = 0; bool key = false, recovery = false, again = false; uint64_t doneAt = 0; };
   struct Repair { uint32_t id = 0; uint16_t index = 0; };
 
   // From `video` taking a key frame until a round trip after its last fragment. It
@@ -624,6 +649,8 @@ class Sender {
   uint64_t tailAt_ = 0, keySentAt_ = 0, recoverAt_ = 0; int tailsLeft_ = 0;
   uint64_t sent_ = 0, sentAtConfirm_ = 0, heard_ = 0; uint32_t confirmed_ = 0, confirmedLost_ = 0, whole_ = 0, finished_ = 0;
   std::deque<Item> queue_, kept_, audio_;
+  std::deque<Item> sentAudio_;  // the last audioRepeats sound messages sent that may go again
+  size_t repeatAt_ = 0;         // which of them goes next, before the sound message now waiting
   std::deque<Repair> repairs_;
   Stats stats_;
 };

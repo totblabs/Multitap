@@ -755,6 +755,29 @@ void audioRules() {
     sender.video(video(1, 400000), false); for (int i = 0; i < 40; ++i) sender.next(now, p);
     sender.audio(pcm(2)); require(sender.next(now, p) && p.bytes[1] == classAudio, "Audio waited behind the pacer");
   }
+  {  // Sound sent again: a one-datagram message marked for it goes out before each of the next two, oldest first.
+    auto sender = provenSender(); Plain p; uint64_t now = 1000; std::vector<uint32_t> ids; Bytes first;
+    const auto drain = [&] { while (sender.next(now, p)) { Fragment f; if (parseFragment(p.bytes.data(), p.size, f) && f.cls == classAudio) { require(f.count == 1 && f.index == 0, "A repeated sound message is not one datagram"); ids.push_back(f.id); if (f.id == 1 && first.empty()) first.assign(p.bytes.begin(), p.bytes.begin() + p.size); else if (f.id == 1) require(Bytes(p.bytes.begin(), p.bytes.begin() + p.size) == first, "A repeat differs from what was sent first"); } } };
+    for (uint64_t n = 1; n <= 5; ++n) { require(sender.audio(pcm(n, 160), true).queued, "Sound refused"); drain(); now += 10000; }
+    require(ids == std::vector<uint32_t>({1, 1, 2, 1, 2, 3, 2, 3, 4, 3, 4, 5}), "Sound was not sent again before the next two, oldest first");
+    require(sender.stats().audioRepeats == 7, "The repeats were not counted");
+    // Three waiting at once (the capture thread was held up): each still follows the two before it.
+    ids.clear(); for (uint64_t n = 6; n <= 8; ++n) sender.audio(pcm(n, 160), true); drain();
+    require(ids == std::vector<uint32_t>({4, 5, 6, 5, 6, 7, 6, 7, 8}), "A backlog of sound broke the order of the repeats");
+    // After a pause of the sound nothing old goes out again.
+    ids.clear(); now += 500000; sender.audio(pcm(9, 160), true); drain(); require(ids == std::vector<uint32_t>({9}), "Sound from before a pause was sent again");
+    now += 10000; ids.clear(); sender.audio(pcm(10, 160), true); drain(); require(ids == std::vector<uint32_t>({9, 10}), "The repeats did not start again after a pause");
+    // A client gets every number once: the receiver hands a repeat on as it came, a decoder drops a number it had
+    // (opus_audio_decoder.h, AndroidOpusStream); the lost first sending of 12 arrives as its repeat, before 13.
+    Client c; std::vector<uint64_t> heard; ids.clear();
+    for (uint64_t n = 11; n <= 14; ++n) { now += 10000; sender.audio(pcm(n, 160), true); bool lose = n == 12; while (sender.next(now, p)) { Fragment f; if (!parseFragment(p.bytes.data(), p.size, f) || f.cls != classAudio) continue; if (lose && f.id == 12) { lose = false; continue; } c.feed(Bytes(p.bytes.begin(), p.bytes.begin() + p.size)); } }
+    uint64_t newest = 0; for (const auto& m : c.out.messages) if (!m.video && m.pts > newest) { heard.push_back(m.pts); newest = m.pts; }
+    require(heard == std::vector<uint64_t>({9, 10, 11, 12, 13, 14}), "A lost sound message did not arrive as its repeat, in order");
+    // Not marked, or more than one datagram (PCM): sent once.
+    auto plain = provenSender(); ids.clear(); now = 1000;
+    for (uint64_t n = 1; n <= 3; ++n) { plain.audio(pcm(n, 160)); plain.audio(pcm(100 + n), true); while (plain.next(now, p)) { Fragment f; if (parseFragment(p.bytes.data(), p.size, f) && f.cls == classAudio && f.index == 0) ids.push_back(f.id); } now += 10000; }
+    require(ids == std::vector<uint32_t>({1, 2, 3, 4, 5, 6}) && plain.stats().audioRepeats == 0, "Sound that may not be sent again was");
+  }
   ++cases;
 }
 

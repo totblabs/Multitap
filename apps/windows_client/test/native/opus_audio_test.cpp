@@ -90,8 +90,8 @@ double threadCpuUs() { FILETIME a{}, b{}, kernel{}, user{}; GetThreadTimes(GetCu
   return (double(ULARGE_INTEGER{{kernel.dwLowDateTime, kernel.dwHighDateTime}}.QuadPart) + double(ULARGE_INTEGER{{user.dwLowDateTime, user.dwHighDateTime}}.QuadPart)) / 10; }
 
 // The decoded stream into the real jitter buffer as RemoteAudio runs them (no
-// device): each packet is decoded when it arrives (one for a concealed number
-// tells the buffer: NoteLate or NotePause); the render thread wakes on every
+// device): each packet's arrival is measured and it is decoded (one for a
+// concealed number tells the buffer: NoteLate or NotePause); the render thread wakes on every
 // packet and every `wakeMs` (its high-resolution timer), conceals while the
 // buffer starves when `conceal` is on (off: the behaviour before it) and
 // pulls. A virtual device plays 48 frames a millisecond.
@@ -104,6 +104,14 @@ std::vector<Arrival> arrivals(const std::vector<Packet>& packets, const std::set
     if (lost.count(k)) continue;
     last = std::max(last, packets[k].pts + 35000 + (late ? late(k) * 1000 : 0)); out.push_back({last, k});
   }
+  return out;
+}
+// As the Host sends since audioRepeats: at each packet's time, the two before
+// it again and then it, oldest first; `lost(k, age)` drops the copy of packet
+// k sent `age` packets after its first.
+std::vector<Arrival> repeated(const std::vector<Packet>& packets, const std::function<bool(size_t, size_t)>& lost) {
+  std::vector<Arrival> out;
+  for (size_t k = 0; k < packets.size(); ++k) for (size_t age = 2; age + 1 > 0; --age) if (k >= age && !lost(k - age, age)) out.push_back({packets[k].pts + 35000, k - age});
   return out;
 }
 struct Played {
@@ -133,8 +141,9 @@ Played play(const std::vector<Packet>& packets, const std::vector<Arrival>& in, 
     bool pushed = false;
     for (; next < in.size() && in[next].at <= now; ++next, pushed = true) {
       const Packet& p = packets[in[next].packet]; const auto before = decoder.counters();
+      if (!decoder.Stale(p.payload.data(), p.payload.size())) buffer.Arrived(p.pts, now);
       require(decoder.Decode(p.pts, p.payload.data(), p.payload.size(), [&](uint64_t pts, const uint8_t* bytes, size_t size) { out.timeline.push_back(pts); buffer.Push(pts, bytes, size, now); }), "A packet was refused");
-      if (decoder.counters().late_concealed != before.late_concealed) buffer.NoteLate(now);
+      if (decoder.counters().late_concealed != before.late_concealed) buffer.NoteLate();
       if (decoder.counters().pauses != before.pauses) buffer.NotePause();
     }
     if (!pushed && now - woke < wakeMs * 1000) continue;
@@ -211,6 +220,33 @@ int main() {
               "Single and paired losses: underruns " + std::to_string(singles.buffer.underruns) + ", dry " + std::to_string(singles.dryAt.size()) + " ms, concealed ahead " + std::to_string(singles.ahead.size()));
       note("underrunsWithSinglesAndPairs", double(singles.buffer.underruns)); checks += 2;
     }
+    // The Host sends each packet again with the next two. First sendings
+    // lost, alone and in a pair: every one comes as its repeat, 10 ms late and
+    // in order, and is played from the packet itself: nothing concealed,
+    // nothing dry, and a level at the floor holds it (the target stays).
+    {
+      const std::set<size_t> first = {20, 45, 46, 90, 133, 170};
+      const auto played = play(speechPackets, repeated(speechPackets, [&](size_t k, size_t age) { return age == 0 && first.count(k); }), true);
+      const auto& d = played.decoder; const auto& b = played.buffer;
+      require(played.timeline == all, "Lost first sendings: a repeat did not fill its place" + differs(played.timeline, all));
+      require(d.concealed == 0 && d.ahead == 0 && d.unfilled == 0 && d.packets == speechPackets.size(), "Lost first sendings: concealed " + std::to_string(d.concealed) + ", ahead " + std::to_string(d.ahead) + ", packets " + std::to_string(d.packets));
+      require(d.late == 2 * speechPackets.size() - 3 - first.size() && d.late_concealed == 0, "The repeats of packets that came were not all dropped: " + std::to_string(d.late));
+      require(b.underruns == 0 && b.overruns == 0 && b.silences == 0 && played.dryAt.empty() && played.targetMs == 40, "Lost first sendings: underruns " + std::to_string(b.underruns) + ", dry " + std::to_string(played.dryAt.size()) + " ms, target " + std::to_string(played.targetMs));
+      note("repeatsDroppedOf200", double(d.late)); checks += 4;
+      // Everything sent in 20 ms lost, twice a second apart (all three copies
+      // at packets 60 and 61, then at 160 and 161): the packets come 20 ms
+      // late, which the floor holds at its edge (the first time one may be
+      // concealed). That lateness is measured (target 50), and the second
+      // time nothing is concealed.
+      const auto burst = [](size_t k, size_t age) { const size_t at = k + age; return at == 60 || at == 61 || at == 160 || at == 161; };
+      const auto twice = play(speechPackets, repeated(speechPackets, burst), true);
+      require(twice.decoder.unfilled == 0 && twice.decoder.concealed == 0 && twice.buffer.underruns == 0 && twice.dryAt.empty(), "A 20 ms loss of everything: unfilled " + std::to_string(twice.decoder.unfilled) + ", filled " + std::to_string(twice.decoder.concealed) + ", dry " + std::to_string(twice.dryAt.size()));
+      require(twice.targetMs == 50, "A packet 20 ms late did not set the target: " + std::to_string(twice.targetMs));
+      size_t early = 0, later = 0; for (const uint64_t at : twice.aheadAt) (at < 1500 ? early : later) += 1;
+      require(early <= 2 && later == 0, "A 20 ms loss of everything: concealed " + std::to_string(early) + " the first time, " + std::to_string(later) + " the second");
+      require(twice.timeline == all || early, "A 20 ms loss of everything left a hole" + differs(twice.timeline, all));
+      note("concealedAtFirst20msLossWithRepeats", double(early)); checks += 3;
+    }
     // Burst losses of 30, 60 and 120 ms outlast the buffer (30-40 ms) before
     // the next packet can show them. Without concealment ahead (as before) the
     // device runs dry. With it: Opus PLC keeps the device fed, every 10 ms in
@@ -248,15 +284,17 @@ int main() {
 
     // Late, not lost: 150-155 come together 50 ms late, then 150-169 come
     // together 190 ms late. What was concealed ahead is dropped when it comes
-    // (its time was played), in order; the rest is decoded in order; the
-    // target grows once, as for an underrun.
+    // (its time was played), in order; the rest is decoded in order. The
+    // target becomes what 50 ms of lateness needs (80 ms); 190 ms is beyond
+    // any depth allowed and leaves it where it was.
     for (const size_t lastLate : {size_t(155), size_t(169)}) {
       const auto played = play(speechPackets, arrivals(speechPackets, {}, [&](size_t k) { return k >= 150 && k <= lastLate ? uint64_t(10 * (lastLate - k)) : 0; }), true);
       const auto& d = played.decoder; const auto& b = played.buffer;
       require(d.ahead >= 1 && d.late_concealed == d.ahead && d.late == d.ahead && d.unfilled == 0 && d.concealed == 0 && d.pauses == 0,
               "Late packets: concealed ahead " + std::to_string(d.ahead) + ", dropped late " + std::to_string(d.late) + " (" + std::to_string(d.late_concealed) + " concealed)");
       require(played.timeline == all, "Late packets: the jitter buffer did not get every 10 ms exactly once, in order" + differs(played.timeline, all));
-      require(b.late_concealments == 1 && played.targetMs == 60 && b.underruns == 0, "Late packets did not grow the target once: " + std::to_string(b.late_concealments) + ", target " + std::to_string(played.targetMs));
+      require(b.late_concealments == 1 && played.targetMs == (lastLate == 155 ? 80 : 40) && b.uncovered == (lastLate == 155 ? 0u : 1u) && b.underruns == 0,
+              "Late packets: counted " + std::to_string(b.late_concealments) + ", target " + std::to_string(played.targetMs) + ", uncovered " + std::to_string(b.uncovered) + ", underruns " + std::to_string(b.underruns));
       require(!played.headBack, "The play head went back across late packets");
       if (lastLate == 155) require(played.dryAt.empty(), "A 50 ms stall ran the device dry");
       else require(d.ahead == OpusAudioDecoder::kMaxRun && !played.dryAt.empty() && played.dryAt.front() > played.aheadAt.back(), "A 190 ms stall: not 80 ms concealed before the device ran dry");

@@ -970,7 +970,7 @@ bool FlutterWindow::OnCreate() {
       else if(FAILED(hr))result->Error("media_backpressure","Native media operation failed.");
       else result->Success();
     };
-    if(call.method_name()=="stop"){if(stream_size_queries_)stream_size_queries_->Retire();complete(remote_media_->Stop(lease,[this]{ResetRemoteInput();}));return;}
+    if(call.method_name()=="stop"){if(stream_size_queries_)stream_size_queries_->Retire();wlan_streaming_.Release();complete(remote_media_->Stop(lease,[this]{ResetRemoteInput();}));return;}
     // A resize's held picture (start with holdPrevious) is no longer shown.
     if(call.method_name()=="releaseHeld"){
       int64_t texture=-1;if(!multitap::MediaInteger(multitap::MediaField(*args,"texture"),texture)||texture<0){result->Error("invalid_arguments","Held texture required.");return;}
@@ -1007,6 +1007,10 @@ bool FlutterWindow::OnCreate() {
       {const auto hw=stats.find(V("hardwareDecode"));stats[V("gpuHardware")]=V(hw!=stats.end()&&std::get_if<bool>(&hw->second)&&std::get<bool>(hw->second));}
       if(render_environment_.known)stats[V("renderHardware")]=V(render_environment_.hardware);
       if(const auto hz=multitap::CompositionRefreshHz())stats[V("displayHz")]=V(hz);
+      // This PC's Wi-Fi while the stream runs (wlan_streaming.h): what the adapter took, the
+      // Win32 code of a refusal, and the scans that completed since the last reading.
+      wlan_streaming_.Touch();
+      if(wlan_streaming_.tried()){stats[V("wlanMode")]=V(wlan_streaming_.mode());stats[V("wlanError")]=V(int64_t(wlan_streaming_.error()));stats[V("wlanScans")]=V(int64_t(wlan_streaming_.TakeScans()));}
       stats[V("remoteSession")]=V(multitap::RemoteDesktopSession());
       result->Success(V(stats));return;
     }
@@ -1078,6 +1082,7 @@ bool FlutterWindow::OnCreate() {
       const HRESULT hr=remote_media_->StartTracks(lease,configuration,textures,[this]{ResetRemoteInput();},!hardwareValue||*hardwareValue,outputAdapters,fps);
       if(remote_media_->LatestAttempt(lease)&&thumbnails_&&thumbnail_target_&&thumbnail_ticket_){if(SUCCEEDED(hr))*thumbnail_ticket_=multitap::ThumbnailGeneration::Change(*thumbnail_ticket_,true);else thumbnails_->Invalidate(*thumbnail_target_,*thumbnail_ticket_);}
       if(FAILED(hr)){complete(hr);return;}
+      wlan_streaming_.Hold();
       flutter::EncodableMap value;for(const auto& [id,texture]:textures)value.emplace(V(std::to_string(id)),V(texture));
       result->Success(V(value));return;
     }
@@ -1129,7 +1134,7 @@ bool FlutterWindow::OnCreate() {
         }else ResetRemoteInput();
       },hardware_decode,fps,shape.sourceWidth,shape.sourceHeight,hold_previous,audio_opus);
       if(remote_media_->LatestAttempt(lease)&&thumbnails_&&thumbnail_target_&&thumbnail_ticket_){if(SUCCEEDED(hr))*thumbnail_ticket_=multitap::ThumbnailGeneration::Change(*thumbnail_ticket_,true);else thumbnails_->Invalidate(*thumbnail_target_,*thumbnail_ticket_);}
-      if(FAILED(hr))complete(hr);else result->Success(flutter::EncodableValue(texture));
+      if(FAILED(hr))complete(hr);else{wlan_streaming_.Hold();result->Success(flutter::EncodableValue(texture));}
       return;
     }
     result->NotImplemented();
@@ -1521,7 +1526,7 @@ void FlutterWindow::OnDestroy() {
   if (cursor_presenter_) cursor_presenter_->Detach();
   cursor_presenter_.reset();
   udp_media_.reset();
-  remote_input_.reset(); remote_media_.reset();
+  remote_input_.reset(); remote_media_.reset(); wlan_streaming_.Release();
   if (remote_events_) remote_events_->SetStreamHandler(nullptr);
   remote_sink_.reset(); remote_events_.reset(); remote_channel_.reset(); remote_registrar_.reset();
   password_ime_.Set(nullptr, false);

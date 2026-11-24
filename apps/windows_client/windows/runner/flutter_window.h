@@ -16,6 +16,7 @@
 #include "thumbnail_writer.h"
 #include "password_ime.h"
 #include "remote_media_session.h"
+#include "wlan_streaming.h"
 #include "udp_media_channel.h"
 #include "render_environment.h"
 #include "remote_input.h"
@@ -153,6 +154,8 @@ class FlutterWindow : public Win32Window, private multitap::tray::Delegate {
   // Whether this view's Flutter renderer is a hardware GPU (stream statistics).
   multitap::RenderEnvironment render_environment_;
   std::unique_ptr<multitap::RemoteMediaSession> remote_media_;
+  // Held from a stream's start to its stop: this PC's Wi-Fi adapter does not scan meanwhile.
+  multitap::WlanStreaming wlan_streaming_;
   std::unique_ptr<multitap::UdpMediaChannel> udp_media_;
   std::unique_ptr<multitap::StreamSizeQueryChannel> stream_size_queries_;
   std::unique_ptr<multitap::RemoteInput> remote_input_;

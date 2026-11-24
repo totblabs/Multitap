@@ -52,6 +52,9 @@ const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samp
   // texture path (0 = CPU pixel buffer, 1 = GPU surface) and the composition
   // rate (Hz) the client's Flutter paces frames at.
   'textureWaitUs', 'textureUploadUs', 'queuedFrames', 'skippedFrames', 'texturePath', 'displayHz',
+  // The client PC's Wi-Fi while the stream runs: 0 no connected Wi-Fi adapter, 1 streaming mode on and
+  // background scans off, 2 one of the two, 3 neither; the Win32 code of a refusal; scans in the window.
+  'wlanMode', 'wlanError', 'wlanScans',
   // Per-stage maxima of the host pipeline (which stage a slow frame spent its time in).
   'topologyMaxUs', 'captureMaxUs', 'convertMaxUs', 'encodeMaxUs',
   // Backpressure that does not end the stream (video packets
