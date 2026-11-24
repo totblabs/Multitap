@@ -103,6 +103,10 @@ void main() {
         minimumGain: const Duration(milliseconds: 100),
       )..start(DateTime.now().add(const Duration(milliseconds: 200)));
       await Future<void>.delayed(const Duration(milliseconds: 600));
+      // A renewal whose timer fired in the same turn as this delay has called
+      // renew and not yet reported it (two microtasks later): let it finish, so
+      // that stopping does not discard it between the two counts below.
+      await Future<void>.delayed(Duration.zero);
       renewer.stop();
       expect(renews, greaterThanOrEqualTo(2));
       expect(expiries.length, renews);

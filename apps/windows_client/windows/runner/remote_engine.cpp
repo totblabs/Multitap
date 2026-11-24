@@ -8,6 +8,8 @@
 #include "../../../../native/windows_video/delayed_output.hpp"
 #include <cstring>
 #include <algorithm>
+// The screen's refresh rate (CompositionRefreshHz) for the presentation depth.
+#pragma comment(lib, "dwmapi.lib")
 namespace multitap {
 
 
@@ -22,7 +24,7 @@ std::shared_ptr<DecodedFrame> RemoteEngine::TakeForFlutter(const std::shared_ptr
       // Frames still waiting from the previous take (a standing backlog)
       // or a frame kept while Flutter drew nothing: show the newest.
       uint32_t skipped = 0;
-      if (pending.size() > 1 && (frames->backlog > 0 || taken - pending.front().published > kStaleFrame)) {
+      if (pending.size() > 1 && (frames->backlog + 1 >= frames->depth || taken - pending.front().published > kStaleFrame)) {
         skipped = uint32_t(pending.size() - 1);
         frames->skipped += pending.size() - 1;
         pending.erase(pending.begin(), pending.end() - 1);
@@ -156,7 +158,7 @@ int64_t RemoteEngine::Start(uint32_t width, uint32_t height, bool audio_enabled,
   { std::lock_guard<std::mutex> lock(mutex_); decode_calls_=texture_notify_calls_=texture_remarks_=rgba_buffer_reuses_=0; decode_total_ms_=decode_max_ms_=0; texture_notify_total_ms_=texture_notify_max_ms_=0;
     lossless_packets_=lossless_republishes_=lossless_deferred_=0; lossless_present_=0; lossless_compose_ms_=lossless_republish_ms_=0; lossless_poisoned_=lossless_scaled_=false; lossless_restarts_=0; watched_.clear(); signal_->remark=signal_->reveal=false; deferred_=0;
     hardware_decode_=decoder_prestarted_=false; decode_tier_=0; decode_vendor_=0; decoder_fallbacks_=gpu_dropped_=0; decoder_fallback_reason_=0; gpu_convert_total_ms_=gpu_convert_max_ms_=gpu_wait_total_ms_=0; gpu_pipelined_=0;
-    since_={}; stalls_.clear(); stall_serial_=0; publishing_key_=false; }
+    since_={}; stalls_.clear(); stall_serial_=0; publishing_key_=false; depth_checked_={}; }
   error_ = S_OK; running_ = true; audio_enabled_=audio_enabled;
   if (audio_enabled_) audio_.Start(audio_opus);
   worker_ = std::thread([this, width, height] { Run(width, height); });
@@ -246,10 +248,10 @@ flutter::EncodableMap RemoteEngine::Stats() {
   using V = flutter::EncodableValue;
   const auto load = ProcessLoadSampler::Instance().Latest();  // timer thread's last reading; never waits
   std::lock_guard<std::mutex> lock(mutex_);
-  uint64_t decoded=0,texture=0,skipped=0,queued=0,uploads=0,present_packets=0;
+  uint64_t decoded=0,texture=0,skipped=0,queued=0,uploads=0,present_packets=0,present_depth=0;
   double wait_ms=0,upload_ms=0,present_age_ms=0;
   if (frames_) { std::lock_guard<std::mutex> frame_lock(frames_->mutex); decoded=frames_->published; texture=frames_->texture_frames; skipped=frames_->skipped;
-    queued=frames_->queued; uploads=frames_->uploads; wait_ms=frames_->wait_total_ms; upload_ms=frames_->upload_total_ms;
+    queued=frames_->queued; present_depth=frames_->depth; uploads=frames_->uploads; wait_ms=frames_->wait_total_ms; upload_ms=frames_->upload_total_ms;
     present_packets=frames_->pending.size();
     if (!frames_->pending.empty()) present_age_ms=std::max(0.0,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frames_->pending.front().published).count()); }
   const double queue_age = queue_.empty() ? 0 : std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-queue_.front().enqueued).count();
@@ -298,6 +300,7 @@ flutter::EncodableMap RemoteEngine::Stats() {
       // Of gpuConvertTotalMs: waiting for the GPU to finish each converted picture.
       {V("gpuWaitTotalMs"), V(gpu_wait_total_ms_)},
       {V("gpuPipelinedFrames"), V(static_cast<int64_t>(gpu_pipelined_))},
+      {V("presentDepth"), V(static_cast<int64_t>(present_depth))},
       {V("gpuDroppedFrames"), V(static_cast<int64_t>(gpu_dropped_))},
       {V("rgbaBufferReuses"), V(static_cast<int64_t>(rgba_buffer_reuses_))},
       {V("queuedPackets"), V(static_cast<int64_t>(queue_.size()))},
@@ -573,6 +576,13 @@ void RemoteEngine::Publish(DecodedFrame&& frame, bool replaceable) {
       if (buffers->spare.size() < FrameBuffers::kSpareFrames) buffers->spare.push_back(std::move(owned->rgba));
     } catch (...) {}
   });
+  // The screen's rate can change in a session (another monitor, another mode).
+  size_t depth = 0;
+  if (const auto now = std::chrono::steady_clock::now(); now - depth_checked_ >= std::chrono::seconds(1)) {
+    depth_checked_ = now;
+    const int64_t forced = test_refresh_hz;
+    depth = PresentDepth(forced > 0 ? forced : CompositionRefreshHz());
+  }
   std::shared_ptr<DecodedFrame> previous;
   std::deque<Frames::Pending> dropped;  // released outside the lock
   uint32_t waiting = 0; uint64_t skipped_total = 0;
@@ -581,6 +591,7 @@ void RemoteEngine::Publish(DecodedFrame&& frame, bool replaceable) {
   {
     std::lock_guard<std::mutex> lock(frames_->mutex);
     auto& pending = frames_->pending;
+    if (depth) frames_->depth = depth;
     if (hidden) { frames_->skipped += pending.size(); dropped.swap(pending); }
     // The newest waiting frame is always `latest`. A lossless republish is a
     // copy of it plus exact tiles, and a frame after a republish has all of
@@ -589,7 +600,7 @@ void RemoteEngine::Publish(DecodedFrame&& frame, bool replaceable) {
     // An earlier frame still waits for Flutter: queue behind it (it would
     // have been replaced, never shown, before texture-pacing-v1).
     if (!pending.empty()) ++frames_->queued;
-    while (pending.size() >= kPresentQueue) { dropped.push_back(std::move(pending.front())); pending.pop_front(); ++frames_->skipped; }
+    while (pending.size() >= frames_->depth) { dropped.push_back(std::move(pending.front())); pending.pop_front(); ++frames_->skipped; }
     if (!hidden) pending.push_back({next, std::chrono::steady_clock::now(), replaceable});
     previous = std::move(frames_->latest); frames_->latest = std::move(next); ++frames_->published;
     waiting = uint32_t(pending.size()); skipped_total = frames_->skipped;

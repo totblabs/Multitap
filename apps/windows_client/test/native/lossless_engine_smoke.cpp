@@ -206,6 +206,65 @@ Piped piped(const std::vector<Unit>& units, uint32_t width, uint32_t height, boo
   require(result.decoded == int64_t(units.size()) && !result.dropped, "A picture of the stream was lost");
   return result;
 }
+// Flutter's take, as its raster thread makes it: one picture, released at once.
+bool take(Registrar& registrar) {
+  flutter::TextureVariant* texture = nullptr;
+  { std::lock_guard<std::mutex> lock(registrar.mutex); if (!registrar.textures.empty()) texture = registrar.textures.begin()->second; }
+  if (!texture) return false;
+  if (auto* pixels = std::get_if<flutter::PixelBufferTexture>(texture)) {
+    if (const auto* buffer = pixels->CopyPixelBuffer(0, 0)) { if (buffer->release_callback) buffer->release_callback(buffer->release_context); return true; }
+  } else if (auto* surface = std::get_if<flutter::GpuSurfaceTexture>(texture)) {
+    if (const auto* descriptor = surface->ObtainDescriptor(0, 0)) { if (descriptor->release_callback) descriptor->release_callback(descriptor->release_context); return true; }
+  }
+  return false;
+}
+// texture-pacing: a burst of pictures (what a radio pause leaves) against a screen of a given
+// rate. What the screen can catch up on within kCatchUpMs is shown, picture by picture; more
+// than that drops the oldest; and a queue that does not empty goes to the newest.
+void presenting() {
+  const uint32_t width = 640, height = 360;
+  const auto units = encode(width, height, 40);
+  struct Case { int64_t hz; size_t depth; };
+  for (const Case c : {Case{60, 2}, Case{144, 2}, Case{180, 3}, Case{240, 4}}) {
+    require(multitap::RemoteEngine::PresentDepth(c.hz) == c.depth, "The depth for a screen rate is not what the rule says");
+    multitap::RemoteEngine::test_refresh_hz = c.hz;
+    struct Reset { ~Reset() { multitap::RemoteEngine::test_refresh_hz = 0; } } reset;
+    Registrar registrar; multitap::RemoteMediaSession owner(&registrar, {}, nullptr);
+    int64_t lease = 1, texture = -1;
+    check(owner.Start(lease, width, height, false, texture, {}, false), "Start");
+    size_t sent = 0;
+    const auto burst = [&](size_t count) {
+      for (size_t i = 0; i < count; ++i, ++sent) push(owner, lease, envelope(units[sent].bytes.data(), units[sent].bytes.size(), units[sent].pts, sent == 0));
+      require(until([&] { return integer(stats(owner, lease), "decodedFrames") >= int64_t(sent); }), "Burst not decoded");
+    };
+    const auto counts = [&] { const auto s = stats(owner, lease); return std::pair<int64_t, int64_t>{integer(s, "textureFrames"), integer(s, "skippedDecodedFrames")}; };
+    // The first picture, taken: nothing waits.
+    burst(1); require(take(registrar), "First take");
+    require(integer(stats(owner, lease), "presentDepth") == int64_t(c.depth), "The engine did not take the screen's depth");
+    // A burst exactly as deep as the screen allows: every picture is shown, one a take.
+    auto before = counts(); burst(c.depth);
+    for (size_t i = 0; i < c.depth; ++i) require(take(registrar), "Take of a burst");
+    auto after = counts();
+    require(after.first - before.first == int64_t(c.depth) && after.second == before.second, "A burst the screen can catch up on lost a picture");
+    // Two more than that: the two oldest are dropped, the rest shown.
+    before = counts(); burst(c.depth + 2);
+    for (size_t i = 0; i < c.depth; ++i) require(take(registrar), "Take of a long burst");
+    after = counts();
+    require(after.first - before.first == int64_t(c.depth) && after.second - before.second == 2, "A burst deeper than the screen allows was not cut to its newest pictures");
+    // A queue that never empties (a picture arrives for every one taken, with the queue full):
+    // nothing is dropped while it could still empty, and the take after depth - 1 takes in a
+    // row that left pictures waiting goes to the newest, so the wait cannot grow.
+    for (size_t i = 0; i <= c.depth; ++i) take(registrar);  // whatever still waits, so the queue starts empty
+    before = counts(); burst(c.depth);
+    for (size_t i = 0; i + 1 < c.depth; ++i) { require(take(registrar), "Take under a standing backlog"); burst(1); }
+    const auto standing = counts();
+    require(standing.second == before.second, "A queue that could still empty was cut");
+    require(take(registrar), "The take that cuts a standing backlog");
+    after = counts();
+    require(after.second - standing.second == int64_t(c.depth - 1), "A standing backlog was not cut to its newest picture");
+    std::cout << "{\"case\":\"presenting\",\"screenHz\":" << c.hz << ",\"depth\":" << c.depth << ",\"burstShownWhole\":true,\"longBurstCut\":2,\"standingBacklogCut\":" << (after.second - before.second) << "}" << std::endl;
+  }
+}
 // The same stream at a game's pace (one picture every 1/120 s): how long after its packet
 // each picture is published. A picture held back must come out when the GPU finishes it,
 // not when the next packet happens to arrive.
@@ -405,6 +464,8 @@ int main() {
       try { pipeline(size.first, size.second); pacing(size.first, size.second); }
       catch (const std::exception& error) { ++failures; std::cout << "{\"size\":\"" << size.first << "x" << size.second << "\",\"case\":\"pipeline\",\"failed\":\"" << error.what() << "\"}" << std::endl; }
     }
+    try { presenting(); }
+    catch (const std::exception& error) { ++failures; std::cout << "{\"case\":\"presenting\",\"failed\":\"" << error.what() << "\"}" << std::endl; }
     std::cout << "{\"kind\":\"lossless-engine-smoke\",\"checks\":" << checks << ",\"failures\":" << failures << "}" << std::endl;
     MFShutdown();
     return failures ? 1 : 0;

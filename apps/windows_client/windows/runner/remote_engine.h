@@ -72,10 +72,20 @@ class RemoteEngine {
   // display refresh. A frame published while an earlier one still waits for
   // Flutter is queued (not replaced), so two frames that arrive within one
   // refresh are both shown, on consecutive refreshes. Bounds keep latency:
-  // at most kPresentQueue frames wait; a take that finds frames waiting again
-  // (a standing backlog) or a frame older than kStaleFrame shows the newest.
-  // The same rules apply to both texture kinds.
-  static constexpr size_t kPresentQueue = 2;
+  // at most PresentDepth frames wait; a queue that has not emptied after that
+  // many takes in a row (a standing backlog) or a frame older than kStaleFrame
+  // shows the newest. The same rules apply to both texture kinds.
+  // The depth is what the screen can catch up on within kCatchUpMs: frames come
+  // in bursts after a radio pause, and a fast screen shows a burst of four in
+  // the time a 60 Hz screen shows one (2 at 60 to 165 Hz, 3 at 180, 4 from 240).
+  static constexpr size_t kPresentQueue = 2, kPresentQueueMost = 4;
+  static constexpr double kCatchUpMs = 17.0;
+  static size_t PresentDepth(int64_t refresh_hz) {
+    if (refresh_hz <= 0) return kPresentQueue;
+    return std::clamp<size_t>(size_t(kCatchUpMs * double(refresh_hz) / 1000.0), kPresentQueue, kPresentQueueMost);
+  }
+  // Tests only: the screen's refresh rate instead of the measured one (0 = measured).
+  static inline std::atomic<int64_t> test_refresh_hz{0};
   // gpu-pipeline: GPU pictures that may be unfinished while the next packet is
   // decoded. One more waits for the oldest first, which is the decoder's load.
   static constexpr size_t kGpuInFlight = 2;
@@ -116,6 +126,8 @@ class RemoteEngine {
     std::deque<Pending> pending;
     // Consecutive takes that left a frame waiting.
     uint32_t backlog = 0;
+    // How many frames may wait (PresentDepth of the screen, kept current by the worker).
+    size_t depth = kPresentQueue;
     uint64_t published = 0, texture_frames = 0, skipped = 0, queued = 0, uploads = 0;
     // Published -> taken by Flutter; Flutter's callback -> buffer release
     // (the raster thread's texture upload). Lifetime totals since Start.
@@ -231,6 +243,7 @@ class RemoteEngine {
   std::deque<Stall> stalls_;
   uint64_t stall_serial_ = 0;
   bool publishing_key_ = false;  // worker only: the packet being decoded is a key frame
+  std::chrono::steady_clock::time_point depth_checked_{};  // worker only: when the screen's rate was last read
   bool audio_enabled_ = true;
   RemoteAudio audio_;
 };
