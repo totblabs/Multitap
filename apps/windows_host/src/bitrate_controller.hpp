@@ -105,14 +105,19 @@ class BitrateController {
   double deliveredKbps() const { return delivered() / 1000; }
   double standingExcessMs() const { return double(standingExcessUs_) / 1000; }
 
-  // The encoder geometry of a (new) media epoch; the floor follows it.
-  std::optional<int> geometry(int width, int height, int fps) {
+  // The encoder geometry of a (new) media epoch; the floor follows it. `lowest`: the capture
+  // paces this stream's frames between that rate and `fps` as the target allows
+  // (path_frame_rate.hpp), so the floor is the lowest rate's and the target can follow a path
+  // that carries less than the stream's own rate needs. 0: the stream keeps its rate.
+  std::optional<int> geometry(int width, int height, int fps, int lowest = 0) {
     fps_ = std::clamp(fps, 1, 240);
-    floor_ = std::min(adaptiveBitrateFloor(width, height, fps_), maximum_);
+    floor_ = std::min(adaptiveBitrateFloor(width, height, lowest > 0 ? std::min(lowest, fps_) : fps_), maximum_);
     target_ = std::clamp(target_, double(floor_), double(maximum_));
     idleRestore_ = std::min(idleRestore_, double(maximum_));
     return publish(true);
   }
+  // The rate the capture paces frames at now: a frame's usual size is the target over it.
+  void paced(int fps) { fps_ = std::clamp(fps, 1, 240); }
   // Independent outputs (bitrate-adaptive-tracks-v1): the floor is the sum of
   // the outputs' own floors (each encoder's limit holds at its own geometry).
   std::optional<int> geometryFloor(int floor, int fps) {

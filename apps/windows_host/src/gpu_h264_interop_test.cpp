@@ -136,8 +136,14 @@ int main(int argc, char** argv) {
     lose("700 ms: older than every slot", frames(250), frames(700), false, false);
     lose("right after an IDR and its marks, 100 ms", std::max(frames(40), 5), frames(100), false, true);
     const int lossFrames = at + frames(150);
-    std::map<uint64_t, std::vector<uint8_t>> wholeFrames, lossyFrames; std::vector<double> encodeMs; bool widened = false; size_t pBytes = 0, pCount = 0, idrBytes = 0, delivered = 0, replaced = 0;
-    const auto keep = [](std::map<uint64_t, std::vector<uint8_t>>& into) { return [&into](multitap::DecodedFrame&& out) { into[out.pts_us] = std::move(out.rgba); }; };
+    // A picture is kept as its size and a 64-bit hash of its pixels (FNV-1a over 8-byte words): two decoders' pictures of several megabytes each, for hundreds of frames, do not fit a small Host's memory.
+    struct Picture { size_t bytes = 0; uint64_t hash = 0; bool operator==(const Picture&) const = default; };
+    std::map<uint64_t, Picture> wholeFrames, lossyFrames; std::vector<double> encodeMs; bool widened = false; size_t pBytes = 0, pCount = 0, idrBytes = 0, delivered = 0, replaced = 0;
+    const auto keep = [](std::map<uint64_t, Picture>& into) { return [&into](multitap::DecodedFrame&& out) {
+      uint64_t hash = 1469598103934665603ull; size_t at = 0;
+      for (; at + 8 <= out.rgba.size(); at += 8) { uint64_t word; std::memcpy(&word, out.rgba.data() + at, 8); hash = (hash ^ word) * 1099511628211ull; }
+      for (; at < out.rgba.size(); ++at) hash = (hash ^ out.rgba[at]) * 1099511628211ull;
+      into[out.pts_us] = {out.rgba.size(), hash}; }; };
     for (int index = 0; index < lossFrames; ++index) {
       // Bars that move, and blocks whose place and shade follow a hash of the frame number.
       for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) pixels[size_t(y) * size_t(width) + size_t(x)] = uint8_t(16 + (int64_t(x) * 3 + y + index * 7) % 210);
@@ -159,6 +165,9 @@ int main(int argc, char** argv) {
           if (!loss.recovered) { if (!widened) widened = lossEncoder->widenReferences(); lossEncoder->requestKeyFrame(); }
         }
       }
+      // The capture's pacing may change with the target (path_frame_rate.hpp): told a lower rate and its own again, the encoder keeps its references.
+      if (index == lossFrames / 3) require(lossEncoder->setFrameRate(std::max(1, fps / 2)), "The hardware refused a paced frame rate in the loss run");
+      if (index == 2 * lossFrames / 3) require(lossEncoder->setFrameRate(fps), "The hardware refused its own frame rate again in the loss run");
       // The automatic rate moves the target all the time; the kept references must outlive it.
       if (index % 7 == 3) require(lossEncoder->setBitrate(index % 14 == 3 ? bitrate * 3 / 4 : bitrate * 9 / 8), "The hardware refused a live bitrate target in the loss run");
       std::vector<host::Frame> coded; const auto began = std::chrono::steady_clock::now(); lossEncoder->encode(pixels.data(), pts, coded);
@@ -178,7 +187,7 @@ int main(int argc, char** argv) {
     host::check(whole.Drain(keep(wholeFrames)), "Drain"); host::check(lossy.Drain(keep(lossyFrames)), "Drain");
     require(whole.hardware() == hardwareDecoder && lossy.hardware() == hardwareDecoder && !whole.fallbacks() && !lossy.fallbacks(), "A decoder of the loss run was replaced");
     size_t identical = 0, different = 0;
-    for (const auto& [pts, picture] : lossyFrames) { const auto same = wholeFrames.find(pts); if (same != wholeFrames.end() && same->second == picture && !picture.empty()) ++identical; else ++different; }
+    for (const auto& [pts, picture] : lossyFrames) { const auto same = wholeFrames.find(pts); if (same != wholeFrames.end() && same->second == picture && picture.bytes) ++identical; else ++different; }
     std::sort(encodeMs.begin(), encodeMs.end());
     std::cout << "{\"kind\":\"gpu-h264-reference-recovery\",\"decoder\":\"" << (hardwareDecoder ? "hardware" : "software") << "\",\"fps\":" << fps << ",\"longTermReferences\":" << (widened ? "true" : "false") << ",\"forcedSlots\":" << forcedSlots << ",\"answersReplacedByIdr\":" << replaced << ",\"frames\":" << lossFrames
               << ",\"delivered\":" << delivered << ",\"shown\":" << lossyFrames.size() << ",\"identicalToNoLoss\":" << identical << ",\"different\":" << different

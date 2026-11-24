@@ -94,7 +94,25 @@ negotiated ceiling.
   (only changed pictures are encoded) neither raises nor lowers the rate.
 - **Geometry floor.** Never below 0.04 bit per pixel-frame, clamped to
   2–20 Mbps (1080p60 5.0, 1440p60 8.8, 4K60 19.9 Mbps); see the encoder
-  measurements below.
+  measurements below. For one picture the frame rate in it is the lowest the
+  capture may pace at (next item): 1080p 2.5, 1440p 4.4, 4K 10 Mbps.
+- **The frame rate follows the target** (`path_frame_rate.hpp`, one picture
+  only). At a fixed frame rate the floor is a rate (16 Mbps for 2084×1340 at
+  144 fps), and a path that carries less was sent that much all the same. Now,
+  when a frame's share of the target falls under 0.04 bit per pixel, the
+  capture paces at the highest of 240, 165, 144, 120, 90, 75, 60, 45 and 30
+  frames a second whose frames get 0.05 or more, and goes back up, to the
+  highest rate whose frames get 0.055, once that has held for two seconds. The
+  encoder is told the paced rate (`Encoder::setFrameRate`): every encoder here
+  budgets a frame as the target over the rate it was opened at, so untold it
+  sends only paced/own of the target (`MultitapHostEncoderFrameRateTest`: x264,
+  the MFT and NVENC opened at 60 and paced at 30 sent half; told, all of it in
+  frames twice as large, with no IDR). That also holds when the Host's or the
+  client's load lowers the capture rate. AMF and Quick Sync cannot be told: such
+  a stream keeps its rate and its floor. The Host announces the lowest rate as
+  `fpsFloor` in `stream.info`; `fpsTarget` in `stream.stats` is the paced
+  rate. A stream whose target stays above its old floor is not changed. A path
+  under the lowest rate's floor is beyond this rule.
 - **Encoder limited.** If the encoder output (bursts and tiles excluded) stays
   above 1.5 × target for 2 s, cuts are futile: no further cut (overflow guard
   included), and the target follows output / 1.3 for at least 5 s.
@@ -196,6 +214,12 @@ the broker channel.
   it again, every output restarts at an IDR) instead of the whole stream.
 - **Floor.** The sum of the outputs' own floors (each encoder's limit holds at
   its own geometry): two 1080p60 outputs 10 Mbps, 4K60 + 1080p60 24.9 Mbps.
+- **UDP legs.** Each output's leg reports its own round trip, datagrams and
+  the bytes that arrived of those it sent. The legs share one path, and the
+  controller's UDP rules read one stream of reports, so the reports of one
+  round (every leg once; a leg that reports again first ends it) are added up
+  and given as one, with the longest round trip. The rules of "What arrived
+  decides how far" above then hold for two monitors as for one.
 - **Shares.** Each output keeps its part of the target by area. What an output
   leaves unused (its part beyond 1.25 x its rate of the last 0.5 s) goes to an
   output that uses its own part (at least 80 % of it), split again every

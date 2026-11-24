@@ -40,7 +40,8 @@ class UdpTracksSession {
     std::function<void()> repairReady;
     // bitrate-adaptive-tracks-v1 (track_bitrate.hpp): a leg's round trip and losses,
     // its path, a pacer backlog. Each returns that output's share (0: keep its own rate).
-    std::function<int(const std::string&,uint64_t,uint32_t,uint32_t)> rateFeedback;
+    // A leg's FEEDBACK: round trip, datagrams received and given up, and the bytes that arrived of those sent since the last one.
+    std::function<int(const std::string&,uint64_t,uint32_t,uint32_t,uint32_t,uint32_t)> rateFeedback;
     std::function<int(const std::string&,bool)> ratePath;
     std::function<void()> rateBacklog;
   };
@@ -162,7 +163,7 @@ class UdpTracksSession {
       const auto scope=item.first;const auto up=std::make_shared<std::atomic<bool>>(false);UdpProbeLegOptions options;
       options.media.keyFrame=[this,scope]{requestRepair(scope,true,{});};
       options.media.recover=[this,scope](uint64_t pts){requestRepair(scope,false,pts);};
-      options.media.feedback=[this,id=scope.track,rate=scope.bitrate](uint64_t rtt,uint32_t received,uint32_t lost,uint32_t,uint32_t){int share=0;try{if(!closed_&&callbacks_.rateFeedback)share=callbacks_.rateFeedback(id,rtt,received,lost);}catch(...){ }return share>0?share:rate;};
+      options.media.feedback=[this,id=scope.track,rate=scope.bitrate](uint64_t rtt,uint32_t received,uint32_t lost,uint32_t arrivedBytes,uint32_t sentBytes){int share=0;try{if(!closed_&&callbacks_.rateFeedback)share=callbacks_.rateFeedback(id,rtt,received,lost,arrivedBytes,sentBytes);}catch(...){ }return share>0?share:rate;};
       options.media.path=[this,up,id=scope.track,rate=scope.bitrate](bool value){*up=value;int share=0;try{if(!closed_&&callbacks_.ratePath)share=callbacks_.ratePath(id,value);}catch(...){ }return share>0?share:rate;};
       options.media.backlog=[this]{try{if(!closed_&&callbacks_.rateBacklog)callbacks_.rateBacklog();}catch(...){ }};
       options.media.local=[this,scope](const std::string& address,uint16_t port){send(scoped("udp.tracks.local",scope,",\"protocol\":\"udp-direct-v1\",\"address\":"+jsonQuote(address)+",\"port\":"+std::to_string(port)));};

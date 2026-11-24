@@ -94,7 +94,7 @@ class X264Encoder final : public EncoderImplementation {
     // refinement still sharpens an unchanged picture. x264 does not write the flags.
     if (settings.constantBlocks) { p.analyse.b_mb_info = 1; p.analyse.b_mb_info_update = 0; }
     p.rc.i_rc_method = X264_RC_CRF; p.rc.f_rf_constant = float(rate_.crf);
-    p.rc.i_vbv_max_bitrate = rate_.maximumKbps; p.rc.i_vbv_buffer_size = rate_.bufferKbit;
+    p.rc.i_vbv_max_bitrate = vbvKbps(rate_); p.rc.i_vbv_buffer_size = rate_.bufferKbit;
     if (settings.cpu == "x86-64-v2") p.cpu &= ~(X264_CPU_LZCNT | X264_CPU_AVX | X264_CPU_XOP | X264_CPU_FMA4 | X264_CPU_FMA3 | X264_CPU_BMI1 | X264_CPU_BMI2 | X264_CPU_AVX2 | X264_CPU_AVX512);
     else if (!settings.cpu.empty()) throw X264Failure(encoderFallbackX264Parameters, "Unknown x264 CPU limit");
     for (const auto& [name, value] : settings.parameters)
@@ -167,11 +167,21 @@ class X264Encoder final : public EncoderImplementation {
   bool setBitrate(int bitrate) override {
     // Live: x264 applies VBV maxrate/buffer and CRF from its next frame, without
     // an IDR or a new SPS (docs: vbv-maxrate, vbv-bufsize and crf reconfigure).
-    const auto rate = x264RateControl(width_, height_, fps_, bitrate, settings_);
+    const auto rate = x264RateControl(width_, height_, paced_, bitrate, settings_);
     x264_param_t p; x264_encoder_parameters(handle_, &p);
-    p.rc.i_vbv_max_bitrate = rate.maximumKbps; p.rc.i_vbv_buffer_size = rate.bufferKbit; p.rc.f_rf_constant = float(rate.crf);
+    p.rc.i_vbv_max_bitrate = vbvKbps(rate); p.rc.i_vbv_buffer_size = rate.bufferKbit; p.rc.f_rf_constant = float(rate.crf);
     if (x264_encoder_reconfig(handle_, &p) < 0) return false;
     rate_ = rate; return true;
+  }
+  // x264 fills its VBV once per frame of the rate it was opened at (no VFR input), so paced
+  // lower it needs that much more per frame to send the same target; the buffer is a time at
+  // the target and stays, and the quality cap follows the bits a paced frame gets.
+  bool setFrameRate(int paced) override {
+    if (paced < 1 || paced > fps_) return false;
+    if (paced == paced_) return true;
+    const int before = paced_; paced_ = paced;
+    if (setBitrate(rate_.maximumKbps * 1000)) return true;
+    paced_ = before; return false;
   }
   int reportedBitrate() const override { return rate_.maximumKbps * 1000; }
   void requestKeyFrame() override { keyFrameRequested_ = true; }
@@ -179,8 +189,10 @@ class X264Encoder final : public EncoderImplementation {
     EncoderTuning value; value.profile = profileOf(profileIdc_); value.cabac = cabac_; return value;
   }
  private:
+  int vbvKbps(const X264RateControl& rate) const { return int(std::min<int64_t>(int64_t(rate.maximumKbps) * fps_ / paced_, 2000000)); }
   x264_t* handle_ = nullptr;
   int width_, height_, fps_;
+  int paced_ = fps_;  // the rate the capture paces frames at (setFrameRate)
   X264Settings settings_;
   X264RateControl rate_;
   std::vector<uint8_t> previous_, constant_;  // constantBlocks: the last input picture, one flag per macroblock

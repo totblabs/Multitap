@@ -11,6 +11,7 @@
 // there for two minutes of freezes.
 #include "bitrate_controller.hpp"
 #include "reference_history.hpp"
+#include "path_frame_rate.hpp"
 #include "../../../native/windows_video/udp_media.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -49,6 +50,11 @@ struct Scenario {
   // frame is among its last 16 (reference invalidation: NVENC on a GPU with several reference frames before
   // Host 1.1.40); 2 a P-frame from a long-term reference the client holds, begun at the first LOSS's IDR.
   int recovery = 2;
+  // The frame rate follows the target (path_frame_rate.hpp); false: the stream keeps its rate and that rate's floor (a Host before 1.1.41).
+  bool frameRate = true;
+  // What a frame of the game costs at the encoder's worst quality, in bits per pixel: it cannot make one smaller
+  // (measured on a Tesla P40 at QP 50-51: 6.5 KB for 2084x1340, 0.0185).
+  double encoderLeast = 0.0185;
   uint64_t restartAtUs = 0;    // a new stream (a resize): a new epoch and a key frame
   size_t idrBytes = 40000;     // the least an IDR takes, whatever the target
   int silentRetries = 0;       // UdpMediaPath: key frames tried again on UDP before the stream leaves it
@@ -56,13 +62,14 @@ struct Scenario {
 };
 struct Result {
   std::vector<double> targetMbps, sentMbps, arrivedMbps;  // per second
-  std::vector<int> lostPerSecond, keysPerSecond;
+  std::vector<int> lostPerSecond, keysPerSecond, shownPerSecond;
   int generated = 0, delivered = 0, idrs = 0, recoveries = 0, backlogKeys = 0, clientKeys = 0, stalls = 0, fallbacks = 0;
   uint64_t stallUs = 0, longestStallUs = 0, wssUs = 0, gaps = 0;
   double target(uint64_t atUs) const { return targetMbps[std::min(targetMbps.size() - 1, size_t(atUs / second))]; }
   double lowest(uint64_t from, uint64_t to) const { double v = 1e9; for (size_t n = size_t(from / second); n < size_t(to / second) && n < targetMbps.size(); ++n) v = std::min(v, targetMbps[n]); return v; }
   double mean(const std::vector<double>& values, uint64_t from, uint64_t to) const { double s = 0; int count = 0; for (size_t n = size_t(from / second); n < size_t(to / second) && n < values.size(); ++n) { s += values[n]; ++count; } return count ? s / count : 0; }
   int lost(uint64_t from, uint64_t to) const { int s = 0; for (size_t n = size_t(from / second); n < size_t(to / second) && n < lostPerSecond.size(); ++n) s += lostPerSecond[n]; return s; }
+  int framesBetween(uint64_t from, uint64_t to) const { int s = 0; for (size_t n = size_t(from / second); n < size_t(to / second) && n < shownPerSecond.size(); ++n) s += shownPerSecond[n]; return s; }
   int keys(uint64_t from, uint64_t to) const { int s = 0; for (size_t n = size_t(from / second); n < size_t(to / second) && n < keysPerSecond.size(); ++n) s += keysPerSecond[n]; return s; }
 };
 
@@ -89,11 +96,11 @@ bool traceRequested = false;
 Result simulate(const Scenario& s, uint64_t seed) {
   Result r; std::mt19937_64 random(seed);
   const auto uniform = [&] { return double(random() >> 11) / double(1ull << 53); };
-  host::BitrateController controller(s.start, s.maximum, s.fps); controller.geometry(s.width, s.height, s.fps); controller.pathChanged();
+  host::BitrateController controller(s.start, s.maximum, s.fps); controller.geometry(s.width, s.height, s.fps, s.frameRate ? host::pathFrameLowest(s.fps) : 0); controller.pathChanged();
+  host::PathFrameRate ladder(s.fps); int paced = s.fps; const double least = s.encoderLeast * s.width * s.height / 8;
   Sender sender(controller.target(), 1000, [&] { return random() | 1; });
   Receiver receiver(1, 1000); Receiver::Output out; Plain plain;
   Link forward(seed + 1, s.capacity, s.rttUs / 2, s.queueUs, s.lossPct), reverse(seed + 2, [](uint64_t) { return 1e9; }, s.rttUs / 2, 0, 0);
-  const uint64_t frameUs = second / uint64_t(s.fps);
   uint16_t epoch = 1; uint64_t pts = 0, nextFrame = 1000, nextPump = 1000, nextClient = 1000, nextTick = 1000;
   // UdpMediaPath's own state.
   uint64_t keyFrameAt = 0, lossAt = 0, switchedAt = 1000, wssUntil = 0; uint32_t received = 0, lost = 0;
@@ -104,7 +111,7 @@ Result simulate(const Scenario& s, uint64_t seed) {
   // The client's picture.
   uint64_t lastShown = 0, restarted = false;
   // Per-second accounting.
-  uint64_t sentBytes = 0, arrivedBytes = 0; int lostNow = 0, keysNow = 0; uint64_t secondAt = second;
+  uint64_t sentBytes = 0, arrivedBytes = 0; int lostNow = 0, keysNow = 0, shownNow = 0; uint64_t secondAt = second;
   uint64_t burstUntil = 0, nextBurst = 2 * second, lastIdleFrame = 0;
 
   for (uint64_t now = 1000; now < s.durationUs; now += 250) {
@@ -112,13 +119,16 @@ Result simulate(const Scenario& s, uint64_t seed) {
     const bool onUdp = !wssUntil;
     if (s.restartAtUs && !restarted && now >= s.restartAtUs) {
       // A resize: a new stream of a new epoch. Its first key frame switches to UDP again.
-      restarted = true; ++epoch; receiver.setEpoch(epoch); forceIdr = true; longTerm.reset(); switchedAt = now; controller.geometry(s.width, s.height, s.fps);
+      restarted = true; ++epoch; receiver.setEpoch(epoch); forceIdr = true; longTerm.reset(); switchedAt = now; controller.geometry(s.width, s.height, s.fps, s.frameRate ? host::pathFrameLowest(s.fps) : 0); ladder = host::PathFrameRate(s.fps);
     }
     if (now >= nextFrame) {
+      // The capture loop: the paced rate follows the target, and the encoder budgets each frame at it.
+      if (s.frameRate) { paced = ladder.decide(now, int(controller.target()), s.width, s.height); controller.paced(paced); }
+      const uint64_t frameUs = second / uint64_t(paced);
       nextFrame += frameUs;
-      const double target = controller.target(), budget = target / 8 / s.fps;
+      const double target = controller.target(), budget = target / 8 / paced;
       size_t size = 0; bool tile = false;
-      if (content == Content::game) size = size_t(std::max(1200.0, std::min(budget, s.gameDemand / 8 / s.fps) * (0.7 + 0.6 * uniform())));
+      if (content == Content::game) size = size_t(std::max(least, std::min(budget, s.gameDemand / 8 / s.fps) * (0.7 + 0.6 * uniform())));
       else if (content == Content::desktop) {
         // A page change every two seconds: 0.7 s of full frames with as many bytes of tiles, then light updates.
         if (now >= nextBurst) { burstUntil = now + 700 * ms; nextBurst = now + 2 * second; }
@@ -183,7 +193,7 @@ Result simulate(const Scenario& s, uint64_t seed) {
     for (const auto& m : out.messages) {
       if (!m.video) continue;
       if (content == Content::game) {
-        ++r.delivered;
+        ++r.delivered; ++shownNow;
         if (lastShown && now - lastShown >= 250 * ms) { ++r.stalls; r.stallUs += now - lastShown; r.longestStallUs = std::max(r.longestStallUs, now - lastShown); }
         lastShown = now;
       } else lastShown = 0;
@@ -205,7 +215,7 @@ Result simulate(const Scenario& s, uint64_t seed) {
     if (now >= nextTick) { nextTick += 100 * ms; if (onUdp) if (const auto value = controller.tick(now)) sender.setTarget(*value); }
     if (now >= secondAt) {
       r.targetMbps.push_back(controller.target() / 1e6); r.sentMbps.push_back(double(sentBytes) * 8 / 1e6); r.arrivedMbps.push_back(double(arrivedBytes) * 8 / 1e6);
-      r.lostPerSecond.push_back(lostNow); r.keysPerSecond.push_back(keysNow);
+      r.lostPerSecond.push_back(lostNow); r.keysPerSecond.push_back(keysNow); r.shownPerSecond.push_back(shownNow); shownNow = 0;
       if (traceRequested) std::printf("  %3llu s %s target %6.2f sent %6.2f arrived %6.2f dropped %4d keys %2d %s\n", (unsigned long long)(secondAt / second), content == Content::game ? "game   " : content == Content::desktop ? "desktop" : "idle   ",
         controller.target() / 1e6, double(sentBytes) * 8 / 1e6, double(arrivedBytes) * 8 / 1e6, lostNow, keysNow, onUdp ? "" : "WSS");
       sentBytes = arrivedBytes = 0; lostNow = keysNow = 0; secondAt += second;
@@ -243,11 +253,10 @@ int main(int argc, char** argv) {
       const Result r = simulate(s, 0x5eed); print(s, r, 10 * second, 130 * second);
       require(r.stalls <= 1 && r.wssUs == 0 && r.lowest(12 * second, 130 * second) >= 30 && r.mean(r.arrivedMbps, 12 * second, 130 * second) >= 50, "a stale target was not brought to the path's rate in one episode");
     }
-    // A running game through what a path does, five seeds summed. "counts only": the controller is not told
-    // what arrived and UdpMediaPath leaves UDP at the first silent second (a Host before 1.1.39 in those two
-    // respects; the remembered limit and the way back are this version's in every row). "last 16 frames": Host
-    // 1.1.39, which answers a LOSS without an IDR only while the last good frame is among the encoder's last 16
-    // (at 144 fps it rarely is). "as built": the answer comes from a long-term reference. The released 1.2.1,
+    // A running game through what a path does, five seeds summed. "Host 1.1.39": a LOSS is answered without an
+    // IDR only while the last good frame is among the encoder's last 16 (at 144 fps it rarely is). "Host 1.1.40":
+    // the answer comes from a long-term reference. "as built": the frame rate follows the target as well. Before
+    // those, a Host that was not told what arrived and left UDP at the first silent second: the released 1.2.1,
     // measured with this file against its headers (2026-11-23): link 60-25-60 73307/86405 frames, 35.6 s
     // stalled, 78 s on WebSocket; link 60-8-60 42088 frames, 159 s stalled, 293 s on WebSocket; outage
     // 63016 frames, 155 s stalled, 150 s on WebSocket; dips 11.2 Mbps arrived (the rate stayed at its floor).
@@ -266,18 +275,18 @@ int main(int argc, char** argv) {
     for (size_t n = 0; n < cases.size(); ++n) {
       const auto& c = cases[n]; Result sum[3]; double mbps[3] = {};
       for (int k = 0; k < 3; ++k) for (int seed = 0; seed < 5; ++seed) {
-        Scenario s; s.name = c.name; s.durationUs = 120 * second; s.capacity = c.capacity; s.lossPct = c.lossPct; s.queueUs = c.queueMs * ms; s.arrival = k >= 1; s.silentRetries = k >= 1 ? 2 : 0; s.recovery = k == 2 ? 2 : 1;
+        Scenario s; s.name = c.name; s.durationUs = 120 * second; s.capacity = c.capacity; s.lossPct = c.lossPct; s.queueUs = c.queueMs * ms; s.silentRetries = 2; s.recovery = k ? 2 : 1; s.frameRate = k == 2;
         const Result r = simulate(s, 0x5eed + uint64_t(seed) * 7919);
         sum[k].delivered += r.delivered; sum[k].generated += r.generated; sum[k].stalls += r.stalls; sum[k].stallUs += r.stallUs; sum[k].longestStallUs = std::max(sum[k].longestStallUs, r.longestStallUs);
         sum[k].wssUs += r.wssUs; sum[k].idrs += r.idrs; sum[k].recoveries += r.recoveries; mbps[k] += r.mean(r.arrivedMbps, 0, 120 * second) / 5;
       }
       for (int k = 0; k < 3; ++k) {
         char frames[32]; std::snprintf(frames, sizeof(frames), "%d/%d", sum[k].delivered, sum[k].generated);
-        std::printf("%-34s %-15s %13s %6d %8.1f %8.2f %7.0f %6d %6d %6.1f\n", c.name, k == 2 ? "as built" : k ? "last 16 frames" : "counts only", frames, sum[k].stalls, double(sum[k].stallUs) / 1e6, double(sum[k].longestStallUs) / 1e6, double(sum[k].wssUs) / 1e6, sum[k].idrs, sum[k].recoveries, mbps[k]);
+        std::printf("%-34s %-15s %13s %6d %8.1f %8.2f %7.0f %6d %6d %6.1f\n", c.name, k == 2 ? "as built" : k ? "Host 1.1.40" : "Host 1.1.39", frames, sum[k].stalls, double(sum[k].stallUs) / 1e6, double(sum[k].longestStallUs) / 1e6, double(sum[k].wssUs) / 1e6, sum[k].idrs, sum[k].recoveries, mbps[k]);
       }
       const Result& r = sum[2]; mbps[1] = mbps[2];
       // A LOSS within reach is answered from a long-term reference: far fewer IDRs than a 16-frame window gives at 144 fps.
-      if (sum[1].idrs >= 40) require(sum[2].idrs * 2 <= sum[1].idrs + 20 && sum[2].recoveries > sum[1].recoveries, std::string(c.name) + ": long-term references did not replace the IDRs"); const double share = double(r.delivered) / double(std::max(r.generated, 1)), stalled = double(r.stallUs) / 1e6, longest = double(r.longestStallUs) / 1e6;
+      if (sum[0].idrs >= 40) require(sum[1].idrs * 2 <= sum[0].idrs + 20 && sum[1].recoveries > sum[0].recoveries, std::string(c.name) + ": long-term references did not replace the IDRs"); const double share = double(r.delivered) / double(std::max(r.generated, 1)), stalled = double(r.stallUs) / 1e6, longest = double(r.longestStallUs) / 1e6;
       const std::string name = c.name;
       // No path here ends the binding, so nothing may send the stream to WebSocket.
       require(r.wssUs == 0, name + ": the stream left UDP");
@@ -288,6 +297,36 @@ int main(int argc, char** argv) {
       if (n == 4) require(mbps[1] >= 30 && longest <= 1, name + ": the rate did not come back between dips");
       if (n == 5) require(share >= 0.96 && mbps[1] >= 50, name + ": loss no rate changes lowered the rate");
       if (n == 6) require(r.stalls == 0 && mbps[1] >= 52 && r.idrs <= 80, name + ": a steady path was not simply used");
+    }
+    // The same game at a field picture's size, 2084x1340 at 144 fps: the old floor of the rate is 16 Mbps there,
+    // so a path under 16 Mbps was sent more than it carries for as long as it stayed narrow.
+    std::printf("%-34s %-15s %13s %6s %8s %8s %7s %6s %6s %6s\n", "2084x1340, 120 s x 5 seeds", "", "frames", "stalls", "stall s", "longest", "WSS s", "IDRs", "fps", "Mbps");
+    const std::vector<Case> narrow{
+      {"link 60-12-60", [=](uint64_t at) { return between(at, 40, 80) ? 12e6 : 60e6; }, 0, 40},
+      {"link 60-8-60", [=](uint64_t at) { return between(at, 40, 80) ? 8e6 : 60e6; }, 0, 40},
+      {"link 60-4-60", [=](uint64_t at) { return between(at, 40, 80) ? 4e6 : 60e6; }, 0, 40},
+      {"steady 60", [](uint64_t) { return 60e6; }, 0, 40},
+    };
+    for (size_t n = 0; n < narrow.size(); ++n) {
+      const auto& c = narrow[n]; Result sum[2]; double mbps[2] = {}, narrowMbps[2] = {}, narrowFps[2] = {};
+      for (int k = 0; k < 2; ++k) for (int seed = 0; seed < 5; ++seed) {
+        Scenario s; s.name = c.name; s.width = 2084; s.height = 1340; s.durationUs = 120 * second; s.capacity = c.capacity; s.queueUs = c.queueMs * ms; s.silentRetries = 2; s.frameRate = k == 1;
+        const Result r = simulate(s, 0x5eed + uint64_t(seed) * 7919);
+        sum[k].delivered += r.delivered; sum[k].generated += r.generated; sum[k].stalls += r.stalls; sum[k].stallUs += r.stallUs; sum[k].longestStallUs = std::max(sum[k].longestStallUs, r.longestStallUs);
+        sum[k].wssUs += r.wssUs; sum[k].idrs += r.idrs; mbps[k] += r.mean(r.arrivedMbps, 0, 120 * second) / 5; narrowMbps[k] += r.mean(r.arrivedMbps, 45 * second, 80 * second) / 5; narrowFps[k] += double(r.framesBetween(45 * second, 80 * second)) / 35 / 5;
+      }
+      for (int k = 0; k < 2; ++k) {
+        char frames[32]; std::snprintf(frames, sizeof(frames), "%d/%d", sum[k].delivered, sum[k].generated);
+        std::printf("%-34s %-15s %13s %6d %8.1f %8.2f %7.0f %6d %6.0f %6.1f\n", c.name, k ? "as built" : "Host 1.1.40", frames, sum[k].stalls, double(sum[k].stallUs) / 1e6, double(sum[k].longestStallUs) / 1e6, double(sum[k].wssUs) / 1e6, sum[k].idrs, narrowFps[k], narrowMbps[k]);
+      }
+      const Result& r = sum[1]; const std::string name = std::string("2084x1340 ") + c.name; const double stalled = double(r.stallUs) / 1e6, longest = double(r.longestStallUs) / 1e6;
+      if (n != 2) require(r.wssUs == 0, name + ": the stream left UDP");
+      // While the link is narrow the stream uses it: most of what it carries arrives, at a lower frame rate, without long stalls.
+      if (n == 0) require(narrowMbps[1] >= 9 && stalled <= 6 && longest <= 1.5 && narrowFps[1] >= 60, name + ": 12 Mbps were not used");
+      if (n == 1) require(narrowMbps[1] >= 6 && stalled <= 8 && longest <= 2 && narrowFps[1] >= 40, name + ": 8 Mbps were not used");
+      // n == 2, 4 Mbps: under what 30 frames of this picture need (3.4 Mbps at 0.04 bit per pixel, with nothing to spare
+      // for a key frame or the way back). Shown, not required: this rule ends at its lowest rate.
+      if (n == 3) require(r.stalls == 0 && narrowFps[1] >= 140 && mbps[1] >= 52, name + ": a wide path lost frames to the frame rate rule");
     }
     std::printf("udp-rate-loop: %lld checks passed\n", checks);
     return 0;

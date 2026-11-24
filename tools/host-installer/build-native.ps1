@@ -80,7 +80,9 @@ if (-not $SkipTests) {
     'MultitapHostBitrateControllerTest','MultitapHostUdpRateLoopTest',
     # The answer to a LOSS on NVENC: which long-term reference, and how many a stream's level holds (no GPU here;
     # the run on a GPU with the client's decoders is MultitapHostGpuH264InteropTest, by hand).
-    'MultitapHostNvencOutputPolicyTest')
+    'MultitapHostNvencOutputPolicyTest',
+    # The frame rate a narrow path still carries a picture at (pure rules; the encoders' side is MultitapHostEncoderFrameRateTest, by hand).
+    'MultitapHostPathFrameRateTest')
   & $cmake --build $tree --config Release --parallel $Parallel --target @tests; if ($LASTEXITCODE) { throw 'test build failed' }
   foreach ($t in $tests) { & (Join-Path $tree "$t.exe") | Out-Null; if ($LASTEXITCODE) { throw "test failed: $t" }; "ok $t" }
 }

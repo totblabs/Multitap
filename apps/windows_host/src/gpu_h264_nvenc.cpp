@@ -172,7 +172,7 @@ bool deviceOnAdapter(ID3D11Device* device, const Adapter& adapter) {
 class NvencEncoder final : public EncoderImplementation {
  public:
   NvencEncoder(int width, int height, int fps, int bitrate, const Adapter& adapter, ID3D11Device* shared)
-      : state_(std::make_unique<State>()), width_(width), height_(height), fps_(fps), bitrate_(bitrate) {
+      : state_(std::make_unique<State>()), width_(width), height_(height), fps_(fps), bitrate_(bitrate), paced_(fps) {
     validateFrameMemory(width, height, 0, 12);
     if (adapter.vendorId != 0x10de) throw Failure(encoderGpuVendorUnsupported, "Selected adapter is not an NVIDIA GPU");
     Com<IDXGIFactory1> factory;
@@ -425,6 +425,7 @@ class NvencEncoder final : public EncoderImplementation {
     if (state_->observation) state_->observation->output();
     // GPU inventory and successful initialization alone never set this flag.
     info_.hardwareVerified = true; havePts_ = true; lastPts_ = ptsUs; ++frameCount_; keyRequested_ = false;
+    if (pacedAfterFirst_) setFrameRate(*pacedAfterFirst_);
     return true;
   }
  public:
@@ -441,7 +442,7 @@ class NvencEncoder final : public EncoderImplementation {
     const int forced = nvenctesting::longTermSlots.load();
     const int slots = forced ? forced : nvencLongTermSlots(caps_, level_, width_, height_);
     if (longTerm_ || longTermEnded_ || slots <= 0) return false;
-    auto next = config_; nvencStreamingConfig(next, fps_, bitrate_, slots);
+    auto next = config_; nvencStreamingConfig(next, paced_, bitrate_, slots);
     NV_ENC_RECONFIGURE_PARAMS request{}; request.version = NV_ENC_RECONFIGURE_PARAMS_VER; request.reInitEncodeParams = init_; request.reInitEncodeParams.encodeConfig = &next;
     request.resetEncoder = 1; request.forceIDR = 1;
     if (state_->api.nvEncReconfigureEncoder(state_->encoder, &request) != NV_ENC_SUCCESS) return false;
@@ -453,11 +454,28 @@ class NvencEncoder final : public EncoderImplementation {
   bool setBitrate(int bitrate) override {
     if (bitrate == bitrate_) return true;
     if (!dynamicBitrate_ || bitrate < encoderMinimumBitrate || bitrate > encoderMaximumBitrate) return false;
-    auto next = config_; nvencRate(next, bitrate, fps_);
+    auto next = config_; nvencRate(next, bitrate, paced_);
     NV_ENC_RECONFIGURE_PARAMS request{}; request.version = NV_ENC_RECONFIGURE_PARAMS_VER; request.reInitEncodeParams = init_; request.reInitEncodeParams.encodeConfig = &next;
     const auto status = state_->api.nvEncReconfigureEncoder(state_->encoder, &request);
     requireNv(status, encoderGpuReconfigureFailed, "Reconfigure GPU H264 bitrate", EncoderGpuFailureSite::nvencReconfigure);
     config_ = next; init_.encodeConfig = &config_; bitrate_ = bitrate; return true;
+  }
+  // The frame rate and the one-frame VBV of the rate control follow the paced rate, live: no
+  // reset, no IDR (measured on a Tesla P40: opened at 144 and paced at 72, 8 Mbps came out
+  // as 3.7 Mbps at QP 50 untold and as 7.0 Mbps at QP 42 told). A refusal changes nothing.
+  // Told before its first picture, the encoder is told after it: of the reconfigurations made
+  // before any picture one of fourteen left the rate control as it was (the same P40; the
+  // call reported success), and none of those made while it streamed did.
+  bool setFrameRate(int paced) override {
+    if (paced < 1 || paced > fps_) return false;
+    if (!frameCount_) { if (!dynamicBitrate_) return false; pacedAfterFirst_ = paced; return true; }
+    pacedAfterFirst_.reset();
+    if (paced == paced_) return true;
+    auto next = config_; nvencRate(next, bitrate_, paced);
+    NV_ENC_RECONFIGURE_PARAMS request{}; request.version = NV_ENC_RECONFIGURE_PARAMS_VER; request.reInitEncodeParams = init_; request.reInitEncodeParams.encodeConfig = &next;
+    request.reInitEncodeParams.frameRateNum = uint32_t(paced);
+    if (!dynamicBitrate_ || state_->api.nvEncReconfigureEncoder(state_->encoder, &request) != NV_ENC_SUCCESS) return false;
+    config_ = next; init_.encodeConfig = &config_; init_.frameRateNum = uint32_t(paced); paced_ = paced; return true;
   }
   int reportedBitrate() const override { return bitrate_; }
   EncoderTuning reportedTuning() const override { return {}; }
@@ -466,6 +484,8 @@ class NvencEncoder final : public EncoderImplementation {
  private:
   std::unique_ptr<State> state_;
   int width_, height_, fps_, bitrate_;
+  int paced_ = 0;  // the rate the capture paces frames at (setFrameRate), fps_ until told
+  std::optional<int> pacedAfterFirst_;  // told before the first picture
   bool dynamicBitrate_ = false, keyRequested_ = false, havePts_ = false, sharedDevice_ = false, textureInput_ = false, longTermEnded_ = false;
   uint8_t level_ = 0;  // level_idc of the first SPS
   NvencCaps caps_;

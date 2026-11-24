@@ -62,7 +62,18 @@ class AdaptiveBitrateSession {
       try {
         const auto value = JsonParser::parse(std::string(bytes.begin(), bytes.end()));
         const auto width = value.get("width").number(), height = value.get("height").number(), fps = value.get("fpsTarget").number();
-        if(std::isfinite(width)&&std::isfinite(height)&&width>=16&&width<=ownedOutputMaxSide&&height>=16&&height<=INT32_MAX&&width==std::floor(width)&&height==std::floor(height)&&encodedPictureSize(uint64_t(width),uint64_t(height))&&fps>=1&&fps<=240)apply(controller_->geometry(int(width),int(height),int(fps)));
+        // The lowest rate the capture may pace this stream at (path_frame_rate.hpp); absent: its own rate.
+        const auto lowest = value.get("fpsFloor").number(); const int floorFps = lowest >= 1 && lowest <= fps && lowest == std::floor(lowest) ? int(lowest) : 0;
+        if(std::isfinite(width)&&std::isfinite(height)&&width>=16&&width<=ownedOutputMaxSide&&height>=16&&height<=INT32_MAX&&width==std::floor(width)&&height==std::floor(height)&&encodedPictureSize(uint64_t(width),uint64_t(height))&&fps>=1&&fps<=240)apply(controller_->geometry(int(width),int(height),int(fps),floorFps));
+      } catch (...) { }
+    }
+    // The rate the capture paces at now, once a second with the stream's statistics.
+    static constexpr char stats[] = "{\"type\":\"stream.stats\"";
+    if (bytes.size() > sizeof(stats) && std::equal(stats, stats + sizeof(stats) - 1, bytes.begin())) {
+      try {
+        const auto value = JsonParser::parse(std::string(bytes.begin(), bytes.end()));
+        const auto paced = value.get("fpsTarget").number();
+        if (paced >= 1 && paced <= 240) controller_->paced(int(paced));
       } catch (...) { }
     }
   }

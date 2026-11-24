@@ -1222,7 +1222,7 @@ class ServiceBridge final : public AgentBridge {
         [this](const std::string& value){return tracks_.send(true,{value.begin(),value.end()});},
         [this,expected=id_](const Json& value){trackControl(jsonObject(value),expected,true);},
         [this]{SetEvent(relayWake_.value);},
-        [this](const std::string& track,uint64_t rtt,uint32_t received,uint32_t lost){return trackRate_.udpFeedback(track,rtt,received,lost);},
+        [this](const std::string& track,uint64_t rtt,uint32_t received,uint32_t lost,uint32_t arrivedBytes,uint32_t sentBytes){return trackRate_.udpFeedback(track,rtt,received,lost,arrivedBytes,sentBytes);},
         [this](const std::string& track,bool onUdp){return trackRate_.udpPath(track,onUdp);},
         [this]{trackRate_.udpBacklog();}},relativeMouseTrackSessionRequested(request)));}catch(...){ }
     }

@@ -193,6 +193,11 @@ class EncoderImplementation {
   // to four long-term ones). Every other client keeps the stream it had: a larger DPB lets
   // some decoders hold frames back (unmeasured on Android). False: no change.
   virtual bool widenReferences() { return false; }
+  // The capture now paces frames at `paced` a second, at most the rate this encoder was
+  // opened at. Every encoder here budgets a frame as the target over its own rate, so told
+  // nothing it sends only paced/own of the target; told, each frame's share is the target
+  // over `paced`, with no IDR and no new SPS. False: this encoder cannot.
+  virtual bool setFrameRate(int) { return false; }
   virtual EncoderHardwareInfo hardwareInfo() const { return {}; }
 };
 class Encoder {
@@ -221,6 +226,12 @@ class Encoder {
   // Returns false, keeping the previous target, if the encoder refuses it.
   bool setBitrate(int bitrate);
   int bitrate() const { return bitrate_; }
+  // The rate the capture paces frames at (EncoderImplementation::setFrameRate), at most
+  // captureFps(). The running encoder is told, and one that replaces it (a fallback, the
+  // GPU's return) before its next frame. False while the running encoder cannot follow:
+  // it then sends paced/own of the target.
+  bool setFrameRate(int paced);
+  int frameRate() const { return paced_ ? std::min(paced_, captureFps()) : captureFps(); }
   // The encoder's own report of its target, or 0 when it cannot be read.
   int reportedBitrate() const;
   // The next encoded frame is an IDR with SPS/PPS (video was dropped on its
@@ -263,8 +274,11 @@ class Encoder {
   void notifyGpuRetry(uint32_t kind, uint32_t code) noexcept;
   uint64_t gpuRetryNow() const;
   void deliverOutput(Frame frame,const std::function<void(Frame)>& output);
+  bool tellFrameRate();
   std::unique_ptr<EncoderImplementation> impl_;
   int width_, height_, fps_, bitrate_;
+  int paced_ = 0;  // 0: the encoder's own rate
+  std::optional<uint64_t> toldGeneration_; bool toldFollows_ = true;
   EncoderBackend backend_ = EncoderBackend::mft;
   bool strict_ = false;
   uint32_t fallback_ = encoderFallbackNone;

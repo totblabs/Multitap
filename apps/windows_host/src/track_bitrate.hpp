@@ -142,9 +142,19 @@ class TrackBitrateSession {
   // trips and losses only while every output is on UDP (the arrival feedback
   // describes the tunnel otherwise). Each returns that output's share, the
   // leg's pacing target (0: none yet, the leg keeps its own).
-  int udpFeedback(const std::string& id, uint64_t rttUs, uint32_t received, uint32_t lost) {
+  //
+  // The legs share one path and one controller, whose rules read one stream of reports (two
+  // short ones in a row, what arrived of what was sent): the legs' reports of one round are
+  // added up and given as one, with the longest round trip. A round is every leg once; a leg
+  // that reports again first ends it, so a silent leg holds nothing back for longer than
+  // the other's own interval.
+  int udpFeedback(const std::string& id, uint64_t rttUs, uint32_t received, uint32_t lost, uint32_t arrivedBytes = 0, uint32_t sentBytes = 0) {
     std::lock_guard lock(mutex_); if (!controller_) return 0;
-    if (udp_) apply(controller_->udpFeedback(micros(), rttUs, received, lost));
+    if (udp_) {
+      if (round_.count(id)) reportRound();
+      round_[id] = {rttUs, received, lost, arrivedBytes, sentBytes};
+      if (round_.size() >= outputs_.size()) reportRound();
+    }
     return share(id);
   }
   int udpPath(const std::string& id, bool on) {
@@ -152,7 +162,7 @@ class TrackBitrateSession {
     legs_[id] = on;
     bool all = !outputs_.empty();
     for (const auto& output : outputs_) { const auto leg = legs_.find(std::to_string(output.id)); all = all && leg != legs_.end() && leg->second; }
-    if (all != udp_) { udp_ = all; controller_->pathChanged(); }
+    if (all != udp_) { udp_ = all; round_.clear(); controller_->pathChanged(); }
     return share(id);
   }
   void udpBacklog() { std::lock_guard lock(mutex_); if (controller_) apply(controller_->udpBacklog(micros())); }
@@ -189,7 +199,7 @@ class TrackBitrateSession {
   struct Output { uint8_t id = 0; uint64_t area = 0; int share = 0; std::deque<std::pair<uint64_t, size_t>> usage; size_t bytes = 0; };
   static uint32_t read32(const std::vector<uint8_t>& b, size_t at) { return uint32_t(b[at]) | uint32_t(b[at + 1]) << 8 | uint32_t(b[at + 2]) << 16 | uint32_t(b[at + 3]) << 24; }
   static uint64_t read64(const std::vector<uint8_t>& b, size_t at) { return uint64_t(read32(b, at)) | uint64_t(read32(b, at + 4)) << 32; }
-  void reset() { controller_.reset(); session_.clear(); wake_ = {}; outputs_.clear(); legs_.clear(); topology_ = 0; udp_ = pending_ = false; lastSplitUs_ = lastTickUs_ = 0; }
+  void reset() { controller_.reset(); session_.clear(); wake_ = {}; outputs_.clear(); legs_.clear(); round_.clear(); topology_ = 0; udp_ = pending_ = false; lastSplitUs_ = lastTickUs_ = 0; }
   uint64_t micros() const { if (clock_) return clock_(); return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - origin_).count()) + 1; }
   // A new topology: its outputs, and a floor that is the sum of theirs.
   void metadata(const Json& value, uint64_t now) {
@@ -206,7 +216,7 @@ class TrackBitrateSession {
       floor += adaptiveBitrateFloor(int(width), int(height), fps_);
       next.push_back(std::move(output));
     }
-    outputs_ = std::move(next); topology_ = uint32_t(topology); legs_.clear();
+    outputs_ = std::move(next); topology_ = uint32_t(topology); legs_.clear(); round_.clear();
     if (udp_) { udp_ = false; controller_->pathChanged(); }
     controller_->geometryFloor(floor, fps_);
     split(now, true);
@@ -240,6 +250,15 @@ class TrackBitrateSession {
   Clock::time_point origin_ = Clock::now();
   std::vector<Output> outputs_;
   std::map<std::string, bool> legs_;
+  // udpFeedback: one leg's report of the round being gathered.
+  struct LegReport { uint64_t rttUs = 0; uint32_t received = 0, lost = 0, arrivedBytes = 0, sentBytes = 0; };
+  std::map<std::string, LegReport> round_;
+  void reportRound() {
+    uint64_t rtt = 0, received = 0, lost = 0, arrived = 0, sent = 0;
+    for (const auto& [leg, report] : round_) { rtt = std::max(rtt, report.rttUs); received += report.received; lost += report.lost; arrived += report.arrivedBytes; sent += report.sentBytes; }
+    round_.clear();
+    apply(controller_->udpFeedback(micros(), rtt, received, lost, arrived, sent));
+  }
   uint32_t topology_ = 0;
   int fps_ = 60;
   uint64_t lastSplitUs_ = 0, lastTickUs_ = 0;

@@ -114,15 +114,18 @@ class MftEncoder final : public EncoderImplementation {
   void encode(const uint8_t* nv12, uint64_t ptsUs, std::vector<Frame>& frames) override;
   void finish(std::vector<Frame>& frames) override;
   bool setBitrate(int bitrate) override;
+  bool setFrameRate(int paced) override;
   int reportedBitrate() const override;
   EncoderTuning reportedTuning() const override;
   void requestKeyFrame() override { keyFrameRequested_ = true; }
  private:
+  bool applyRate(int bitrate, int paced);
   void drain(std::vector<Frame>& frames);
   void headers();
   Com<IMFTransform> encoder_;
   Com<ICodecAPI> codec_;
   int width_, height_, fps_, bitrate_;
+  int paced_ = 0;  // the rate the capture paces frames at (setFrameRate); 0: fps_
   uint64_t frameCount_ = 0;
   bool keyFrameRequested_ = false;
   std::vector<uint8_t> sequence_;
@@ -186,19 +189,37 @@ MftEncoder::MftEncoder(int width, int height, int fps, int bitrate, EncoderTunin
 MftEncoder::~MftEncoder() { if (encoder_) encoder_->ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0); }
 bool MftEncoder::setBitrate(int bitrate) {
   if (bitrate == bitrate_) return true;
+  if (!applyRate(bitrate, paced_ ? paced_ : fps_)) return false;
+  bitrate_ = bitrate; return true;
+}
+// The MFT budgets a frame as its mean bitrate over the frame rate of its media type,
+// whatever the samples' times say (encoder_frame_rate_test.cpp: opened at 60 and paced at
+// 30 it sent 1.34 of 2.34 Mbps). Its type cannot change while it streams, so paced lower it
+// is given that much more as its mean: each frame then gets the target over the paced rate.
+bool MftEncoder::setFrameRate(int paced) {
+  if (paced < 1 || paced > fps_) return false;
+  if (paced == (paced_ ? paced_ : fps_)) return true;
+  // Before its first frame the MFT takes the value and does not use it (measured): it is given after that frame (encode).
+  if (frameCount_ && !applyRate(bitrate_, paced)) return false;
+  paced_ = paced; return true;
+}
+bool MftEncoder::applyRate(int bitrate, int paced) {
   if (!codec_) return false;
   // The Microsoft H.264 MFT accepts a CBR mean-bitrate change while streaming;
   // the next submitted frame is budgeted at the new rate (measured in
   // encoder_bitrate_test.cpp). Nothing else (GOP, profile, type) changes.
-  VARIANT value; VariantInit(&value); value.vt = VT_UI4; value.ulVal = ULONG(bitrate);
+  VARIANT value; VariantInit(&value); value.vt = VT_UI4; value.ulVal = ULONG(std::min<int64_t>(int64_t(bitrate) * fps_ / paced, 2000000000));
   const HRESULT result = codec_->SetValue(&CODECAPI_AVEncCommonMeanBitRate, &value); VariantClear(&value);
-  if (FAILED(result)) return false;
-  bitrate_ = bitrate; return true;
+  return SUCCEEDED(result);
 }
+// The target: what the MFT holds as its mean, back at the paced rate.
 int MftEncoder::reportedBitrate() const {
   if (!codec_) return 0;
   VARIANT value; VariantInit(&value); int reported = 0;
-  if (SUCCEEDED(codec_->GetValue(&CODECAPI_AVEncCommonMeanBitRate, &value)) && value.vt == VT_UI4 && value.ulVal <= ULONG(encoderMaximumBitrate)) reported = int(value.ulVal);
+  if (SUCCEEDED(codec_->GetValue(&CODECAPI_AVEncCommonMeanBitRate, &value)) && value.vt == VT_UI4) {
+    const int64_t target = (int64_t(value.ulVal) * (paced_ ? paced_ : fps_) + fps_ / 2) / fps_;
+    if (target <= encoderMaximumBitrate) reported = int(target);
+  }
   VariantClear(&value); return reported;
 }
 EncoderTuning MftEncoder::reportedTuning() const {
@@ -226,6 +247,7 @@ void MftEncoder::headers() {
 }
 void MftEncoder::encode(const uint8_t* nv12, uint64_t ptsUs, std::vector<Frame>& output) {
   // This MFT takes VT_UI4 here; a VT_BOOL request is rejected with E_INVALIDARG.
+  if (frameCount_ == 1 && paced_ && paced_ != fps_) applyRate(bitrate_, paced_);  // told before its first frame (setFrameRate)
   if (frameCount_++ == 0 || std::exchange(keyFrameRequested_, false)) codecValue(codec_.Get(), CODECAPI_AVEncVideoForceKeyFrame, 1);
   const auto layout=checkedFrameLayout(uint64_t(width_),uint64_t(height_));
   if(!layout)throw std::runtime_error("encoder_format_unsupported");
@@ -514,7 +536,7 @@ void Encoder::fallBackGpu(uint32_t code, EncoderGpuFailure detail) {
   impl_ = std::make_unique<MftEncoder>(width_, height_, std::min(fps_,60), bitrate_, EncoderTuning{}); backend_ = EncoderBackend::mft;
 }
 void Encoder::encode(const uint8_t* nv12, uint64_t ptsUs, const std::function<void(Frame)>& output) {
-  pending_.clear();
+  pending_.clear(); tellFrameRate();
   if (!hardwareEncoderBackend(backend_) && (gpuCandidate_.valid() || gpuRetry_.pending()) && returnToGpu(nv12, ptsUs)) {
     // The reopened GPU encoder coded this picture as its first IDR.
   } else if (hardwareEncoderBackend(backend_)) {
@@ -545,7 +567,7 @@ void Encoder::encode(const uint8_t* nv12, uint64_t ptsUs, const std::function<vo
 void Encoder::encode(const EncoderPicture& picture, uint64_t ptsUs, const std::function<void(Frame)>& output) {
   // CPU pictures and CPU backends: exactly the byte path above.
   if (!picture.texture || !hardwareEncoderBackend(backend_)) { encode(picture.bytes(), ptsUs, output); return; }
-  pending_.clear();
+  pending_.clear(); tellFrameRate();
   uint32_t failure = 0;
   EncoderGpuFailure detail;
   try { impl_->encodePicture(picture, ptsUs, pending_); }
@@ -578,6 +600,21 @@ void Encoder::deliverOutput(Frame frame,const std::function<void(Frame)>& output
   }catch(...){ }
   output(std::move(frame));
   if(observation&&outputObserver_)try{outputObserver_(*observation);observedOutputGeneration_=generation;}catch(...){ }
+}
+bool Encoder::setFrameRate(int paced) {
+  const int next = std::clamp(paced, 1, captureFps());
+  if (next == frameRate() && toldGeneration_ == uint64_t(outputGeneration_)) return toldFollows_;
+  paced_ = next; toldGeneration_.reset();
+  return tellFrameRate();
+}
+// The implementation that codes the next frame knows the paced rate. Its refusal or failure
+// changes nothing else: it keeps budgeting for its own rate.
+bool Encoder::tellFrameRate() {
+  if (!impl_ || toldGeneration_ == uint64_t(outputGeneration_)) return toldFollows_;
+  toldGeneration_ = uint64_t(outputGeneration_); toldFollows_ = true;
+  if (!paced_) return true;  // never told: every implementation starts at its own rate
+  try { toldFollows_ = impl_->setFrameRate(std::min(paced_, captureFps())); } catch (...) { toldFollows_ = false; }
+  return toldFollows_;
 }
 bool Encoder::setBitrate(int bitrate) {
   if (bitrate < encoderMinimumBitrate || bitrate > encoderMaximumBitrate) throw std::runtime_error("Unsupported encoder bitrate");

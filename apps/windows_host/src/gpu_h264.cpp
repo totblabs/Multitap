@@ -190,6 +190,9 @@ class VerifiedCandidates final : public EncoderImplementation {
   }
   int reportedBitrate() const override { return encoder_->reportedBitrate(); }
   EncoderTuning reportedTuning() const override { return encoder_->reportedTuning(); }
+  // A refusal or a failure leaves the encoder budgeting for its own rate; nothing else depends on it.
+  // Kept for a candidate that takes over before the first verified output (next()), as the bitrate is.
+  bool setFrameRate(int paced) override { pacedRate_ = paced; try { return encoder_->setFrameRate(paced); } catch (...) { return false; } }
   void requestKeyFrame() override { encoder_->requestKeyFrame(); }
   // Before the first verified output another candidate may still take over: only an IDR then.
   bool recover(uint64_t lastGood) override { return verified_ && encoder_->recover(lastGood); }
@@ -204,7 +207,9 @@ class VerifiedCandidates final : public EncoderImplementation {
       const auto& adapter = candidates_[at_++];
       try { encoder_ = open_(adapter); if (!encoder_ || !identity(encoder_->hardwareInfo()) || encoder_->hardwareInfo().hardwareVerified)
           throw Failure(encoderGpuInitializationFailed, "GPU candidate initialization identity is invalid", failureDetail(EncoderGpuFailureSite::candidateIdentity));
-        if (changedBitrate_ && !encoder_->setBitrate(*changedBitrate_)) throw Failure(encoderGpuReconfigureFailed, "GPU candidate cannot retain the current bitrate", failureDetail(EncoderGpuFailureSite::candidateReconfigure)); return;
+        if (changedBitrate_ && !encoder_->setBitrate(*changedBitrate_)) throw Failure(encoderGpuReconfigureFailed, "GPU candidate cannot retain the current bitrate", failureDetail(EncoderGpuFailureSite::candidateReconfigure));
+        if (pacedRate_) try { encoder_->setFrameRate(*pacedRate_); } catch (...) { }
+        return;
       } catch (const std::exception& error) {
         const auto detail = failureInfo(error, adapter, EncoderGpuFailureSite::candidateOpen);
         // A failed NVENC teardown can fence later NVIDIA opens in this process.
@@ -223,7 +228,7 @@ class VerifiedCandidates final : public EncoderImplementation {
   EncoderGpuFailure lastFailure_;
   std::function<std::unique_ptr<EncoderImplementation>(const Adapter&)> open_; std::function<void(uint64_t, bool)> remember_;
   std::unique_ptr<EncoderImplementation> encoder_;
-  std::optional<int> changedBitrate_;
+  std::optional<int> changedBitrate_, pacedRate_;
 };
 std::mutex lastGoodMutex;
 std::optional<uint64_t> lastGoodAdapter;

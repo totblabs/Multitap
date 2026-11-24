@@ -129,6 +129,19 @@ void session() {
   const int before = rate.target();
   now += 100000; rate.udpFeedback("0", 20000, 300, 100); now += 100000; rate.udpFeedback("1", 20000, 300, 100);
   require(rate.target() < before, "losses on both UDP legs did not lower the target");
+  // The legs' reports of one round are one report: one lossy round is a single lossy report (15 % at most), not two in a row.
+  require(rate.target() >= int(before * 0.84), "one lossy round was read as two lossy reports");
+  // What arrived of what was sent, added over the legs: two rounds at a third decide at once, to about a third.
+  for (int n = 0; n < 30; ++n) { now += 100000; rate.udpFeedback("0", 20000, 400, 0, 200000, 200000); rate.udpFeedback("1", 20000, 400, 0, 100000, 100000); }
+  const int steady = rate.target();
+  for (int n = 0; n < 2; ++n) { now += 100000; rate.udpFeedback("0", 20000, 130, 270, 66000, 200000); rate.udpFeedback("1", 20000, 130, 270, 34000, 100000); }
+  require(rate.target() <= int(steady * 0.4) || rate.target() <= 10100000, "two rounds in which a third arrived did not take the target to what arrived");
+  // A leg that says nothing holds the other's reports back for one of its own intervals only.
+  for (int n = 0; n < 600 && rate.target() < 14000000; ++n) { now += 100000; rate.udpFeedback("0", 20000, 400, 0, 200000, 200000); rate.udpFeedback("1", 20000, 400, 0, 100000, 100000); for (int frame = 0; frame < 6; ++frame) { const size_t bytes = size_t(rate.target()) / 8 / 60; rate.outgoing(false, packet(1, 0, 3, now + uint64_t(frame) * 16000, bytes)); rate.written(bytes); } }
+  const int alone = rate.target();
+  require(alone >= 14000000, "a clear path did not let the target rise from its floor again");
+  for (int n = 0; n < 4; ++n) { now += 100000; rate.udpFeedback("0", 20000, 100, 300, 50000, 200000); }
+  require(rate.target() < alone, "a silent leg kept the other leg's losses from the controller");
   rate.stop();
   require(!rate.active() && !rate.takeCommand() && rate.udpFeedback("0", 1, 1, 0) == 0, "a stopped session still answered");
 }

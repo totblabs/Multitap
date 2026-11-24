@@ -38,6 +38,7 @@
 #include "gpu_capture.hpp"
 #include "stream_encode_size.hpp"
 #include "stream_size.hpp"
+#include "path_frame_rate.hpp"
 #include "send_queue.hpp"
 #include "websocket_send.hpp"
 #include "operational_log.hpp"
@@ -1131,6 +1132,11 @@ class Agent {
         retryWgcStart(source);
         stages.captureMs=resizeStageMs(stageBegan,std::chrono::steady_clock::now());stageBegan=std::chrono::steady_clock::now();
         failureReason="encoder_failed";captureStage=4;encoderSlot.emplace(width, height, fps, applied,EncoderTuning{},EncoderBackend::automatic,capture.adapterLuid(),capture.gpuDevice());Encoder& encoder=*encoderSlot;
+        // path_frame_rate.hpp: with an encoder that can be told the paced rate, the frame rate follows the automatic
+        // target and the rate's floor is that of the lowest frame rate. Any other encoder keeps its rate and floor.
+        std::optional<PathFrameRate> pathRate; int pacedFps = encoder.captureFps();
+        const auto followPath = [&] { pathRate.reset(); pacedFps = encoder.captureFps(); if (rate.adaptive && encoder.setFrameRate(pacedFps)) pathRate.emplace(fps); floorBitrate = std::min(adaptiveBitrateFloor(width, height, pathRate ? pathRate->lowest() : fps), rate.maximum); };
+        followPath();
         stages.encoderMs=resizeStageMs(stageBegan,std::chrono::steady_clock::now());
         const auto observeEncoderOutput=[this,session](const EncoderOutputObservation& output){const auto packet=encoderUsagePacket({session,0,{"0",mediaEpoch_.load(),encoderDiagnostic(output.backend,output.hardware,output.softwareFallbackCode)}});if(!packet.empty())text(packet);};
         // encoder_gpu_retry.hpp: each step of a way back to the GPU encoder, as a fixed
@@ -1179,7 +1185,7 @@ class Agent {
         stages.audioMs=resizeStageMs(stageBegan,std::chrono::steady_clock::now());
         // stream-size-v1 pictures also state their scale of the source and why.
         // Only the first one of a resize restart carries its stages.
-        const auto announce = [&] { std::ostringstream info; info << "{\"type\":\"stream.info\",\"codec\":\"h264\",\"width\":" << width << ",\"height\":" << height << ",\"sourceWidth\":" << sourceWidth << ",\"sourceHeight\":" << sourceHeight << ",\"captureBackend\":"<<jsonQuote(capture.backend())<<",\"fpsTarget\":" << fps << ",\"bitrate\":" << applied << (rate.adaptive ? ",\"bitrateMode\":\"auto\",\"bitrateMax\":" + std::to_string(rate.maximum) : std::string()) << ",\"audio\":" << streamAudioInfoJson(audioAvailable, audioOpus) << (scaler ? ",\"encodeScale\":" + std::to_string(scaler->scalePermille()) + ",\"encodeLimit\":\"" + encodeLimitName(scaler->reason()) + '"' : std::string()) <<epochFields;
+        const auto announce = [&] { std::ostringstream info; info << "{\"type\":\"stream.info\",\"codec\":\"h264\",\"width\":" << width << ",\"height\":" << height << ",\"sourceWidth\":" << sourceWidth << ",\"sourceHeight\":" << sourceHeight << ",\"captureBackend\":"<<jsonQuote(capture.backend())<<",\"fpsTarget\":" << fps << (pathRate ? ",\"fpsFloor\":" + std::to_string(pathRate->lowest()) : std::string()) << ",\"bitrate\":" << applied << (rate.adaptive ? ",\"bitrateMode\":\"auto\",\"bitrateMax\":" + std::to_string(rate.maximum) : std::string()) << ",\"audio\":" << streamAudioInfoJson(audioAvailable, audioOpus) << (scaler ? ",\"encodeScale\":" + std::to_string(scaler->scalePermille()) + ",\"encodeLimit\":\"" + encodeLimitName(scaler->reason()) + '"' : std::string()) <<epochFields;
           if(resizeStages&&!announced){stages.startMs=resizeStageMs(startBegan,std::chrono::steady_clock::now());info<<",\"resizeStages\":"<<resizeStagesJson(stages);}
           info<<'}'; text(info.str()); };
         announce(); announced = true; audioGo = audioAvailable;
@@ -1473,7 +1479,7 @@ class Agent {
           if(rate.adaptive){
             if(const int wanted=requestedBitrate_.exchange(0)){
               const int value=std::clamp(wanted,floorBitrate,rate.maximum);
-              if(value!=applied&&encoder.setBitrate(value)){applied=value;autoBitrate_=value;encodePolicy.retarget(FrameRefinement::forCbr(value,fps));++stall.steps;stall.targetMinKbps=stall.targetMinKbps?std::min(stall.targetMinKbps,value/1000):value/1000;}
+              if(value!=applied&&encoder.setBitrate(value)){applied=value;autoBitrate_=value;encodePolicy.retarget(FrameRefinement::forCbr(value,pacedFps));++stall.steps;stall.targetMinKbps=stall.targetMinKbps?std::min(stall.targetMinKbps,value/1000):value/1000;}
             }
             shareTiles(0);  // a still screen frees the share again
           }
@@ -1602,11 +1608,12 @@ class Agent {
                 if(memoryAdmitted){
                 encoderSlot.reset();captureDevices_.keep(captureSlot->sharedDevice());captureSlot.reset();width=picture.first;height=picture.second;
                 failureReason="capture_failed";captureStage=3;captureSlot.emplace(width,height,current,captureDevices_.take());retryWgcStart(current);if(cursorSeparated)capture.composeCursor(false);capture.observeReadback(observability_.enabled());raiseCaptureGpu();
-                floorBitrate=std::min(adaptiveBitrateFloor(width,height,fps),rate.maximum);if(rate.adaptive){applied=std::clamp(applied,floorBitrate,rate.maximum);autoBitrate_=applied;}
+                floorBitrate=std::min(adaptiveBitrateFloor(width,height,pathRate?pathRate->lowest():fps),rate.maximum);if(rate.adaptive){applied=std::clamp(applied,floorBitrate,rate.maximum);autoBitrate_=applied;}
                 failureReason="encoder_failed";captureStage=4;encoderSlot.emplace(width,height,fps,applied,EncoderTuning{},EncoderBackend::automatic,capture.adapterLuid(),capture.gpuDevice());
                 if(local_)try{encoder.setOutputObserver(observeEncoderOutput);encoder.setGpuRetryObserver(observeGpuRetry);}catch(...){ }
                 armGpu();
-                policySlot.emplace(size_t(width)*height*3/2,FrameRefinement::forCbr(applied,fps));
+                followPath();
+                policySlot.emplace(size_t(width)*height*3/2,FrameRefinement::forCbr(applied,pacedFps));
                 // Tiles describe the source; the client's new decoder starts without them.
                 lossless.reset();losslessHelper.reset();
                 *scaler=std::move(candidate);keepScale();
@@ -1622,7 +1629,13 @@ class Agent {
           // schedule continues one period after it) instead of waiting for the
           // fixed tick; never sooner than the frame-rate cap after the last
           // tick that captured or submitted a frame (idle ticks do not count).
-          period = std::chrono::microseconds(1000000 / std::min(scaler ? scaler->fps() : fps, encoder.captureFps()));
+          // The slowest of what the Host or the client can do (the scaler), what this encoder takes, and what the
+          // target carries (pathRate). The encoder is told, so each frame's share of the target follows.
+          // The encoder's own rate is not fixed (a CPU encoder takes 60 at most, and the GPU's may come back), so it is asked every time.
+          { const int top = std::max(1, std::min(scaler ? scaler->fps() : fps, encoder.captureFps()));
+            const int paced = pathRate ? std::min(top, pathRate->decide(uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(now - beginning).count()), applied, width, height, top)) : top;
+            if (paced != pacedFps) { pacedFps = paced; encoder.setFrameRate(paced); encodePolicy.retarget(FrameRefinement::forCbr(applied, paced)); } }
+          period = std::chrono::microseconds(1000000 / pacedFps);
           next += period; if (next < now) next = now;
           stall.waitBegan = Clock::now(); loopStats.tail(stall.waitBegan - now);
           const HANDLE frameEvent = capture.frameEvent();
