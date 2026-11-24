@@ -43,7 +43,7 @@ const streamStatsNumeric = [...Object.keys(observabilityDiagnosticBounds), 'samp
   'decodeFpsLow10', 'captureFpsLow10', 'encodeFpsLow10', 'receiveKbps', 'bitrateKbps', 'targetKbps', 'networkDelayMs', 'rttMs', 'rttMaxMs',
   // The relay's own measurement of the Host leg of the client's ping (relay -> Host -> relay; the largest in the
   // window, ms), so a slow round trip (rttMaxMs) can be placed on one side of the relay.
-  'rttHostMaxMs', 'hostWorkUs', 'hostP95Us', 'hostMaxUs', 'captureUs', 'convertUs', 'encodeUs', 'decodeUs', 'decodeMaxUs', 'queueMaxMs', 'skipped', 'losslessTiles', 'losslessKbps',
+  'rttHostMaxMs', 'hostWorkUs', 'hostP95Us', 'hostMaxUs', 'captureUs', 'convertUs', 'encodeUs', 'decodeUs', 'gpuConvertUs', 'gpuWaitUs', 'decodeMaxUs', 'queueMaxMs', 'skipped', 'losslessTiles', 'losslessKbps',
   // tiles-v2: scrolls the Host sent as a move since the stream began (a count; absent from a Host without moves).
   // tiles-resync-v1: tile restarts the client asked for after a poison, and the restarted sources its engine took.
   'losslessMoves', 'losslessResyncs', 'losslessRestarts', 'inputHostP50Us', 'inputHostP95Us', 'inputFrameP50Us', 'inputFrameP95Us',

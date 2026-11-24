@@ -840,6 +840,8 @@ class RemoteSession extends ChangeNotifier {
       if (stable) ..._nativeObservation,
       if (stable) ...{
         'decodeUs': us(clientDecodeMs),
+        'gpuConvertUs': us(gpuConvertMs),
+        'gpuWaitUs': us(gpuWaitMs),
         'textureWaitUs': us(textureWaitMs),
         'textureUploadUs': us(textureUploadMs),
         'captureFps10': rate(capturedFps),
@@ -1165,6 +1167,9 @@ class RemoteSession extends ChangeNotifier {
   double? decodedFpsLowest;
   final _lastOutputFrames = <String, int>{};
   double? textureFps, clientDecodeMs, clientDecodeMaxMs, clientQueueMs;
+  // Of clientDecodeMs on the GPU path: converting a picture to a texture, and
+  // of that, waiting for the GPU to finish it (per decode call).
+  double? gpuConvertMs, gpuWaitMs;
   int? clientQueuePackets, skippedDecodedFrames;
 
   /// texture-pacing-v1 (per statistics tick): mean decoded -> taken by
@@ -1224,6 +1229,7 @@ class RemoteSession extends ChangeNotifier {
   int _lastStatsBytes = 0;
   int _lastTextures = 0, _lastDecodeCalls = 0;
   double _lastDecodeTotalMs = 0, _lastDecodeBusyMs = 0;
+  double _lastGpuConvertMs = 0, _lastGpuWaitMs = 0;
   int _lastUploads = 0, _lastQueued = 0, _lastSkipped = 0;
   double _lastWaitTotalMs = 0, _lastUploadTotalMs = 0;
 
@@ -1817,12 +1823,14 @@ class RemoteSession extends ChangeNotifier {
     _awaitingKeyFrame = true;
     decodedFps = receivedMbps = textureFps = null;
     clientDecodeMs = clientDecodeMaxMs = clientQueueMs = null;
+    gpuConvertMs = gpuWaitMs = null;
     clientQueuePackets = skippedDecodedFrames = null;
     textureWaitMs = textureUploadMs = null;
     textureQueuedFrames = skippedFramesTick = null;
     appCpuPct10 = systemCpuPct10 = gpuDecodePct10 = gpu3dPct10 = null;
     _lastTextures = _lastDecodeCalls = 0;
     _lastDecodeTotalMs = _lastDecodeBusyMs = 0;
+    _lastGpuConvertMs = _lastGpuWaitMs = 0;
     _lastUploads = _lastQueued = _lastSkipped = 0;
     _lastWaitTotalMs = _lastUploadTotalMs = 0;
     _lastAudioDropped = 0;
@@ -3044,11 +3052,13 @@ class RemoteSession extends ChangeNotifier {
         capturedFps = encodedFps = decodedFps = receivedMbps = textureFps =
             null;
         clientDecodeMs = clientDecodeMaxMs = clientQueueMs = null;
+        gpuConvertMs = gpuWaitMs = null;
         clientQueuePackets = skippedDecodedFrames = null;
         textureWaitMs = textureUploadMs = null;
         textureQueuedFrames = skippedFramesTick = null;
         _lastTextures = _lastDecodeCalls = 0;
         _lastDecodeTotalMs = _lastDecodeBusyMs = 0;
+        _lastGpuConvertMs = _lastGpuWaitMs = 0;
         _lastUploads = _lastQueued = _lastSkipped = 0;
         _stallWatch.restart();
         _lastWaitTotalMs = _lastUploadTotalMs = 0;
@@ -3906,6 +3916,23 @@ class RemoteSession extends ChangeNotifier {
                 total >= _lastDecodeTotalMs
             ? (total - _lastDecodeTotalMs) / (calls - _lastDecodeCalls)
             : null;
+        final converted = metricNumber(stats['gpuConvertTotalMs'], 1e12),
+            waited = metricNumber(stats['gpuWaitTotalMs'], 1e12);
+        final decodedNow = calls is int && calls > _lastDecodeCalls
+            ? calls - _lastDecodeCalls
+            : 0;
+        gpuConvertMs =
+            decodedNow > 0 &&
+                converted != null &&
+                converted >= _lastGpuConvertMs
+            ? (converted - _lastGpuConvertMs) / decodedNow
+            : null;
+        gpuWaitMs =
+            decodedNow > 0 && waited != null && waited >= _lastGpuWaitMs
+            ? (waited - _lastGpuWaitMs) / decodedNow
+            : null;
+        if (converted != null) _lastGpuConvertMs = converted;
+        if (waited != null) _lastGpuWaitMs = waited;
         if (calls is int && calls >= 0) _lastDecodeCalls = calls;
         if (total != null) _lastDecodeTotalMs = total;
         final busyNow = metricNumber(stats['decodeBusyMs'], 1e12);
@@ -4094,6 +4121,8 @@ class RemoteSession extends ChangeNotifier {
         rttMs: rttMs,
         rttHostMaxMs: hostRtt,
         clientDecodeMs: clientDecodeMs,
+        gpuConvertMs: gpuConvertMs,
+        gpuWaitMs: gpuWaitMs,
         clientDecodeMaxMs: clientDecodeMaxMs,
         clientQueueMs: clientQueueMs,
         skippedDecodedFrames: skippedDecodedFrames,

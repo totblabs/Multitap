@@ -39,6 +39,8 @@ StreamStatsSample sample(
   receivedMbps: 18.4,
   rttMs: rtt,
   clientDecodeMs: 2.1,
+  gpuConvertMs: 1.4,
+  gpuWaitMs: 1.1,
   clientDecodeMaxMs: 7.5,
   clientQueueMs: 3,
   skippedDecodedFrames: 2,
@@ -104,6 +106,8 @@ void main() {
     expect(report['encodeMaxUs'], 12250);
     expect(report['convertMaxUs'], isNull, reason: 'older host field absent');
     expect(report['decodeUs'], 2100);
+    expect(report['gpuConvertUs'], 1400);
+    expect(report['gpuWaitUs'], 1100);
     expect(report['receiveKbps'], 18400);
     expect(report['inputHostP50Us'], 6100);
     expect(report['inputFrameP95Us'], 48200);

@@ -63,6 +63,10 @@ const streamStatsFields = <String>{
   'convertUs',
   'encodeUs',
   'decodeUs',
+  // Of decodeUs on the GPU path: the texture conversion, and of that the wait
+  // for the GPU to finish (absent on the CPU path and from older apps).
+  'gpuConvertUs',
+  'gpuWaitUs',
   'decodeMaxUs',
   'queueMaxMs',
   'skipped',
@@ -272,6 +276,8 @@ class StreamStatsSample {
     this.rttMs,
     this.rttHostMaxMs,
     this.clientDecodeMs,
+    this.gpuConvertMs,
+    this.gpuWaitMs,
     this.clientDecodeMaxMs,
     this.clientQueueMs,
     this.skippedDecodedFrames,
@@ -415,6 +421,7 @@ class StreamStatsSample {
   /// Independent outputs: the slowest output's decoded rate (decodedFps sums them).
   final double? decodedFpsLowest;
   final double? clientDecodeMs, clientDecodeMaxMs, clientQueueMs;
+  final double? gpuConvertMs, gpuWaitMs;
   final double? losslessKbps;
 
   /// Fresh host telemetry only; stale host values are not repeated.
@@ -487,6 +494,7 @@ class StreamStatsWindow {
   var _encode = _Mean(), _receive = _Mean(), _rtt = _Mean(), _work = _Mean();
   var _captureMs = _Mean(), _convert = _Mean(), _encodeMs = _Mean();
   var _clientDecode = _Mean(), _lossless = _Mean(), _delay = _Mean();
+  var _gpuConvert = _Mean(), _gpuWait = _Mean();
   var _decodeMin = _Min();
   var _decodeLow = _Mean(), _captureLow = _Mean(), _encodeLow = _Mean();
   var _rttMax = _Max(), _p95 = _Max(), _hostMax = _Max(), _decodeMax = _Max();
@@ -532,6 +540,8 @@ class StreamStatsWindow {
     _rttHostMax.add(sample.rttHostMaxMs?.toDouble());
     _videoGapMax.add(sample.videoGapMaxMs);
     _clientDecode.add(sample.clientDecodeMs);
+    _gpuConvert.add(sample.gpuConvertMs);
+    _gpuWait.add(sample.gpuWaitMs);
     _decodeMax.add(sample.clientDecodeMaxMs);
     _queue.add(sample.clientQueueMs);
     _tiles.add(sample.losslessTiles?.toDouble());
@@ -642,6 +652,8 @@ class StreamStatsWindow {
       'convertUs': _convert.scaled(1000),
       'encodeUs': _encodeMs.scaled(1000),
       'decodeUs': _clientDecode.scaled(1000),
+      'gpuConvertUs': _gpuConvert.scaled(1000),
+      'gpuWaitUs': _gpuWait.scaled(1000),
       'decodeMaxUs': _decodeMax.scaled(1000),
       'queueMaxMs': _queue.scaled(1),
       'skipped': last.skippedDecodedFrames,
@@ -741,6 +753,8 @@ class StreamStatsWindow {
     _convert = _Mean();
     _encodeMs = _Mean();
     _clientDecode = _Mean();
+    _gpuConvert = _Mean();
+    _gpuWait = _Mean();
     _lossless = _Mean();
     _delay = _Mean();
     _decodeMin = _Min();

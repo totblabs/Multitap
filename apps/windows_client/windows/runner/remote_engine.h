@@ -214,7 +214,7 @@ class RemoteEngine {
   uint32_t decode_vendor_ = 0;
   uint64_t decoder_fallbacks_ = 0, gpu_dropped_ = 0;
   int64_t decoder_fallback_reason_ = 0;
-  double gpu_convert_total_ms_ = 0, gpu_convert_max_ms_ = 0;
+  double gpu_convert_total_ms_ = 0, gpu_convert_max_ms_ = 0, gpu_wait_total_ms_ = 0;
   // Guarded by mutex_: watched packet PTS and its queued -> published time.
   std::deque<std::pair<uint64_t, int64_t>> watched_;
   // Guarded by mutex_: what happened since the last publication (kind 1 stalls), and the records.

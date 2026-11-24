@@ -321,6 +321,8 @@ class Converter {
   explicit Converter(std::shared_ptr<Device> device) : device_(std::move(device)) {}
   const std::shared_ptr<Device>& device() const { return device_; }
   double last_ms() const { return last_ms_; }
+  // Of last_ms, the part spent waiting for the GPU to finish (Finish).
+  double last_wait_ms() const { return last_wait_ms_; }
 
   // `nv12` is a decoder output (or any NV12 texture) of this converter's
   // device; `slice` its array slice. The visible picture is width x height at
@@ -362,7 +364,7 @@ class Converter {
       device_->context->CopySubresourceRegion(copy_.Get(), 0, 0, 0, 0, nv12, slice, nullptr);
       if (FAILED(hr = make_views(copy_.Get(), 0, 1))) return hr;
     }    hr = Draw(luma.Get(), chroma.Get(), width, height, out_width, out_height, colour, out);
-    last_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    last_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count(); last_wait_ms_ = finish_ms_;
     return hr;
   }
   // Planar NV12 in system memory: luma rows then interleaved UV rows, `stride`
@@ -387,7 +389,7 @@ class Converter {
     device_->context->UpdateSubresource(luma_.Get(), 0, nullptr, nv12, stride, 0);
     device_->context->UpdateSubresource(chroma_.Get(), 0, nullptr, nv12 + size_t(stride) * plane_height, stride, 0);
     hr = Draw(luma_view_.Get(), chroma_view_.Get(), width, height, out_width, out_height, colour, out);
-    last_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    last_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count(); last_wait_ms_ = finish_ms_;
     return hr;
   }
   // A BGRA picture (this device's) scaled to out_width x out_height: the
@@ -416,6 +418,8 @@ class Converter {
   // Waits until the GPU finished everything submitted so far (a shared texture
   // is read by Flutter's own device, without a keyed mutex).
   HRESULT Finish() {
+    const auto finish_began = std::chrono::steady_clock::now();
+    const auto timed = [&](HRESULT value) { finish_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - finish_began).count(); return value; };
     if (!query_) {
       D3D11_QUERY_DESC desc{}; desc.Query = D3D11_QUERY_EVENT;
       HRESULT hr = device_->device->CreateQuery(&desc, &query_);
@@ -435,9 +439,9 @@ class Converter {
           status == S_OK && done ? video::GpuCompletionState::ready : video::GpuCompletionState::pending;
       },
       [] { SwitchToThread(); });
-    if (result == video::GpuCompletionResult::ready) return S_OK;
-    if (result == video::GpuCompletionResult::failed) return status;
-    return HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+    if (result == video::GpuCompletionResult::ready) return timed(S_OK);
+    if (result == video::GpuCompletionResult::failed) return timed(status);
+    return timed(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
   }
 
  private:
@@ -528,7 +532,7 @@ class Converter {
   ComPtr<ID3D11ShaderResourceView> luma_view_, chroma_view_;
   uint32_t upload_width_ = 0, upload_height_ = 0, copy_width_ = 0, copy_height_ = 0;
   ComPtr<ID3D11Query> query_;
-  double last_ms_ = 0;
+  double last_ms_ = 0, last_wait_ms_ = 0, finish_ms_ = 0;
 };
 
 // Lossless tiles on the GPU. Tile pixels are kept as BGRA in a texture of the

@@ -124,6 +124,8 @@ class RemoteDecoder {
   uint64_t gpu_dropped() const { return gpu_dropped_; }
   // Milliseconds spent converting to GPU textures since the last call.
   double TakeConvertMs() { const double value = convert_ms_; convert_ms_ = 0; return value; }
+  // Of that, the milliseconds spent waiting for the GPU to finish each picture.
+  double TakeWaitMs() { const double value = wait_ms_; wait_ms_ = 0; return value; }
   // HRESULT of the failure that ended hardware decoding (S_OK: none yet).
   HRESULT fallback_reason() const { return fallback_reason_; }
 
@@ -162,7 +164,7 @@ class RemoteDecoder {
   // Actual last sample timestamp, independent of the newest ProcessInput.
   std::optional<uint64_t> last_sample_pts_;
   uint32_t late_misses_ = 0;  // consecutive packets whose picture never came
-  double convert_ms_ = 0;
+  double convert_ms_ = 0, wait_ms_ = 0;
   // The deferred picture: in nv12_, with the geometry and colour it was decoded in.
   struct Deferred { bool held = false; uint32_t width = 0, height = 0, coded_width = 0, coded_height = 0; bool matrix_709 = false, full_range = false; uint64_t pts_us = 0; } deferred_;
   uint64_t deferred_count_ = 0;

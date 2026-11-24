@@ -155,7 +155,7 @@ int64_t RemoteEngine::Start(uint32_t width, uint32_t height, bool audio_enabled,
   if (texture_id_ < 0) { texture_.reset(); converter_.reset(); overlay_.reset(); return -1; }
   { std::lock_guard<std::mutex> lock(mutex_); decode_calls_=texture_notify_calls_=texture_remarks_=rgba_buffer_reuses_=0; decode_total_ms_=decode_max_ms_=0; texture_notify_total_ms_=texture_notify_max_ms_=0;
     lossless_packets_=lossless_republishes_=lossless_deferred_=0; lossless_present_=0; lossless_compose_ms_=lossless_republish_ms_=0; lossless_poisoned_=lossless_scaled_=false; lossless_restarts_=0; watched_.clear(); signal_->remark=signal_->reveal=false; deferred_=0;
-    hardware_decode_=decoder_prestarted_=false; decode_tier_=0; decode_vendor_=0; decoder_fallbacks_=gpu_dropped_=0; decoder_fallback_reason_=0; gpu_convert_total_ms_=gpu_convert_max_ms_=0;
+    hardware_decode_=decoder_prestarted_=false; decode_tier_=0; decode_vendor_=0; decoder_fallbacks_=gpu_dropped_=0; decoder_fallback_reason_=0; gpu_convert_total_ms_=gpu_convert_max_ms_=gpu_wait_total_ms_=0;
     since_={}; stalls_.clear(); stall_serial_=0; publishing_key_=false; }
   error_ = S_OK; running_ = true; audio_enabled_=audio_enabled;
   if (audio_enabled_) audio_.Start(audio_opus);
@@ -295,6 +295,8 @@ flutter::EncodableMap RemoteEngine::Stats() {
       {V("decoderFallbackReason"), V(decoder_fallback_reason_)},
       {V("gpuConvertTotalMs"), V(gpu_convert_total_ms_)},
       {V("gpuConvertMaxMs"), V(gpu_convert_max_ms_)},
+      // Of gpuConvertTotalMs: waiting for the GPU to finish each converted picture.
+      {V("gpuWaitTotalMs"), V(gpu_wait_total_ms_)},
       {V("gpuDroppedFrames"), V(static_cast<int64_t>(gpu_dropped_))},
       {V("rgbaBufferReuses"), V(static_cast<int64_t>(rgba_buffer_reuses_))},
       {V("queuedPackets"), V(static_cast<int64_t>(queue_.size()))},
@@ -383,6 +385,7 @@ void RemoteEngine::Run(uint32_t width, uint32_t height) {
         decoder_fallbacks_ = decoder.fallbacks(); gpu_dropped_ = decoder.gpu_dropped(); decoder_fallback_reason_ = decoder.fallback_reason();
         const double converted = decoder.TakeConvertMs();
         gpu_convert_total_ms_ += converted; gpu_convert_max_ms_ = std::max(gpu_convert_max_ms_, converted);
+        gpu_wait_total_ms_ += decoder.TakeWaitMs();
       };
       if (SUCCEEDED(hr)) publish_decoder_state();
       // Tiles may describe the unscaled source of a downscaled video.

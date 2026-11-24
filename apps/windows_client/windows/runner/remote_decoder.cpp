@@ -476,7 +476,7 @@ HRESULT RemoteDecoder::ConvertGpu(IMFSample* sample, LONGLONG pts, const FrameCa
   const auto deliver = [&](HRESULT result) -> HRESULT {
     if (result == E_PENDING) { ++gpu_dropped_; return S_OK; }  // every pooled texture is still in use: drop this picture
     if (FAILED(result)) return result;
-    convert_ms_ += converter.last_ms();
+    convert_ms_ += converter.last_ms(); wait_ms_ += converter.last_wait_ms();
     ++frames_out_;
     callback(std::move(frame));
     return S_OK;
