@@ -35,6 +35,11 @@ void main() {
     expect((await admitDisplayRefresh(screens, 60, 60, 144, query)).$1, 60);
     expect((await admitDisplayRefresh(screens, 30, 240, 144, query)).$1, 30);
     expect(tried, [90, 60, 30]);
+    // The user's ceiling (StreamOptions.rateCap): never above it, whatever the monitor and the Host take.
+    expect((await admitDisplayRefresh(screens, 60, 240, 180, query, cap: 90)).$1, 90);
+    expect((await admitDisplayRefresh(screens, 60, 240, 180, query, cap: 60)).$1, 60);
+    expect((await admitDisplayRefresh(screens, 60, 240, 75, query, cap: 120)).$1, 75);
+    expect((await admitDisplayRefresh(screens, 30, 240, 180, query, cap: 120)).$1, 30);
   });
   test('a high-rate native capability check tests only the requested size', () async {
     var probes = 0;

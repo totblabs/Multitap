@@ -2281,14 +2281,16 @@ class HttpBrokerApi
     String token,
     String desktopId,
     List<StreamSourceSize> sources,
-    int preference,
-  ) async {
+    int preference, [
+    int cap = 0,
+  ]) async {
     final ceiling = _inventoryToken == token ? _refreshCeilings[desktopId] ?? 60 : 60;
-    final displayHz = ceiling > 60 && preference != 30
+    // A ceiling of 60 the user chose needs no look at the display.
+    final displayHz = ceiling > 60 && preference != 30 && cap != 60
         ? await _viewRefreshRate(sources.length > 1)
         : 60;
     try {
-      return await admitDisplayRefresh(sources, preference, ceiling, displayHz, streamAdmission);
+      return await admitDisplayRefresh(sources, preference, ceiling, displayHz, streamAdmission, cap: cap);
     } on StreamCapacityException catch (error) {
       throw BrokerException("decoder_${error.reason}", 409);
     }
@@ -3338,7 +3340,7 @@ class HttpBrokerApi
     final capacity = v2
         ? await _connectionCapacity(token, desktopId, [
             for (final t in tracks.outputs) StreamSourceSize(t.width, t.height),
-          ], options.fps)
+          ], options.fps, options.rateCap)
         : null;
     final admission = capacity?.$2;
     options = options.withFps(capacity?.$1 ?? (options.fps == 30 ? 30 : 60));
@@ -3459,7 +3461,7 @@ class HttpBrokerApi
     final capacity = v2
         ? await _connectionCapacity(token, desktopId, [
             for (final t in tracks.outputs) StreamSourceSize(t.width, t.height),
-          ], options.fps)
+          ], options.fps, options.rateCap)
         : null;
     final admission = capacity?.$2;
     options = options.withFps(capacity?.$1 ?? (options.fps == 30 ? 30 : 60));
@@ -4248,7 +4250,7 @@ class HttpBrokerApi
     final capacity = v2
         ? await _connectionCapacity(token, desktopId, [
             StreamSourceSize(initialViewport.width, initialViewport.height),
-          ], (options ?? const StreamOptions()).fps)
+          ], (options ?? const StreamOptions()).fps, options?.rateCap ?? 0)
         : null;
     final admission = capacity?.$2;
     final rate = capacity?.$1 ?? (options?.fps == 30 ? 30 : 60);

@@ -12263,4 +12263,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get changeAndSignIn => 'Change and sign in';
+
+  @override
+  String get targetFrameRateFps => 'Target frame rate (fps)';
+
+  @override
+  String get frameRateMonitor => 'Monitor rate';
+
+  @override
+  String get frameRateAutoHint =>
+      'Auto goes up to the refresh rate of your monitor.';
 }

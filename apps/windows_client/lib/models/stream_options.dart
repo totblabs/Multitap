@@ -18,6 +18,9 @@ enum StreamBitrateMode { fixed, auto }
 
 bool validStreamFps(int fps) => fps == 30 || (fps >= 60 && fps <= 240);
 
+/// The frame rates a connection can be held to (StreamOptions.rateCap).
+const streamRateCaps = [120, 90, 60];
+
 class StreamOptions {
   // Product name; existing stream/media-epoch-v1 negotiation stays compatible.
   static const engineName = 'Multitap';
@@ -55,8 +58,25 @@ class StreamOptions {
     this.audio = true,
     this.monitor = '0',
     this.bitrateMode = StreamBitrateMode.fixed,
-  });
+    this.rateCap = 0,
+  }) : assert(rateCap == 0 || (rateCap >= 60 && rateCap <= 240));
   final int maxWidth, maxHeight, fps, bitrate;
+
+  /// The user's ceiling on the frame rate, never sent: 0 lets a connection go
+  /// up to the viewing display's rate where the Host and the decoder take it
+  /// (the default); 60, 90 or 120 holds it there. [fps] is what the request
+  /// carries: 30, 60, or the rate a connection was admitted at.
+  final int rateCap;
+
+  /// The frame rate choice as the settings show it: 30, a [rateCap], or 0
+  /// for the display's rate.
+  int get rateChoice => fps == 30 ? 30 : rateCap;
+
+  /// These choices with another frame rate choice ([rateChoice]). The rate a
+  /// connection was admitted at is kept while the choice is the same.
+  StreamOptions withRateChoice(int choice) => choice == rateChoice
+      ? this
+      : _with(rate: choice == 30 ? 30 : 60, cap: choice == 30 ? 0 : choice);
   final bool audio;
   final String monitor;
   final StreamBitrateMode bitrateMode;
@@ -70,6 +90,7 @@ class StreamOptions {
     int? bitrate,
     StreamBitrateMode? mode,
     String? monitor,
+    int? cap,
   }) => StreamOptions(
     maxWidth: maxWidth,
     maxHeight: maxHeight,
@@ -78,6 +99,7 @@ class StreamOptions {
     audio: audio,
     monitor: monitor ?? this.monitor,
     bitrateMode: mode ?? bitrateMode,
+    rateCap: cap ?? rateCap,
   );
 
   /// The request this desktop's broker and host accept. [maximumBitrate] is
@@ -142,6 +164,7 @@ class StreamOptions {
           audio: audio,
           monitor: monitor,
           bitrateMode: bitrateMode,
+          rateCap: rateCap,
         );
 
   StreamOptions forMonitors(List<RemoteMonitor> monitors) {
@@ -246,7 +269,9 @@ enum StreamPreset {
     final asked = sent(choices);
     for (final preset in values) {
       final mode = sent(preset.options);
-      if (mode.fps == asked.fps &&
+      // The frame rate choice, not the rate a connection was admitted at: 작업
+      // on a 144 Hz monitor runs at 144 and is still 작업.
+      if (mode.rateChoice == asked.rateChoice &&
           mode.bitrateMode == asked.bitrateMode &&
           mode.bitrate == asked.bitrate) {
         return preset;

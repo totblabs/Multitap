@@ -114,13 +114,58 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('A new connection starts at 작업 (60 fps, automatic)', (
+    testWidgets('A connection running at 144 fps is 작업 with 자동 lit, and can be held at 90', (
+      tester,
+    ) async {
+      // What a 작업 connection carries once it was admitted at the monitor rate.
+      final results = await open(
+        tester,
+        initial: StreamOptions.recommended.withFps(144),
+      );
+      expect(_plain(tester, 'stream-preset-label'), '화질 모드  작업');
+      expect(_windowsMode(tester), 'work');
+      expect(_windowsFps(tester), {0});
+      for (final rate in const [0, 120, 90, 60, 30]) {
+        expect(find.byKey(Key('stream-rate-$rate')), findsOneWidget);
+      }
+      await tester.tap(find.byKey(const Key('stream-rate-90')));
+      await tester.pump();
+      expect(_windowsFps(tester), {90});
+      expect(_plain(tester, 'stream-preset-label'), '화질 모드  사용자 설정');
+      expect(_plain(tester, 'stream-current-summary'), startsWith('90 fps'));
+      await apply(tester);
+      // The request asks again from 60 and carries the ceiling beside it.
+      expect(results.single!.fps, 60);
+      expect(results.single!.rateCap, 90);
+      expect(results.single!.rateChoice, 90);
+      expect(results.single!.toJson().containsKey('rateCap'), isFalse);
+    });
+
+    testWidgets('A connection held at 60 shows 60 lit, and 자동 gives the monitor rate back', (
+      tester,
+    ) async {
+      final results = await open(
+        tester,
+        initial: StreamOptions.recommended.withRateChoice(60),
+      );
+      expect(_windowsFps(tester), {60});
+      expect(_plain(tester, 'stream-preset-label'), '화질 모드  사용자 설정');
+      await tester.tap(find.byKey(const Key('stream-rate-0')));
+      await tester.pump();
+      expect(_plain(tester, 'stream-preset-label'), '화질 모드  작업');
+      await apply(tester);
+      expect(results.single!.rateCap, 0);
+      expect(results.single!.fps, 60);
+    });
+
+    testWidgets('A new connection starts at 작업 (the monitor\'s rate, automatic)', (
       tester,
     ) async {
       final results = await open(tester);
       expect(_plain(tester, 'stream-preset-label'), '화질 모드  작업');
       expect(_windowsMode(tester), 'work');
-      expect(_windowsFps(tester), {60});
+      // 자동: up to the monitor's rate (0); the request itself starts from 60.
+      expect(_windowsFps(tester), {0});
       expect(_plain(tester, 'stream-bitrate-label'), '영상 전송률  자동');
       await apply(tester);
       expect(results.single!.fps, 60);
@@ -162,7 +207,7 @@ void main() {
       // No sound switch: sound is no choice.
       expect(find.byKey(const Key('stream-audio')), findsNothing);
       expect(_windowsMode(tester), 'work');
-      await tester.tap(find.text('30 fps'));
+      await tester.tap(find.byKey(const Key('stream-rate-30')));
       await tester.pump();
       expect(_plain(tester, 'stream-preset-label'), '화질 모드  사용자 설정');
       expect(_windowsMode(tester), '');

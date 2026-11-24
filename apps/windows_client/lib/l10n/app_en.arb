@@ -3265,5 +3265,8 @@
   "setNewPasswordToSignIn": "Set a new password to sign in.",
   "chooseDifferentFromFirstPassword": "Choose a password different from the first one.",
   "passwordAlreadyChangedSignIn": "The password has already changed. Sign in with the new one.",
-  "changeAndSignIn": "Change and sign in"
+  "changeAndSignIn": "Change and sign in",
+  "targetFrameRateFps": "Target frame rate (fps)",
+  "frameRateMonitor": "Monitor rate",
+  "frameRateAutoHint": "Auto goes up to the refresh rate of your monitor."
 }

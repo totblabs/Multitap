@@ -901,7 +901,7 @@ void main() {
       expect(find.text('가상 화면 두 개 함께'), findsNothing);
       await tester.tap(find.byKey(const Key('stream-advanced')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('30 fps'));
+      await tester.tap(find.byKey(const Key('stream-rate-30')));
       // Sound is always on: there is no switch to turn it off.
       expect(find.byKey(const Key('stream-audio')), findsNothing);
       await tester.drag(

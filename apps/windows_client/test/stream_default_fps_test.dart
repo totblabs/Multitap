@@ -179,9 +179,9 @@ void main() {
         tester
             .widget<SegmentedButton<int>>(find.byType(SegmentedButton<int>))
             .selected,
-        {60},
+        {0},
       );
-      await tester.tap(find.text('30 fps'));
+      await tester.tap(find.byKey(const Key('stream-rate-30')));
       await tester.tap(find.byKey(const Key('apply-stream-settings')));
       await acceptStreamConnect(tester, 'pve-149');
       await tester.pumpAndSettle();

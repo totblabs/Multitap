@@ -725,7 +725,7 @@ void main() {
           find.byKey(const Key('apply-stream-settings')),
         );
         expect(apply().onPressed, isNull, reason: 'Nothing changed yet.');
-        await tester.tap(find.text('30 fps'));
+        await tester.tap(find.byKey(const Key('stream-rate-30')));
         await tester.pump();
         expect(apply().onPressed, isNotNull);
         await tester.tap(find.byKey(const Key('apply-stream-settings')));

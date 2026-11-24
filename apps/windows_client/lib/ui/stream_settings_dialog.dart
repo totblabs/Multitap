@@ -27,9 +27,14 @@ class StreamSettingsBody extends StatefulWidget {
     this.audioDeviceMissing = false,
     this.hardwareDecode = true,
     this.onHardwareDecodeChanged,
+    this.connected = false,
   });
   final DesktopMachine machine;
   final StreamOptions initialOptions;
+
+  /// [initialOptions] are a running connection's: its frame rate is the one
+  /// it was admitted at, and the summary says that number.
+  final bool connected;
 
   /// The "하드웨어 디코딩" choice shown (DecodeSettings), and its change. The
   /// choice is a client preference, not part of the stream request, so it does
@@ -52,7 +57,7 @@ class StreamSettingsBody extends StatefulWidget {
   ) => _request(
     machine,
     initial.forMonitors(machine.monitors),
-    fps: initial.fps,
+    rate: initial.rateChoice,
     mbps: _manualMbps(machine, initial),
     auto: initial.automaticBitrate,
   );
@@ -65,7 +70,7 @@ class StreamSettingsBody extends StatefulWidget {
   static StreamOptions _request(
     DesktopMachine machine,
     StreamOptions base, {
-    required int fps,
+    required int rate,
     required int mbps,
     required bool auto,
   }) => StreamOptions(
@@ -73,7 +78,11 @@ class StreamSettingsBody extends StatefulWidget {
     // active viewport through the authenticated resize protocol.
     maxWidth: StreamOptions.codecMaxWidth,
     maxHeight: StreamOptions.codecMaxHeight,
-    fps: fps,
+    // [rate] is the frame rate choice (StreamOptions.rateChoice). While it is
+    // the one the connection was made with, the rate that connection was
+    // admitted at stays; another choice asks again from 30 or 60.
+    fps: rate == base.rateChoice ? base.fps : (rate == 30 ? 30 : 60),
+    rateCap: rate == 30 ? 0 : rate,
     bitrate: mbps * 1000000,
     // Always sound: an earlier 소리 끔 choice is not carried on.
     audio: true,
@@ -83,7 +92,7 @@ class StreamSettingsBody extends StatefulWidget {
 
   /// Whether [a] and [b] ask for the same stream (the user-facing choices).
   static bool sameChoices(StreamOptions a, StreamOptions b) =>
-      a.fps == b.fps &&
+      a.rateChoice == b.rateChoice &&
       a.bitrateMode == b.bitrateMode &&
       (a.automaticBitrate || a.bitrate == b.bitrate);
 
@@ -104,7 +113,15 @@ class _StreamSettingsBodyState extends State<StreamSettingsBody> {
   late final StreamOptions _base = widget.initialOptions.forMonitors(
     widget.machine.monitors,
   );
-  late int _fps = widget.initialOptions.fps;
+  // The frame rate choice: 0 (the monitor's rate), 120, 90, 60 or 30.
+  late int _rate = widget.initialOptions.rateChoice;
+  // What the summary says of it: the rate this connection runs at while the
+  // choice is its own, else the choice.
+  String get _rateText => widget.connected && _rate == _base.rateChoice
+      ? '${_base.fps} fps'
+      : _rate == 0
+      ? l10n.frameRateMonitor
+      : '$_rate fps';
   late int _mbps = StreamSettingsBody._manualMbps(
     widget.machine,
     widget.initialOptions,
@@ -125,7 +142,7 @@ class _StreamSettingsBodyState extends State<StreamSettingsBody> {
   StreamOptions get _request => StreamSettingsBody._request(
     widget.machine,
     _base,
-    fps: _fps,
+    rate: _rate,
     mbps: _mbps,
     auto: _auto,
   );
@@ -138,7 +155,7 @@ class _StreamSettingsBodyState extends State<StreamSettingsBody> {
   // A mode sets the frame rate and the rate below; changing either of them
   // afterwards reads 사용자 설정.
   void _choose(StreamPreset preset) => _update(() {
-    _fps = preset.options.fps;
+    _rate = preset.options.rateChoice;
     _auto = preset.options.automaticBitrate;
     if (!_auto) _mbps = preset.options.bitrate ~/ 1000000;
   });
@@ -203,7 +220,7 @@ class _StreamSettingsBodyState extends State<StreamSettingsBody> {
         ),
         const SizedBox(height: 12),
         KeepAllText(
-          '$_fps fps · ${_showAuto ? l10n.autoBitrateMaxMbps(_maxMbps) : '$_shownMbps Mbps'}',
+          '$_rateText · ${_showAuto ? l10n.autoBitrateMaxMbps(_maxMbps) : '$_shownMbps Mbps'}',
           key: const Key('stream-current-summary'),
           style: uiText(size: 13, color: p.muted),
         ),
@@ -228,21 +245,42 @@ class _StreamSettingsBodyState extends State<StreamSettingsBody> {
         if (_advanced) ...[
           gap,
           KeepAllText(
-            l10n.targetFrameRate,
+            l10n.targetFrameRateFps,
             key: const Key('stream-fps-label'),
             style: _label,
           ),
           const SizedBox(height: 8),
+          // 자동 is the monitor's rate; a number holds the stream at that many
+          // frames a second at most. Five choices in the panel's width: the
+          // unit is in the label above, and the sides are narrower.
           SegmentedButton<int>(
-            style: choiceStyle,
+            key: const Key('stream-rate'),
+            style: choiceStyle.copyWith(
+              padding: const WidgetStatePropertyAll(
+                EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+              ),
+            ),
             expandedInsets: EdgeInsets.zero,
             showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: 30, label: KeepAllText('30 fps')),
-              ButtonSegment(value: 60, label: KeepAllText('60 fps')),
+            segments: [
+              ButtonSegment(
+                value: 0,
+                label: KeepAllText(l10n.auto, key: const Key('stream-rate-0')),
+              ),
+              for (final rate in const [...streamRateCaps, 30])
+                ButtonSegment(
+                  value: rate,
+                  label: KeepAllText('$rate', key: Key('stream-rate-$rate')),
+                ),
             ],
-            selected: {_fps},
-            onSelectionChanged: (values) => _update(() => _fps = values.single),
+            selected: {_rate},
+            onSelectionChanged: (values) => _update(() => _rate = values.single),
+          ),
+          const SizedBox(height: 6),
+          KeepAllText(
+            l10n.frameRateAutoHint,
+            key: const Key('stream-rate-hint'),
+            style: uiText(size: 12, height: 1.5, color: p.muted),
           ),
           gap,
           Text.rich(
@@ -407,6 +445,7 @@ class _StreamSettingsDialogState extends State<StreamSettingsDialog> {
         StreamSettingsBody(
           machine: widget.machine,
           initialOptions: widget.initialOptions,
+          connected: widget.reconnect,
           audioDeviceMissing: widget.audioDeviceMissing,
           hardwareDecode: _hardware,
           onHardwareDecodeChanged: (value) => _hardware = value,
@@ -590,6 +629,7 @@ class _StreamSettingsPanelState extends State<_StreamSettingsPanel> {
             child: StreamSettingsBody(
               machine: widget.machine,
               initialOptions: widget.initialOptions,
+              connected: true,
               audioDeviceMissing: widget.audioDeviceMissing,
               hardwareDecode: _hardware,
               onHardwareDecodeChanged: (value) =>

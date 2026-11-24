@@ -19730,6 +19730,24 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'바꾸고 로그인'**
   String get changeAndSignIn;
+
+  /// No description provided for @targetFrameRateFps.
+  ///
+  /// In ko, this message translates to:
+  /// **'목표 프레임 (fps)'**
+  String get targetFrameRateFps;
+
+  /// No description provided for @frameRateMonitor.
+  ///
+  /// In ko, this message translates to:
+  /// **'모니터 주사율'**
+  String get frameRateMonitor;
+
+  /// No description provided for @frameRateAutoHint.
+  ///
+  /// In ko, this message translates to:
+  /// **'자동은 보는 모니터의 주사율까지 올려요.'**
+  String get frameRateAutoHint;
 }
 
 class _AppLocalizationsDelegate

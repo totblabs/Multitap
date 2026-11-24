@@ -11416,4 +11416,13 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get changeAndSignIn => '바꾸고 로그인';
+
+  @override
+  String get targetFrameRateFps => '목표 프레임 (fps)';
+
+  @override
+  String get frameRateMonitor => '모니터 주사율';
+
+  @override
+  String get frameRateAutoHint => '자동은 보는 모니터의 주사율까지 올려요.';
 }

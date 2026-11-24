@@ -70,6 +70,8 @@ class SessionWindowLaunch {
     'localPcApproved': localPcApproved,
     'mode': mode.name,
     'options': options.toJson(),
+    // The frame rate ceiling the user chose is not part of the request (StreamOptions.rateCap).
+    if (options.rateCap > 0) 'rateCap': options.rateCap,
     'thumbnailKey': ?thumbnailKey,
     'thumbnailEpoch': ?thumbnailEpoch,
     'guideAccountKey': ?guideAccountKey,
@@ -149,9 +151,15 @@ class SessionWindowLaunch {
       name: name,
       localPcApproved: value['localPcApproved'] == true,
       mode: mode,
-      options: StreamOptions.fromJson(
-        Map<String, dynamic>.from(value['options'] as Map),
-      ),
+      options: () {
+        final options = StreamOptions.fromJson(
+          Map<String, dynamic>.from(value['options'] as Map),
+        );
+        final cap = value['rateCap'];
+        return cap is int && streamRateCaps.contains(cap) && options.fps != 30
+            ? options.withRateChoice(cap).withFps(options.fps)
+            : options;
+      }(),
       thumbnailKey: thumbnailKey as String?,
       thumbnailEpoch: thumbnailEpoch as String?,
       guideAccountKey: guideAccountKey as String?,

@@ -72,12 +72,14 @@ const _reasonAliases = {
 
 /// Try the viewing display's rate at the original resolution before accepting
 /// a lower rate. Only a definitive format rejection allows another probe.
+/// [cap]: the user's ceiling on the frame rate (StreamOptions.rateCap), 0 for none.
 Future<(int, DecoderAdmission)> admitDisplayRefresh(
   List<StreamSourceSize> sources, int preference, int maximum, int displayHz,
-  StreamAdmissionQuery query,
-) async {
+  StreamAdmissionQuery query, {
+  int cap = 0,
+}) async {
   final base = preference == 30 ? 30 : 60;
-  final top = math.min(displayHz, maximum).clamp(60, 240);
+  final top = math.min(math.min(displayHz, maximum), cap > 0 ? cap : 240).clamp(60, 240);
   if (base == 60 && top > 60) {
     for (final hz in [top, 165, 144, 120, 90, 75].toSet()) {
       if (hz > top) continue;

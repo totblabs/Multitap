@@ -8405,5 +8405,8 @@
   "passwordAlreadyChangedSignIn": "비밀번호가 이미 바뀌었어요. 새 비밀번호로 로그인하세요.",
   "@passwordAlreadyChangedSignIn": {},
   "changeAndSignIn": "바꾸고 로그인",
-  "@changeAndSignIn": {}
+  "@changeAndSignIn": {},
+  "targetFrameRateFps": "목표 프레임 (fps)",
+  "frameRateMonitor": "모니터 주사율",
+  "frameRateAutoHint": "자동은 보는 모니터의 주사율까지 올려요."
 }
