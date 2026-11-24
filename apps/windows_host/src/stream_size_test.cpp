@@ -173,6 +173,45 @@ int main() {
     }
     ++checks;
 
+    // A client decoder that holds 90 a second and not 120 (field: 6.8 ms a picture on integrated graphics, a 144 fps
+    // stream): down to the rate its busy share fits, and it stays there; the next rate is not tried while the
+    // client's own measure says it would not fit.
+    {
+      const auto start = Clock::now(); auto at = start;
+      EncodeScaleController c(bounds(1692, 970, fast, 144), {}, start);
+      const auto busyAt = [&] { return ClientDecodeReport{std::min(1000, int(6.8 * c.fps())), c.fps() >= 120 ? 120 : 10}; };
+      int changes = 0, last = c.fps(), lowest = 144, highestAfterDown = 0;
+      for (int second = 1; second <= 600; ++second) {
+        at = start + std::chrono::seconds(second); (void)c.observe(still(), busyAt(), at, false, 144);
+        if (c.fps() != last) { ++changes; last = c.fps(); }
+        lowest = std::min(lowest, c.fps()); if (second > 30) highestAfterDown = std::max(highestAfterDown, c.fps());
+      }
+      require(lowest == 90 && c.fps() == 90 && highestAfterDown == 90 && changes == 1 && c.reason() == EncodeLimit::decoderLoad, "A decoder that holds 90 fps was sent another rate again and again");
+      // The client gets faster (the other stream it was decoding ends): 3 ms a picture fits 144, one rate at a time.
+      for (int second = 601; second <= 700; ++second) { at = start + std::chrono::seconds(second); (void)c.observe(still(), ClientDecodeReport{int(3.0 * c.fps()), 5}, at, false, 144); }
+      require(c.fps() == 144 && c.reason() == EncodeLimit::none, "A client with room again did not get its rate back");
+    }
+    ++checks;
+    // A client that reports only a backlog (no busy share): a rate that fails soon after it is tried waits twice as
+    // long each time, so the stream is not taken up and down every ten seconds; a minute at a rate clears the wait.
+    {
+      const auto start = Clock::now(); auto at = start;
+      EncodeScaleController c(bounds(1692, 970, fast, 144), {}, start);
+      const auto backlog = [&] { return ClientDecodeReport{-1, c.fps() >= 120 ? 400 : 0}; };
+      std::vector<int> ups; int last = c.fps();
+      for (int second = 1; second <= 900; ++second) {
+        at = start + std::chrono::seconds(second); (void)c.observe(still(), backlog(), at, false, 144);
+        if (c.fps() > last) ups.push_back(second);
+        last = c.fps();
+      }
+      require(ups.size() >= 3 && ups.size() <= 7, "The retries of a failing rate did not thin out (every 15 s would be 60 in 15 minutes)");
+      for (size_t n = 2; n < ups.size(); ++n) require(ups[n] - ups[n - 1] >= ups[n - 1] - ups[n - 2], "A later retry came sooner than the one before");
+      // The backlog ends: after a minute at the next rate the wait is the short one again.
+      for (int second = 901; second <= 1400; ++second) { at = start + std::chrono::seconds(second); (void)c.observe(still(), ClientDecodeReport{-1, 0}, at, false, 144); }
+      require(c.fps() == 144, "A client without a backlog did not get its rate back");
+    }
+    ++checks;
+
     // Field case (a VM composed on Microsoft Basic Render): capture alone over the budget is never
     // answered with a smaller picture (it reads the source at full size anyway, so text only blurs), and a
     // picture made small earlier comes back when the thread has room, even while capture paces the frames.

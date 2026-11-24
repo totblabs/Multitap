@@ -188,6 +188,8 @@ class EncodeScaleController {
   static constexpr int overloadClientBusy = 900, targetClientBusy = 750, upClientBusy = 700;
   static constexpr uint32_t measuredFrames = 5;
   static constexpr auto downInterval = std::chrono::seconds(3), upInterval = std::chrono::seconds(2), upAfterDown = std::chrono::seconds(10);
+  // A rate step up that is taken back within rateTrial failed; one that lasts rateHeld held.
+  static constexpr auto rateTrial = std::chrono::seconds(20), rateHeld = std::chrono::seconds(60), rateRetryMaximum = std::chrono::seconds(320);
   static constexpr int softwareRates[] = {240, 165, 144, 120, 90, 75, 60, 45, 30};
   static constexpr double softwareKeepScale = 0.75, softwareMinimumScale = 0.5;
 
@@ -243,6 +245,9 @@ class EncodeScaleController {
         if (hostFits && clientFits) { next = rate; break; }
       }
       const EncodeLimit why = hostOverloaded ? EncodeLimit::hostCpu : EncodeLimit::decoderLoad;
+      // A rate that failed soon after it was tried is not tried again as soon: twice as long each time, to five minutes.
+      if (rateUp_ && now - *rateUp_ <= rateTrial) rateRetry_ = std::min<Clock::duration>(rateRetry_ * 2, rateRetryMaximum);
+      rateUp_.reset();
       fps_ = next; lastChange_ = now; lastDown_ = now; downReason_ = reason_ = why; overloaded_ = 0;
       memory_.fps = fps_; memory_.reason = why;
       return false;
@@ -298,11 +303,19 @@ class EncodeScaleController {
       }
     }
     // The size is back at its cap: then the rate, one rung, when the measured work
-    // fits the shorter period with the same headroom a size step up asks for.
-    if (calm_ >= 2 && fps_ < maximumRate && target_ >= cap - 1e-9 && now - lastChange_ >= upInterval && (!lastDown_ || now - *lastDown_ >= upAfterDown)) {
+    // fits the shorter period with the same headroom a size step up asks for: the Host's own
+    // work, and the client's decoder by its own measure (its busy share at the higher rate
+    // within 700 per mille). Without the client's side a decoder that holds 90 a second but
+    // not 120 was sent 120 again every ten seconds, and fell behind every time (field: a
+    // desktop CPU's integrated graphics at 6.8 ms a picture, 144 -> 90 -> 120 -> 90 -> ...).
+    // A rate that held for a minute clears the longer wait.
+    if (rateUp_ && now - *rateUp_ > rateHeld) { rateUp_.reset(); rateRetry_ = upAfterDown; }
+    if (calm_ >= 2 && fps_ < maximumRate && target_ >= cap - 1e-9 && now - lastChange_ >= upInterval && (!lastDown_ || now - *lastDown_ >= std::max<Clock::duration>(upAfterDown, rateRetry_))) {
       int next = maximumRate;
       for (const int rate : softwareRates) if (rate > fps_ && rate < next) next = rate;
-      if (!measured || fixed + scalable <= upWork * 1000.0 / next) {
+      const bool clientRoom = !clientKnown || client->busy <= 0 || double(client->busy) * next / fps_ <= upClientBusy;
+      if ((!measured || fixed + scalable <= upWork * 1000.0 / next) && clientRoom) {
+        rateUp_ = now;
         fps_ = next; lastChange_ = now; memory_.fps = fps_ < bounds_.fps ? fps_ : 0;
         if (!memory_.fps && !memory_.pixels) memory_ = {};
         settleReason();
@@ -332,7 +345,8 @@ class EncodeScaleController {
   EncodeLimit reason_ = EncodeLimit::none, downReason_ = EncodeLimit::none;
   EncodeScaleMemory memory_;
   Clock::time_point lastChange_;
-  std::optional<Clock::time_point> lastDown_;
+  std::optional<Clock::time_point> lastDown_, rateUp_;  // rateUp_: the last rate step up, while it is on trial
+  Clock::duration rateRetry_ = upAfterDown;             // the wait after a step down before the next rate is tried
   uint32_t overloaded_ = 0, calm_ = 0;
   int fps_ = 60;
 };

@@ -139,7 +139,10 @@ int main(int argc, char** argv) {
     // A picture is kept as its size and a 64-bit hash of its pixels (FNV-1a over 8-byte words): two decoders' pictures of several megabytes each, for hundreds of frames, do not fit a small Host's memory.
     struct Picture { size_t bytes = 0; uint64_t hash = 0; bool operator==(const Picture&) const = default; };
     std::map<uint64_t, Picture> wholeFrames, lossyFrames; std::vector<double> encodeMs; bool widened = false; size_t pBytes = 0, pCount = 0, idrBytes = 0, delivered = 0, replaced = 0;
-    const auto keep = [](std::map<uint64_t, Picture>& into) { return [&into](multitap::DecodedFrame&& out) {
+    // A picture that leaves a decoder later than the call that fed its frame is a frame of delay on the client's screen.
+    uint64_t feeding = 0; size_t lateWhole = 0, lateLossy = 0, maximumLate = 0;
+    const auto keep = [&](std::map<uint64_t, Picture>& into) { return [&into, &feeding, &lateWhole, &lateLossy, &maximumLate, &wholeFrames, fps](multitap::DecodedFrame&& out) {
+      if (out.pts_us != feeding) { ++(&into == &wholeFrames ? lateWhole : lateLossy); maximumLate = std::max(maximumLate, size_t((feeding - out.pts_us) * uint64_t(fps) / 1000000)); }
       uint64_t hash = 1469598103934665603ull; size_t at = 0;
       for (; at + 8 <= out.rgba.size(); at += 8) { uint64_t word; std::memcpy(&word, out.rgba.data() + at, 8); hash = (hash ^ word) * 1099511628211ull; }
       for (; at < out.rgba.size(); ++at) hash = (hash ^ out.rgba[at]) * 1099511628211ull;
@@ -181,6 +184,7 @@ int main(int argc, char** argv) {
         if (loss.recovered && frame.key) ++replaced;
         require(forcedSlots ? frame.key || loss.recovered : frame.key == !loss.recovered, "The answer to a LOSS has the wrong type");
       }
+      feeding = frame.ptsUs;
       host::check(whole.Decode(frame.bytes.data(), frame.bytes.size(), frame.ptsUs, keep(wholeFrames)), "Decode the loss run");
       if (!lost) { ++delivered; host::check(lossy.Decode(frame.bytes.data(), frame.bytes.size(), frame.ptsUs, keep(lossyFrames)), "Decode the loss run without the lost frames"); }
     }
@@ -190,11 +194,13 @@ int main(int argc, char** argv) {
     for (const auto& [pts, picture] : lossyFrames) { const auto same = wholeFrames.find(pts); if (same != wholeFrames.end() && same->second == picture && picture.bytes) ++identical; else ++different; }
     std::sort(encodeMs.begin(), encodeMs.end());
     std::cout << "{\"kind\":\"gpu-h264-reference-recovery\",\"decoder\":\"" << (hardwareDecoder ? "hardware" : "software") << "\",\"fps\":" << fps << ",\"longTermReferences\":" << (widened ? "true" : "false") << ",\"forcedSlots\":" << forcedSlots << ",\"answersReplacedByIdr\":" << replaced << ",\"frames\":" << lossFrames
-              << ",\"delivered\":" << delivered << ",\"shown\":" << lossyFrames.size() << ",\"identicalToNoLoss\":" << identical << ",\"different\":" << different
+              << ",\"delivered\":" << delivered << ",\"shown\":" << lossyFrames.size() << ",\"identicalToNoLoss\":" << identical << ",\"different\":" << different << ",\"picturesLateFromDecoder\":" << lateWhole + lateLossy << ",\"latestByFrames\":" << maximumLate
               << ",\"pFrameBytesMean\":" << (pCount ? pBytes / pCount : 0) << ",\"idrBytesMax\":" << idrBytes << ",\"encodeMsP50\":" << encodeMs[encodeMs.size() / 2] << ",\"encodeMsMax\":" << encodeMs.back() << ",\"losses\":[";
     for (size_t n = 0; n < losses.size(); ++n) std::cout << (n ? "," : "") << "{\"case\":\"" << losses[n].name << "\",\"lostFrames\":" << losses[n].count << ",\"answer\":\"" << (losses[n].key ? "IDR" : "P from a long-term reference") << "\",\"bytes\":" << losses[n].bytes << "}";
     std::cout << "]}\n";
     require(different == 0 && identical == delivered && lossyFrames.size() == delivered, "The decoder that lost frames differs from one that lost nothing");
+    // The larger DPB of long-term references must not make a decoder hold pictures back: each leaves with the call that fed its frame.
+    require(lateWhole + lateLossy == 0, "A decoder held pictures back");
     if (!forcedSlots) for (const auto& loss : losses) require(loss.recovered == (widened && loss.recovers), "A LOSS was answered with the wrong kind of frame");
     host::gpu::nvenctesting::longTermSlots = 0;
     const auto info = encoder->hardwareInfo(); const char* backend = info.vendorId == 0x10de ? "nvenc" : info.vendorId == 0x1002 ? "amf" : "qsv-mft";

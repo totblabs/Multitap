@@ -82,7 +82,9 @@ if (-not $SkipTests) {
     # the run on a GPU with the client's decoders is MultitapHostGpuH264InteropTest, by hand).
     'MultitapHostNvencOutputPolicyTest',
     # The frame rate a narrow path still carries a picture at (pure rules; the encoders' side is MultitapHostEncoderFrameRateTest, by hand).
-    'MultitapHostPathFrameRateTest')
+    'MultitapHostPathFrameRateTest',
+    # The picture's size and capture rate under load: the Host's own and the client decoder's (stream_size.hpp).
+    'MultitapHostStreamSizeTest')
   & $cmake --build $tree --config Release --parallel $Parallel --target @tests; if ($LASTEXITCODE) { throw 'test build failed' }
   foreach ($t in $tests) { & (Join-Path $tree "$t.exe") | Out-Null; if ($LASTEXITCODE) { throw "test failed: $t" }; "ok $t" }
 }
