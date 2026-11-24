@@ -132,16 +132,16 @@ void KeysTheLayoutMarks() {
     WireKey(events[0], vk, scan, true, false);
     WireKey(events[1], vk, scan, false, false);
   }
-  // The keypad's digits and point, and what they are with NumLock off: by the virtual key this
-  // keyboard gave them (measured: by scan code they follow the desktop's NumLock instead).
+  // The keypad's digits and point, and what they are with NumLock off: by scan code, so that
+  // the desktop's NumLock gives them their meaning as it does for a keyboard of its own.
   for (const auto [vk, scan] : {std::pair<UINT, UINT>{VK_NUMPAD7, 0x47}, std::pair<UINT, UINT>{VK_NUMPAD4, 0x4b},
                                std::pair<UINT, UINT>{VK_NUMPAD0, 0x52}, std::pair<UINT, UINT>{VK_DECIMAL, 0x53},
                                std::pair<UINT, UINT>{VK_HOME, 0x47}, std::pair<UINT, UINT>{VK_LEFT, 0x4b},
                                std::pair<UINT, UINT>{VK_CLEAR, 0x4c}, std::pair<UINT, UINT>{VK_INSERT, 0x52},
                                std::pair<UINT, UINT>{VK_DELETE, 0x53}}) {
     tap(vk, scan, 0);
-    WireKey(events[0], vk, 0, true, false);
-    WireKey(events[1], vk, 0, false, false);
+    WireKey(events[0], vk, scan, true, false);
+    WireKey(events[1], vk, scan, false, false);
   }
   // The same codes with the mark are the gray keys beside the keypad: unchanged.
   for (const auto [vk, scan] : {std::pair<UINT, UINT>{VK_HOME, 0x47}, std::pair<UINT, UINT>{VK_DELETE, 0x53},
