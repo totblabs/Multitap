@@ -76,6 +76,11 @@ class RemoteEngine {
   // (a standing backlog) or a frame older than kStaleFrame shows the newest.
   // The same rules apply to both texture kinds.
   static constexpr size_t kPresentQueue = 2;
+  // gpu-pipeline: GPU pictures that may be unfinished while the next packet is
+  // decoded. One more waits for the oldest first, which is the decoder's load.
+  static constexpr size_t kGpuInFlight = 2;
+  // Tests only: every GPU picture is waited for before the next packet, as before gpu-pipeline.
+  static inline std::atomic<bool> test_no_gpu_pipeline{false};
   static constexpr std::chrono::milliseconds kStaleFrame{100};
   // 0 = CPU pixel buffer (glTexImage2D upload by Flutter's raster thread),
   // 1 = GPU surface (DXGI shared handle of a BGRA texture, no CPU copy).
@@ -133,6 +138,8 @@ class RemoteEngine {
     bool remark = false;
     // The window was shown again: the worker hands Flutter the newest picture.
     bool reveal = false;
+    // gpu-pipeline: the GPU finished the oldest picture the worker holds back.
+    bool completed = false;
   };
   struct QueuedPacket {
     std::vector<uint8_t> bytes;
@@ -215,6 +222,8 @@ class RemoteEngine {
   uint64_t decoder_fallbacks_ = 0, gpu_dropped_ = 0;
   int64_t decoder_fallback_reason_ = 0;
   double gpu_convert_total_ms_ = 0, gpu_convert_max_ms_ = 0, gpu_wait_total_ms_ = 0;
+  // gpu-pipeline: pictures published after the worker had moved on to the next packet.
+  uint64_t gpu_pipelined_ = 0;
   // Guarded by mutex_: watched packet PTS and its queued -> published time.
   std::deque<std::pair<uint64_t, int64_t>> watched_;
   // Guarded by mutex_: what happened since the last publication (kind 1 stalls), and the records.

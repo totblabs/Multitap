@@ -156,6 +156,129 @@ std::vector<uint8_t> label(uint32_t width, uint32_t height) {
   return rgba;
 }
 
+double number(const flutter::EncodableMap& map, const char* key) {
+  const auto it = map.find(V(key)); require(it != map.end(), std::string("Missing statistic ") + key);
+  if (const auto* value = std::get_if<double>(&it->second)) return *value;
+  return double(integer(map, key));
+}
+// gpu-pipeline: a stream of video alone (no tiles), as a game sends it, pushed as fast as the
+// engine takes it. Every picture is published, and the pictures at two points of the stream are
+// the same whichever path decoded them: nothing is shown early, late or out of order.
+struct Piped { std::vector<uint8_t> middle, last; int64_t path = 0, pipelined = 0, decoded = 0, dropped = 0; bool hw = false; double decode_ms = 0, wait_ms = 0, wall_ms = 0; };
+Piped piped(const std::vector<Unit>& units, uint32_t width, uint32_t height, bool hardware) {
+  Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+  if (hardware) {
+    ComPtr<IDXGIFactory1> factory; check(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "DXGI factory");
+    ComPtr<IDXGIAdapter1> candidate;
+    for (UINT i = 0; factory->EnumAdapters1(i, &candidate) != DXGI_ERROR_NOT_FOUND; ++i, candidate.Reset()) {
+      DXGI_ADAPTER_DESC1 desc{}; candidate->GetDesc1(&desc);
+      if (!(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && desc.VendorId != 0x1414) { adapter = candidate; break; }
+    }
+    require(bool(adapter), "No hardware adapter on this PC");
+  }
+  Registrar registrar; multitap::RemoteMediaSession owner(&registrar, {}, adapter);
+  int64_t lease = 1, texture = -1;
+  check(owner.Start(lease, width, height, false, texture, {}, hardware), "Start");
+  Piped result;
+  const auto snapshot = [&](size_t count, std::vector<uint8_t>& out) {
+    require(until([&] { return integer(stats(owner, lease), "decodedFrames") >= int64_t(count); }), "Pictures did not all arrive");
+    int64_t at = 0; uint64_t serial = 0;
+    const auto latest = owner.Latest(at, serial);
+    require(latest && latest->width == width && latest->height == height && latest->rgba.size() == size_t(width) * height * 4, "Published picture readback");
+    out = latest->rgba;
+  };
+  push(owner, lease, envelope(units[0].bytes.data(), units[0].bytes.size(), units[0].pts, true));
+  require(until([&] { return integer(stats(owner, lease), "decodedFrames") >= 1; }), "First picture");
+  const auto before = stats(owner, lease);
+  const auto began = Clock::now();
+  const size_t half = units.size() / 2;
+  for (size_t i = 1; i < half; ++i) push(owner, lease, envelope(units[i].bytes.data(), units[i].bytes.size(), units[i].pts, false));
+  snapshot(half, result.middle);
+  for (size_t i = half; i < units.size(); ++i) push(owner, lease, envelope(units[i].bytes.data(), units[i].bytes.size(), units[i].pts, false));
+  snapshot(units.size(), result.last);
+  result.wall_ms = std::chrono::duration<double, std::milli>(Clock::now() - began).count();
+  const auto after = stats(owner, lease);
+  const double calls = double(integer(after, "decodeCalls") - integer(before, "decodeCalls"));
+  result.path = integer(after, "texturePath"); result.hw = flag(after, "hardwareDecode");
+  result.pipelined = integer(after, "gpuPipelinedFrames"); result.decoded = integer(after, "decodedFrames"); result.dropped = integer(after, "gpuDroppedFrames");
+  result.decode_ms = calls > 0 ? (number(after, "decodeTotalMs") - number(before, "decodeTotalMs")) / calls : 0;
+  result.wait_ms = calls > 0 ? (number(after, "gpuWaitTotalMs") - number(before, "gpuWaitTotalMs")) / calls : 0;
+  require(result.decoded == int64_t(units.size()) && !result.dropped, "A picture of the stream was lost");
+  return result;
+}
+// The same stream at a game's pace (one picture every 1/120 s): how long after its packet
+// each picture is published. A picture held back must come out when the GPU finishes it,
+// not when the next packet happens to arrive.
+struct Pace { double median = 0, p95 = 0, worst = 0, decode_ms = 0; int64_t pipelined = 0; };
+Pace paced(const std::vector<Unit>& units, uint32_t width, uint32_t height, bool pipelineOn) {
+  multitap::RemoteEngine::test_no_gpu_pipeline = !pipelineOn;
+  struct Reset { ~Reset() { multitap::RemoteEngine::test_no_gpu_pipeline = false; } } reset;
+  Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+  ComPtr<IDXGIFactory1> factory; check(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "DXGI factory");
+  ComPtr<IDXGIAdapter1> candidate;
+  for (UINT i = 0; factory->EnumAdapters1(i, &candidate) != DXGI_ERROR_NOT_FOUND; ++i, candidate.Reset()) {
+    DXGI_ADAPTER_DESC1 desc{}; candidate->GetDesc1(&desc);
+    if (!(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && desc.VendorId != 0x1414) { adapter = candidate; break; }
+  }
+  require(bool(adapter), "No hardware adapter on this PC");
+  Registrar registrar; multitap::RemoteMediaSession owner(&registrar, {}, adapter);
+  int64_t lease = 1, texture = -1;
+  check(owner.Start(lease, width, height, false, texture, {}, true), "Start");
+  push(owner, lease, envelope(units[0].bytes.data(), units[0].bytes.size(), units[0].pts, true));
+  require(until([&] { return integer(stats(owner, lease), "decodedFrames") >= 1; }), "First picture");
+  const auto before = stats(owner, lease);
+  std::vector<double> waits;
+  const auto began = Clock::now();
+  for (size_t i = 1; i < units.size(); ++i) {
+    const auto due = began + std::chrono::microseconds(8333 * int64_t(i));
+    while (Clock::now() < due) std::this_thread::yield();
+    const auto sent = Clock::now();
+    push(owner, lease, envelope(units[i].bytes.data(), units[i].bytes.size(), units[i].pts, false));
+    const auto limit = sent + std::chrono::milliseconds(500);
+    while (integer(stats(owner, lease), "decodedFrames") < int64_t(i + 1)) { require(Clock::now() < limit, "A picture was not published within 0.5 s of its packet"); std::this_thread::yield(); }
+    waits.push_back(std::chrono::duration<double, std::milli>(Clock::now() - sent).count());
+  }
+  const auto after = stats(owner, lease);
+  std::sort(waits.begin(), waits.end());
+  Pace pace; pace.median = waits[waits.size() / 2]; pace.p95 = waits[waits.size() * 95 / 100]; pace.worst = waits.back();
+  const double calls = double(integer(after, "decodeCalls") - integer(before, "decodeCalls"));
+  pace.decode_ms = calls > 0 ? (number(after, "decodeTotalMs") - number(before, "decodeTotalMs")) / calls : 0;
+  pace.pipelined = integer(after, "gpuPipelinedFrames");
+  return pace;
+}
+void pacing(uint32_t width, uint32_t height) {
+  const auto units = encode(width, height, 240);
+  const Pace waited = paced(units, width, height, false), piped = paced(units, width, height, true);
+  char text[520];
+  std::snprintf(text, sizeof(text), "{\"size\":\"%ux%u\",\"case\":\"pacing\",\"pictures\":%zu,\"waitEach\":{\"medianMs\":%.2f,\"p95Ms\":%.2f,\"worstMs\":%.2f,\"decodeMs\":%.2f},\"pipeline\":{\"medianMs\":%.2f,\"p95Ms\":%.2f,\"worstMs\":%.2f,\"decodeMs\":%.2f,\"pipelined\":%lld}}",
+                width, height, units.size(), waited.median, waited.p95, waited.worst, waited.decode_ms, piped.median, piped.p95, piped.worst, piped.decode_ms, static_cast<long long>(piped.pipelined));
+  std::cout << text << std::endl;
+  require(!waited.pipelined, "The test switch did not turn the pipeline off");
+  // Held back until the GPU is done, not until the next packet: well inside one 8.3 ms interval
+  // more than the old path took.
+  require(piped.median <= waited.median + 2.0, "Pictures come out later with the pipeline than without it");
+}
+void pipeline(uint32_t width, uint32_t height) {
+  const auto units = encode(width, height, 120);
+  const Piped cpu = piped(units, width, height, false), gpu = piped(units, width, height, true);
+  // The same decoded pictures through two converters: at most the rounding the engine's own
+  // conversion self-test allows.
+  const auto differ = [](const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    uint64_t wrong = 0; if (a.size() != b.size()) return UINT64_MAX;
+    for (size_t i = 0; i < a.size(); ++i) if (std::abs(int(a[i]) - int(b[i])) > 3) ++wrong;
+    return wrong;
+  };
+  const uint64_t middle = differ(cpu.middle, gpu.middle), last = differ(cpu.last, gpu.last), apart = differ(cpu.middle, cpu.last);
+  char text[640];
+  std::snprintf(text, sizeof(text), "{\"size\":\"%ux%u\",\"case\":\"pipeline\",\"pictures\":%zu,\"hardwareDecode\":%s,\"texturePath\":%lld,\"pipelined\":%lld,\"wrongMiddle\":%llu,\"wrongLast\":%llu,\"middleAndLastDiffer\":%llu,\"gpuDecodeMs\":%.2f,\"gpuWaitMs\":%.2f,\"gpuWallMs\":%.0f,\"cpuDecodeMs\":%.2f,\"cpuWallMs\":%.0f}",
+                width, height, units.size(), gpu.hw ? "true" : "false", static_cast<long long>(gpu.path), static_cast<long long>(gpu.pipelined),
+                static_cast<unsigned long long>(middle), static_cast<unsigned long long>(last), static_cast<unsigned long long>(apart), gpu.decode_ms, gpu.wait_ms, gpu.wall_ms, cpu.decode_ms, cpu.wall_ms);
+  std::cout << text << std::endl;
+  require(apart > 0, "The two points of the stream show the same picture: the comparison proves nothing");
+  require(!middle && !last, "A picture differs between the CPU path and the GPU path");
+  require(!cpu.pipelined, "The CPU path held a picture back");
+}
+
 struct Result { std::string json; };
 // `tiles`: tile indices sent as one packet (pts one before the next picture).
 std::string run(uint32_t width, uint32_t height, bool hardware) {
@@ -277,6 +400,10 @@ int main() {
     for (const bool hardware : {false, true}) for (const auto size : {std::pair<uint32_t, uint32_t>{640, 360}, {1920, 1080}}) {
       try { run(size.first, size.second, hardware); }
       catch (const std::exception& error) { ++failures; std::cout << "{\"size\":\"" << size.first << "x" << size.second << "\",\"hardwareRequested\":" << (hardware ? "true" : "false") << ",\"failed\":\"" << error.what() << "\"}" << std::endl; }
+    }
+    for (const auto size : {std::pair<uint32_t, uint32_t>{640, 360}, {1920, 1080}}) {
+      try { pipeline(size.first, size.second); pacing(size.first, size.second); }
+      catch (const std::exception& error) { ++failures; std::cout << "{\"size\":\"" << size.first << "x" << size.second << "\",\"case\":\"pipeline\",\"failed\":\"" << error.what() << "\"}" << std::endl; }
     }
     std::cout << "{\"kind\":\"lossless-engine-smoke\",\"checks\":" << checks << ",\"failures\":" << failures << "}" << std::endl;
     MFShutdown();

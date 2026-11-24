@@ -468,14 +468,19 @@ HRESULT RemoteDecoder::ConvertDeferred(const FrameCallback& callback) {
 
 HRESULT RemoteDecoder::ConvertGpu(IMFSample* sample, LONGLONG pts, const FrameCallback& callback) {
   gpu::Converter& converter = *options_.converter;
+  // The converter is shared with the lossless overlay, which waits as before.
+  converter.set_deferred(options_.defer_gpu);
+  struct Restore { gpu::Converter& value; ~Restore() { value.set_deferred(false); } } restore{converter};
   const gpu::Colour colour{matrix_709_, full_range_};
   const uint32_t out_width = out_width_ ? out_width_ : width_, out_height = out_height_ ? out_height_ : height_;
   DecodedFrame frame; frame.width = out_width; frame.height = out_height;
   frame.pts_us = static_cast<uint64_t>(std::max<LONGLONG>(0, pts / 10));
   HRESULT hr = S_OK;
   const auto deliver = [&](HRESULT result) -> HRESULT {
+    const uint64_t ticket = converter.TakeTicket();
     if (result == E_PENDING) { ++gpu_dropped_; return S_OK; }  // every pooled texture is still in use: drop this picture
     if (FAILED(result)) return result;
+    frame.gpu_ticket = ticket;
     convert_ms_ += converter.last_ms(); wait_ms_ += converter.last_wait_ms();
     ++frames_out_;
     callback(std::move(frame));

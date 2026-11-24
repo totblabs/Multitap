@@ -323,6 +323,35 @@ class Converter {
   double last_ms() const { return last_ms_; }
   // Of last_ms, the part spent waiting for the GPU to finish (Finish).
   double last_wait_ms() const { return last_wait_ms_; }
+  // Deferred completion (gpu-pipeline, D3D11.4 fences). While on, a conversion
+  // (FromTexture, FromSystem) ends by signalling a fence instead of waiting for
+  // the GPU: the picture is NOT complete when the call returns, and must not be
+  // published before its ticket is (Completed / Wait / Notify). A device without
+  // fences keeps the wait, and the ticket is 0.
+  void set_deferred(bool on) { deferred_ = on && EnsureFence(); }
+  bool deferred() const { return deferred_; }
+  // The ticket of the last conversion, once; 0 when it finished before returning.
+  uint64_t TakeTicket() { const uint64_t value = ticket_; ticket_ = 0; return value; }
+  // Whether the GPU has finished everything a ticket stands for (true also when
+  // the device is gone: the next call on it fails).
+  bool Completed(uint64_t ticket) const { return !ticket || !fence_ || fence_->GetCompletedValue() >= ticket; }
+  // Sets `event` once the ticket's work is finished (at once when it already is).
+  HRESULT Notify(uint64_t ticket, HANDLE event) { return fence_ && ticket ? fence_->SetEventOnCompletion(ticket, event) : E_NOTIMPL; }
+  // Waits for a ticket as Finish waits for everything.
+  HRESULT Wait(uint64_t ticket) {
+    if (!ticket || !fence_) return S_OK;
+    const auto result = video::waitForGpuCompletion(std::chrono::seconds(2),
+      [] { return std::chrono::steady_clock::now(); },
+      [] {},
+      [&](video::GpuCompletionPollMode) {
+        const UINT64 seen = fence_->GetCompletedValue();
+        return seen == UINT64_MAX ? video::GpuCompletionState::failed : seen >= ticket ? video::GpuCompletionState::ready : video::GpuCompletionState::pending;
+      },
+      [] { SwitchToThread(); });
+    if (result == video::GpuCompletionResult::ready) return S_OK;
+    if (result == video::GpuCompletionResult::failed) return DXGI_ERROR_DEVICE_REMOVED;
+    return HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+  }
 
   // `nv12` is a decoder output (or any NV12 texture) of this converter's
   // device; `slice` its array slice. The visible picture is width x height at
@@ -484,7 +513,24 @@ class Converter {
       if (!out) return E_PENDING;
       if (FAILED(hr = Pass(ps_scale_.Get(), nullptr, nullptr, converted->view.Get(), *out, colour))) { out.reset(); return hr; }
     } else out = std::move(converted);
-    if (FAILED(hr = Finish())) { out.reset(); return hr; }
+    if (FAILED(hr = deferred_ ? Submit() : Finish())) { out.reset(); return hr; }
+    return S_OK;
+  }
+  bool EnsureFence() {
+    if (fence_) return true;
+    if (fence_refused_) return false;
+    ComPtr<ID3D11Device5> device;
+    if (FAILED(device_->device.As(&device)) || FAILED(device_->context.As(&fence_context_)) ||
+        FAILED(device->CreateFence(0, D3D11_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)))) { fence_.Reset(); fence_context_.Reset(); fence_refused_ = true; return false; }
+    return true;
+  }
+  // The end of a deferred conversion: a fence value the GPU reaches after everything
+  // submitted so far, and the flush that sends it. No wait.
+  HRESULT Submit() {
+    const uint64_t value = ++fence_value_;
+    if (FAILED(fence_context_->Signal(fence_.Get(), value))) return Finish();
+    device_->context->Flush();
+    ticket_ = value; finish_ms_ = 0;
     return S_OK;
   }
   HRESULT Pass(ID3D11PixelShader* shader, ID3D11ShaderResourceView* luma, ID3D11ShaderResourceView* chroma, ID3D11ShaderResourceView* rgb, const Frame& target, Colour colour) {
@@ -533,6 +579,10 @@ class Converter {
   uint32_t upload_width_ = 0, upload_height_ = 0, copy_width_ = 0, copy_height_ = 0;
   ComPtr<ID3D11Query> query_;
   double last_ms_ = 0, last_wait_ms_ = 0, finish_ms_ = 0;
+  ComPtr<ID3D11Fence> fence_;
+  ComPtr<ID3D11DeviceContext4> fence_context_;
+  uint64_t fence_value_ = 0, ticket_ = 0;
+  bool deferred_ = false, fence_refused_ = false;
 };
 
 // Lossless tiles on the GPU. Tile pixels are kept as BGRA in a texture of the

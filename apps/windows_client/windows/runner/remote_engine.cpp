@@ -155,7 +155,7 @@ int64_t RemoteEngine::Start(uint32_t width, uint32_t height, bool audio_enabled,
   if (texture_id_ < 0) { texture_.reset(); converter_.reset(); overlay_.reset(); return -1; }
   { std::lock_guard<std::mutex> lock(mutex_); decode_calls_=texture_notify_calls_=texture_remarks_=rgba_buffer_reuses_=0; decode_total_ms_=decode_max_ms_=0; texture_notify_total_ms_=texture_notify_max_ms_=0;
     lossless_packets_=lossless_republishes_=lossless_deferred_=0; lossless_present_=0; lossless_compose_ms_=lossless_republish_ms_=0; lossless_poisoned_=lossless_scaled_=false; lossless_restarts_=0; watched_.clear(); signal_->remark=signal_->reveal=false; deferred_=0;
-    hardware_decode_=decoder_prestarted_=false; decode_tier_=0; decode_vendor_=0; decoder_fallbacks_=gpu_dropped_=0; decoder_fallback_reason_=0; gpu_convert_total_ms_=gpu_convert_max_ms_=gpu_wait_total_ms_=0;
+    hardware_decode_=decoder_prestarted_=false; decode_tier_=0; decode_vendor_=0; decoder_fallbacks_=gpu_dropped_=0; decoder_fallback_reason_=0; gpu_convert_total_ms_=gpu_convert_max_ms_=gpu_wait_total_ms_=0; gpu_pipelined_=0;
     since_={}; stalls_.clear(); stall_serial_=0; publishing_key_=false; }
   error_ = S_OK; running_ = true; audio_enabled_=audio_enabled;
   if (audio_enabled_) audio_.Start(audio_opus);
@@ -297,6 +297,7 @@ flutter::EncodableMap RemoteEngine::Stats() {
       {V("gpuConvertMaxMs"), V(gpu_convert_max_ms_)},
       // Of gpuConvertTotalMs: waiting for the GPU to finish each converted picture.
       {V("gpuWaitTotalMs"), V(gpu_wait_total_ms_)},
+      {V("gpuPipelinedFrames"), V(static_cast<int64_t>(gpu_pipelined_))},
       {V("gpuDroppedFrames"), V(static_cast<int64_t>(gpu_dropped_))},
       {V("rgbaBufferReuses"), V(static_cast<int64_t>(rgba_buffer_reuses_))},
       {V("queuedPackets"), V(static_cast<int64_t>(queue_.size()))},
@@ -368,6 +369,25 @@ void RemoteEngine::Run(uint32_t width, uint32_t height) {
       decoder_options.decode_device = selection_.decode; decoder_options.tier = selection_.tier;
       decoder_options.prestart = std::move(options_.prestart);
       decoder_options.converter = present_gpu_ ? converter_.get() : nullptr;
+      // gpu-pipeline: wakes this worker when the GPU finishes the oldest picture it
+      // holds back. Only an event is waited for there; the device stays this thread's.
+      struct Completion {
+        HANDLE done = CreateEventW(nullptr, FALSE, FALSE, nullptr), stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        std::thread thread;
+        explicit Completion(std::shared_ptr<Signal> signal) {
+          if (!done || !stop) return;
+          thread = std::thread([this, signal] {
+            const HANDLE both[2] = {stop, done};
+            while (WaitForMultipleObjects(2, both, FALSE, INFINITE) == WAIT_OBJECT_0 + 1) {
+              { std::lock_guard<std::mutex> lock(signal->mutex); signal->completed = true; }
+              signal->wake.notify_all();
+            }
+          });
+        }
+        ~Completion() { if (stop) SetEvent(stop); if (thread.joinable()) thread.join(); if (done) CloseHandle(done); if (stop) CloseHandle(stop); }
+        Completion(const Completion&) = delete; Completion& operator=(const Completion&) = delete;
+      } completion(signal_);
+      decoder_options.defer_gpu = present_gpu_ && completion.thread.joinable() && !test_no_gpu_pipeline;
       decoder_options.pending_input=[this]{
         std::lock_guard<std::mutex> lock(mutex_);
         if(!running_)return true;
@@ -402,13 +422,76 @@ void RemoteEngine::Run(uint32_t width, uint32_t height) {
         } else lossless.ComposeDecoded(frame.rgba.data(), size_t(frame.width) * 4, frame.pts_us);
         return S_OK;
       };
+      // gpu-pipeline: pictures whose GPU conversion is submitted and not finished, oldest
+      // first. Each is published once the GPU finished it, in order, while the next packet
+      // is decoded. Only while no lossless tile is in play (tiles keep the old order: wait,
+      // compose, publish).
+      std::deque<DecodedFrame> in_flight;
+      uint64_t armed_ticket = 0;
+      double texture_notify_ms=0,texture_notify_max_ms=0,compose_ms=0,gpu_wait_ms=0;
+      uint64_t texture_notify_calls=0, pipelined=0;
+      HRESULT compose_error = S_OK;
+      const auto deliver = [&](DecodedFrame&& frame) {
+        if (lossless.active()) {
+          const auto composing = std::chrono::steady_clock::now();
+          const HRESULT composed = compose(frame);
+          if (FAILED(composed) && SUCCEEDED(compose_error)) compose_error = composed;
+          compose_ms += std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-composing).count();
+        }
+        const auto notifying = std::chrono::steady_clock::now();
+        const uint64_t published_pts = frame.pts_us;
+        Publish(std::move(frame));
+        if (audio_enabled_) audio_.NoteVideo(published_pts);
+        const auto published = std::chrono::steady_clock::now();
+        const double elapsed=std::chrono::duration<double,std::milli>(published-notifying).count();
+        texture_notify_ms+=elapsed;texture_notify_max_ms=std::max(texture_notify_max_ms,elapsed);++texture_notify_calls;
+        // The first frame at or after a watched PTS is now available to the
+        // texture (a dropped watched frame resolves with the next later one).
+        if (!watching.empty() && watching.front().first <= published_pts) {
+          std::lock_guard<std::mutex> lock(mutex_);
+          while (!watching.empty() && watching.front().first <= published_pts) {
+            watched_.push_back({watching.front().first, std::chrono::duration_cast<std::chrono::microseconds>(published - watching.front().second).count()});
+            watching.pop_front();
+          }
+          while (watched_.size() > kWatchedFrames) watched_.pop_front();
+        }
+      };
+      const auto wait_for = [&](uint64_t ticket) -> HRESULT {
+        const auto began = std::chrono::steady_clock::now();
+        const HRESULT waited = converter_ ? converter_->Wait(ticket) : S_OK;
+        gpu_wait_ms += std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count();
+        return waited;
+      };
+      // Publishes the finished pictures at the front; `all` waits for every one.
+      const auto settle = [&](bool all) -> HRESULT {
+        while (!in_flight.empty()) {
+          const uint64_t ticket = in_flight.front().gpu_ticket;
+          if (!converter_->Completed(ticket)) {
+            if (!all) {
+              if (armed_ticket == ticket || SUCCEEDED(converter_->Notify(ticket, completion.done))) { armed_ticket = ticket; break; }
+            }
+            const HRESULT waited = wait_for(ticket);
+            if (FAILED(waited)) { in_flight.clear(); return waited; }
+          }
+          DecodedFrame frame = std::move(in_flight.front()); in_flight.pop_front(); frame.gpu_ticket = 0;
+          deliver(std::move(frame));
+        }
+        return S_OK;
+      };
       while (SUCCEEDED(hr) && running_) {
         std::vector<uint8_t> packet; bool watch = false, video_next = false; std::chrono::steady_clock::time_point enqueued;
-        { std::unique_lock<std::mutex> lock(mutex_); wake_.wait(lock, [this] { return !running_ || !queue_.empty() || signal_->remark || signal_->reveal; });
+        { std::unique_lock<std::mutex> lock(mutex_); wake_.wait(lock, [this] { return !running_ || !queue_.empty() || signal_->remark || signal_->reveal || signal_->completed; });
           if (!running_) break;
+          if (signal_->completed) {
+            // The GPU finished a picture held back: publish what is finished.
+            signal_->completed = false; armed_ticket = 0; lock.unlock();
+            hr = settle(false);
+            continue;
+          }
           if (signal_->reveal) {
             // Shown again: the newest decoded picture, converted now if it was kept.
             signal_->reveal = false; lock.unlock();
+            if (FAILED(hr = settle(true))) continue;
             HRESULT composed = S_OK;
             const HRESULT shown = decoder.ConvertDeferred([&](DecodedFrame&& frame) {
               if (lossless.active()) composed = compose(frame);
@@ -432,7 +515,7 @@ void RemoteEngine::Run(uint32_t width, uint32_t height) {
         // tile packet (pts T-1) right before its video (pts T): when that video
         // is already queued, its decoded frame shows the new tiles instead of a
         // republished intermediate picture.
-        if (lossless::isTilePayload(packet.data() + 12, packet.size() - 12)) { AcceptLossless(lossless, packet, !video_next, gpu_worker); continue; }
+        if (lossless::isTilePayload(packet.data() + 12, packet.size() - 12)) { if (FAILED(hr = settle(true))) continue; AcceptLossless(lossless, packet, !video_next, gpu_worker); continue; }
         uint64_t pts = 0; std::memcpy(&pts, packet.data() + 4, 8);
         publishing_key_ = (packet[1] & 1) != 0;
         if (watch) { watching.push_back({pts, enqueued}); while (watching.size() > kWatchingPackets) watching.pop_front(); }
@@ -441,48 +524,37 @@ void RemoteEngine::Run(uint32_t width, uint32_t height) {
           if (!buffers->spare.empty()) { released = std::move(buffers->spare.back()); buffers->spare.pop_back(); } }
         const bool reused = !released.empty() && decoder.Recycle(std::move(released));
         const auto decoding = std::chrono::steady_clock::now();
-        double texture_notify_ms=0,texture_notify_max_ms=0,compose_ms=0;
-        uint64_t texture_notify_calls=0;
-        HRESULT compose_error = S_OK;
-        hr = decoder.Decode(packet.data() + 12, packet.size() - 12, pts, [this,&lossless,&watching,&compose,&compose_ms,&texture_notify_ms,&texture_notify_max_ms,&texture_notify_calls,&compose_error](DecodedFrame&& frame) {
-          if (lossless.active()) {
-            const auto composing = std::chrono::steady_clock::now();
-            const HRESULT composed = compose(frame);
-            if (FAILED(composed) && SUCCEEDED(compose_error)) compose_error = composed;
-            compose_ms += std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-composing).count();
-          }
-          const auto notifying = std::chrono::steady_clock::now();
-          const uint64_t published_pts = frame.pts_us;
-          Publish(std::move(frame));
-          if (audio_enabled_) audio_.NoteVideo(published_pts);
-          const auto published = std::chrono::steady_clock::now();
-          const double elapsed=std::chrono::duration<double,std::milli>(published-notifying).count();
-          texture_notify_ms+=elapsed;texture_notify_max_ms=std::max(texture_notify_max_ms,elapsed);++texture_notify_calls;
-          // The first frame at or after a watched PTS is now available to the
-          // texture (a dropped watched frame resolves with the next later one).
-          if (!watching.empty() && watching.front().first <= published_pts) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            while (!watching.empty() && watching.front().first <= published_pts) {
-              watched_.push_back({watching.front().first, std::chrono::duration_cast<std::chrono::microseconds>(published - watching.front().second).count()});
-              watching.pop_front();
-            }
-            while (watched_.size() > kWatchedFrames) watched_.pop_front();
-          }
+        // What deliveries inside this call cost is not the decoder's time; a wait for the
+        // oldest picture because too many are unfinished is.
+        const double delivered_before = texture_notify_ms + compose_ms;
+        if (in_flight.size() >= kGpuInFlight && FAILED(hr = wait_for(in_flight.front().gpu_ticket))) continue;
+        if (FAILED(hr = settle(false))) continue;
+        hr = decoder.Decode(packet.data() + 12, packet.size() - 12, pts, [&](DecodedFrame&& frame) {
+          if (frame.gpu_ticket && !lossless.active()) { in_flight.push_back(std::move(frame)); ++pipelined; return; }
+          // Tiles in play (or a picture that needs no wait): everything before it first.
+          if (frame.gpu_ticket) { const HRESULT waited = wait_for(frame.gpu_ticket); if (FAILED(waited) && SUCCEEDED(compose_error)) compose_error = waited; frame.gpu_ticket = 0; }
+          if (!in_flight.empty()) { const HRESULT settled = settle(true); if (FAILED(settled) && SUCCEEDED(compose_error)) compose_error = settled; }
+          deliver(std::move(frame));
         });
         if (SUCCEEDED(hr) && FAILED(compose_error)) hr = compose_error;
         publish_decoder_state();
         if (compose_ms > 0) { std::lock_guard<std::mutex> lock(mutex_); lossless_compose_ms_ += compose_ms; lossless_present_ = lossless.presentTiles(); lossless_poisoned_ = lossless.poisoned(); }
         // Deferred tiles whose video packet produced no frame appear now (a
         // hidden window's appear when it is shown).
+        if (SUCCEEDED(hr) && lossless.republishPending()) hr = settle(true);
         if (SUCCEEDED(hr) && !hidden_ && lossless.republishPending() && RepublishLossless(lossless, gpu_worker)) { std::lock_guard<std::mutex> lock(mutex_); ++lossless_republishes_; }
         // Decoder work includes MFT processing and NV12 -> RGBA conversion (or
         // the GPU conversion); publishing/Flutter notification can wait
         // independently and must not inflate the codec measurement. Neither
         // value measures presentation.
-        const double decode_ms=std::max(0.0,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-decoding).count()-texture_notify_ms-compose_ms);
+        const double decode_ms=std::max(0.0,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-decoding).count()-(texture_notify_ms+compose_ms-delivered_before));
         { std::lock_guard<std::mutex> lock(mutex_); ++decode_calls_; rgba_buffer_reuses_+=reused?1:0; decode_total_ms_+=decode_ms; decode_max_ms_=std::max(decode_max_ms_,decode_ms); texture_notify_total_ms_+=texture_notify_ms; texture_notify_max_ms_=std::max(texture_notify_max_ms_,texture_notify_max_ms);texture_notify_calls_+=texture_notify_calls;
+          gpu_wait_total_ms_+=gpu_wait_ms; gpu_pipelined_+=pipelined;
           // A call that published opened the next interval, so it counts there.
           ++since_.decodes; since_.decode_max_ms=std::max(since_.decode_max_ms,decode_ms); }
+        texture_notify_ms=texture_notify_max_ms=compose_ms=gpu_wait_ms=0; texture_notify_calls=pipelined=0; compose_error=S_OK;
+        // Publish what the GPU finished meanwhile, and ask to be woken for the next.
+        if (SUCCEEDED(hr)) hr = settle(false);
       }
     }
     MFShutdown();

@@ -18,7 +18,10 @@ namespace multitap {
 // One decoded picture. CPU path: `rgba` (width x height x 4, R G B A). GPU
 // path: `gpu` is a shared BGRA texture and `rgba` is empty (the lossless
 // compositor and thumbnails read it back on demand).
-struct DecodedFrame { uint32_t width = 0, height = 0; uint64_t pts_us = 0; std::vector<uint8_t> rgba; std::shared_ptr<gpu::Frame> gpu; };
+// gpu-pipeline: a GPU picture with a non-zero `gpu_ticket` is still being drawn
+// (Options::defer_gpu). Its receiver publishes it only once the converter says
+// that ticket is complete.
+struct DecodedFrame { uint32_t width = 0, height = 0; uint64_t pts_us = 0; std::vector<uint8_t> rgba; std::shared_ptr<gpu::Frame> gpu; uint64_t gpu_ticket = 0; };
 // decoder-prestart-v1: the CPU decoder (Microsoft software H.264 MFT) started
 // on its own thread before its stream's size is known, while a session still
 // waits for its stream info. Its MFT_MESSAGE_NOTIFY_BEGIN_STREAMING waits for
@@ -78,6 +81,10 @@ class RemoteDecoder {
     // stream's first SPS replaces its output type (MF_E_TRANSFORM_STREAM_CHANGE,
     // raised at every stream's first SPS), as it does for a new decoder.
     std::shared_ptr<DecoderPrestart> prestart;
+    // gpu-pipeline: GPU pictures leave without waiting for the GPU to finish them
+    // (DecodedFrame::gpu_ticket), so the next packet can be decoded meanwhile.
+    // Only for a receiver that holds each picture until its ticket completes.
+    bool defer_gpu = false;
     // Hidden windows (backlog #62): asked with each CPU picture's PTS before its
     // RGBA conversion (GPU frames are not asked). True keeps the picture as NV12
     // instead, without a callback, until ConvertDeferred or the next picture.
