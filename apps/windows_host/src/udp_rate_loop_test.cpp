@@ -45,6 +45,13 @@ struct Scenario {
   std::function<double(uint64_t)> capacity = [](uint64_t) { return 60e6; };
   std::function<Content(uint64_t)> content = [](uint64_t) { return Content::game; };
   double lossPct = 0;          // random loss on the way to the client
+  // A wireless last hop that goes off the air (a scan): from each of these times, for pauseUs, nothing
+  // passes either way. The access point holds up to holdBytes for the client and drops the rest; all
+  // of it leaves when the pause ends. Field 2026-11-24 (a viewing PC on Wi-Fi): 0.3 s, one to five
+  // minutes apart, the low-rate desktop late and whole, the 60 Mbps one short of about 120 datagrams.
+  std::vector<uint64_t> pauses; uint64_t pauseUs = 300000; size_t holdBytes = 2000000;
+  // Interference on that hop: this share (per cent) of what passes is lost, either way, by time.
+  std::function<double(uint64_t)> lossAt;
   double gameDemand = 90e6;    // what the encoder emits for the game when the target allows it
   // How the encoder answers a LOSS (reference_history.hpp): 0 an IDR; 1 a P-frame while the client's last good
   // frame is among its last 16 (reference invalidation: NVENC on a GPU with several reference frames before
@@ -76,8 +83,18 @@ struct Result {
 class Link {
  public:
   Link(uint64_t seed, std::function<double(uint64_t)> rate, uint64_t delayUs, uint64_t queueUs, double lossPct) : random_(seed), rate_(std::move(rate)), delayUs_(delayUs), queueUs_(queueUs), lossPct_(lossPct) {}
+  void pauses(std::vector<uint64_t> from, uint64_t lengthUs, size_t holdBytes) { pauses_ = std::move(from); pauseUs_ = lengthUs; hold_ = holdBytes; }
+  void lossAt(std::function<double(uint64_t)> pct) { lossAt_ = std::move(pct); }
   bool send(const uint8_t* data, size_t size, uint64_t now) {
-    if (uniform() * 100 < lossPct_) return false;
+    if (uniform() * 100 < lossPct_ + (lossAt_ ? lossAt_(now) : 0)) return false;
+    for (const uint64_t from : pauses_) if (now >= from && now < from + pauseUs_) {
+      // Off the air: held until the pause ends, in order, while the hold has room.
+      if (heldFor_ != from) { heldFor_ = from; held_ = 0; }
+      if (held_ + size > hold_) return false;
+      held_ += size; free_ = std::max(free_, from + pauseUs_) + uint64_t(double(size + 28) * 8e6 / std::max(rate_(from + pauseUs_), 1.0));
+      queue_.push({free_ + delayUs_, order_++, Bytes(data, data + size)});
+      return true;
+    }
     if (queueUs_ && free_ > now + queueUs_) return false;  // the queue is full: dropped at its end
     free_ = std::max(free_, now) + uint64_t(double(size + 28) * 8e6 / std::max(rate_(now), 1.0));
     queue_.push({free_ + delayUs_, order_++, Bytes(data, data + size)});
@@ -88,6 +105,7 @@ class Link {
   struct Packet { uint64_t at, order; Bytes bytes; bool operator>(const Packet& o) const { return at != o.at ? at > o.at : order > o.order; } };
   double uniform() { return double(random_() >> 11) / double(1ull << 53); }
   std::mt19937_64 random_; std::function<double(uint64_t)> rate_; uint64_t delayUs_, queueUs_; double lossPct_; uint64_t free_ = 0, order_ = 0;
+  std::vector<uint64_t> pauses_; uint64_t pauseUs_ = 0, heldFor_ = 0; size_t hold_ = 0, held_ = 0; std::function<double(uint64_t)> lossAt_;
   std::priority_queue<Packet, std::vector<Packet>, std::greater<Packet>> queue_;
 };
 
@@ -101,6 +119,8 @@ Result simulate(const Scenario& s, uint64_t seed) {
   Sender sender(controller.target(), 1000, [&] { return random() | 1; });
   Receiver receiver(1, 1000); Receiver::Output out; Plain plain;
   Link forward(seed + 1, s.capacity, s.rttUs / 2, s.queueUs, s.lossPct), reverse(seed + 2, [](uint64_t) { return 1e9; }, s.rttUs / 2, 0, 0);
+  if (!s.pauses.empty()) { forward.pauses(s.pauses, s.pauseUs, s.holdBytes); reverse.pauses(s.pauses, s.pauseUs, size_t(1) << 30); }
+  if (s.lossAt) { forward.lossAt(s.lossAt); reverse.lossAt(s.lossAt); }
   uint16_t epoch = 1; uint64_t pts = 0, nextFrame = 1000, nextPump = 1000, nextClient = 1000, nextTick = 1000;
   // UdpMediaPath's own state.
   uint64_t keyFrameAt = 0, lossAt = 0, switchedAt = 1000, wssUntil = 0; uint32_t received = 0, lost = 0;
@@ -327,6 +347,34 @@ int main(int argc, char** argv) {
       // n == 2, 4 Mbps: under what 30 frames of this picture need (3.4 Mbps at 0.04 bit per pixel, with nothing to spare
       // for a key frame or the way back). Shown, not required: this rule ends at its lowest rate.
       if (n == 3) require(r.stalls == 0 && narrowFps[1] >= 140 && mbps[1] >= 52, name + ": a wide path lost frames to the frame rate rule");
+    }
+    // A wireless pause or a burst of interference: the target is back within seconds (as built: 1 to 8 s after
+    // pauses, 2 to 21 s after two seconds of loss). The field once took two minutes (2026-11-24, 100 to 30 Mbps
+    // after two stalls two seconds apart); that is not reproduced here, so nothing was changed for it.
+    {
+      struct Wireless { const char* name; std::vector<uint64_t> at; size_t hold; double lossPct = 0; uint64_t lossUs = 0; };
+      const std::vector<Wireless> wireless{
+        {"20 % lost for 2 s at 60 s", {}, 0, 20, 2 * second},
+        {"40 % lost for 2 s at 60 s", {}, 0, 40, 2 * second},
+        {"70 % lost for 1 s at 60 s", {}, 0, 70, second},
+        {"pause, then 30 % for 2 s", {60 * second}, 2000000, 30, 2 * second},
+        {"one pause at 60 s, holds 2 MB", {60 * second}, 2000000},
+        {"one pause at 60 s, holds 1 MB", {60 * second}, 1000000},
+        {"two pauses, 60 s and 62 s", {60 * second, 62 * second}, 2000000},
+        {"three pauses, 60, 62, 64 s", {60 * second, 62 * second, 64 * second}, 2000000},
+      };
+      std::printf("%-32s %5s %7s %6s %6s %6s %6s %6s %6s %8s %6s %7s %5s\n", "wireless pause 0.3 s, 2084x1340", "seed", "before", "+2 s", "+5 s", "+10 s", "+20 s", "+40 s", "+80 s", "back in", "stalls", "stall s", "IDRs");
+      for (const auto& c : wireless) for (int seed = 0; seed < 3; ++seed) {
+        Scenario s; s.name = c.name; s.width = 2084; s.height = 1340; s.fps = 120; s.durationUs = 180 * second; s.capacity = [](uint64_t) { return 300e6; }; s.silentRetries = 2;
+        s.pauses = c.at; s.holdBytes = c.hold;
+        if (c.lossUs) s.lossAt = [pct = c.lossPct, length = c.lossUs](uint64_t t) { return t >= 60 * second && t < 60 * second + length ? pct : 0.0; };
+        const Result r = simulate(s, 0x5eed + uint64_t(seed) * 7919);
+        const uint64_t at = c.at.empty() ? 60 * second : c.at.back(); const double before = r.mean(r.targetMbps, 50 * second, 59 * second);
+        int back = -1; for (uint64_t t = at + second; t < s.durationUs; t += second) if (r.target(t) >= before * 0.9) { back = int((t - at) / second); break; }
+        char took[16]; if (back < 0) std::snprintf(took, sizeof(took), "never"); else std::snprintf(took, sizeof(took), "%d s", back);
+        require(back >= 0 && back <= (c.lossUs ? 30 : 15), std::string(c.name) + ": the target stayed low after a wireless pause or burst");
+        std::printf("%-32s %5d %7.1f %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f %8s %6d %7.2f %5d\n", c.name, seed, before, r.target(at + 2 * second), r.target(at + 5 * second), r.target(at + 10 * second), r.target(at + 20 * second), r.target(at + 40 * second), r.target(at + 80 * second), took, r.stalls, double(r.stallUs) / 1e6, r.idrs);
+      }
     }
     std::printf("udp-rate-loop: %lld checks passed\n", checks);
     return 0;

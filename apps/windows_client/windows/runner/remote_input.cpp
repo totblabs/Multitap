@@ -92,10 +92,29 @@ bool RemoteInput::HandleKey(WPARAM message, const KBDLLHOOKSTRUCT& key, bool for
     if (release_key) PostMessageW(GetAncestor(window_, GA_ROOT), WM_APP + 180, 0, 0);
     return release_key;
   }
+  // A Host injects the scan code, with E0 before it when "extended" is set. The hook's
+  // extended flag is the layout's mark on a key, and for three keys that is not an E0 code:
+  // - NumLock (0x45) and Right Shift (0x36) carry the mark, but E0 45 and E0 36 name no key.
+  //   Measured with SendInput (2026-11-24): neither toggles NumLock nor holds Shift, the
+  //   plain codes do. So NumLock could not be turned on in a desktop from here, and its
+  //   keypad stayed arrows (field: a PC with no keyboard of its own starts with it off).
+  // - Pause reports a plain 0x45, which injected is NumLock. Its code is E1 1D 45, which no
+  //   single scan code carries, so it goes by its virtual key alone (the Host keeps one
+  //   sent without a scan code).
+  // The keypad's digits, its point and what they are with NumLock off (0x47 to 0x53 without
+  // the mark, less - and +) mean what this keyboard's NumLock says: the hook already reports
+  // VK_NUMPAD4 or VK_LEFT. Injected by scan code they would mean what the desktop's NumLock
+  // says instead (measured: 0x4B is VK_NUMPAD4 with it on, VK_LEFT with it off, while
+  // VK_NUMPAD4 sent as a virtual key stays 4 either way). So they too go by virtual key.
+  int32_t scan = static_cast<int32_t>(key.scanCode);
+  bool extended = (key.flags & LLKHF_EXTENDED) != 0;
+  if (key.vkCode == VK_NUMLOCK || key.vkCode == VK_RSHIFT) extended = false;
+  else if (key.vkCode == VK_PAUSE) { scan = 0; extended = false; }
+  else if (!extended && scan >= 0x47 && scan <= 0x53 && scan != 0x4a && scan != 0x4e) scan = 0;
   callback_({
       {V("type"), V("input")}, {V("event"), V("key")}, {V("vk"), V(static_cast<int32_t>(key.vkCode))},
-      {V("scan"), V(static_cast<int32_t>(key.scanCode))}, {V("down"), V(down)},
-      {V("extended"), V((key.flags & LLKHF_EXTENDED) != 0)}});
+      {V("scan"), V(scan)}, {V("down"), V(down)},
+      {V("extended"), V(extended)}});
   return true;
 }
 bool RemoteInput::HandleTextPacket(const KBDLLHOOKSTRUCT& key, bool down) {

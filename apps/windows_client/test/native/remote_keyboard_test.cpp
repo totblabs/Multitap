@@ -94,6 +94,65 @@ void DedicatedLanguageKeys() {
   Check(!Peer::Installed(input), "Memory test acquired an OS hook");
 }
 
+// Keys whose hook report is not what a Host can inject (SendInput takes a scan code with
+// or without E0): measured 2026-11-24, E0 45 and E0 36 name no key, a plain 0x45 is NumLock.
+void KeysTheLayoutMarks() {
+  std::vector<Event> events;
+  RemoteInput input([&](auto event) { events.push_back(std::move(event)); });
+  const auto tap = [&](UINT vk, UINT scan, DWORD flags) {
+    events.clear();
+    Check(Peer::Dispatch(input, vk, scan, true, flags) && Peer::Dispatch(input, vk, scan, false, flags) &&
+          events.size() == 2, "A marked key was not captured as one press and one release");
+  };
+  // NumLock and Right Shift: the plain code, whether or not the hook marked them.
+  for (const DWORD flags : {DWORD(LLKHF_EXTENDED), DWORD(0)}) {
+    tap(VK_NUMLOCK, 0x45, flags);
+    WireKey(events[0], VK_NUMLOCK, 0x45, true, false);
+    WireKey(events[1], VK_NUMLOCK, 0x45, false, false);
+    tap(VK_RSHIFT, 0x36, flags);
+    WireKey(events[0], VK_RSHIFT, 0x36, true, false);
+    WireKey(events[1], VK_RSHIFT, 0x36, false, false);
+  }
+  // Pause: by its virtual key alone, never as the scan code that is NumLock.
+  tap(VK_PAUSE, 0x45, 0);
+  WireKey(events[0], VK_PAUSE, 0, true, false);
+  WireKey(events[1], VK_PAUSE, 0, false, false);
+  // The keys whose mark is an E0 code keep it, and the others keep their code.
+  for (const auto [vk, scan] : {std::pair<UINT, UINT>{VK_RCONTROL, 0x1d}, std::pair<UINT, UINT>{VK_DIVIDE, 0x35},
+                               std::pair<UINT, UINT>{VK_SNAPSHOT, 0x37}, std::pair<UINT, UINT>{VK_CANCEL, 0x46},
+                               std::pair<UINT, UINT>{VK_LEFT, 0x4b}, std::pair<UINT, UINT>{VK_RETURN, 0x1c}}) {
+    tap(vk, scan, LLKHF_EXTENDED);
+    WireKey(events[0], vk, scan, true, true);
+    WireKey(events[1], vk, scan, false, true);
+  }
+  for (const auto [vk, scan] : {std::pair<UINT, UINT>{VK_LSHIFT, 0x2a}, std::pair<UINT, UINT>{VK_MULTIPLY, 0x37},
+                               std::pair<UINT, UINT>{VK_SUBTRACT, 0x4a}, std::pair<UINT, UINT>{VK_ADD, 0x4e},
+                               std::pair<UINT, UINT>{'A', 0x1e}, std::pair<UINT, UINT>{VK_F12, 0x58}}) {
+    tap(vk, scan, 0);
+    WireKey(events[0], vk, scan, true, false);
+    WireKey(events[1], vk, scan, false, false);
+  }
+  // The keypad's digits and point, and what they are with NumLock off: by the virtual key this
+  // keyboard gave them (measured: by scan code they follow the desktop's NumLock instead).
+  for (const auto [vk, scan] : {std::pair<UINT, UINT>{VK_NUMPAD7, 0x47}, std::pair<UINT, UINT>{VK_NUMPAD4, 0x4b},
+                               std::pair<UINT, UINT>{VK_NUMPAD0, 0x52}, std::pair<UINT, UINT>{VK_DECIMAL, 0x53},
+                               std::pair<UINT, UINT>{VK_HOME, 0x47}, std::pair<UINT, UINT>{VK_LEFT, 0x4b},
+                               std::pair<UINT, UINT>{VK_CLEAR, 0x4c}, std::pair<UINT, UINT>{VK_INSERT, 0x52},
+                               std::pair<UINT, UINT>{VK_DELETE, 0x53}}) {
+    tap(vk, scan, 0);
+    WireKey(events[0], vk, 0, true, false);
+    WireKey(events[1], vk, 0, false, false);
+  }
+  // The same codes with the mark are the gray keys beside the keypad: unchanged.
+  for (const auto [vk, scan] : {std::pair<UINT, UINT>{VK_HOME, 0x47}, std::pair<UINT, UINT>{VK_DELETE, 0x53},
+                               std::pair<UINT, UINT>{VK_INSERT, 0x52}, std::pair<UINT, UINT>{VK_NEXT, 0x51}}) {
+    tap(vk, scan, LLKHF_EXTENDED);
+    WireKey(events[0], vk, scan, true, true);
+    WireKey(events[1], vk, scan, false, true);
+  }
+  Check(!Peer::Installed(input), "Memory test acquired an OS hook");
+}
+
 void ExistingKeysAndGuards() {
   std::vector<Event> events;
   RemoteInput input([&](auto event) { events.push_back(std::move(event)); });
@@ -309,6 +368,7 @@ void ReentrantCaptureReturn() {
 int main() {
   try {
     DedicatedLanguageKeys();
+    KeysTheLayoutMarks();
     ExistingKeysAndGuards();
     RelativeToggle();
     RelativeToggleQueueOwnership();
