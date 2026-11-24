@@ -156,6 +156,7 @@ For text size use [scale](#resolution-and-scale), for copying files use [copy an
 
 While input goes to the desktop after you click inside the screen, the Windows key, `Alt+Tab` and similar keys are sent to the desktop.
 The keyboard's **Han/Eng** (한/영) key also switches the desktop's input language.
+The numeric keypad follows the **NumLock** of your own keyboard: with its light on, it types digits.
 
 1. To return keyboard input to your PC, press `Ctrl+Alt+Shift+F12`.
 2. To send it to the desktop again, click inside the screen.

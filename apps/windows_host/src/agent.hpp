@@ -178,7 +178,9 @@ class RemoteInput {
   explicit RemoteInput(Injector injector = [](INPUT& input) { return SendInput(1, &input, sizeof(input)); }, bool automaticReleaseRetry = false,RemotePointerBounds bounds=remotePointerDesktopBounds,TouchInjectionBackend touch={},SigninEnterBatch signinEnter={}) : inject_(std::move(injector)),signinEnter_(std::move(signinEnter)),bounds_(std::move(bounds)),touch_(std::move(touch),bounds_,automaticReleaseRetry) {
     if (automaticReleaseRetry) releaseWorker_ = std::thread([this] { retryReleases(); });
   }
-  explicit RemoteInput(bool automaticReleaseRetry) : RemoteInput([](INPUT& input) { return SendInput(1, &input, sizeof(input)); }, automaticReleaseRetry, remotePointerDesktopBounds, nativeTouchInjection()) {}
+  explicit RemoteInput(bool automaticReleaseRetry) : RemoteInput([](INPUT& input) { return SendInput(1, &input, sizeof(input)); }, automaticReleaseRetry, remotePointerDesktopBounds, nativeTouchInjection()) { numLock_ = [] { return (GetKeyState(VK_NUMLOCK) & 1) != 0; }; }
+  // How this desktop's NumLock is read. Without it the keypad is injected as it comes.
+  void numLock(std::function<bool()> reader) { std::lock_guard lock(mutex_); numLock_ = std::move(reader); }
   ~RemoteInput() {
     { std::lock_guard lock(mutex_); releaseClosing_ = true; }
     releaseWake_.notify_one();
@@ -209,6 +211,21 @@ class RemoteInput {
       // reinterpret the physical key using the host keyboard's layout.
       const bool imeAction = vk == VK_HANGUL || vk == VK_HANJA;
       Key key{imeAction ? WORD(0) : WORD(scanCode), !imeAction && message.get("extended").boolean()};
+      // A client's hook reports the layout's extended mark, which is not an E0 prefix for
+      // three keys (measured with SendInput): E0 45 and E0 36 name no key, the plain codes are
+      // NumLock and Right Shift; and a Pause key reports the plain 0x45 that is NumLock, so it
+      // goes by its virtual key.
+      if (key.scan) {
+        if (vk == VK_NUMLOCK || vk == VK_RSHIFT) key.extended = false;
+        else if (vk == VK_PAUSE && key.scan == 0x45) key = Key{0, false};
+      }
+      // With NumLock on, Windows lifts a held Shift around a keypad key, and a client's hook
+      // reports that as a Shift release with 0x200 in the scan code (measured: 0x22A). It is no
+      // key press of the user's: this desktop lifts its own Shift the same way when it gets the
+      // keypad's scan code. It does tell that the client's NumLock is on.
+      const bool shift = vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT;
+      if (shift && (key.scan & 0x200)) { shiftLifted_ = !down; return true; }
+      if (shift) shiftLifted_ = false;
       // A key sent without a scan code (Android's hardware keyboard sends letters
       // with 0): keep the virtual key that was sent and add this layout's scan code,
       // which Windows then reports with it. A scan code of 0 may keep the Korean IME
@@ -231,6 +248,19 @@ class RemoteInput {
         if(result.accepted==2){enterTapAwaitingUp_=true;return result.scopeCurrent;}
         if(result.accepted){keys_[vk]=key;releaseFailed();}
         return false;
+      }
+      // A keypad key comes with its scan code and with what it meant on the client's keyboard
+      // (0x4B as VK_NUMPAD4 or as VK_LEFT), so the virtual key tells the client's NumLock. The
+      // injected scan code means what this desktop's NumLock says. Put this NumLock where the
+      // client's is first, and the keypad follows the keyboard the user is looking at.
+      // A navigation key under a held Shift tells nothing: NumLock on gives the same.
+      if (down && numLock_ && keypad(key) && !keys_.contains(vk) && !keys_.contains(VK_NUMLOCK)) {
+        const bool digit = (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) || vk == VK_DECIMAL;
+        const bool navigation = vk == VK_CLEAR || vk == VK_INSERT || vk == VK_DELETE || (vk >= VK_PRIOR && vk <= VK_DOWN);
+        const bool shiftHeld = keys_.contains(VK_SHIFT) || keys_.contains(VK_LSHIFT) || keys_.contains(VK_RSHIFT);
+        std::optional<bool> client;
+        if (digit || shiftLifted_) client = true; else if (navigation && !shiftHeld) client = false;
+        if (client && numLock_() != *client) tapNumLock();
       }
       input = keyInput(vk, key, !down);
       if (inject_(input) == 1) { if (down) keys_[vk] = key; else keys_.erase(vk);return true; } else if (!down && keys_.contains(vk)) releaseFailed();
@@ -284,6 +314,14 @@ class RemoteInput {
  private:
   // virtualKey: the scan code was filled in here; Windows keeps the sent virtual key.
   struct Key { WORD scan; bool extended; bool virtualKey = false; };
+  // The keypad's digits and point by scan code (0x47 to 0x53 without E0, less - and +).
+  static bool keypad(const Key& key) { return !key.virtualKey && !key.extended && key.scan >= 0x47 && key.scan <= 0x53 && key.scan != 0x4a && key.scan != 0x4e; }
+  void tapNumLock() {
+    const Key lock{0x45, false};
+    INPUT press = keyInput(VK_NUMLOCK, lock, false), release = keyInput(VK_NUMLOCK, lock, true);
+    if (inject_(press) != 1) return;
+    if (inject_(release) != 1) { keys_[VK_NUMLOCK] = lock; releaseFailed(); }
+  }
   static INPUT keyInput(WORD vk, const Key& key, bool up) {
     const bool byScan = key.scan && !key.virtualKey;
     INPUT input{}; input.type = INPUT_KEYBOARD; input.ki.wVk = byScan ? 0 : vk; input.ki.wScan = key.scan;
@@ -314,6 +352,7 @@ class RemoteInput {
   }
   Injector inject_;SigninEnterBatch signinEnter_;bool enterTapAwaitingUp_=false;RemotePointerBounds bounds_; RemoteTouch touch_; bool releasePending_ = false; std::mutex mutex_; std::map<WORD, Key> keys_; std::set<std::string> buttons_; std::optional<WORD> textUnit_; RECT area_{};
   std::condition_variable releaseWake_; bool releaseClosing_ = false; std::thread releaseWorker_;
+  std::function<bool()> numLock_; bool shiftLifted_ = false;
 };
 class Agent {
  public:

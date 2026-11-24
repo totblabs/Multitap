@@ -91,6 +91,84 @@ void simulated() {
   std::cout << "{\"kind\":\"simulated-injector\",\"passed\":true,\"imeSemanticVariants\":6,\"scanCodeFilled\":true,\"shortcuts\":[\"Win\",\"Alt+Tab\",\"Ctrl+Shift+Esc\"],\"repeat\":true,\"matchingRelease\":true,\"failedReleaseRetry\":true,\"mouseReleaseRetry\":true,\"secureAttentionBlocked\":true,\"osKeystrokesEmitted\":false}\n";
 }
 
+// The keypad follows the client's NumLock: the virtual key a client sends beside the scan
+// code tells its NumLock, and this desktop's is put there before the scan code goes in.
+void keypadFollowsTheClient() {
+  std::vector<INPUT> events; bool lock = false, failTapUp = false;
+  const auto tapDown = [](const INPUT& e) { return e.ki.wScan == 0x45 && e.ki.dwFlags == KEYEVENTF_SCANCODE; };
+  const auto tapUp = [](const INPUT& e) { return e.ki.wScan == 0x45 && e.ki.dwFlags == (KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP); };
+  RemoteInput input([&](INPUT& event) -> UINT {
+    events.push_back(event);
+    if (tapDown(event)) lock = !lock;
+    return failTapUp && tapUp(event) ? 0U : 1U;
+  });
+  int reads = 0;
+  input.numLock([&] { ++reads; return lock; });
+  const auto press = [&](WORD vk, WORD scan, bool extended = false) { events.clear(); return input.apply(key(vk, true, scan, extended)); };
+  const auto release = [&](WORD vk, WORD scan, bool extended = false) { events.clear(); return input.apply(key(vk, false, scan, extended)); };
+  const auto scanDown = [](const INPUT& e, WORD scan) { return e.ki.wVk == 0 && e.ki.wScan == scan && e.ki.dwFlags == KEYEVENTF_SCANCODE; };
+  // A digit from a client whose NumLock is on, this desktop's off: NumLock first, then the key.
+  require(press(VK_NUMPAD4, 0x4b) && events.size() == 3 && tapDown(events[0]) && tapUp(events[1]) && scanDown(events[2], 0x4b) && lock, "A keypad digit did not turn this desktop's NumLock on first");
+  require(release(VK_NUMPAD4, 0x4b) && events.size() == 1 && events[0].ki.dwFlags == (KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP), "A keypad release did more than release");
+  // Already the same: only the key.
+  for (const WORD vk : {WORD(VK_NUMPAD0), WORD(VK_NUMPAD9), WORD(VK_DECIMAL)}) {
+    const WORD scan = vk == VK_NUMPAD0 ? 0x52 : vk == VK_NUMPAD9 ? 0x49 : 0x53;
+    require(press(vk, scan) && events.size() == 1 && scanDown(events[0], scan) && lock, "NumLock was touched though it already agreed");
+    release(vk, scan);
+  }
+  // The same key as an arrow: the client's NumLock is off.
+  require(press(VK_LEFT, 0x4b) && events.size() == 3 && tapDown(events[0]) && scanDown(events[2], 0x4b) && !lock, "A keypad arrow did not turn this desktop's NumLock off first");
+  // A held key repeats without another look.
+  lock = true; reads = 0;
+  require(press(VK_LEFT, 0x4b) && events.size() == 1 && reads == 0 && lock, "A repeating key changed NumLock");
+  release(VK_LEFT, 0x4b); lock = false;
+  // Keypad 5 with NumLock off is VK_CLEAR.
+  lock = true;
+  require(press(VK_CLEAR, 0x4c) && events.size() == 3 && !lock, "Keypad 5 as Clear did not turn NumLock off");
+  release(VK_CLEAR, 0x4c);
+  // The gray keys (E0), and - and +, tell nothing and change nothing.
+  for (const bool state : {false, true}) {
+    lock = state; reads = 0;
+    require(press(VK_LEFT, 0x4b, true) && events.size() == 1 && (events[0].ki.dwFlags & KEYEVENTF_EXTENDEDKEY), "A gray arrow lost its mark or touched NumLock"); release(VK_LEFT, 0x4b, true);
+    require(press(VK_DELETE, 0x53, true) && events.size() == 1, "Gray Delete touched NumLock"); release(VK_DELETE, 0x53, true);
+    require(press(VK_SUBTRACT, 0x4a) && events.size() == 1, "Keypad minus touched NumLock"); release(VK_SUBTRACT, 0x4a);
+    require(press(VK_ADD, 0x4e) && events.size() == 1, "Keypad plus touched NumLock"); release(VK_ADD, 0x4e);
+    require(press('A', 0x1e) && events.size() == 1, "A letter touched NumLock"); release('A', 0x1e);
+    require(reads == 0 && lock == state, "NumLock was read or changed for a key that tells nothing");
+  }
+  // A navigation key under a held Shift tells nothing (NumLock on gives the same).
+  lock = true;
+  press(VK_LSHIFT, 0x2a);
+  require(press(VK_LEFT, 0x4b) && events.size() == 1 && lock, "Shift with a keypad arrow changed NumLock");
+  release(VK_LEFT, 0x4b); release(VK_LSHIFT, 0x2a);
+  // The lifted Shift a hook reports with NumLock on (0x22A) is no key, and tells NumLock is on.
+  lock = false;
+  press(VK_LSHIFT, 0x2a);
+  require(release(VK_LSHIFT, 0x22a) && events.empty(), "The lifted Shift was injected or refused");
+  require(press(VK_LEFT, 0x4b) && events.size() == 3 && tapDown(events[0]) && scanDown(events[2], 0x4b) && lock, "The lifted Shift did not tell that the client's NumLock is on");
+  release(VK_LEFT, 0x4b);
+  require(press(VK_LSHIFT, 0x22a) && events.empty(), "The Shift put back was injected");
+  require(release(VK_LSHIFT, 0x2a) && events.size() == 1 && events[0].ki.wScan == 0x2a && (events[0].ki.dwFlags & KEYEVENTF_KEYUP), "The real Shift release was lost");
+  // After it, a plain keypad arrow tells NumLock is off again.
+  require(press(VK_LEFT, 0x4b) && events.size() == 3 && !lock, "The lifted Shift outlived its Shift");
+  release(VK_LEFT, 0x4b);
+  // A failed NumLock release is retried like any other.
+  lock = false; failTapUp = true;
+  require(press(VK_NUMPAD4, 0x4b) && input.pending() >= 1, "A failed NumLock release was dropped");
+  failTapUp = false; input.retry(); require(input.pending() == 0, "The NumLock release was not retried");
+  input.reset();
+  // The three keys whose mark is not an E0 code.
+  require(press(VK_NUMLOCK, 0x45, true) && events.size() == 1 && scanDown(events[0], 0x45), "NumLock kept the extended mark"); release(VK_NUMLOCK, 0x45, true);
+  require(press(VK_RSHIFT, 0x36, true) && events.size() == 1 && scanDown(events[0], 0x36), "Right Shift kept the extended mark"); release(VK_RSHIFT, 0x36, true);
+  if ((MapVirtualKeyW(VK_PAUSE, MAPVK_VK_TO_VSC_EX) >> 8) == 0xe1) {
+    require(press(VK_PAUSE, 0x45) && events.size() == 1 && events[0].ki.wVk == VK_PAUSE && events[0].ki.wScan == 0 && events[0].ki.dwFlags == 0, "Pause went in as NumLock"); release(VK_PAUSE, 0x45);
+  }
+  // Without a reader (a substituted injector) the keypad goes in as it comes.
+  RemoteInput plain([&](INPUT& event) -> UINT { events.push_back(event); return 1; });
+  events.clear(); plain.apply(key(VK_NUMPAD4, true, 0x4b)); plain.apply(key(VK_NUMPAD4, false, 0x4b));
+  require(events.size() == 2 && scanDown(events[0], 0x4b), "A keypad key without a reader was changed");
+  std::cout << "{\"kind\":\"keypad-follows-client\",\"passed\":true}\n";
+}
 void idleReleaseRetry() {
   std::atomic<unsigned> calls{0}, releases{0};
   std::atomic<bool> deny{true};
@@ -219,6 +297,37 @@ class OwnWindowTest {
     std::cout << "{\"kind\":\"own-window-os\",\"repeat\":true,\"focusTransferRelease\":true,\"loadedKoreanLayout\":true,\"hangulToggleSent\":" << (toggled ? "true" : "false") << ",\"hangulComposed\":" << (composed ? "true" : "false") << ",\"imeCompositionMessages\":" << composition_ << ",\"hanjaKeyRequested\":true,\"hanjaCandidateObserved\":" << (candidate_ ? "true" : "false") << ",\"physicalKeyboard\":false}\n";
     if (!composed) throw std::runtime_error("Real OS Korean IME composition was not observed; semantic structure tests alone do not establish Hangul support");
   }
+  // The session's path with the real SendInput and the real NumLock: keypad keys from a client
+  // whose NumLock differs from this PC's, into this test's own EDIT. Puts NumLock back.
+  void keypad() {
+    const auto lockOn = [] { return (GetKeyState(VK_NUMLOCK) & 1) != 0; };
+    input_.numLock(lockOn);
+    const bool original = lockOn();
+    const auto set = [&](bool on) { if (lockOn() != on) { send(VK_NUMLOCK, true, 0x45); send(VK_NUMLOCK, false, 0x45); } require(lockOn() == on, "Cannot set NumLock for the keypad test"); };
+    const auto text = [&] { const int size = GetWindowTextLengthW(edit_); std::wstring value(size + 1, L'\0'); GetWindowTextW(edit_, value.data(), size + 1); value.resize(size); return value; };
+    const auto tap = [&](WORD vk, WORD scan) { send(vk, true, scan); send(vk, false, scan); };
+    bool digits = false, arrow = false, lifted = false;
+    try {
+      // This PC's NumLock off, the client's on: digits, and NumLock is on afterwards.
+      set(false); SetWindowTextW(edit_, L"");
+      tap(VK_NUMPAD4, 0x4b); tap(VK_NUMPAD5, 0x4c); tap(VK_DECIMAL, 0x53);
+      digits = text() == L"45." && lockOn();
+      // Now on, the client's off: Left moves the caret, no digit, and NumLock is off afterwards.
+      SendMessageW(edit_, EM_SETSEL, 3, 3);
+      tap(VK_LEFT, 0x4b);
+      DWORD from = 0, to = 0; SendMessageW(edit_, EM_GETSEL, WPARAM(&from), LPARAM(&to));
+      arrow = text() == L"45." && !lockOn() && from == 2 && to == 2;
+      // Shift held on a client whose NumLock is on, as its hook reports it: Shift, the lifted
+      // Shift (0x22A), Left, Shift put back, Shift released. Left without a selection.
+      SendMessageW(edit_, EM_SETSEL, 3, 3);
+      send(VK_LSHIFT, true, 0x2a); send(VK_LSHIFT, false, 0x22a); tap(VK_LEFT, 0x4b); send(VK_LSHIFT, true, 0x2a); send(VK_LSHIFT, false, 0x2a);
+      SendMessageW(edit_, EM_GETSEL, WPARAM(&from), LPARAM(&to));
+      lifted = text() == L"45." && lockOn() && from == 2 && to == 2;
+      set(original);
+    } catch (...) { input_.reset(); if (lockOn() != original) { INPUT press{}; press.type = INPUT_KEYBOARD; press.ki.wScan = 0x45; press.ki.dwFlags = KEYEVENTF_SCANCODE; INPUT release = press; release.ki.dwFlags |= KEYEVENTF_KEYUP; SendInput(1, &press, sizeof(press)); SendInput(1, &release, sizeof(release)); } throw; }
+    std::cout << "{\"kind\":\"own-window-keypad\",\"digitsTurnNumLockOn\":" << (digits ? "true" : "false") << ",\"arrowTurnsNumLockOff\":" << (arrow ? "true" : "false") << ",\"liftedShiftLeftWithoutSelection\":" << (lifted ? "true" : "false") << ",\"numLockRestored\":" << (lockOn() == original ? "true" : "false") << ",\"physicalKeyboard\":false}\n";
+    if (!digits || !arrow || !lifted) throw std::runtime_error("The keypad did not follow the client's NumLock in a real window");
+  }
  private:
   HWND window_ = nullptr, edit_ = nullptr, second_ = nullptr; WNDPROC oldEdit_ = nullptr; HKL originalLayout_ = nullptr;
   RemoteInput input_; int f8Down_ = 0, f8Up_ = 0, composition_ = 0; bool candidate_ = false;
@@ -237,8 +346,9 @@ class OwnWindowTest {
 }
 int wmain(int argc, wchar_t** argv) {
   try {
-    if (argc == 1) { simulated(); idleReleaseRetry(); concurrentReleaseRetry(); return 0; }
+    if (argc == 1) { simulated(); keypadFollowsTheClient(); idleReleaseRetry(); concurrentReleaseRetry(); return 0; }
     if (argc == 2 && std::wstring(argv[1]) == L"--own-window-os") { check(OleInitialize(nullptr), "Own-window COM/IME initialization"); try { OwnWindowTest test; test.run(); } catch (...) { OleUninitialize(); throw; } OleUninitialize(); return 0; }
-    std::cerr << "Use no argument for simulation or --own-window-os for the explicit native EDIT/IME test.\n"; return 2;
+    if (argc == 2 && std::wstring(argv[1]) == L"--own-window-keypad") { check(OleInitialize(nullptr), "Own-window COM/IME initialization"); try { OwnWindowTest test; test.keypad(); } catch (...) { OleUninitialize(); throw; } OleUninitialize(); return 0; }
+    std::cerr << "Use no argument for simulation, --own-window-os for the explicit native EDIT/IME test or --own-window-keypad for the keypad and NumLock in a real window.\n"; return 2;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

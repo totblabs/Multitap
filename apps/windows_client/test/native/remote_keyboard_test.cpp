@@ -104,9 +104,12 @@ void KeysTheLayoutMarks() {
     Check(Peer::Dispatch(input, vk, scan, true, flags) && Peer::Dispatch(input, vk, scan, false, flags) &&
           events.size() == 2, "A marked key was not captured as one press and one release");
   };
-  // NumLock and Right Shift: the plain code, whether or not the hook marked them.
+  // NumLock and Right Shift: the plain code, whether or not the hook marked them. NumLock is
+  // sent and also passed on, so that this keyboard's NumLock changes with the desktop's.
   for (const DWORD flags : {DWORD(LLKHF_EXTENDED), DWORD(0)}) {
-    tap(VK_NUMLOCK, 0x45, flags);
+    events.clear();
+    Check(!Peer::Dispatch(input, VK_NUMLOCK, 0x45, true, flags) && !Peer::Dispatch(input, VK_NUMLOCK, 0x45, false, flags) &&
+          events.size() == 2, "NumLock was kept from this keyboard, or not sent");
     WireKey(events[0], VK_NUMLOCK, 0x45, true, false);
     WireKey(events[1], VK_NUMLOCK, 0x45, false, false);
     tap(VK_RSHIFT, 0x36, flags);
@@ -132,8 +135,8 @@ void KeysTheLayoutMarks() {
     WireKey(events[0], vk, scan, true, false);
     WireKey(events[1], vk, scan, false, false);
   }
-  // The keypad's digits and point, and what they are with NumLock off: by scan code, so that
-  // the desktop's NumLock gives them their meaning as it does for a keyboard of its own.
+  // The keypad's digits and point, and what they are with NumLock off: by scan code, with the
+  // virtual key this keyboard gave them (a Host reads this keyboard's NumLock from it).
   for (const auto [vk, scan] : {std::pair<UINT, UINT>{VK_NUMPAD7, 0x47}, std::pair<UINT, UINT>{VK_NUMPAD4, 0x4b},
                                std::pair<UINT, UINT>{VK_NUMPAD0, 0x52}, std::pair<UINT, UINT>{VK_DECIMAL, 0x53},
                                std::pair<UINT, UINT>{VK_HOME, 0x47}, std::pair<UINT, UINT>{VK_LEFT, 0x4b},

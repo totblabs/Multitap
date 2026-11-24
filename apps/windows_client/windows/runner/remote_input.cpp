@@ -102,12 +102,15 @@ bool RemoteInput::HandleKey(WPARAM message, const KBDLLHOOKSTRUCT& key, bool for
   //   single scan code carries, so it goes by its virtual key alone (the Host keeps one
   //   sent without a scan code).
   // The keypad goes by scan code like every other key, as a keyboard on the desktop would
-  // send it: it means what the desktop's NumLock says (measured: 0x4B is VK_NUMPAD4 with it
-  // on, VK_LEFT with it off), and NumLock pressed here toggles the desktop's. This keyboard's
-  // own NumLock cannot change while the hook holds the key (measured: a swallowed NumLock
-  // toggles nothing), so the keypad must not follow it. Sent by virtual key (1.1.38), a Host
-  // added a scan code from its own layout, and in the field only 5 worked on one desktop;
-  // that was not reproduced on the development PC.
+  // send it, and the scan code means what the desktop's NumLock says (measured: 0x4B is
+  // VK_NUMPAD4 with it on, VK_LEFT with it off). The virtual key beside it is what the key
+  // meant on this keyboard, so it tells this keyboard's NumLock: a Host that knows this puts
+  // the desktop's NumLock there before the key, and the keypad follows the NumLock light the
+  // user sees. An older Host follows the desktop's NumLock alone.
+  // For that the NumLock key must act on this keyboard too: it is sent and also passed on to
+  // Windows (measured: a NumLock press swallowed by a hook leaves this keyboard's NumLock as
+  // it was). Sent by virtual key instead (1.1.38), the keypad showed only 5 working on one
+  // desktop in the field, which was not reproduced on the development PC.
   int32_t scan = static_cast<int32_t>(key.scanCode);
   bool extended = (key.flags & LLKHF_EXTENDED) != 0;
   if (key.vkCode == VK_NUMLOCK || key.vkCode == VK_RSHIFT) extended = false;
@@ -116,7 +119,7 @@ bool RemoteInput::HandleKey(WPARAM message, const KBDLLHOOKSTRUCT& key, bool for
       {V("type"), V("input")}, {V("event"), V("key")}, {V("vk"), V(static_cast<int32_t>(key.vkCode))},
       {V("scan"), V(scan)}, {V("down"), V(down)},
       {V("extended"), V(extended)}});
-  return true;
+  return key.vkCode != VK_NUMLOCK;
 }
 bool RemoteInput::HandleTextPacket(const KBDLLHOOKSTRUCT& key, bool down) {
   // VK_PACKET scanCode is a UTF-16 unit, never a hardware scan. Do not relay
