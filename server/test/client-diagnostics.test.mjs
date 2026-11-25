@@ -212,7 +212,7 @@ test('Global inventory churn preserves activity within the same strict diagnosti
 });
 function statsReport(sequence) {
   const value=report();value.sequence=sequence;
-  value.events=[{time:new Date().toISOString(),event:'streamStats',desktopId:'pve-149',mode:'stream',sessionId:operationId,values:{samples:30,windowMs:30012,width:1264,height:760,decodeFps10:598,encodeFps10:600,decodeFpsLow10:291,captureFpsLow10:300,encodeFpsLow10:299,decodeTier:2,decodeVendor:32902,receiveKbps:18450,bitrateKbps:42000,auto:true,rttMs:21,hostWorkUs:9200,encodeUs:4400,decodeUs:2100,gpuConvertUs:1400,gpuWaitUs:1100,inputHostP50Us:6100,inputFrameP95Us:48200,
+  value.events=[{time:new Date().toISOString(),event:'streamStats',desktopId:'pve-149',mode:'stream',sessionId:operationId,values:{samples:30,windowMs:30012,width:1264,height:760,decodeFps10:598,encodeFps10:600,decodeFpsLow10:291,captureFpsLow10:300,encodeFpsLow10:299,decodeTier:2,decodeVendor:32902,receiveKbps:18450,bitrateKbps:42000,auto:true,rttMs:21,hostWorkUs:9200,encodeUs:4400,decodeUs:2100,gpuConvertUs:1400,gpuWaitUs:1100,publishDelayUs:4600,decodeChoice:4,inputHostP50Us:6100,inputFrameP95Us:48200,
     captureMaxUs:41000,textureWaitUs:13000,textureUploadUs:190,queuedFrames:310,skippedFrames:0,texturePath:0,displayHz:32,wlanMode:1,wlanError:0,wlanScans:3,gpuHardware:false,remoteSession:true,mediaWaits:7,audioDropMs:60,
     hostInputCaptureP50Us:31500,hostInputCaptureP95Us:70250,hostCaptureEncodedP50Us:2100,hostCaptureEncodedP95Us:6400,inputPushP50Us:800,inputDecodeP50Us:1600,
     hostSendQueueP50Us:1200,hostSendQueueP95Us:4100,hostSendWriteP50Us:300,hostSendWriteP95Us:2600,relayForwardP50Us:400,relayForwardP95Us:1900,inputTransferP50Us:9800,inputTransferP95Us:31000,inputFrameBytes:48211,inputDownlinkP50Us:11400,inputDownlinkP95Us:52000,
@@ -256,7 +256,7 @@ test('stream-stats-v1 rows keep only integer/boolean fields, are acknowledged, a
     assert.equal(row.values.decodeFpsLow10,291);assert.equal(row.values.captureFpsLow10,300);assert.equal(row.values.encodeFpsLow10,299);
     assert.equal(row.values.decodeTier,2);assert.equal(row.values.decodeVendor,32902);
     // texture-pacing-v1 and render facts: integers and booleans only, never adapter strings.
-    assert.equal(row.values.gpuConvertUs,1400);assert.equal(row.values.gpuWaitUs,1100);assert.equal(row.values.textureWaitUs,13000);assert.equal(row.values.textureUploadUs,190);assert.equal(row.values.queuedFrames,310);assert.equal(row.values.skippedFrames,0);
+    assert.equal(row.values.gpuConvertUs,1400);assert.equal(row.values.gpuWaitUs,1100);assert.equal(row.values.publishDelayUs,4600);assert.equal(row.values.decodeChoice,4);assert.equal(row.values.textureWaitUs,13000);assert.equal(row.values.textureUploadUs,190);assert.equal(row.values.queuedFrames,310);assert.equal(row.values.skippedFrames,0);
     assert.equal(row.values.texturePath,0);assert.equal(row.values.displayHz,32);assert.equal(row.values.gpuHardware,false);assert.equal(row.values.remoteSession,true);
     assert.equal(row.values.wlanMode,1);assert.equal(row.values.wlanError,0);assert.equal(row.values.wlanScans,3);
     assert.equal(JSON.stringify(row).includes('PRIVATE_ADAPTER'),false);assert.equal(row.values.gpuHardwareText,undefined);assert.equal(row.values.texturePathName,undefined);

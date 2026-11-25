@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <climits>
+#include <cstdio>
 #include <limits>
 #include <algorithm>
 #include <flutter/standard_method_codec.h>
@@ -841,10 +842,16 @@ bool FlutterWindow::OnCreate() {
   // presentation (shared textures) use exactly this one, so frames do not cross
   // adapters. A separate remote window on another GPU decides on its own.
   Microsoft::WRL::ComPtr<IDXGIAdapter> render_adapter;
+  // decode-path-v1: which adapter that is, for this PC's own memory of the decode path that
+  // suits it (lib/data/decode_path_choice.dart). It is kept on this PC only: no diagnostics
+  // field carries it (render_environment.h).
+  std::string render_adapter_id;
   {
     IDXGIAdapter* adapter = nullptr;
     if (remote_registrar_->GetGraphicsAdapter(&adapter) && adapter) {
       render_environment_ = multitap::InspectRenderAdapter(adapter);
+      DXGI_ADAPTER_DESC described{};
+      if (SUCCEEDED(adapter->GetDesc(&described))) { char text[32]; std::snprintf(text, sizeof(text), "%04x:%04x", described.VendorId & 0xffffu, described.DeviceId & 0xffffu); render_adapter_id = text; }
       render_adapter.Attach(adapter);
     }
   }
@@ -893,8 +900,10 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->messenger(), "multitap/remote",
       &flutter::StandardMethodCodec::GetInstance());
   stream_size_queries_=std::make_unique<multitap::StreamSizeQueryChannel>(GetHandle());
-  remote_channel_->SetMethodCallHandler([this,render_adapter](const auto& call, auto result) {
+  remote_channel_->SetMethodCallHandler([this,render_adapter,render_adapter_id](const auto& call, auto result) {
     using V=flutter::EncodableValue;
+    // decode-path-v1: null when Flutter's adapter could not be read.
+    if (call.method_name() == "renderAdapter") { if (render_adapter_id.empty()) result->Success(); else result->Success(V(render_adapter_id)); return; }
     // Compatibility tuple is ABI-only, never a decoder-supported rectangle.
     // stream-size-v2 clients must validate their actual encoded shape(s).
     if (call.method_name() == "decoderLimits") {

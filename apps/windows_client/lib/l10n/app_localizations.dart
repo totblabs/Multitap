@@ -17883,7 +17883,7 @@ abstract class AppLocalizations {
   /// No description provided for @decodesGpuFallsBackCpu.
   ///
   /// In ko, this message translates to:
-  /// **'GPU로 디코딩해요. 안 되면 CPU를 써요.'**
+  /// **'GPU와 CPU 중 PC에서 더 빠른 쪽으로 디코딩해요.'**
   String get decodesGpuFallsBackCpu;
 
   /// No description provided for @decodesCpuOnlyTryIf.

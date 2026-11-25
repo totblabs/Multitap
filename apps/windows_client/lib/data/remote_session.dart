@@ -20,6 +20,7 @@ import 'notices.dart' show noticeLiveFeature;
 import 'relay_socket.dart';
 import 'channel_redial.dart';
 import 'clipboard_session.dart';
+import 'decode_path_choice.dart';
 import 'decode_settings.dart';
 import 'display_scale.dart';
 import 'print_session.dart';
@@ -715,7 +716,7 @@ class RemoteSession extends ChangeNotifier {
              audioEnabled: connection.options.audio,
              losslessTiles: true,
              hardwareDecode:
-                 connection.hardwareDecode ?? DecodeSettings.hardwareDecode,
+                 connection.hardwareDecode ?? DecodeSettings.useHardware,
              textInputAllowed:
                  connection.textInput && connection.trackPlan == null,
            ),
@@ -842,6 +843,7 @@ class RemoteSession extends ChangeNotifier {
         'decodeUs': us(clientDecodeMs),
         'gpuConvertUs': us(gpuConvertMs),
         'gpuWaitUs': us(gpuWaitMs),
+        'publishDelayUs': us(publishDelayMs),
         'textureWaitUs': us(textureWaitMs),
         'textureUploadUs': us(textureUploadMs),
         'captureFps10': rate(capturedFps),
@@ -1170,6 +1172,21 @@ class RemoteSession extends ChangeNotifier {
   // Of clientDecodeMs on the GPU path: converting a picture to a texture, and
   // of that, waiting for the GPU to finish it (per decode call).
   double? gpuConvertMs, gpuWaitMs;
+
+  /// decode-path-v1: the mean time from a video packet entering the engine to
+  /// its picture being ready for Flutter, over the pictures of the last
+  /// reading; null from an engine that does not report it.
+  double? publishDelayMs;
+
+  /// Why this session decodes the way it does (DecodePathReason.code), where
+  /// this PC's records decided it.
+  int? get decodeChoice {
+    final media = _media;
+    if (media is! NativeRemoteMedia) return null;
+    final reason = DecodeSettings.reason;
+    return reason.hardware == media.hardwareDecode ? reason.code : null;
+  }
+
   int? clientQueuePackets, skippedDecodedFrames;
 
   /// texture-pacing-v1 (per statistics tick): mean decoded -> taken by
@@ -1237,6 +1254,8 @@ class RemoteSession extends ChangeNotifier {
   int _lastTextures = 0, _lastDecodeCalls = 0;
   double _lastDecodeTotalMs = 0, _lastDecodeBusyMs = 0;
   double _lastGpuConvertMs = 0, _lastGpuWaitMs = 0;
+  double _lastPublishDelayMs = 0;
+  int _lastPublishDelayFrames = 0;
   int _lastUploads = 0, _lastQueued = 0, _lastSkipped = 0;
   double _lastWaitTotalMs = 0, _lastUploadTotalMs = 0;
 
@@ -1830,14 +1849,15 @@ class RemoteSession extends ChangeNotifier {
     _awaitingKeyFrame = true;
     decodedFps = receivedMbps = textureFps = null;
     clientDecodeMs = clientDecodeMaxMs = clientQueueMs = null;
-    gpuConvertMs = gpuWaitMs = null;
+    gpuConvertMs = gpuWaitMs = publishDelayMs = null;
     clientQueuePackets = skippedDecodedFrames = null;
     textureWaitMs = textureUploadMs = null;
     textureQueuedFrames = skippedFramesTick = null;
     appCpuPct10 = systemCpuPct10 = gpuDecodePct10 = gpu3dPct10 = null;
     _lastTextures = _lastDecodeCalls = 0;
     _lastDecodeTotalMs = _lastDecodeBusyMs = 0;
-    _lastGpuConvertMs = _lastGpuWaitMs = 0;
+    _lastGpuConvertMs = _lastGpuWaitMs = _lastPublishDelayMs = 0;
+    _lastPublishDelayFrames = 0;
     _lastUploads = _lastQueued = _lastSkipped = 0;
     _lastWaitTotalMs = _lastUploadTotalMs = 0;
     _lastAudioDropped = 0;
@@ -3059,13 +3079,14 @@ class RemoteSession extends ChangeNotifier {
         capturedFps = encodedFps = decodedFps = receivedMbps = textureFps =
             null;
         clientDecodeMs = clientDecodeMaxMs = clientQueueMs = null;
-        gpuConvertMs = gpuWaitMs = null;
+        gpuConvertMs = gpuWaitMs = publishDelayMs = null;
         clientQueuePackets = skippedDecodedFrames = null;
         textureWaitMs = textureUploadMs = null;
         textureQueuedFrames = skippedFramesTick = null;
         _lastTextures = _lastDecodeCalls = 0;
         _lastDecodeTotalMs = _lastDecodeBusyMs = 0;
-        _lastGpuConvertMs = _lastGpuWaitMs = 0;
+        _lastGpuConvertMs = _lastGpuWaitMs = _lastPublishDelayMs = 0;
+        _lastPublishDelayFrames = 0;
         _lastUploads = _lastQueued = _lastSkipped = 0;
         _stallWatch.restart();
         _lastWaitTotalMs = _lastUploadTotalMs = 0;
@@ -3940,6 +3961,7 @@ class RemoteSession extends ChangeNotifier {
             : null;
         if (converted != null) _lastGpuConvertMs = converted;
         if (waited != null) _lastGpuWaitMs = waited;
+        _samplePublishDelay(stats, elapsed);
         if (calls is int && calls >= 0) _lastDecodeCalls = calls;
         if (total != null) _lastDecodeTotalMs = total;
         final busyNow = metricNumber(stats['decodeBusyMs'], 1e12);
@@ -3988,6 +4010,42 @@ class RemoteSession extends ChangeNotifier {
       _polling = false;
       _scheduleViewportFrameCheck();
     }
+  }
+
+  /// decode-path-v1: what the path in use cost the pictures of this reading,
+  /// and, while the stream is fast, one more entry in this PC's record of that
+  /// path (DecodeSettings.observe). [elapsed]: microseconds since the last
+  /// reading. A hidden, held or resizing picture is no measure of a path.
+  void _samplePublishDelay(Map<String, dynamic> stats, num elapsed) {
+    final total = metricNumber(stats['publishDelayTotalMs'], 1e12);
+    final frames = stats['publishDelayFrames'];
+    if (total == null || frames is! int || frames < 0) {
+      publishDelayMs = null;
+      return;
+    }
+    final pictures = frames - _lastPublishDelayFrames;
+    final spent = total - _lastPublishDelayMs;
+    _lastPublishDelayFrames = frames;
+    _lastPublishDelayMs = total;
+    if (pictures <= 0 || spent < 0 || elapsed <= 0) {
+      publishDelayMs = null;
+      return;
+    }
+    final delay = publishDelayMs = spent / pictures;
+    final seconds = elapsed / 1000000, fps = pictures / seconds;
+    final path = stats['texturePath'], tier = stats['decodeTier'];
+    // The whole hardware path or the whole CPU path; a mix is neither record's.
+    final hardwarePath = path == 1 && (tier == 1 || tier == 2);
+    if (!hardwarePath && !(path == 0 && tier == 0)) return;
+    if (fps < DecodePathRule.fastFps || !frameReady || resizing) return;
+    final busy = decoderBusy;
+    DecodeSettings.observe(
+      hardwarePath: hardwarePath,
+      seconds: seconds,
+      delayMs: delay,
+      frameMs: 1000 / fps,
+      decoderBusy: busy != null && busy >= DecodePathRule.busyShare * 1000,
+    );
   }
 
   /// texture-pacing-v1 and render facts from one engine statistics reading;
@@ -4139,6 +4197,8 @@ class RemoteSession extends ChangeNotifier {
         clientDecodeMs: clientDecodeMs,
         gpuConvertMs: gpuConvertMs,
         gpuWaitMs: gpuWaitMs,
+        publishDelayMs: publishDelayMs,
+        decodeChoice: decodeChoice,
         clientDecodeMaxMs: clientDecodeMaxMs,
         clientQueueMs: clientQueueMs,
         skippedDecodedFrames: skippedDecodedFrames,
@@ -4846,6 +4906,8 @@ class RemoteSession extends ChangeNotifier {
 
   Future<void> _close(bool notifyHost) async {
     if (_closed) return;
+    // decode-path-v1: what this session measured goes to this PC's records.
+    unawaited(DecodeSettings.remember());
     final ordinaryDisconnect =
         diagnosticCode == null && error == null && notifyHost;
     Future<void>? thumbnailRevocation;

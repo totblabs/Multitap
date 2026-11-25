@@ -218,7 +218,8 @@ While you are connected, the desktop's other displays are turned off, and when t
 
 New connections default to **60 fps** and a bitrate of **Auto (recommended)**. If you saved your own settings, those values are used.
 The automatic bitrate adjusts to the connection. You can see how much you are receiving now in **Connection quality**.
-If the screen looks broken, turn **Hardware decoding** off and check again.
+With **Hardware decoding** on, the app uses the GPU or the CPU, whichever gets a picture ready sooner on your PC. It decides after a few minutes of a fast-moving connection, and the decision applies from the next connection.
+If the screen looks broken, turn **Hardware decoding** off and check again. Off uses the CPU only.
 
 ![Windows streaming settings](../images/client-settings.jpg)
 

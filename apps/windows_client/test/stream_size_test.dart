@@ -5,7 +5,7 @@
 // and media only: no device, Host, decoder or display is involved.
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show Directory, File, Platform;
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -16,6 +16,8 @@ import 'package:multitap_client/android/android_stream_preparation.dart';
 import 'package:multitap_client/android/android_touch.dart'
     show AndroidPictureView;
 import 'package:multitap_client/data/broker_api.dart';
+import 'package:multitap_client/data/decode_path_choice.dart';
+import 'package:multitap_client/data/decode_settings.dart';
 import 'package:multitap_client/data/desktop_mapping.dart';
 import 'package:multitap_client/data/initial_viewport.dart';
 import 'package:multitap_client/data/remote_session.dart';
@@ -884,6 +886,58 @@ void main() {
         await session.close();
         await running;
         await media.events.close();
+      },
+    );
+
+    test(
+      'decode-path-v1: a fast stream is measured into the record of its path',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('decode-path-session');
+        final store = DecodeSettings(File('${dir.path}/decoding.json'));
+        await DecodeSettings.init(store, adapter: '1002:164e');
+        final (session, _, media, running) = await open(
+          _connection(1080, 2400),
+          _info(1080, 2400, 1080, 2400),
+        );
+        expect(session.publishDelayMs, isNull, reason: 'the engine said none');
+        // 120 pictures a second, each ready 13 ms after its packet, on the
+        // hardware path; then a work screen's 5 a second.
+        var pictures = 0, rate = 12;
+        final feed = Timer.periodic(const Duration(milliseconds: 100), (_) {
+          pictures += rate;
+          media.extra = {
+            'publishDelayTotalMs': pictures * 13.0,
+            'publishDelayFrames': pictures,
+            'texturePath': 1,
+            'decodeTier': 1,
+          };
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 3300));
+        expect(session.publishDelayMs, closeTo(13, 0.01));
+        await DecodeSettings.remember();
+        final fast = (await store.loadPaths())['1002:164e']!.hardware;
+        expect(fast.seconds, greaterThan(1.5));
+        expect(fast.delayMs, closeTo(13, 0.01));
+        expect(fast.behindShare, 1, reason: '13 ms against 8.3 ms a picture');
+        expect((await store.loadPaths())['1002:164e']!.cpu.seconds, 0);
+        rate = 0;
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
+        pictures += 5;
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
+        await DecodeSettings.remember();
+        expect(
+          (await store.loadPaths())['1002:164e']!.hardware.seconds,
+          lessThan(fast.seconds + 1.3),
+          reason: 'a slow stream is no measure of a path',
+        );
+        feed.cancel();
+        expect(session.decodeChoice, isNull, reason: 'a test media');
+        await session.close();
+        await running;
+        await media.events.close();
+        await DecodeSettings.init(DecodeSettings(File('${dir.path}/none.json')));
+        dir.deleteSync(recursive: true);
+        expect(DecodePathRule.fastFps, 50);
       },
     );
 

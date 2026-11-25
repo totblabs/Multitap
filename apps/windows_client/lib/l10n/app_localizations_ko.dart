@@ -10309,7 +10309,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get ifNetworkCantKeepUp => '네트워크가 감당하지 못하면 지연이 쌓일 수 있어요.';
 
   @override
-  String get decodesGpuFallsBackCpu => 'GPU로 디코딩해요. 안 되면 CPU를 써요.';
+  String get decodesGpuFallsBackCpu => 'GPU와 CPU 중 PC에서 더 빠른 쪽으로 디코딩해요.';
 
   @override
   String get decodesCpuOnlyTryIf => 'CPU로만 디코딩해요. 화면이 깨질 때 써 보세요.';

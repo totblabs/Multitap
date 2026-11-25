@@ -157,7 +157,7 @@ int64_t RemoteEngine::Start(uint32_t width, uint32_t height, bool audio_enabled,
   if (texture_id_ < 0) { texture_.reset(); converter_.reset(); overlay_.reset(); return -1; }
   { std::lock_guard<std::mutex> lock(mutex_); decode_calls_=texture_notify_calls_=texture_remarks_=rgba_buffer_reuses_=0; decode_total_ms_=decode_max_ms_=0; texture_notify_total_ms_=texture_notify_max_ms_=0;
     lossless_packets_=lossless_republishes_=lossless_deferred_=0; lossless_present_=0; lossless_compose_ms_=lossless_republish_ms_=0; lossless_poisoned_=lossless_scaled_=false; lossless_restarts_=0; watched_.clear(); signal_->remark=signal_->reveal=false; deferred_=0;
-    hardware_decode_=decoder_prestarted_=false; decode_tier_=0; decode_vendor_=0; decoder_fallbacks_=gpu_dropped_=0; decoder_fallback_reason_=0; gpu_convert_total_ms_=gpu_convert_max_ms_=gpu_wait_total_ms_=0; gpu_pipelined_=0;
+    hardware_decode_=decoder_prestarted_=false; decode_tier_=0; decode_vendor_=0; decoder_fallbacks_=gpu_dropped_=0; decoder_fallback_reason_=0; gpu_convert_total_ms_=gpu_convert_max_ms_=gpu_wait_total_ms_=0; gpu_pipelined_=0; publish_delay_total_ms_=0; publish_delay_frames_=0;
     since_={}; stalls_.clear(); stall_serial_=0; publishing_key_=false; depth_checked_={}; }
   error_ = S_OK; running_ = true; audio_enabled_=audio_enabled;
   if (audio_enabled_) audio_.Start(audio_opus);
@@ -300,6 +300,10 @@ flutter::EncodableMap RemoteEngine::Stats() {
       // Of gpuConvertTotalMs: waiting for the GPU to finish each converted picture.
       {V("gpuWaitTotalMs"), V(gpu_wait_total_ms_)},
       {V("gpuPipelinedFrames"), V(static_cast<int64_t>(gpu_pipelined_))},
+      // decode-path-v1: every picture's time from its packet entering this engine to its
+      // publication (decoding, conversion and any wait for the GPU), summed, and how many.
+      {V("publishDelayTotalMs"), V(publish_delay_total_ms_)},
+      {V("publishDelayFrames"), V(static_cast<int64_t>(publish_delay_frames_))},
       {V("presentDepth"), V(static_cast<int64_t>(present_depth))},
       {V("gpuDroppedFrames"), V(static_cast<int64_t>(gpu_dropped_))},
       {V("rgbaBufferReuses"), V(static_cast<int64_t>(rgba_buffer_reuses_))},
@@ -433,6 +437,8 @@ void RemoteEngine::Run(uint32_t width, uint32_t height) {
       uint64_t armed_ticket = 0;
       double texture_notify_ms=0,texture_notify_max_ms=0,compose_ms=0,gpu_wait_ms=0;
       uint64_t texture_notify_calls=0, pipelined=0;
+      // decode-path-v1: when each video packet entered the queue, oldest first, until its picture is published.
+      std::deque<std::pair<uint64_t, std::chrono::steady_clock::time_point>> arriving;
       HRESULT compose_error = S_OK;
       const auto deliver = [&](DecodedFrame&& frame) {
         if (lossless.active()) {
@@ -448,6 +454,12 @@ void RemoteEngine::Run(uint32_t width, uint32_t height) {
         const auto published = std::chrono::steady_clock::now();
         const double elapsed=std::chrono::duration<double,std::milli>(published-notifying).count();
         texture_notify_ms+=elapsed;texture_notify_max_ms=std::max(texture_notify_max_ms,elapsed);++texture_notify_calls;
+        // A packet that gave no picture (dropped, hidden) is passed over by the next one's.
+        while (!arriving.empty() && arriving.front().first < published_pts) arriving.pop_front();
+        if (!arriving.empty() && arriving.front().first == published_pts) {
+          const double waited = std::chrono::duration<double,std::milli>(published - arriving.front().second).count(); arriving.pop_front();
+          std::lock_guard<std::mutex> lock(mutex_); publish_delay_total_ms_ += waited; ++publish_delay_frames_;
+        }
         // The first frame at or after a watched PTS is now available to the
         // texture (a dropped watched frame resolves with the next later one).
         if (!watching.empty() && watching.front().first <= published_pts) {
@@ -522,6 +534,7 @@ void RemoteEngine::Run(uint32_t width, uint32_t height) {
         uint64_t pts = 0; std::memcpy(&pts, packet.data() + 4, 8);
         publishing_key_ = (packet[1] & 1) != 0;
         if (watch) { watching.push_back({pts, enqueued}); while (watching.size() > kWatchingPackets) watching.pop_front(); }
+        arriving.push_back({pts, enqueued}); while (arriving.size() > kArrivingPackets) arriving.pop_front();
         std::vector<uint8_t> released;
         { std::lock_guard<std::mutex> lock(buffers->mutex);
           if (!buffers->spare.empty()) { released = std::move(buffers->spare.back()); buffers->spare.pop_back(); } }

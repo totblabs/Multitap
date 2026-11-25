@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'app.dart';
 import 'data/client_settings.dart';
@@ -23,6 +24,21 @@ import 'data/window_close_guard.dart';
 import 'ui/session_status_panel.dart';
 import 'ui/session_window.dart';
 import 'l10n/l10n.dart';
+
+/// decode-path-v1: the graphics adapter Flutter renders on, the key of this
+/// PC's records of its decode paths (DecodeSettings). Null when the runner
+/// does not say; then nothing is learned.
+Future<String?> _renderAdapter() async {
+  try {
+    return DecodeSettings.adapterKey(
+      await const MethodChannel('multitap/remote')
+          .invokeMethod<Object?>('renderAdapter')
+          .timeout(const Duration(seconds: 2)),
+    );
+  } catch (_) {
+    return null;
+  }
+}
 
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,7 +68,10 @@ Future<void> main(List<String> arguments) async {
   if (Platform.isWindows && !hostMode) await SamePc.load();
   if (Platform.isWindows) {
     try {
-      await DecodeSettings.init(DecodeSettings.windows());
+      await DecodeSettings.init(
+        DecodeSettings.windows(),
+        adapter: await _renderAdapter(),
+      );
     } catch (_) {
       // Hardware decoding stays on (the default) without a readable choice.
     }

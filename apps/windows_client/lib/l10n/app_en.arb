@@ -2958,7 +2958,7 @@
   "manual2": "Manual",
   "adjustsBitrateConnectionMaxMbps": "Adjusts the bitrate to the connection. Max {maxMbps} Mbps",
   "ifNetworkCantKeepUp": "If the network can't keep up, latency can build up.",
-  "decodesGpuFallsBackCpu": "Decodes on the GPU. Falls back to the CPU if that fails.",
+  "decodesGpuFallsBackCpu": "Decodes on the GPU or the CPU, whichever is faster on your PC.",
   "decodesCpuOnlyTryIf": "Decodes on the CPU only. Try it if the picture breaks up.",
   "eachMonitorMatchesItsOwn": "Each monitor matches its own size.",
   "remoteResolutionFollowsWindowSize": "The remote resolution follows the window size.",

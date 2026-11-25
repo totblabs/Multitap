@@ -11074,7 +11074,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get decodesGpuFallsBackCpu =>
-      'Decodes on the GPU. Falls back to the CPU if that fails.';
+      'Decodes on the GPU or the CPU, whichever is faster on your PC.';
 
   @override
   String get decodesCpuOnlyTryIf =>

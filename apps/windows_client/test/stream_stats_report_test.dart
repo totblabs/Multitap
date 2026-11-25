@@ -41,6 +41,8 @@ StreamStatsSample sample(
   clientDecodeMs: 2.1,
   gpuConvertMs: 1.4,
   gpuWaitMs: 1.1,
+  publishDelayMs: 4.6,
+  decodeChoice: 4,
   clientDecodeMaxMs: 7.5,
   clientQueueMs: 3,
   skippedDecodedFrames: 2,
@@ -108,6 +110,7 @@ void main() {
     expect(report['decodeUs'], 2100);
     expect(report['gpuConvertUs'], 1400);
     expect(report['gpuWaitUs'], 1100);
+    expect(report['publishDelayUs'], 4600);
     expect(report['receiveKbps'], 18400);
     expect(report['inputHostP50Us'], 6100);
     expect(report['inputFrameP95Us'], 48200);
@@ -145,6 +148,7 @@ void main() {
       wlanError: 0,
       wlanScans: queued > 0 ? 1 : 0,
       decodeTier: 2,
+      decodeChoice: 4,
       decodeVendor: 0x8086,
     );
     window.add(paced(9.5, .18, 16, 0), 0);
@@ -174,6 +178,7 @@ void main() {
     expect(next['wlanError'], 0);
     expect(next['wlanScans'], 0);
     expect(next['decodeTier'], 2);
+    expect(next['decodeChoice'], 4, reason: 'the newest sample says');
     expect(next['decodeVendor'], 0x8086);
     expect(next['queuedFrames'], 0);
     expect(next['textureWaitUs'], 4000);

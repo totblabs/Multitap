@@ -164,7 +164,8 @@ double number(const flutter::EncodableMap& map, const char* key) {
 // gpu-pipeline: a stream of video alone (no tiles), as a game sends it, pushed as fast as the
 // engine takes it. Every picture is published, and the pictures at two points of the stream are
 // the same whichever path decoded them: nothing is shown early, late or out of order.
-struct Piped { std::vector<uint8_t> middle, last; int64_t path = 0, pipelined = 0, decoded = 0, dropped = 0; bool hw = false; double decode_ms = 0, wait_ms = 0, wall_ms = 0; };
+// decode-path-v1: `timed` pictures had their packet-to-publication time measured, `delay_ms` each.
+struct Piped { std::vector<uint8_t> middle, last; int64_t path = 0, pipelined = 0, decoded = 0, dropped = 0, timed = 0; bool hw = false; double decode_ms = 0, wait_ms = 0, wall_ms = 0, delay_ms = 0; };
 Piped piped(const std::vector<Unit>& units, uint32_t width, uint32_t height, bool hardware) {
   Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
   if (hardware) {
@@ -204,6 +205,10 @@ Piped piped(const std::vector<Unit>& units, uint32_t width, uint32_t height, boo
   result.decode_ms = calls > 0 ? (number(after, "decodeTotalMs") - number(before, "decodeTotalMs")) / calls : 0;
   result.wait_ms = calls > 0 ? (number(after, "gpuWaitTotalMs") - number(before, "gpuWaitTotalMs")) / calls : 0;
   require(result.decoded == int64_t(units.size()) && !result.dropped, "A picture of the stream was lost");
+  // Every picture is timed once, whichever path decoded it; a picture cannot be ready sooner than it was decoded.
+  result.timed = integer(after, "publishDelayFrames"); result.delay_ms = result.timed > 0 ? number(after, "publishDelayTotalMs") / double(result.timed) : 0;
+  require(result.timed == result.decoded, "A picture's time to publication was not measured, or measured twice");
+  require(result.delay_ms > 0 && result.delay_ms < result.wall_ms, "The time to publication is not a time of this run");
   return result;
 }
 // Flutter's take, as its raster thread makes it: one picture, released at once.
@@ -328,10 +333,10 @@ void pipeline(uint32_t width, uint32_t height) {
     return wrong;
   };
   const uint64_t middle = differ(cpu.middle, gpu.middle), last = differ(cpu.last, gpu.last), apart = differ(cpu.middle, cpu.last);
-  char text[640];
-  std::snprintf(text, sizeof(text), "{\"size\":\"%ux%u\",\"case\":\"pipeline\",\"pictures\":%zu,\"hardwareDecode\":%s,\"texturePath\":%lld,\"pipelined\":%lld,\"wrongMiddle\":%llu,\"wrongLast\":%llu,\"middleAndLastDiffer\":%llu,\"gpuDecodeMs\":%.2f,\"gpuWaitMs\":%.2f,\"gpuWallMs\":%.0f,\"cpuDecodeMs\":%.2f,\"cpuWallMs\":%.0f}",
+  char text[768];
+  std::snprintf(text, sizeof(text), "{\"size\":\"%ux%u\",\"case\":\"pipeline\",\"pictures\":%zu,\"hardwareDecode\":%s,\"texturePath\":%lld,\"pipelined\":%lld,\"wrongMiddle\":%llu,\"wrongLast\":%llu,\"middleAndLastDiffer\":%llu,\"gpuDecodeMs\":%.2f,\"gpuWaitMs\":%.2f,\"gpuWallMs\":%.0f,\"cpuDecodeMs\":%.2f,\"cpuWallMs\":%.0f,\"gpuPublishDelayMs\":%.2f,\"cpuPublishDelayMs\":%.2f}",
                 width, height, units.size(), gpu.hw ? "true" : "false", static_cast<long long>(gpu.path), static_cast<long long>(gpu.pipelined),
-                static_cast<unsigned long long>(middle), static_cast<unsigned long long>(last), static_cast<unsigned long long>(apart), gpu.decode_ms, gpu.wait_ms, gpu.wall_ms, cpu.decode_ms, cpu.wall_ms);
+                static_cast<unsigned long long>(middle), static_cast<unsigned long long>(last), static_cast<unsigned long long>(apart), gpu.decode_ms, gpu.wait_ms, gpu.wall_ms, cpu.decode_ms, cpu.wall_ms, gpu.delay_ms, cpu.delay_ms);
   std::cout << text << std::endl;
   require(apart > 0, "The two points of the stream show the same picture: the comparison proves nothing");
   require(!middle && !last, "A picture differs between the CPU path and the GPU path");

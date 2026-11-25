@@ -125,7 +125,10 @@ Future<DecoderAdmission> nativeStreamAdmission(
       (Map<String, Object> request) =>
           const MethodChannel('multitap/remote')
               .invokeMethod<Object?>('validateStreamSize', request);
-  final useHardware = hardware ?? DecodeSettings.hardwareDecode;
+  // decode-path-v1: the launcher decides for the connection it makes, from the
+  // records as its session windows last left them.
+  if (hardware == null) await DecodeSettings.refresh();
+  final useHardware = hardware ?? DecodeSettings.useHardware;
   var lower = 0.0, upper = 1.0, scale = 1.0;
   List<StreamSourceSize>? accepted;
   String lastReason = 'capability_unknown';

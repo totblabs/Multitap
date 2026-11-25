@@ -64,6 +64,8 @@ class RemoteEngine {
   flutter::EncodableMap Stats();
   // Bounded results: [pts, queued -> published microseconds], newest last.
   static constexpr size_t kWatchedFrames = 32, kWatchingPackets = 8;
+  // decode-path-v1: packets whose pictures are not published yet (two wait for the GPU at most).
+  static constexpr size_t kArrivingPackets = 64;
   // UI thread: a shared reference to the newest published frame and its
   // publication count. The CPU path copies no pixels and does not touch the
   // decoder; a GPU frame is read back once per publication (thumbnails).
@@ -234,6 +236,8 @@ class RemoteEngine {
   uint64_t decoder_fallbacks_ = 0, gpu_dropped_ = 0;
   int64_t decoder_fallback_reason_ = 0;
   double gpu_convert_total_ms_ = 0, gpu_convert_max_ms_ = 0, gpu_wait_total_ms_ = 0;
+  // decode-path-v1 (Stats publishDelayTotalMs / publishDelayFrames).
+  double publish_delay_total_ms_ = 0; uint64_t publish_delay_frames_ = 0;
   // gpu-pipeline: pictures published after the worker had moved on to the next packet.
   uint64_t gpu_pipelined_ = 0;
   // Guarded by mutex_: watched packet PTS and its queued -> published time.
