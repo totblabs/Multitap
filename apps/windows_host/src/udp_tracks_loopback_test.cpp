@@ -15,7 +15,9 @@ struct Relay {
   std::atomic<bool> stopped{false},blockData{false};std::atomic<uint64_t> forwarded{0};std::mutex mutex;std::thread thread;
   std::atomic<int> dropHostSize{0};
   explicit Relay(uint8_t seed,bool direct=true){
-    require(socket.open(),"relay socket");sockaddr_in own{};int size=sizeof(own);require(!getsockname(socket.handle,reinterpret_cast<sockaddr*>(&own),&size),"relay port");port=ntohs(own.sin_port);
+    require(socket.open(),"relay socket");sockaddr_in own{};int size=sizeof(own);
+    // The socket every leg sends on: its send buffer must hold a picture's burst (udp_probe_leg.hpp, udpSendBufferBytes).
+    int kept=0,keptSize=sizeof(kept);require(!getsockopt(socket.handle,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<char*>(&kept),&keptSize)&&kept>=udpSendBufferBytes,"The leg's socket kept the default send buffer");require(!getsockname(socket.handle,reinterpret_cast<sockaddr*>(&own),&size),"relay port");port=ntohs(own.sin_port);
     for(size_t n=0;n<8;++n){hg.id[n]=uint8_t(seed+n);cg.id[n]=uint8_t(seed+11+n);}for(size_t n=0;n<32;++n){hg.ticket[n]=uint8_t(seed+n);cg.ticket[n]=uint8_t(seed+51+n);}
     hg.relays={{"127.0.0.1",port}};cg.relays=hg.relays;hg.direct=cg.direct=direct;
     require(udpLegDatagrams(hg,proof[0])&&udpLegDatagrams(cg,proof[1]),"proofs");thread=std::thread([this]{run();});

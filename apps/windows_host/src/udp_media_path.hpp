@@ -22,6 +22,8 @@ namespace host {
 namespace udpcore=multitap::udp;
 // hostAction 271, each path change: `stage` the path now, `error` why (fixed codes).
 inline constexpr uint32_t udpPathAction=271,udpPathOnUdp=1,udpPathOnWss=2,udpPathHeld=3;  // 3: stayed on UDP through a dark network
+// 4: this PC's socket refused datagrams. `error` is how many since the last such row (at most one every 10 s), `cause` the socket error.
+inline constexpr uint32_t udpPathRefused=4;
 enum UdpPathReason:uint32_t{udpPathProven=1,udpPathNewStream=2,udpPathSilent=3,udpPathTooLarge=4,udpPathStalled=5,udpPathExhausted=6,udpPathSealFailed=7,udpPathSocketFailed=8};
 // What the path may ask of its session. They only store (AgentBridge::keyFrame) or
 // take a short lock, and none is called once `detach` returns: the leg's thread can
@@ -116,6 +118,9 @@ class UdpMediaPath {
   void pauseInputs(){std::lock_guard lock(mutex_);inputMinimumEpoch_=uint32_t(epoch_)+1;}
   // audio-stats-v1, any thread: audio messages the sender took and refused since the last call.
   std::pair<uint64_t,uint64_t> takeAudio()noexcept{return {audioSent_.exchange(0),audioDropped_.exchange(0)};}
+  // Leg thread: the socket refused a datagram (udp_probe_leg.hpp, udpSendBufferBytes). It is lost on this PC, before
+  // any network, with its sequence used: the client sees a run of loss and its NACK brings it back like any other.
+  void refused(uint32_t error)noexcept{++sendRefused_;sendError_=error;}
 
   // Leg thread: a datagram from the bound relay. Every client datagram is hostile until
   // its tag verifies: nothing below `open` runs for anything else.
@@ -172,6 +177,10 @@ class UdpMediaPath {
       send(std::span<const uint8_t>(datagram_.data(),size));
     }
     datagrams_=sender_->stats().datagrams;repairs_=sender_->stats().repairs;recoveries_=sender_->stats().recoveries;refused_=sender_->stats().refused;
+    if(const uint64_t count=sendRefused_.load();count!=refusedRecorded_&&(!refusedAt_||nowUs-refusedAt_>=refusedRecordUs)){
+      if(record_)record_(udpPathRefused,uint32_t(std::min<uint64_t>(count-refusedRecorded_,UINT32_MAX)),sendError_);
+      refusedRecorded_=count;refusedAt_=nowUs;
+    }
   }
   // Leg thread: its sender's timer, in milliseconds; 0 with nothing to send. 200 ms
   // TAILs and what is left in the queue need no pacing precision off UDP.
@@ -212,7 +221,9 @@ class UdpMediaPath {
       bool onUdp=false;{std::lock_guard lock(mutex_);onUdp=route_==Route::udp;}
       const auto extra=",\"udpPath\":"+std::to_string(onUdp?1:0)+",\"udpDatagrams\":"+std::to_string(datagrams_.load())+",\"udpRetransmits\":"+std::to_string(repairs_.load())+",\"udpFallbacks\":"+std::to_string(fallbacks_.load())+",\"udpRecoveries\":"+std::to_string(recoveries_.load())
         // Stall forensics: IDRs the pacer's backlog asked for, client KEYFRAME requests honoured, repair datagrams refused.
-        +",\"udpBacklogKeys\":"+std::to_string(backlogKeys_.load())+",\"udpClientKeys\":"+std::to_string(clientKeys_.load())+",\"udpRefused\":"+std::to_string(refused_.load());
+        +",\"udpBacklogKeys\":"+std::to_string(backlogKeys_.load())+",\"udpClientKeys\":"+std::to_string(clientKeys_.load())+",\"udpRefused\":"+std::to_string(refused_.load())
+        // Datagrams this PC's socket refused (see `refused`): not the repairs the Sender refused above.
+        +",\"udpSendRefused\":"+std::to_string(sendRefused_.load());
       text.insert(text.end()-1,extra.begin(),extra.end());
     }
   }
@@ -285,7 +296,7 @@ class UdpMediaPath {
   const bool directEnabled_;udpcore::DirectPath direct_;std::vector<udpcore::DirectEndpoint> candidates_;
   std::atomic<bool> probePassed_{false},exchanged_{false},keyed_{false};
   std::atomic<uint32_t> inputMinimumEpoch_{0};
-  std::atomic<uint64_t> datagrams_{0},repairs_{0},fallbacks_{0},wssHeard_{0},recoveries_{0},audioSent_{0},audioDropped_{0},backlogKeys_{0},clientKeys_{0},refused_{0};
+  std::atomic<uint64_t> datagrams_{0},repairs_{0},fallbacks_{0},wssHeard_{0},recoveries_{0},audioSent_{0},audioDropped_{0},backlogKeys_{0},clientKeys_{0},refused_{0},sendRefused_{0};
   // Guarded by mutex_.
   std::mutex mutex_;Route route_=Route::wss;bool firstKey_=false,firstKeyAsked_=false,ended_=false,audioOpus_=false;uint16_t epoch_=0;int target_=0;
   std::unique_ptr<udpcore::SessionKeys> keys_;std::deque<Item> inbox_;size_t inboxBytes_=0;std::vector<Change> changes_;
@@ -295,6 +306,7 @@ class UdpMediaPath {
   udpcore::ProbeBackoff backoff_;std::array<uint8_t,udpcore::maxDatagram> datagram_{};
   bool onUdp_=false,over_=false,holding_=false;uint64_t switchedAt_=0,feedbackAt_=0,keyFrameAt_=0,lossAt_=0;uint32_t received_=0,lost_=0;
   static constexpr int udpSilentRetries=2;int silentRetries_=0;
+  static constexpr uint64_t refusedRecordUs=10000000;uint64_t refusedRecorded_=0,refusedAt_=0;uint32_t sendError_=0;
   uint64_t wireAt_=0,datagramsAt_=0;double meanDatagram_=1200;  // the sender's counters at the last FEEDBACK
 };
 }

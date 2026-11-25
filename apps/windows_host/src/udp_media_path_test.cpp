@@ -58,14 +58,14 @@ struct Client {
 struct Link {
   int keyFrames=0,backlogs=0,inputs=0,target=20000000;std::vector<bool> paths;std::vector<std::pair<uint32_t,uint32_t>> records;std::vector<uint32_t> causes;std::vector<uint64_t> recoveries;
   struct Sample {uint64_t rtt;uint32_t received,lost;};std::vector<Sample> samples;std::vector<std::pair<uint32_t,uint32_t>> arrived;  // per FEEDBACK: bytes arrived, bytes sent
-  UdpMediaPath path;Client client;uint64_t now=10000000,upDelayUs=0;size_t wire=0;bool upCut=false,downCut=false,wssFeedback=false;std::function<bool(size_t)> dropDown;std::deque<std::pair<uint64_t,Bytes>> flying;
+  UdpMediaPath path;Client client;uint64_t now=10000000,upDelayUs=0;size_t wire=0;bool upCut=false,downCut=false,wssFeedback=false,socketFull=false;std::function<bool(size_t)> dropDown;std::deque<std::pair<uint64_t,Bytes>> flying;
   UdpMediaHooks hooks(){UdpMediaHooks out{[this]{++keyFrames;},[this](uint64_t rtt,uint32_t received,uint32_t lost,uint32_t arrivedBytes,uint32_t sentBytes){samples.push_back({rtt,received,lost});arrived.push_back({arrivedBytes,sentBytes});return target;},[this]{++backlogs;},[this](bool onUdp){paths.push_back(onUdp);return target;},[this](uint64_t lastGood){recoveries.push_back(lastGood);}};out.input=[this](uint32_t,uint16_t,const std::string&){++inputs;};return out;}
   explicit Link(bool direct=false):path(hostLeg,hooks(),[this](uint32_t stage,uint32_t reason,uint32_t cause){records.push_back({stage,reason});causes.push_back(cause);},direct){}
   void step(int milliseconds=1){
     for(int n=0;n<milliseconds;++n){
       now+=1000;
       if(wssFeedback&&now%100000==0)path.wssHeard(now);  // the client's stream.feedback on WSS
-      path.pump(now,[&](std::span<const uint8_t> bytes){++wire;if(!downCut&&!(dropDown&&dropDown(wire)))client.datagram(bytes,now);});
+      path.pump(now,[&](std::span<const uint8_t> bytes){if(socketFull){path.refused(10035);return;}++wire;if(!downCut&&!(dropDown&&dropDown(wire)))client.datagram(bytes,now);});
       client.tick(now);
       for(auto& bytes:client.outbound)if(!upCut)flying.push_back({now+upDelayUs,std::move(bytes)});
       client.outbound.clear();
@@ -425,8 +425,25 @@ void sessionSignals(){
   session.stop();require(session.udpFeedback(1000,1,0)==0,"A stopped session answered");++passed;
 }
 }
+// What this PC's socket refuses is counted, said in stream.stats and recorded: at once, then at most every 10 s.
+void socketRefusals(){
+  Link link;auto pts=onUdp(link);play(link,100,pts);link.step(20);
+  require(link.stat("udpSendRefused")==0&&!link.hasRecord(udpPathRefused,0),"A refusal was counted on a socket that took everything");
+  const auto rows=[&]{return std::count_if(link.records.begin(),link.records.end(),[](const auto& row){return row.first==udpPathRefused;});};
+  link.socketFull=true;pts+=16667;require(route(link,video(pts,false,20000)),"The frame did not go on UDP");link.step(30);link.socketFull=false;
+  const auto first=link.stat("udpSendRefused");
+  require(first>=10&&rows()==1&&link.records.back().first==udpPathRefused&&link.records.back().second>=1&&link.causes.back()==10035,"The refused datagrams were not counted and recorded");
+  const auto firstRowAt=link.records.size()-1;
+  play(link,300,pts);require(link.client.delivered.size()>0&&link.paths.back(),"The stream did not go on after the socket took datagrams again");
+  link.socketFull=true;pts+=16667;route(link,video(pts,false,20000));link.step(30);link.socketFull=false;play(link,2000,pts);
+  require(link.stat("udpSendRefused")>first&&rows()==1&&link.records[firstRowAt].first==udpPathRefused,"A second row came within 10 s");
+  const auto firstRow=link.records[firstRowAt].second;play(link,9000,pts);
+  require(rows()==2&&link.records.back().first==udpPathRefused&&double(firstRow)+double(link.records.back().second)==link.stat("udpSendRefused"),"The later refusals were not recorded once the 10 s had passed");
+  ++passed;
+}
 int main(){
   try{
+    socketRefusals();
     for(const auto& scenario:{exchangeRules,proofRequired,switching,firstIdrStaysOnWss,directInputGates,staleProof,fallback,retry,legEnds,tooLarge,soundAgain,stalledLeg,hostile,keyframeRequests,lossAnswers,bitrate,arrival,statistics,exhausted,sessionSignals})scenario();
     std::cout<<"{\"kind\":\"udp-media-path\",\"passed\":"<<passed<<",\"link\":\"simulated\",\"sockets\":false}\n";return 0;
   }catch(const std::exception& error){std::cerr<<"UDP media path check failed: "<<error.what()<<"\n";return 1;}

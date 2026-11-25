@@ -614,6 +614,15 @@ longest lateness it saw in the last 15 to 30 s and a millisecond, at least
 and asks for a key frame again sooner after a loss (three round trips and
 60 ms, then a quarter second, then every half second), but sends no LOSS.
 
+A Host sends a picture's datagrams in one burst, as large as its pacer allows
+(three times the target for 6 ms: 135 KB at 60 Mbps). Its socket's send buffer
+is 1 MB. With the 64 KB Windows gives by default, the socket refused the end
+of such a burst whenever the network card was not taken at once, and those
+datagrams were lost on that PC with their sequences used. What a Host's socket
+still refuses is counted: `udpSendRefused` in `stream.stats`, and hostAction
+271 stage 4 in the Host's records (`error` how many since the last such row,
+at most one every 10 s, `cause` the socket error).
+
 ### Direct UDP (udp-direct-v1)
 
 This is a bounded IPv4 hole-punching extension to the existing encrypted UDP

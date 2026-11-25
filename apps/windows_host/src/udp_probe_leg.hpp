@@ -32,6 +32,13 @@ struct UdpProbeLegOptions {
   // Each path change (hostAction 271), on the leg's thread: it writes a file.
   UdpMediaPath::Record recordPath;
 };
+// What Windows may hold of this socket's sends while the network card is busy. A picture leaves in one go
+// (udp_media.hpp, pacerBurstUs: 135 KB at a 60 Mbps target), the default is 64 KB, and past it sendto refuses
+// (WSAEWOULDBLOCK): the tail of that picture is lost on this PC. Field 2026-11-25, a 57 Mbps stream: 14 runs of
+// 4 to 88 datagrams in 45 s were already missing where the stream reached the relay. A socket opened as below sent
+// the same bursts to the first router: 5 and 12 runs refused in 40 s with the default, none with 256 KB, 512 KB,
+// 1 MB or 4 MB, nor with 300 datagrams a burst. 1 MB is 140 ms of that stream: what would wait longer is too late.
+inline constexpr int udpSendBufferBytes=1<<20;
 struct UdpProbeSocket {
   bool started=false;SOCKET handle=INVALID_SOCKET;WSAEVENT readable=WSA_INVALID_EVENT;
   // A wait's timeout follows the 15.6 ms system tick, which the pacer's 2 ms of credit
@@ -45,6 +52,7 @@ struct UdpProbeSocket {
     // Windows reports an ICMP answer to a send as a failed read. A relay port
     // that is closed says nothing about this socket.
     BOOL report=FALSE;DWORD used=0;WSAIoctl(handle,SIO_UDP_CONNRESET,&report,sizeof(report),nullptr,0,&used,nullptr,nullptr);
+    setsockopt(handle,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<const char*>(&udpSendBufferBytes),sizeof(udpSendBufferBytes));
     sockaddr_in any{};any.sin_family=AF_INET;readable=WSACreateEvent();
     return readable!=WSA_INVALID_EVENT&&::bind(handle,reinterpret_cast<const sockaddr*>(&any),sizeof(any))==0&&WSAEventSelect(handle,readable,FD_READ)==0;
   }
@@ -75,12 +83,13 @@ inline void udpProbeRun(UdpGrant& grant,const UdpProbeLegOptions& options,HANDLE
     struct Lookup{std::atomic<bool> ready{false};std::optional<sockaddr_in> address;};
     std::vector<std::shared_ptr<Lookup>> stunLookups;udpcore::StunBinding stun;
     if(grant.direct)for(const auto& server:grant.stun){auto lookup=std::make_shared<Lookup>();stunLookups.push_back(lookup);try{std::thread([lookup,server]{lookup->address=udpResolveRelay(server);lookup->ready=true;}).detach();}catch(...){lookup->ready=true;}}
-    // A full send buffer drops the datagram: UDP sends never wait here.
-    const auto sendTo=[&](size_t relay,std::span<const uint8_t> bytes){return sendto(sock.handle,reinterpret_cast<const char*>(bytes.data()),int(bytes.size()),0,reinterpret_cast<const sockaddr*>(&*addresses[relay]),sizeof(sockaddr_in))==int(bytes.size());};
+    // A full send buffer drops the datagram: UDP sends never wait here. Each one is counted (UdpMediaPath::refused).
+    const auto handed=[&](int sent,size_t size){if(sent==int(size))return true;media.refused(uint32_t(WSAGetLastError()));return false;};
+    const auto sendTo=[&](size_t relay,std::span<const uint8_t> bytes){return handed(sendto(sock.handle,reinterpret_cast<const char*>(bytes.data()),int(bytes.size()),0,reinterpret_cast<const sockaddr*>(&*addresses[relay]),sizeof(sockaddr_in)),bytes.size());};
     const auto directSend=[&](udpcore::DirectEndpoint endpoint,std::span<const uint8_t> bytes){
       const auto address=udpSockaddr(endpoint);std::array<uint8_t,udpHeaderBytes+udpcore::DirectPath::packetBytes> wrapped{};
       if(bytes.size()==udpcore::DirectPath::packetBytes&&bytes[0]=='T'&&bytes[1]=='V'&&bytes[2]=='D')for(const auto& relay:addresses)if(relay&&udpEndpoint(*relay)==endpoint){wrapped[0]=udpTypeData;std::copy(grant.id.begin(),grant.id.end(),wrapped.begin()+1);std::copy(bytes.begin(),bytes.end(),wrapped.begin()+udpHeaderBytes);bytes=wrapped;break;}
-      return sendto(sock.handle,reinterpret_cast<const char*>(bytes.data()),int(bytes.size()),0,reinterpret_cast<const sockaddr*>(&address),sizeof(address))==int(bytes.size());
+      return handed(sendto(sock.handle,reinterpret_cast<const char*>(bytes.data()),int(bytes.size()),0,reinterpret_cast<const sockaddr*>(&address),sizeof(address)),bytes.size());
     };
     UdpProbe probe(datagrams,grant.relays.size(),udpProbeNowMs(),
       [&](size_t relay){addresses[relay]=options.resolve(grant.relays[relay]);return addresses[relay].has_value();},sendTo);
