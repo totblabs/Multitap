@@ -66,6 +66,44 @@ constexpr size_t maxAudioQueue = 64, maxRepairs = 2048, maxKeptBytes = 16 * 1024
 constexpr size_t audioRepeats = 2;
 constexpr uint64_t audioRepeatUs = 100000;
 constexpr uint64_t queuePacingUs = 250000, repairWindowUs = 100000, pacerBurstUs = 6000;
+// parity-v1. A lost video fragment is asked for again (NACK), and its frame then reaches the
+// decoder a NACK delay and a round trip late: about 20 ms on a LAN, two or three pictures at
+// 120 fps. Field 2026-11-25, a game over Wi-Fi: 2.7 such repairs a second with 0.04 % of the
+// datagrams lost. So a video message may be followed by parity datagrams, from which the
+// client rebuilds a lost fragment at once.
+//  * A message of `count` fragments has parityCount(count) parities. Parity `slot` is the XOR
+//    of the fragments whose index is `slot` modulo that number, each padded with zeros to a
+//    full payload: any one lost fragment of a class comes back, so a run of up to that many
+//    lost in a row does.
+//  * PARITY, Host to client (kindParity): [1] the message's class in the low four bits and
+//    the number of parities less one in the high four; [2..5] the message ID; [6..7] the slot
+//    in bits 11-14 and the size of the message's last fragment in bits 0-10; [8..9] the
+//    fragment count; then fragmentPayload bytes.
+//  * ABILITIES, client to Host (kindAbilities): [1] 0; [2..3] bits, abilityParity = it takes
+//    PARITY; [4..7] the lost fragments parity has repaired for it so far: rebuilt ones whose
+//    own datagram did not come within repairedAfterUs either (a parity that overtakes its
+//    fragment on the way rebuilds it too, and that is no loss). It goes once a second.
+//    A Host that does not know it ignores it, and a Host sends PARITY only to a client that
+//    sent it, so released clients, which drop the kind, never see one.
+//  * Parity costs about a sixteenth of the video rate, and it repairs single losses only: on
+//    a path that drops runs of datagrams (a full queue, a radio pause) it is load and nothing
+//    else (simulation, a link just above the video rate: late time 33 s -> 82 s with parity
+//    always on; closed loop, a 25 Mbps link with an 8 ms queue: 97.8 % -> 93.9 % of the
+//    frames delivered). So the Host sends it only where it works. A NACK starts a trial of
+//    parityTrialUs, at most one in parityHoldUs; each ABILITIES whose count rose keeps parity
+//    on for parityHoldUs from then. A KEYFRAME or a LOSS (the client gave a frame up: what
+//    neither NACK nor parity brought back is a full queue, a policer or a blackout) ends
+//    parity at once, and none starts for parityBackoffUs. So does a target the rate
+//    controller lowers by more than parityCutShare (the path carries less), and so does a
+//    second in which more than parityLossShare of the datagrams sent did not arrive (single
+//    losses are rarer than that; a full queue is not).
+constexpr uint8_t kindParity = 7, kindAbilities = 8;
+constexpr size_t abilitiesBytes = 8, maxParities = 16;
+constexpr uint16_t abilityParity = 1;
+constexpr uint64_t abilitiesIntervalUs = 1000000, parityHoldUs = 60000000, parityTrialUs = 10000000, parityBackoffUs = 15000000, repairedAfterUs = 50000;
+constexpr double parityCutShare = 0.03, parityLossShare = 0.04;
+constexpr uint64_t parityLossWindowUs = 1000000, parityLossDatagrams = 200;
+constexpr size_t maxRebuiltWatched = 256;
 // FEEDBACK that shows none of this many sent datagrams arrived proves nothing.
 constexpr uint64_t unconfirmedLimit = 16;
 
@@ -96,6 +134,26 @@ inline void writeFragment(Plain& out, uint8_t cls, uint32_t id, const std::vecto
   out.bytes[0] = kindFragment; out.bytes[1] = cls; put32(&out.bytes[2], id); put16(&out.bytes[6], index); put16(&out.bytes[8], uint16_t(count));
   std::memcpy(&out.bytes[fragmentHeaderBytes], message.data() + at, size); out.size = fragmentHeaderBytes + size;
 }
+inline unsigned parityCount(size_t fragments) { return fragments ? unsigned(std::min<size_t>((fragments + 15) / 16, maxParities)) : 0; }
+inline void writeParity(Plain& out, uint8_t cls, uint32_t id, const std::vector<uint8_t>& message, unsigned slot, unsigned parities) {
+  const size_t count = fragmentCount(message.size()), lastSize = message.size() - (count - 1) * fragmentPayload;
+  out.bytes[0] = kindParity; out.bytes[1] = uint8_t(cls | (parities - 1) << 4); put32(&out.bytes[2], id);
+  put16(&out.bytes[6], uint16_t(slot << 11 | lastSize)); put16(&out.bytes[8], uint16_t(count));
+  uint8_t* mixed = &out.bytes[fragmentHeaderBytes]; std::memset(mixed, 0, fragmentPayload);
+  for (size_t index = slot; index < count; index += parities) {
+    const size_t at = index * fragmentPayload, size = std::min(fragmentPayload, message.size() - at);
+    for (size_t n = 0; n < size; ++n) mixed[n] ^= message[at + n];
+  }
+  out.size = fragmentHeaderBytes + fragmentPayload;
+}
+struct Parity { uint8_t cls = 0; uint32_t id = 0; uint16_t count = 0, slot = 0, parities = 0, lastSize = 0; const uint8_t* data = nullptr; };
+inline bool parseParity(const uint8_t* plain, size_t size, Parity& p) {
+  if (size != fragmentHeaderBytes + fragmentPayload || plain[0] != kindParity) return false;
+  const uint16_t packed = get16(plain + 6);
+  p = {uint8_t(plain[1] & 15), get32(plain + 2), get16(plain + 8), uint16_t(packed >> 11), uint16_t((plain[1] >> 4) + 1), uint16_t(packed & 2047), plain + fragmentHeaderBytes};
+  return (p.cls == classVideo || p.cls == classRecovery) && p.id && p.count && p.count <= maxFragments && p.parities == parityCount(p.count) && p.slot < p.parities
+      && p.lastSize && p.lastSize <= fragmentPayload;
+}
 struct Fragment { uint8_t cls = 0; uint32_t id = 0; uint16_t index = 0, count = 0; const uint8_t* data = nullptr; size_t size = 0; };
 // Every fragment but the last carries exactly fragmentPayload bytes: a slice's
 // place follows from its index. Message IDs start at 1.
@@ -123,6 +181,8 @@ class Partial {
     if (f.index + 1u == count_) size_ = size_t(f.index) * fragmentPayload + f.size;
     return true;
   }
+  // XORs fragment `index` as the Host mixed it (padded with zeros to a full payload) into `to`.
+  void mix(uint16_t index, uint8_t* to) const { const uint8_t* from = bytes_.data() + size_t(index) * fragmentPayload; for (size_t n = 0; n < fragmentPayload; ++n) to[n] ^= from[n]; }
   std::vector<uint8_t> take() { bytes_.resize(size_); return std::move(bytes_); }
   void release() { count_ = have_ = 0; size_ = 0; got_ = {}; bytes_ = {}; }
  private:
@@ -141,14 +201,20 @@ class Receiver {
   struct Message { bool video = false, key = false; uint16_t epoch = 0; uint64_t pts = 0; std::vector<uint8_t> bytes; };
   struct Output { std::vector<Message> messages; std::vector<std::vector<uint8_t>> control; };
 
-  Receiver(uint16_t epoch, uint64_t nowUs) : epoch_(epoch), feedbackAt_(nowUs + feedbackIntervalUs) {}
+  // `parity`: it tells the Host that it takes parity (tests of a client that does not).
+  Receiver(uint16_t epoch, uint64_t nowUs, bool parity = true) : epoch_(epoch), feedbackAt_(nowUs + feedbackIntervalUs), abilitiesAt_(parity ? nowUs : UINT64_MAX) {}
+  // Fragments rebuilt from parity, those of them that were lost (see ABILITIES), and parity datagrams that came.
+  uint32_t rebuilt() const { return rebuilt_; }
+  uint32_t repaired() const { return repaired_; }
+  uint32_t parities() const { return parities_; }
   uint64_t rttUs() const { return rtt_; }
   // Announced on WSS. What carries another epoch is dropped, and no frame of it is known good.
   void setEpoch(uint16_t epoch) { if (epoch != epoch_) { haveLast_ = lossWait_ = false; } epoch_ = epoch; }
 
   void datagram(const uint8_t* plain, size_t size, uint64_t nowUs, Output& out) {
-    Fragment f;
+    Fragment f; Parity p;
     if (parseFragment(plain, size, f)) { ++received_; if (f.cls == classAudio) audio(f, out); else video(f, nowUs, out); }
+    else if (parseParity(plain, size, p)) { ++received_; ++parities_; parity(p, nowUs, out); }
     else if (size == tailBytes && plain[0] == kindTail && !plain[1]) {
       ++received_; challenge_ = get64(plain + 14);
       if (const uint32_t rtt = get32(plain + 22)) rtt_ = rtt;
@@ -193,6 +259,11 @@ class Receiver {
       if (asked_ < 2) ++asked_;
     }
     if (nowUs >= feedbackAt_) { feedback(nowUs, out); feedbackAt_ = nowUs + feedbackIntervalUs; }
+    while (!made_.empty() && nowUs - made_.front().at >= repairedAfterUs) { made_.pop_front(); ++repaired_; }
+    if (nowUs >= abilitiesAt_) {
+      std::vector<uint8_t> plain(abilitiesBytes); plain[0] = kindAbilities; put16(&plain[2], abilityParity); put32(&plain[4], repaired_);
+      out.control.push_back(std::move(plain)); abilitiesAt_ = nowUs + abilitiesIntervalUs;
+    }
   }
 
   // A key frame took the other path: that path is active, and what was in flight
@@ -218,7 +289,8 @@ class Receiver {
   size_t windowMessages() const { return window_.size(); }
 
  private:
-  struct Entry : Partial { uint16_t frontier = 0; bool known = false, skip = false, recovery = false; Envelope envelope; };  // indices below frontier are passed
+  // indices below frontier are passed. parity: the parities that came and are not used up, by slot.
+  struct Entry : Partial { uint16_t frontier = 0; bool known = false, skip = false, recovery = false; Envelope envelope; uint16_t lastSize = 0; std::vector<std::vector<uint8_t>> parity; };
   // Oldest first. `whole`: no fragment of that message arrived, so its size is unknown.
   struct Gap { uint32_t id = 0; uint16_t index = 0; uint8_t nacks = 0; bool whole = false; uint64_t at = 0, due = 0; };
   struct Audio : Partial { uint32_t id = 0; };
@@ -317,9 +389,51 @@ class Receiver {
     m.known = true;
     if (valid && m.envelope.epoch == epoch_) { if (ends(m)) abandonBefore(oldestNeeded(id)); return; }
     if (!valid || m.envelope.epoch > epoch_) dropUntilKey(nowUs);
-    m.skip = true; held_ -= m.reserved(); m.release();
+    m.skip = true; held_ -= m.reserved(); m.release(); m.parity.clear();
+  }
+  // parity-v1: the one fragment still missing of a parity's class is that parity XOR the
+  // others of the class. It is taken as if it had just arrived.
+  void rebuild(uint32_t id, Entry& m, unsigned slot, uint64_t nowUs) {
+    if (slot >= m.parity.size() || m.parity[slot].empty()) return;
+    const unsigned step = unsigned(m.parity.size()); int missing = -1;
+    for (unsigned index = slot; index < m.count(); index += step) if (!m.has(uint16_t(index))) { if (missing >= 0) return; missing = int(index); }
+    std::vector<uint8_t> mixed = std::move(m.parity[slot]); m.parity[slot].clear();
+    if (missing < 0) return;
+    for (unsigned index = slot; index < m.count(); index += step) if (int(index) != missing) m.mix(uint16_t(index), mixed.data());
+    Fragment f; f.cls = m.recovery ? classRecovery : classVideo; f.id = id; f.index = uint16_t(missing); f.count = m.count(); f.data = mixed.data();
+    f.size = missing + 1 == int(m.count()) ? m.lastSize : fragmentPayload;
+    if (!m.add(f)) return;
+    ++rebuilt_; made_.push_back({id, f.index, nowUs});
+    if (made_.size() > maxRebuiltWatched) { made_.pop_front(); ++repaired_; }
+    if (f.index == 0) inspect(id, m, f, nowUs);
+  }
+  // A parity datagram. Its message's fragments have all left the Host by now.
+  void parity(const Parity& p, uint64_t nowUs, Output& out) {
+    if (p.id < next_) return;
+    if (p.id - next_ >= videoWindow) { dropForLoss(next_, nowUs); abandonBefore(p.id - videoWindow + 1); }
+    close(uint64_t(p.id) - 1, nowUs);
+    while (next_ + window_.size() <= p.id) window_.emplace_back();
+    Entry& m = window_[size_t(p.id - next_)];
+    if (m.skip) return;
+    if (!m.started()) {
+      if (held_ + size_t(p.count) * fragmentPayload > maxVideoBytes) return;
+      m.start(p.count); held_ += m.reserved();
+    }
+    if (m.count() != p.count) return;
+    m.recovery = m.recovery || p.cls == classRecovery;
+    if (m.parity.empty()) m.parity.resize(p.parities);
+    m.lastSize = p.lastSize;
+    if (!m.whole() && m.parity[p.slot].empty()) m.parity[p.slot].assign(p.data, p.data + fragmentPayload);
+    rebuild(p.id, m, p.slot, nowUs);
+    if (m.skip) return drain(out);
+    // What is still missing is lost; a later parity or a repair may bring it.
+    for (unsigned i = m.frontier; i < m.count(); ++i) if (!m.has(uint16_t(i))) addGap(p.id, uint16_t(i), false, nowUs);
+    m.frontier = m.count();
+    limitGaps(nowUs); drain(out);
   }
   void video(const Fragment& f, uint64_t nowUs, Output& out) {
+    // The fragment itself, after parity rebuilt it: it was not lost.
+    for (auto it = made_.begin(); it != made_.end(); ++it) if (it->id == f.id && it->index == f.index) { made_.erase(it); break; }
     if (f.id < next_) return;
     if (f.id - next_ >= videoWindow) { dropForLoss(next_, nowUs); abandonBefore(f.id - videoWindow + 1); }
     close(uint64_t(f.id) - 1, nowUs);
@@ -333,6 +447,8 @@ class Receiver {
     if (m.count() != f.count || !m.add(f)) return;
     m.recovery = m.recovery || f.cls == classRecovery;
     if (f.index == 0) { inspect(f.id, m, f, nowUs); if (m.skip) return drain(out); }
+    // A fragment that came late may be the last one a waiting parity needed.
+    if (!m.parity.empty()) { rebuild(f.id, m, unsigned(f.index % m.parity.size()), nowUs); if (m.skip) return drain(out); }
     const unsigned end = f.id <= closed_ ? m.count() : f.index;
     for (unsigned i = m.frontier; i < end; ++i) if (!m.has(uint16_t(i))) addGap(f.id, uint16_t(i), false, nowUs);
     m.frontier = uint16_t(std::max<unsigned>(m.frontier, end));
@@ -393,7 +509,10 @@ class Receiver {
 
   uint64_t rtt_ = assumedRttUs;
   uint16_t epoch_;
-  uint64_t feedbackAt_, keyAt_ = 0, echoUs_ = 0, echoAt_ = 0, challenge_ = 0;
+  uint64_t feedbackAt_, abilitiesAt_, keyAt_ = 0, echoUs_ = 0, echoAt_ = 0, challenge_ = 0;
+  uint32_t rebuilt_ = 0, repaired_ = 0, parities_ = 0;
+  struct Made { uint32_t id = 0; uint16_t index = 0; uint64_t at = 0; };
+  std::deque<Made> made_;  // rebuilt fragments whose own datagram may still come
   // fullAt_: a full decoder queue asks no sooner than this, across waits (queueFull).
   // asked_: requests sent in this wait, counted to two.
   uint64_t fullAt_ = 0; int asked_ = 0;
@@ -425,11 +544,17 @@ class Sender {
   struct Control { bool feedback = false, keyFrame = false, loss = false; uint16_t epoch = 0; uint32_t highestWhole = 0, received = 0, lost = 0, lostId = 0; uint64_t rttUs = 0, lastGood = 0; };
   // wireBytes: every datagram emitted (media, repairs, TAIL), as it goes on the wire.
   // audioRepeats: sound datagrams sent again (see audioRepeats above).
-  struct Stats { uint64_t datagrams = 0, videoBytes = 0, repairs = 0, repairBytes = 0, refused = 0, tails = 0, mergedKeys = 0, recoveries = 0, wireBytes = 0, audioRepeats = 0; };
+  // parities: parity datagrams sent (parity-v1), parityBytes on the wire.
+  struct Stats { uint64_t datagrams = 0, videoBytes = 0, repairs = 0, repairBytes = 0, refused = 0, tails = 0, mergedKeys = 0, recoveries = 0, wireBytes = 0, audioRepeats = 0, parities = 0, parityBytes = 0; };
 
   Sender(int targetBps, uint64_t nowUs, std::function<uint64_t()> random)
       : random_(std::move(random)), at_(nowUs), alive_(nowUs), proofAt_(nowUs), challengeAt_(nowUs), challenge_(random_()) { setTarget(targetBps); budget_ = budgetLimit(); credit_ = creditLimit(); }
-  void setTarget(int targetBps) { bytesPerUs_ = double(std::max(targetBps, 1)) / 8e6; }
+  // `nowUs`: when the rate controller set it (0: no change of its own, the first target).
+  void setTarget(int targetBps, uint64_t nowUs = 0) {
+    const double next = double(std::max(targetBps, 1)) / 8e6;
+    if (nowUs && next < bytesPerUs_ * (1 - parityCutShare)) gaveUp(nowUs);  // parity-v1
+    bytesPerUs_ = next;
+  }
   bool proven() const { return proven_; }
   uint64_t rttUs() const { return rtt_; }
 
@@ -475,10 +600,18 @@ class Sender {
     else if (size == keyframeBytes && plain[0] == kindKeyframe && !plain[1]) {
       result.keyFrame = !keyInFlight(nowUs); result.epoch = get16(plain + 2);
       if (!result.keyFrame) ++stats_.mergedKeys;
+      gaveUp(nowUs);
     }
     // A key frame in flight answers a LOSS too: the client takes one in any wait.
     else if (size == lossBytes && plain[0] == kindLoss && !plain[1]) {
       result.loss = !keyInFlight(nowUs); result.epoch = get16(plain + 2); result.lostId = get32(plain + 4); result.lastGood = get64(plain + 8);
+      gaveUp(nowUs);
+    }
+    // parity-v1: what the client takes, and what parity has repaired for it so far.
+    else if (size == abilitiesBytes && plain[0] == kindAbilities && !plain[1]) {
+      parityAsked_ = (get16(plain + 2) & abilityParity) != 0;
+      const uint32_t repaired = get32(plain + 4);
+      if (int32_t(repaired - repaired_) > 0) { repaired_ = repaired; if (parityAsked_ && nowUs >= parityBlockedUntil_) parityUntil_ = std::max(parityUntil_, nowUs + parityHoldUs); }
     }
     return result;
   }
@@ -519,17 +652,30 @@ class Sender {
     }
     if (queue_.empty()) return false;
     Item& item = queue_.front();
-    writeFragment(out, item.recovery ? classRecovery : classVideo, item.sent ? item.id : videoId_, item.bytes, item.sent);
-    if (!charge(out.size)) return false;
-    if (!item.sent) item.id = videoId_++;
-    stats_.videoBytes += out.size + headerBytes + tagBytes;
-    if (++item.sent == item.count) {
-      if (item.key || item.recovery) keySentAt_ = nowUs;
-      account(item, false); keptBytes_ += item.bytes.size(); item.doneAt = nowUs; finished_ = item.id;
-      kept_.push_back(std::move(item)); queue_.pop_front();
-      tailAt_ = nowUs + tailFirstUs; tailsLeft_ = 2;
+    const uint8_t cls = item.recovery ? classRecovery : classVideo;
+    if (item.sent == item.count) {  // its parity, right behind it
+      writeParity(out, cls, item.id, item.bytes, item.paritySent, item.parity);
+      if (!charge(out.size)) return false;
+      ++stats_.parities; stats_.parityBytes += out.size + headerBytes + tagBytes;
+      if (++item.paritySent == item.parity) finish(nowUs);
+      return emitted(out);
     }
+    writeFragment(out, cls, item.sent ? item.id : videoId_, item.bytes, item.sent);
+    if (!charge(out.size)) return false;
+    if (!item.sent) { item.id = videoId_++; item.parity = uint8_t(parityOn(nowUs) ? parityCount(item.count) : 0); }
+    stats_.videoBytes += out.size + headerBytes + tagBytes;
+    if (++item.sent == item.count && !item.parity) finish(nowUs);
     return emitted(out);
+  }
+  // parity-v1: whether a message that starts now is followed by parity.
+  bool parityOn(uint64_t nowUs) const { return parityAsked_ && nowUs < parityUntil_; }
+  // The client gave a frame up, or the rate controller lowered the target: parity is load on this path now.
+  void gaveUp(uint64_t nowUs) { parityUntil_ = 0; parityBlockedUntil_ = nowUs + parityBackoffUs; }
+  // The client asked for a repair: parity gets a trial, unless one ran lately and repaired
+  // nothing, or the path gave datagrams up lately.
+  void lossShown(uint64_t nowUs) {
+    if (!parityAsked_ || nowUs < parityUntil_ || nowUs < parityBlockedUntil_ || (trialAt_ && nowUs - trialAt_ < parityHoldUs)) return;
+    trialAt_ = std::max<uint64_t>(nowUs, 1); parityUntil_ = nowUs + parityTrialUs;
   }
 
   // Back to WSS at a forced IDR. The contract's rule is FEEDBACK silence, but
@@ -551,7 +697,8 @@ class Sender {
   size_t waitingRepairs() const { return repairs_.size(); }
 
  private:
-  struct Item { std::vector<uint8_t> bytes; uint32_t id = 0; uint16_t count = 0, sent = 0; bool key = false, recovery = false, again = false; uint64_t doneAt = 0; };
+  // parity, paritySent: parity datagrams this message is followed by, and how many have gone.
+  struct Item { std::vector<uint8_t> bytes; uint32_t id = 0; uint16_t count = 0, sent = 0; uint8_t parity = 0, paritySent = 0; bool key = false, recovery = false, again = false; uint64_t doneAt = 0; };
   struct Repair { uint32_t id = 0; uint16_t index = 0; };
 
   // From `video` taking a key frame until a round trip after its last fragment. It
@@ -559,6 +706,14 @@ class Sender {
   // recovery frame counts the same, and so does the wait for one the caller asked for.
   bool keyInFlight(uint64_t nowUs) const {
     return queuedKeyBytes_ || (keySentAt_ && nowUs < keySentAt_ + (rtt_ ? rtt_ : assumedRttUs)) || (recoverAt_ && nowUs < recoverAt_ + keyframeIntervalUs / 2);
+  }
+  // The message at the front has left in full, its parity included.
+  void finish(uint64_t nowUs) {
+    Item& item = queue_.front();
+    if (item.key || item.recovery) keySentAt_ = nowUs;
+    account(item, false); keptBytes_ += item.bytes.size(); item.doneAt = nowUs; finished_ = item.id;
+    kept_.push_back(std::move(item)); queue_.pop_front();
+    tailAt_ = nowUs + tailFirstUs; tailsLeft_ = 2;
   }
   void account(const Item& item, bool added) {
     const size_t size = item.bytes.size();
@@ -613,6 +768,12 @@ class Sender {
       rtt_ = rtt_ ? (7 * rtt_ + result.rttUs) / 8 : result.rttUs;
     }
     if (result.received != confirmed_) { confirmed_ = result.received; sentAtConfirm_ = sent_; }
+    // parity-v1: what did not arrive of what was sent, over about a second (the datagrams on their way at both ends cancel).
+    if (nowUs - shareAt_ >= parityLossWindowUs) {
+      const uint64_t sent = sent_ - shareSent_; const uint32_t arrived = received - shareReceived_;
+      if (shareAt_ && sent >= parityLossDatagrams && double(arrived) < double(sent) * (1 - parityLossShare)) gaveUp(nowUs);
+      shareAt_ = std::max<uint64_t>(nowUs, 1); shareSent_ = sent_; shareReceived_ = received;
+    }
     arriving_ = sent_ - sentAtConfirm_ < unconfirmedLimit;
     const bool videoMoves = result.highestWhole != whole_ || finished_ <= result.highestWhole;
     whole_ = result.highestWhole;
@@ -622,6 +783,7 @@ class Sender {
     const size_t entries = plain[1];
     if (!entries || entries > maxNackEntries || size != 2 + entries * nackEntryBytes) return;
     for (size_t n = 0; n < entries; ++n) if (!get16(plain + 2 + n * nackEntryBytes + 6)) return;
+    lossShown(nowUs);
     refill(nowUs); expire(nowUs);
     for (size_t n = 0; n < entries; ++n) {
       const uint8_t* entry = plain + 2 + n * nackEntryBytes;
@@ -648,6 +810,11 @@ class Sender {
   uint32_t videoId_ = 1, audioId_ = 1;  // given when a message starts, so a dropped one leaves no gap
   size_t queuedBytes_ = 0, queuedKeyBytes_ = 0, keptBytes_ = 0;  // a key frame alone must not look like a backlog
   uint64_t tailAt_ = 0, keySentAt_ = 0, recoverAt_ = 0; int tailsLeft_ = 0;
+  // parity-v1: the client asked for parity; until when it goes; when its last trial began; the client's count of repaired fragments.
+  // parityBlockedUntil_: no parity before then (the client gave a frame up).
+  bool parityAsked_ = false; uint64_t parityUntil_ = 0, trialAt_ = 0, parityBlockedUntil_ = 0; uint32_t repaired_ = 0;
+  // The start of the second now measured for parityLossShare, and the two counts then.
+  uint64_t shareAt_ = 0, shareSent_ = 0; uint32_t shareReceived_ = 0;
   uint64_t sent_ = 0, sentAtConfirm_ = 0, heard_ = 0; uint32_t confirmed_ = 0, confirmedLost_ = 0, whole_ = 0, finished_ = 0;
   std::deque<Item> queue_, kept_, audio_;
   std::deque<Item> sentAudio_;  // the last audioRepeats sound messages sent that may go again

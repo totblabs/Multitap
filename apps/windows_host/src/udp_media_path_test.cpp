@@ -333,7 +333,9 @@ void keyframeRequests(){
 }
 // LOSS: the encoder is asked to code from the client's last good frame, the KEYFRAME
 // that came with it is merged, and the marked answer reaches the client as a recovery
-// frame that ends its wait. Unanswered, the client's repeat still gets an IDR.
+// frame that ends its wait. Unanswered, the stream still gets an IDR: each repeat of the client
+// is a LOSS acted on again (and its KEYFRAME merged again), so it is the path's own rule that
+// asks, once no picture was made whole for a second (decide, cause 3).
 void lossAnswers(){
   const auto lose=[](Link& link,uint64_t& pts){
     // Downlink gone for a few frames and their repairs, then the uplink too, past the deadline.
@@ -351,8 +353,10 @@ void lossAnswers(){
     require(link.stat("udpFallbacks")==0,"A loss answered by recovery fell back");++passed;}
   {Link link;auto pts=onUdp(link);play(link,300,pts);link.step(20);const int keys=link.keyFrames;
     lose(link,pts);require(link.stepUntil([&]{return !link.recoveries.empty();},700),"No LOSS reached the encoder");
-    // The worker never answers: the next repeat is not merged and forces an IDR.
-    require(link.stepUntil([&]{return link.keyFrames>keys;},700),"An unanswered LOSS left the client without an IDR");++passed;}
+    // The worker never answers. Since the client repeats a LOSS after a tenth of a second (not half
+    // a second), the first one comes sooner after the cut and the second of silence ends later
+    // after it: up to a second from the LOSS, not 0.7 s.
+    require(link.stepUntil([&]{return link.keyFrames>keys;},1200),"An unanswered LOSS left the client without an IDR");++passed;}
   {Link link;auto pts=onUdp(link);play(link,100,pts);link.step(20);link.upCut=true;
     Bytes loss(core::lossBytes);loss[0]=core::kindLoss;core::put16(&loss[2],streamEpoch);core::put64(&loss[8],pts);
     link.path.received(forged(loss,1ull<<41),link.now);require(link.recoveries.empty(),"A forged LOSS reached the encoder");

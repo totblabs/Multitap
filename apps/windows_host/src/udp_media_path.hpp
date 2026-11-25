@@ -139,7 +139,7 @@ class UdpMediaPath {
       const auto& sent=sender_->stats();const uint64_t wire=sent.wireBytes-wireAt_,count=sent.datagrams-datagramsAt_;wireAt_=sent.wireBytes;datagramsAt_=sent.datagrams;
       if(count)meanDatagram_=double(wire)/double(count);
       const auto bytes=[](double value){return uint32_t(std::clamp(value,0.0,double(UINT32_MAX)));};
-      if(onUdp_){std::lock_guard lock(hookMutex_);if(hooks_.feedback)if(const int target=hooks_.feedback(control.rttUs,arrived,lost,bytes(double(arrived)*meanDatagram_),bytes(double(wire)));target>0)sender_->setTarget(target);}
+      if(onUdp_){std::lock_guard lock(hookMutex_);if(hooks_.feedback)if(const int target=hooks_.feedback(control.rttUs,arrived,lost,bytes(double(arrived)*meanDatagram_),bytes(double(wire)));target>0)sender_->setTarget(target,nowUs);}
     }
     // The Sender merges requests only once a key frame reaches it, so the encoder's gap
     // before that needs this limit: a client holding the keys must not turn this into
@@ -223,7 +223,7 @@ class UdpMediaPath {
     if(change.onUdp)switchedAt_=nowUs;
     else if(change.reason!=udpPathNewStream){++fallbacks_;backoff_.failed(nowUs);}
     if(change.needsKey)askKeyFrame();
-    {std::lock_guard lock(hookMutex_);if(hooks_.path)if(const int target=hooks_.path(change.onUdp);target>0)sender_->setTarget(target);}
+    {std::lock_guard lock(hookMutex_);if(hooks_.path)if(const int target=hooks_.path(change.onUdp);target>0)sender_->setTarget(target,nowUs);}
     if(record_)record_(change.onUdp?udpPathOnUdp:udpPathOnWss,change.reason,change.cause);
   }
   void leave(uint32_t reason,uint64_t nowUs,bool forever=false,uint32_t cause=0){

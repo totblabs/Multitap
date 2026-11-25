@@ -585,6 +585,25 @@ under its own message ID, right before each of the next two. A client plays
 a packet number once and drops one it already had, so a lost packet arrives
 as its repeat one packet late and in order. PCM sound is sent once.
 
+Lost video is repaired without asking where that works (parity-v1). A client
+that takes parity says so once a second (ABILITIES, kind 8: bits, bit 0 =
+parity; then the count of lost fragments parity has repaired for it). To such
+a client the Host may send, right behind a video message, parity datagrams
+(PARITY, kind 7): a message of `count` fragments has ceil(count / 16) of
+them, at most 16, and parity `slot` is the XOR of the fragments whose index
+is `slot` modulo that number, each padded with zeros to a full payload. The
+datagram carries the message's class and ID, the slot, the fragment count
+and the size of the last fragment. A client rebuilds the one missing
+fragment of a class from its parity and the others; two missing of one class
+are asked for with NACK as before. The Host sends parity only where it
+works: a NACK starts a trial of 10 s (one a minute at most), and parity stays
+on for a minute after each report that it repaired a loss. It stops at once,
+for 15 s, when the client gives a frame up (KEYFRAME or LOSS), when the rate
+controller lowers the target by more than 3 %, or when more than 4 % of the
+datagrams of a second did not arrive: those are a full queue or a blackout,
+where parity is only load. A Host or client that does not know these kinds
+ignores them, and a Host never sends parity to a client that did not ask.
+
 ### Direct UDP (udp-direct-v1)
 
 This is a bounded IPv4 hole-punching extension to the existing encrypted UDP

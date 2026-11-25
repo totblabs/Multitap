@@ -101,7 +101,7 @@ struct Client {
   Receiver::Output out;
   uint64_t now = 1000000;
   // A given RTT arrives the only way it can: in a TAIL.
-  explicit Client(uint64_t rtt = 0, uint16_t epoch = 1) : receiver(epoch, 1000000) { if (rtt) feed(tailFor(0, 1, testChallenge, uint32_t(rtt))); }
+  explicit Client(uint64_t rtt = 0, uint16_t epoch = 1, bool parity = false) : receiver(epoch, 1000000, parity) { if (rtt) feed(tailFor(0, 1, testChallenge, uint32_t(rtt))); }
   void feed(const Bytes& plain) { receiver.datagram(plain.data(), plain.size(), now, out); }
   void feed(const std::vector<Bytes>& plains) { for (const auto& p : plains) feed(p); }
   void tick() { receiver.tick(now, out); }
@@ -1274,6 +1274,178 @@ void lossRecovery() {
   ++cases;
 }
 
+// parity-v1: a message followed by parity loses a fragment and is whole again without a NACK.
+void parityRules() {
+  const auto parities = [](uint32_t id, const Bytes& message, uint8_t cls = classVideo) {
+    std::vector<Bytes> result; const unsigned count = parityCount(fragmentCount(message.size()));
+    for (unsigned slot = 0; slot < count; ++slot) { Plain p; writeParity(p, cls, id, message, slot, count); result.emplace_back(p.bytes.data(), p.bytes.data() + p.size); }
+    return result;
+  };
+  require(parityCount(0) == 0 && parityCount(1) == 1 && parityCount(16) == 1 && parityCount(17) == 2 && parityCount(52) == 4 && parityCount(256) == 16 && parityCount(2048) == 16, "The number of parities for a message");
+  {  // The datagram: a full plaintext, the fields where the contract puts them.
+    const Bytes message = video(10, 3 * fragmentPayload + 88); Plain p; writeParity(p, classRecovery, 0x01020304, message, 0, 1);
+    require(p.size == maxPlaintext && p.bytes[0] == kindParity && p.bytes[1] == classRecovery && get32(&p.bytes[2]) == 0x01020304 && get16(&p.bytes[6]) == 100 && get16(&p.bytes[8]) == 4, "PARITY layout");
+    Parity parsed; require(parseParity(p.bytes.data(), p.size, parsed) && parsed.cls == classRecovery && parsed.id == 0x01020304 && parsed.count == 4 && parsed.slot == 0 && parsed.parities == 1 && parsed.lastSize == 100, "PARITY did not parse back");
+    const Bytes big = video(10, 40 * fragmentPayload); writeParity(p, classVideo, 7, big, 2, 3);
+    require(p.bytes[1] == (classVideo | 2 << 4) && get16(&p.bytes[6]) == (2 << 11 | 12) && parseParity(p.bytes.data(), p.size, parsed) && parsed.slot == 2 && parsed.parities == 3 && parsed.lastSize == 12, "PARITY slot and last size");
+    Bytes bad(p.bytes.data(), p.bytes.data() + p.size);
+    const auto refused = [&](size_t at, uint8_t value, const char* why) { Bytes b = bad; b[at] = value; Parity q; require(!parseParity(b.data(), b.size(), q), why); };
+    refused(1, classAudio | 2 << 4, "Sound parity parsed"); refused(1, 3 | 2 << 4, "An unknown class parsed"); refused(1, classVideo | 1 << 4, "A parity count that is not the contract's parsed");
+    refused(6, 3 << 3, "A slot past the parities parsed");
+    { Bytes b = bad; put32(&b[2], 0); Parity q; require(!parseParity(b.data(), b.size(), q), "Message 0 parsed"); }
+    { Bytes b = bad; put16(&b[6], uint16_t(2 << 11)); Parity q; require(!parseParity(b.data(), b.size(), q), "A last fragment of no bytes parsed"); }
+    { Bytes b = bad; put16(&b[6], uint16_t(2 << 11 | (fragmentPayload + 1))); Parity q; require(!parseParity(b.data(), b.size(), q), "A last fragment larger than a payload parsed"); }
+    { Bytes b = bad; b.pop_back(); Parity q; require(!parseParity(b.data(), b.size(), q), "A short parity parsed"); }
+  }
+  // Every single fragment of messages of many sizes, lost and rebuilt to the same bytes.
+  for (const size_t size : {size_t(40), fragmentPayload - 12, fragmentPayload + 500, 16 * fragmentPayload - 12, 16 * fragmentPayload + 1, 52 * fragmentPayload - 700, 150 * fragmentPayload + 3}) {
+    const Bytes message = video(20, size, false, 1, uint32_t(size)); const auto parts = split(classVideo, 2, message); const auto extra = parities(2, message);
+    for (size_t lost = 0; lost < parts.size(); lost += parts.size() > 40 ? 7 : 1) {
+      Client c(8000, 1, true); c.feed(split(classVideo, 1, video(10, 100, true))); c.clear();
+      for (size_t i = 0; i < parts.size(); ++i) if (i != lost) c.feed(parts[i]);
+      require(!c.videos(), "A message with a fragment missing was delivered");
+      c.feed(extra);
+      require(c.videos() == 1 && c.out.messages[0].bytes == message && c.receiver.rebuilt() == 1, "A lost fragment was not rebuilt from parity to the same bytes");
+      c.at(c.now + 100000); require(!c.controls(kindNack) && !c.controls(kindKeyframe) && !c.receiver.gaps(), "A rebuilt fragment was asked for again");
+    }
+    // The last fragment alone, lost: its size comes from the parity.
+    { Client c(8000, 1, true); c.feed(split(classVideo, 1, video(10, 100, true))); c.clear();
+      for (size_t i = 0; i + 1 < parts.size(); ++i) c.feed(parts[i]);
+      c.feed(extra); require(c.videos() == 1 && c.out.messages[0].bytes == message, "The last fragment was not rebuilt to its own size"); }
+  }
+  {  // As many lost in a row as there are parities: all rebuilt. Two of one class: neither, and NACK goes as before.
+    const Bytes message = video(20, 52 * fragmentPayload - 700, false, 1, 9); const auto parts = split(classVideo, 2, message); const auto extra = parities(2, message);
+    require(extra.size() == 4, "Fixture: four parities");
+    Client c(8000, 1, true); c.feed(split(classVideo, 1, video(10, 100, true))); c.clear();
+    for (size_t i = 0; i < parts.size(); ++i) if (i < 20 || i > 23) c.feed(parts[i]);
+    c.feed(extra); require(c.videos() == 1 && c.out.messages[0].bytes == message && c.receiver.rebuilt() == 4, "A run of four lost fragments was not rebuilt");
+    Client d(8000, 1, true); d.feed(split(classVideo, 1, video(10, 100, true))); d.clear();
+    for (size_t i = 0; i < parts.size(); ++i) if (i != 20 && i != 24 && i != 30) d.feed(parts[i]);
+    d.feed(extra); require(!d.videos() && d.receiver.rebuilt() == 1, "Two lost fragments of one class: the third was not rebuilt, or the two were not left to NACK");
+    d.at(d.now + 10000); const auto nacks = d.taken(kindNack);
+    require(nacks.size() == 1 && nacks[0][1] == 2 && get32(&nacks[0][2]) == 2 && get16(&nacks[0][6]) == 20 && get16(&nacks[0][14]) == 24, "The fragments parity could not rebuild were not asked for");
+    // The repair of one lets the parity rebuild the other.
+    d.clear(); d.feed(parts[24]); require(d.videos() == 1 && d.out.messages[0].bytes == message && d.receiver.rebuilt() == 2, "A repair did not let the waiting parity rebuild the other fragment");
+  }
+  {  // Fragment 0 rebuilt: the message is named by it, so a key frame ends a wait as one that arrived does.
+    Client c(8000, 1, true); const auto lostP = split(classVideo, 1, video(10, 5000)); c.feed(lostP[0]); c.feed(lostP[2]); c.at(c.now + 90000); require(c.receiver.awaitingKey(), "Fixture: a key wait"); c.clear();
+    const Bytes key = video(20, 3000, true); const auto parts = split(classVideo, 2, key);
+    c.feed(parts[1]); c.feed(parts[2]); c.feed(parities(2, key));
+    require(c.videos() == 1 && c.out.messages[0].key && c.out.messages[0].bytes == key && !c.receiver.awaitingKey(), "A key frame whose first fragment was rebuilt did not end the wait");
+  }
+  {  // A one-fragment message lost whole: its parity is its copy.
+    Client c(8000, 1, true); c.feed(split(classVideo, 1, video(10, 100, true))); c.clear();
+    const Bytes small = video(20, 300); c.feed(parities(2, small));
+    require(c.videos() == 1 && c.out.messages[0].bytes == small && c.receiver.rebuilt() == 1, "A message lost whole was not rebuilt from its parity");
+    // Parity that comes for a whole message, twice, or late, changes nothing.
+    c.clear(); const Bytes next = video(30, 2000); c.feed(split(classVideo, 3, next)); require(c.videos() == 1, "Fixture: a whole message");
+    c.clear(); c.feed(parities(3, next)); c.feed(parities(3, next)); c.feed(parities(2, small));
+    require(!c.videos() && c.receiver.rebuilt() == 1 && c.receiver.parities() == 4 && !c.receiver.gaps(), "Parity of a delivered message did something");
+  }
+  {  // The client says what it takes once a second, with what it has rebuilt; a client made without parity never does.
+    Client c(8000, 1, true); c.tick();
+    auto said = c.taken(kindAbilities);
+    require(said.size() == 1 && said[0].size() == abilitiesBytes && !said[0][1] && get16(&said[0][2]) == abilityParity && get32(&said[0][4]) == 0, "ABILITIES layout");
+    c.clear(); c.at(c.now + abilitiesIntervalUs - 1000); require(!c.controls(kindAbilities), "ABILITIES repeated early");
+    c.at(c.now + 1000); require(c.controls(kindAbilities) == 1, "ABILITIES did not repeat");
+    Client old; old.tick(); old.at(old.now + 3 * abilitiesIntervalUs); require(!old.controls(kindAbilities), "A client that takes no parity said it does");
+    // What it counts as repaired: a rebuilt fragment whose own datagram did not come either. A parity that
+    // overtook its fragment on the way rebuilt it too, and that fragment was not lost.
+    Client r(8000, 1, true); r.feed(split(classVideo, 1, video(10, 100, true))); r.tick(); r.clear();
+    const Bytes first = video(20, 3000), second = video(30, 3000); const auto a = split(classVideo, 2, first), b = split(classVideo, 3, second);
+    r.feed(a[0]); r.feed(a[2]); r.feed(parities(2, first)); require(r.videos() == 1 && r.receiver.rebuilt() == 1 && r.receiver.repaired() == 0, "Fixture: one rebuilt");
+    r.feed(a[1]);  // its own datagram, late: the message is delivered already
+    r.feed(b[0]); r.feed(b[1]); r.feed(parities(3, second)); require(r.videos() == 2 && r.receiver.rebuilt() == 2, "Fixture: another rebuilt");
+    r.at(r.now + repairedAfterUs - 1000); require(r.receiver.repaired() == 0, "A rebuilt fragment counted as lost before its own datagram could have come");
+    r.at(r.now + 1000); require(r.receiver.repaired() == 1, "A fragment that never came did not count as repaired, or one that came late did");
+    r.clear(); r.at(r.now + abilitiesIntervalUs); const auto counted = r.taken(kindAbilities); require(counted.size() == 1 && get32(&counted[0][4]) == 1, "ABILITIES does not carry the repaired count");
+  }
+  // Host: parity only for a client that asked, only while the path loses, right behind each message.
+  const Bytes asks = [] { Bytes b(abilitiesBytes); b[0] = kindAbilities; put16(&b[2], abilityParity); return b; }();
+  const auto run = [&](Sender& sender, uint64_t& now, const Bytes& message, bool key = false) {
+    std::vector<Bytes> sent; require(sender.video(message, key).queued, "Fixture: the message was not queued");
+    Plain p; const uint64_t until = now + 200000;
+    while (now < until) { while (sender.next(now, p)) if (p.bytes[0] != kindTail) sent.emplace_back(p.bytes.data(), p.bytes.data() + p.size); now += 500; }
+    return sent;
+  };
+  {
+    auto sender = provenSender(); uint64_t now = 1000; const Bytes message = video(10, 20 * fragmentPayload, true);
+    auto sent = run(sender, now, message, true);
+    require(sent.size() == 21 && sender.stats().parities == 0, "Parity went to a client that never asked");
+    sender.control(asks.data(), asks.size(), now);
+    sent = run(sender, now, video(20, 20 * fragmentPayload));
+    require(sent.size() == 21 && sender.stats().parities == 0, "Parity went on a path that showed no loss");
+    const auto nack = nackFor(2, 3, 1); sender.control(nack.data(), nack.size(), now);
+    sent = run(sender, now, video(30, 20 * fragmentPayload + 40));
+    // 21 fragments, then two parities, then nothing else of this message; the repair asked for went first.
+    require(sent.size() == 24 && sent[0][0] == kindFragment && get32(&sent[0][2]) == 2 && get16(&sent[0][6]) == 3, "The repair did not go first");
+    for (size_t i = 1; i <= 21; ++i) require(sent[i][0] == kindFragment && get32(&sent[i][2]) == 3 && get16(&sent[i][6]) == i - 1, "The fragments did not go in order before the parity");
+    require(sent[22][0] == kindParity && sent[23][0] == kindParity && get32(&sent[22][2]) == 3 && get16(&sent[22][6]) >> 11 == 0 && get16(&sent[23][6]) >> 11 == 1 && sender.stats().parities == 2, "The parities did not follow their message in order");
+    // What it sends is what a client rebuilds from: fragment 5 and the last one, lost.
+    { Client c(8000, 1, true); c.feed(split(classVideo, 1, video(1, 100, true))); c.feed(split(classVideo, 2, video(2, 100))); c.clear();
+      for (size_t i = 1; i < sent.size(); ++i) if (i != 6 && i != 21) c.feed(sent[i]);
+      require(c.videos() == 1 && c.out.messages[0].bytes == video(30, 20 * fragmentPayload + 40) && c.receiver.rebuilt() == 2, "A client did not rebuild from the Host's own parity"); }
+    // A key frame is in flight until its parity has left too, and its TAIL follows that.
+    require(sender.video(video(40, 20 * fragmentPayload, true), true).queued, "Fixture: a key frame");
+    Plain p; size_t fragmentsOut = 0; while (fragmentsOut < 20) { if (sender.next(now, p)) fragmentsOut += p.bytes[0] == kindFragment; else now += 500; }
+    const Bytes keyRequest = [] { Bytes b(keyframeBytes); b[0] = kindKeyframe; put16(&b[2], 1); return b; }();
+    require(!sender.control(keyRequest.data(), keyRequest.size(), now).keyFrame, "A key request during a key frame's parity was not merged");
+    { const uint64_t until = now + 100000; while (now < until) { while (sender.next(now, p)) {} now += 500; } }  // its parity leaves
+    // (That request ended the trial: the client gave a frame up.) A loss starts a trial of ten seconds; parity
+    // goes on past it only while the client says it repairs losses.
+    now += parityHoldUs + 1000000; sender.control(nack.data(), nack.size(), now);
+    now += 5000000; sent = run(sender, now, video(50, 20 * fragmentPayload)); require(sent.size() == 23, "Parity stopped within its trial");
+    now += parityHoldUs; sent = run(sender, now, video(60, 20 * fragmentPayload)); require(sent.size() == 21, "Parity went on after a trial that repaired nothing");
+    Bytes counted = asks; put32(&counted[4], 5); sender.control(counted.data(), counted.size(), now);
+    sent = run(sender, now, video(70, 20 * fragmentPayload)); require(sent.size() == 23, "A loss the client repaired from parity did not keep parity on");
+    sender.control(counted.data(), counted.size(), now + parityHoldUs / 2); now += parityHoldUs + 1000000;
+    sent = run(sender, now, video(80, 20 * fragmentPayload)); require(sent.size() == 21, "The same count again kept parity on");
+    Bytes none(abilitiesBytes); none[0] = kindAbilities; put32(&none[4], 9); sender.control(none.data(), none.size(), now);
+    sent = run(sender, now, video(90, 20 * fragmentPayload)); require(sent.size() == 21, "Parity went to a client that takes none");
+    // A trial that repaired nothing is not tried again within the hold, whatever is lost meanwhile.
+    { auto again = provenSender(); uint64_t at = 1000; again.control(asks.data(), asks.size(), at); again.control(nack.data(), nack.size(), at);
+      require(run(again, at, video(10, 20 * fragmentPayload, true), true).size() == 23, "A loss did not start a trial");
+      at = 1000 + parityTrialUs + 1000; require(run(again, at, video(20, 20 * fragmentPayload)).size() == 21, "The trial did not end");
+      at = 1000 + parityHoldUs / 2; again.control(nack.data(), nack.size(), at);
+      { const auto sent2 = run(again, at, video(30, 20 * fragmentPayload)); size_t parity = 0; for (const auto& d : sent2) parity += d[0] == kindParity; require(!parity, "A second trial began within the hold"); }
+      at = 1000 + parityHoldUs + 1000; again.control(nack.data(), nack.size(), at);
+      { const auto sent3 = run(again, at, video(40, 20 * fragmentPayload)); size_t parity = 0; for (const auto& d : sent3) parity += d[0] == kindParity; require(parity == 2, "No trial after the hold"); } }
+    // A frame given up (the client asks for a key frame or reports a LOSS) is a full queue or a blackout: parity ends at once and stays off for the backoff.
+    { auto gave = provenSender(); uint64_t at = 1000; gave.control(asks.data(), asks.size(), at); gave.control(nack.data(), nack.size(), at);
+      const auto parityIn = [](const std::vector<Bytes>& sent) { size_t n = 0; for (const auto& d : sent) n += d[0] == kindParity; return n; };
+      require(parityIn(run(gave, at, video(10, 20 * fragmentPayload, true), true)) == 2, "Fixture: a trial");
+      { Bytes loss(lossBytes); loss[0] = kindLoss; put16(&loss[2], 1); put32(&loss[4], 9); put64(&loss[8], 20); gave.control(loss.data(), loss.size(), at); }
+      require(!parityIn(run(gave, at, video(20, 20 * fragmentPayload))), "Parity went on after the client gave a frame up");
+      Bytes repairs = asks; put32(&repairs[4], 3); gave.control(repairs.data(), repairs.size(), at); gave.control(nack.data(), nack.size(), at);
+      require(!parityIn(run(gave, at, video(30, 20 * fragmentPayload))), "Parity came back within the backoff");
+      at += parityBackoffUs; put32(&repairs[4], 4); gave.control(repairs.data(), repairs.size(), at);
+      require(parityIn(run(gave, at, video(40, 20 * fragmentPayload))) == 2, "Parity did not come back after the backoff"); }
+    // A target the rate controller lowers is a path that carries less: the same.
+    { auto lowered = provenSender(); uint64_t at = 1000; lowered.control(asks.data(), asks.size(), at); lowered.control(nack.data(), nack.size(), at);
+      const auto parityIn = [](const std::vector<Bytes>& sent) { size_t n = 0; for (const auto& d : sent) n += d[0] == kindParity; return n; };
+      require(parityIn(run(lowered, at, video(10, 20 * fragmentPayload, true), true)) == 2, "Fixture: a trial");
+      lowered.setTarget(19500000, at); require(parityIn(run(lowered, at, video(20, 20 * fragmentPayload))) == 2, "A target lowered by a fortieth ended parity");
+      lowered.setTarget(21000000, at); require(parityIn(run(lowered, at, video(30, 20 * fragmentPayload))) == 2, "A raised target ended parity");
+      lowered.setTarget(18000000, at); require(!parityIn(run(lowered, at, video(40, 20 * fragmentPayload))), "Parity went on while the rate controller lowered the target");
+      lowered.setTarget(20000000, at); lowered.control(nack.data(), nack.size(), at);
+      require(!parityIn(run(lowered, at, video(50, 20 * fragmentPayload))), "Parity came back within the backoff after a lowered target"); }
+    // A second in which a twentieth of what was sent did not arrive is a full queue: the same. A hundredth is not.
+    { auto full = provenSender(); uint64_t at = 1000; full.control(asks.data(), asks.size(), at); full.control(nack.data(), nack.size(), at);
+      const auto parityIn = [](const std::vector<Bytes>& sent) { size_t n = 0; for (const auto& d : sent) n += d[0] == kindParity; return n; };
+      uint32_t received = 0; const auto second = [&](double share) {  // a second of frames, and the FEEDBACK that reports that share of them arrived
+        const uint64_t before = full.stats().datagrams; size_t parity = 0;
+        for (int n = 0; n < 5; ++n) parity += parityIn(run(full, at, video(uint64_t(at), 60 * fragmentPayload)));
+        received += uint32_t(double(full.stats().datagrams - before) * share); const auto f = feedbackFor(received); full.control(f.data(), f.size(), at); return parity; };
+      require(second(1.0) == 20, "Fixture: a trial");
+      require(second(0.99) == 20 && second(0.99) == 20, "A hundredth lost ended parity");
+      (void)second(0.95); require(second(1.0) == 0, "Parity went on though a twentieth of the datagrams did not arrive"); }
+    // Before the address proof nothing counts.
+    Sender unproven(20000000, 0, fixedRandom); unproven.control(asks.data(), asks.size(), 0); unproven.control(nack.data(), nack.size(), 0);
+    require(unproven.stats().parities == 0, "An unproven sender took an ABILITIES");
+  }
+  ++cases;
+}
+
 void backoff() {
   ProbeBackoff b; uint64_t now = 1000; require(b.mayProbe(now), "A new session could not probe");
   for (uint64_t delay : {30, 60, 120, 240, 300, 300, 300}) {
@@ -1459,11 +1631,14 @@ struct Scenario {
   // what comes, from either side (field 2026-11-24: a relay socket held to 0.4 MB by the kernel
   // dropped 17,862 datagrams in 44 minutes, media and the client's requests alike).
   double clumpPct = 0; uint64_t clumpEveryUs = 0, clumpUs = 0;
+  bool parity = false;  // the client asks for parity (parity-v1)
 };
 struct Result {
   int generated = 0, delivered = 0, idrs = 0, keysDelivered = 0, keyRequests = 0, giveUps = 0, recoveries = 0, longWaits = 0;
   uint64_t stallUs = 0, longestKeyWaitUs = 0, gaveUpAfterUs = 0, repairs = 0, refused = 0, nacks = 0, mediaDatagrams = 0, bytesToAddress = 0, videoBytes = 0, waitUs = 0;
   double overheadPct = 0; bool gaveUp = false, proven = false;
+  // parity-v1: frames that reached the decoder later than the path and its pacing explain; parity sent and used.
+  int late = 0; uint64_t lateUs = 0, parities = 0, parityBytes = 0, rebuilt = 0, wireBytes = 0;
 };
 class Link {
  public:
@@ -1502,13 +1677,14 @@ class Link {
 // noise (x264-reference-recovery in x264_encoder_test.cpp), so 6 is the pessimistic end.
 // A wait this long reached the client's second request (keyframeIntervalUs): the first answer never came.
 constexpr uint64_t longWaitUs = 400000;
+constexpr uint64_t lateAfterUs = 12000;
 Result simulate(const Scenario& s, uint64_t seed, bool recovery = false) {
   const double recoveryScale = s.recoveryScale;
   Result result; Pair keys; constexpr int target = 20000000; constexpr uint64_t frameUs = 16667, audioUs = 10000;
   Link forward(seed, s, s.linkMbps * 1e6, true), reverse(seed + 1, s, s.linkMbps * 1e6, false); std::mt19937_64 sizes(seed + 2);
   std::mt19937_64 challenges(seed + 3); Sender sender(target, 1000, [&] { return challenges() | 1; });
-  Receiver receiver(1, 1000); Receiver::Output out; PathState path; Plain plain;
-  std::vector<Bytes> sentFrames; std::vector<bool> answers; uint64_t nextFrame = 1000, nextAudio = 1000, lastDelivered = 0, audioPts = 1, waitingSince = 0; bool forceIdr = true, answerNext = false, widened = false; int64_t lastFrame = -1; uint8_t sealed[maxDatagram], opened[maxPlaintext];
+  Receiver receiver(1, 1000, s.parity); Receiver::Output out; PathState path; Plain plain;
+  std::vector<Bytes> sentFrames; std::vector<bool> answers; std::vector<uint64_t> madeAt; uint64_t nextFrame = 1000, nextAudio = 1000, lastDelivered = 0, audioPts = 1, waitingSince = 0; bool forceIdr = true, answerNext = false, widened = false; int64_t lastFrame = -1; uint8_t sealed[maxDatagram], opened[maxPlaintext];
   const auto byFrame = [&](uint64_t pts) { return int64_t(pts / frameUs) - 1; };
   uint64_t now = 1000;
   for (; now < s.runUs; now += 100) {
@@ -1519,7 +1695,7 @@ Result simulate(const Scenario& s, uint64_t seed, bool recovery = false) {
       // Offered whether or not the Host would: the Sender itself must refuse before the proof.
       const bool key = forceIdr, answer = !key && answerNext; const int frame = int(sentFrames.size());
       const size_t pSize = 24000 + size_t(sizes() % 12000), size = key ? s.idrBytes : answer ? size_t(double(pSize) * recoveryScale) : pSize;
-      sentFrames.push_back(video(uint64_t(frame + 1) * frameUs + 5, size, key, 1, uint32_t(frame))); answers.push_back(answer);
+      sentFrames.push_back(video(uint64_t(frame + 1) * frameUs + 5, size, key, 1, uint32_t(frame))); answers.push_back(answer); madeAt.push_back(now);
       const auto admitted = sender.video(sentFrames.back(), key, answer);
       if (sender.proven()) {
         ++result.generated;
@@ -1555,6 +1731,8 @@ Result simulate(const Scenario& s, uint64_t seed, bool recovery = false) {
       require(acceptVideo(path, Path::udp, m.epoch, m.key, m.pts), "The path rule refused a UDP frame");
       if (lastDelivered) result.stallUs = std::max(result.stallUs, now - lastDelivered);
       lastDelivered = now; lastFrame = frame; ++result.delivered; result.keysDelivered += m.key;
+      // Half the round trip, the link's own jitter and a frame's pacing: 12 ms more than that is a repair's wait.
+      if (!m.key && !answers[size_t(frame)]) { const uint64_t took = now - madeAt[size_t(frame)], due = s.rttUs / 2 + lateAfterUs; if (took > due) { ++result.late; result.lateUs += took - due; } }
     }
     out.messages.clear();
     reverse.arrive(now, [&](const Bytes& d) {
@@ -1572,6 +1750,7 @@ Result simulate(const Scenario& s, uint64_t seed, bool recovery = false) {
   result.proven = sender.proven();
   result.overheadPct = 100.0 * double(sender.stats().repairBytes) / double(std::max<uint64_t>(sender.stats().videoBytes, 1));
   result.repairs = sender.stats().repairs; result.refused = sender.stats().refused; result.videoBytes = sender.stats().videoBytes + sender.stats().repairBytes;
+  result.parities = sender.stats().parities; result.parityBytes = sender.stats().parityBytes; result.rebuilt = receiver.repaired(); result.wireBytes = sender.stats().wireBytes;
   return result;
 }
 
@@ -1619,6 +1798,43 @@ void recoverySimulation() {
     // and 20, with 14% and 16% less time waited. The Host without recovery is asked as before.
     if (seeds == 5 && s.name == "RTT 8 ms, clumps 30%") require(sum[1].longWaits <= 8 && sum[1].waitUs <= 18500000, "Lost requests waited out the whole interval again (clumps 30%)");
     if (seeds == 5 && s.name == "RTT 8 ms, clumps 60%") require(sum[1].longWaits <= 30 && sum[1].waitUs <= 24000000, "Lost requests waited out the whole interval again (clumps 60%)");
+  }
+  ++cases;
+}
+
+// parity-v1 against NACK alone on the same links: how many frames reach the decoder late, and what it costs.
+void paritySimulation() {
+  std::vector<Scenario> scenarios;
+  for (const double loss : {0.05, 0.2, 0.5, 1.0, 3.0}) { Scenario s; char name[40]; std::snprintf(name, sizeof(name), "RTT 8 ms, %.2f%%", loss); s.name = name; s.lossPct = loss; s.rttUs = 8000; s.idrBytes = 60000; s.recoveryScale = 1.5; scenarios.push_back(s); }
+  { Scenario s; s.name = "RTT 30 ms, 0.50%"; s.lossPct = 0.5; s.idrBytes = 60000; s.recoveryScale = 1.5; scenarios.push_back(s); }
+  { Scenario s; s.name = "RTT 8 ms, bursts"; s.bursts = true; s.rttUs = 8000; s.idrBytes = 60000; s.recoveryScale = 1.5; scenarios.push_back(s); }
+  { Scenario s; s.name = "RTT 8 ms, no loss"; s.rttUs = 8000; s.idrBytes = 60000; s.recoveryScale = 1.5; scenarios.push_back(s); }
+  { Scenario s; s.name = "RTT 8 ms, 18 Mbps link"; s.rttUs = 8000; s.linkMbps = 18; s.queueUs = 30000; s.idrBytes = 60000; s.recoveryScale = 1.5; scenarios.push_back(s); }
+  char text[8] = {}; size_t length = 0; getenv_s(&length, text, sizeof(text), "UDP_SIM_SEEDS");
+  const int seeds = length > 1 ? std::clamp(std::atoi(text), 1, 200) : 5;
+  std::printf("PARITY, %d seeds summed, a Host that answers LOSS with recovery frames. Late: a frame at the decoder more than 12 ms past half the round trip.\n", seeds);
+  std::printf("%-24s %-7s %13s %7s %9s %7s %8s %8s %8s %6s %8s %9s\n", "case", "parity", "frames", "late", "late ms", "NACKs", "repairs", "parities", "repaired", "IDRs", "wait ms", "wire MB");
+  for (auto s : scenarios) {
+    Result sum[2];
+    for (int k = 0; k < 2; ++k) for (int seed = 0; seed < seeds; ++seed) {
+      s.parity = k == 1;
+      const Result r = simulate(s, 0x9a17 + uint64_t(seed) * 104729, true);
+      sum[k].delivered += r.delivered; sum[k].generated += r.generated; sum[k].late += r.late; sum[k].lateUs += r.lateUs; sum[k].nacks += r.nacks; sum[k].repairs += r.repairs;
+      sum[k].parities += r.parities; sum[k].rebuilt += r.rebuilt; sum[k].idrs += r.idrs; sum[k].waitUs += r.waitUs; sum[k].wireBytes += r.wireBytes; sum[k].parityBytes += r.parityBytes; sum[k].giveUps += r.giveUps;
+    }
+    for (int k = 0; k < 2; ++k) {
+      char frames[32]; std::snprintf(frames, sizeof(frames), "%d/%d", sum[k].delivered, sum[k].generated);
+      std::printf("%-24s %-7s %13s %7d %9.1f %7llu %8llu %8llu %8llu %6d %8.1f %9.2f\n", s.name.c_str(), k ? "on" : "off", frames, sum[k].late, double(sum[k].lateUs) / 1000,
+        static_cast<unsigned long long>(sum[k].nacks), static_cast<unsigned long long>(sum[k].repairs), static_cast<unsigned long long>(sum[k].parities), static_cast<unsigned long long>(sum[k].rebuilt), sum[k].idrs, double(sum[k].waitUs) / 1000, double(sum[k].wireBytes) / 1e6);
+    }
+    require(!sum[0].parities && !sum[0].rebuilt, "A client that did not ask got parity");
+    if (s.lossPct == 0 && !s.bursts && s.linkMbps == 100) require(!sum[1].parities, "Parity went on a path that loses nothing");
+    // Where single datagrams are lost, parity takes most of the late frames away, for under a tenth more on the wire.
+    if (seeds == 5 && s.rttUs == 8000 && s.lossPct >= 0.2 && s.lossPct <= 1.0) {
+      require(sum[1].late * 3 <= sum[0].late, "Parity did not cut the late frames to a third");
+      require(double(sum[1].wireBytes) <= double(sum[0].wireBytes) * 1.10, "Parity cost more than a tenth of the wire bytes");
+      require(sum[1].delivered >= sum[0].delivered - sum[0].delivered / 100, "Parity delivered fewer frames");
+    }
   }
   ++cases;
 }
@@ -1698,11 +1914,12 @@ int main() {
   try {
     // UDP_SIM_ONLY=recovery: the recovery table alone, for a one-off measurement.
     char only[16] = {}; size_t onlyLength = 0; getenv_s(&onlyLength, only, sizeof(only), "UDP_SIM_ONLY");
+    if (std::string(only) == "parity") { paritySimulation(); std::cout << "udp-media: parity table only\n"; return 0; }
     if (std::string(only) == "recovery") { recoverySimulation(); std::cout << "udp-media: recovery table only\n"; return 0; }
     rfc7748(); rfc5869(); nistGcm(); keySchedule(); framingLayout(); tamper(); replay(); retransmissionTakesNewSequence();
     fragments(); inOrderDelivery(); nackTiming(); rttFromTail(); giveUpDeadline(); dropUntilKey(); keyFrameRules(); epochs(); tailHandling();
-    feedbackTiming(); audioRules(); pacer(); resendBuffer(); repairBudget(); tailTiming(); silence(); addressProof(); keyFrameMerging(); lossRecovery(); resendMemory(); backoff(); sendQueue(); pathRule();
-    maliciousPlaintext(); windowBounds(); fuzz(); simulation(); recoverySimulation(); aesCost();
+    feedbackTiming(); audioRules(); pacer(); resendBuffer(); repairBudget(); tailTiming(); silence(); addressProof(); keyFrameMerging(); lossRecovery(); parityRules(); resendMemory(); backoff(); sendQueue(); pathRule();
+    maliciousPlaintext(); windowBounds(); fuzz(); simulation(); recoverySimulation(); paritySimulation(); aesCost();
     std::cout << "udp-media: " << cases << " cases, " << checks << " checks passed\n";
     return 0;
   } catch (const std::exception& error) {

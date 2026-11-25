@@ -261,6 +261,10 @@ const streamStatsFields = <String>{
   'udpQueueWaits',
   'udpQueueSkips',
   'udpNacks',
+  // parity-v1 (the leg's lifetime): parity datagrams that came, and lost
+  // fragments rebuilt from them without a NACK.
+  'udpParities',
+  'udpRepaired',
   // stream-stall-v1: displayed-video gaps of 250 ms or more in the window and
   // the longest (ms); each one is also its own streamStall row.
   'stalls',

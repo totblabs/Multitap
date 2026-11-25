@@ -287,7 +287,7 @@ struct UdpMediaLeg::Impl {
       if (const size_t size = sealer->seal(plain.data(), plain.size(), sealed.data())) {if(const auto endpoint=direct.target(now);grant.direct&&endpoint)DirectSend(*endpoint,sealed.data(),size);else Send(chosen,sealed.data(),size);}
     }
     output.control.clear();
-    if (keys || nacks) { std::lock_guard<std::mutex> lock(mutex); shared.keyRequests += keys; shared.nacks += nacks; }
+    { std::lock_guard<std::mutex> lock(mutex); shared.keyRequests += keys; shared.nacks += nacks; shared.parities = receiver->parities(); shared.repaired = receiver->repaired(); }
   }
 
   void Release(uint64_t now) {

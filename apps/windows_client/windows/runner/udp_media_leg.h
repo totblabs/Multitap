@@ -38,6 +38,8 @@ class UdpMediaLeg {
     // skips to the next key frame (refused, or the queue stayed full), and KEYFRAME and
     // NACK datagrams sent.
     uint32_t queueWaits = 0, queueSkips = 0, keyRequests = 0, nacks = 0;
+    // parity-v1, this leg's lifetime: parity datagrams that came, and lost fragments they repaired.
+    uint32_t parities = 0, repaired = 0;
     UdpPathGate::View path;
     std::optional<std::pair<std::string,uint16_t>> local;
     std::optional<std::pair<std::string,uint16_t>> reflexive;

@@ -176,7 +176,7 @@ Result simulate(const Scenario& s, uint64_t seed) {
         controller.sent(now, true, epoch, pts, size + 12, false);
         if (onUdp) {
           const auto admitted = sender.video(media(idr, epoch, pts, size), idr, recovery);
-          if (admitted.requestKey && now - keyFrameAt >= keyframeIntervalUs / 2) { keyFrameAt = now; ++r.backlogKeys; forceIdr = true; if (const auto value = controller.udpBacklog(now)) sender.setTarget(*value); }
+          if (admitted.requestKey && now - keyFrameAt >= keyframeIntervalUs / 2) { keyFrameAt = now; ++r.backlogKeys; forceIdr = true; if (const auto value = controller.udpBacklog(now)) sender.setTarget(*value, now); }
         }
         if (tile) {  // tiles ride beside the video, outside the encoder's budget
           const size_t tiles = size; controller.sent(now, true, epoch, pts, tiles + 12, true);
@@ -226,13 +226,13 @@ Result simulate(const Scenario& s, uint64_t seed) {
         // As UdpMediaPath: the wire bytes sent since the last report, and the same mean size for what arrived.
         const uint64_t sentWire = sender.stats().wireBytes - wireAt, sentCount = sender.stats().datagrams - datagramsAt; wireAt = sender.stats().wireBytes; datagramsAt = sender.stats().datagrams;
         if (sentCount) meanDatagram = double(sentWire) / double(sentCount);
-        if (onUdp) { (void)controller.udpFeedback(now, c.rttUs, arrived, given, s.arrival ? uint64_t(double(arrived) * meanDatagram) : 0, s.arrival ? sentWire : 0); sender.setTarget(controller.target()); }
+        if (onUdp) { (void)controller.udpFeedback(now, c.rttUs, arrived, given, s.arrival ? uint64_t(double(arrived) * meanDatagram) : 0, s.arrival ? sentWire : 0); sender.setTarget(controller.target(), now); }
       }
       if (c.keyFrame && onUdp && c.epoch == epoch && now - keyFrameAt >= keyframeIntervalUs / 2) { keyFrameAt = now; ++r.clientKeys; forceIdr = true; }
       if (c.loss && c.lastGood && onUdp && c.epoch == epoch && now - lossAt >= 30000) { lossAt = now; sender.recovering(now); answerLoss = true; answerLastGood = c.lastGood; }
     });
     // On WebSocket the controller follows that path (not modelled): it is left as it was.
-    if (now >= nextTick) { nextTick += 100 * ms; if (onUdp) if (const auto value = controller.tick(now)) sender.setTarget(*value); }
+    if (now >= nextTick) { nextTick += 100 * ms; if (onUdp) if (const auto value = controller.tick(now)) sender.setTarget(*value, now); }
     if (now >= secondAt) {
       r.targetMbps.push_back(controller.target() / 1e6); r.sentMbps.push_back(double(sentBytes) * 8 / 1e6); r.arrivedMbps.push_back(double(arrivedBytes) * 8 / 1e6);
       r.lostPerSecond.push_back(lostNow); r.keysPerSecond.push_back(keysNow); r.shownPerSecond.push_back(shownNow); shownNow = 0;
