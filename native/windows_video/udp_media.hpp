@@ -180,13 +180,16 @@ class Receiver {
       // The request itself can be lost, and then nothing is on its way. Field 2026-11-24 (a
       // game through a relay that dropped datagrams in clumps): of 87 requests the Host acted
       // on 80, and each of the others froze the picture 0.58 s, the whole interval, until the
-      // next one. A Host that answers a LOSS with a recovery frame answers it cheaply, and it
-      // merges one that comes while its answer is still due or on its way
-      // (Sender::keyInFlight), so the first repeat of a loss wait need only outlast an answer's
-      // way here. Where the answer is an IDR the interval stays: a plain key wait, and a Host
-      // that has never sent a recovery frame on this path.
+      // next one. So the first repeat of a loss wait need only outlast an answer's way here.
+      // The Host merges a request that comes while its answer is due or on its way
+      // (Sender::keyInFlight), whether that answer is a recovery frame or an IDR, and an
+      // answer that shows here holds the repeat (keyArriving). Until 2026-11-25 only a Host
+      // that had already sent a recovery frame was asked again sooner; but the first LOSS an
+      // encoder gets is always answered with an IDR, so a session with few losses never
+      // got there (field: one lost request in a game, 0.6 s). A plain key wait keeps the
+      // interval.
       fullAt_ = nowUs + keyframeIntervalUs;
-      keyAt_ = nowUs + (lossWait_ && recovers_ ? askAgainDelay() : keyframeIntervalUs);
+      keyAt_ = nowUs + (lossWait_ ? askAgainDelay() : keyframeIntervalUs);
       if (asked_ < 2) ++asked_;
     }
     if (nowUs >= feedbackAt_) { feedback(nowUs, out); feedbackAt_ = nowUs + feedbackIntervalUs; }
@@ -261,7 +264,6 @@ class Receiver {
     if (m.envelope.epoch != epoch_) return;
     // drain lets a recovery frame through a wait only when it may end it.
     if (m.envelope.key || m.recovery) awaitKey_ = lossWait_ = false;
-    if (m.recovery) recovers_ = true;
     // Whole and handed on: a whole frame that is dropped must not read as progress.
     highestWhole_ = uint32_t(next_);
     auto bytes = m.take();
@@ -393,9 +395,8 @@ class Receiver {
   uint16_t epoch_;
   uint64_t feedbackAt_, keyAt_ = 0, echoUs_ = 0, echoAt_ = 0, challenge_ = 0;
   // fullAt_: a full decoder queue asks no sooner than this, across waits (queueFull).
-  // asked_: requests sent in this wait, counted to two. recovers_: the Host has answered a
-  // LOSS with a recovery frame.
-  uint64_t fullAt_ = 0; int asked_ = 0; bool recovers_ = false;
+  // asked_: requests sent in this wait, counted to two.
+  uint64_t fullAt_ = 0; int asked_ = 0;
   uint64_t next_ = 1, closed_ = 0;  // next ID to deliver, and the last known sent in full
   // lossWait_: the wait a recovery frame may end; lastPts_ the newest video this path delivered.
   // answerLost_: an answer to this wait was given up since the last tick.

@@ -861,6 +861,16 @@ void main() {
           publicKey: clientKey,
         );
         await reading();
+        // The session takes the reading on its own timer. On a loaded PC that
+        // timer can fire later than one wait (the full suite, 2026-11-25: the
+        // key was not out yet), so a session that is to speak is waited for.
+        for (
+          var i = 0;
+          i < 20 && marker == true && adaptive && keysSent().isEmpty;
+          i++
+        ) {
+          await reading();
+        }
         return session;
       }
 

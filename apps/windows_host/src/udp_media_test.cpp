@@ -572,7 +572,9 @@ void dropUntilKey() {
   c.clear();
   c.feed(split(classVideo, 3, video(3))); c.feed(split(classVideo, 4, video(4)));
   require(c.out.messages.empty() && !c.receiver.heldBytes(), "A P-frame passed the key wait, or still holds memory");
-  c.at(c.now + 499999); require(!c.controls(kindKeyframe), "KEYFRAME repeated early");
+  // A loss wait (a frame was delivered before): its first repeat goes once an answer could have
+  // come (RTT 20 ms: 120 ms), see lossRecovery.
+  c.at(c.now + 119999); require(!c.controls(kindKeyframe), "KEYFRAME repeated early");
   c.at(c.now + 1); require(c.controls(kindKeyframe) == 1, "KEYFRAME did not repeat");
   c.clear();
   // No gap, no NACK for frames it will drop.
@@ -598,7 +600,8 @@ void keyFrameRules() {
     c.feed(tailFor(3, 1)); const uint64_t closed = c.now;
     c.at(closed + 89999); require(!c.controls(kindKeyframe), "The held repeat went before the give-up");
     c.at(closed + 90000); require(c.controls(kindKeyframe) == 1 && c.receiver.awaitingKey(), "The held repeat did not go at the give-up");
-    c.clear(); c.at(closed + 90000 + 499999); require(!c.controls(kindKeyframe), "The repeat lost its 500 ms after the hold"); c.at(closed + 90000 + 500000); require(c.controls(kindKeyframe) == 1, "The repeat stopped after the hold");
+    // The second request of a loss wait: the next one goes a quarter second on (lossRecovery).
+    c.clear(); c.at(closed + 90000 + 249999); require(!c.controls(kindKeyframe), "The repeat lost its quarter second after the hold"); c.at(closed + 90000 + 250000); require(c.controls(kindKeyframe) == 1, "The repeat stopped after the hold");
   }
   {  // It finishes: no repeat at all.
     Client c(20000); c.feed(split(classVideo, 1, video(1, 100, true))); c.clear();
@@ -1128,15 +1131,22 @@ void lossRecovery() {
     c.at(asked + keyframeIntervalUs); require(!c.controls(kindKeyframe) && !c.controls(kindLoss), "The repeat went while a recovery frame was arriving");
   }
   {  // No answer shows at all: the request may be what was lost (field 2026-11-24: 0.58 s freezes, a
-     // lost request and the whole interval). A Host that has not answered a LOSS with a recovery
-     // frame keeps the interval, its answer being an IDR.
-    Client d(20000); givenUp(d); const uint64_t first = d.now; d.clear(); d.at(first + keyframeIntervalUs - 1000);
-    require(!d.controls(kindKeyframe) && !d.controls(kindLoss), "With no recovery frame ever seen, the repeat went before its interval");
-    d.clear(); d.at(first + keyframeIntervalUs);
-    require(d.controls(kindLoss) == 1 && d.controls(kindKeyframe) == 1 && d.out.control[0][0] == kindLoss, "The repeat dropped LOSS");
-    // The Host answers with a recovery frame. From then on a LOSS left unanswered is asked again
-    // after three round trips and the Host's time to code a frame (RTT 20 ms: 120 ms), once more
-    // a quarter second on, and then every interval.
+     // lost request and the whole interval). The first LOSS an encoder gets is answered with an IDR,
+     // so a Host that has sent no recovery frame yet is asked again as soon as any other (field
+     // 2026-11-25: the one lost request of a game still cost 0.6 s). The Host merges the repeat
+     // into an answer that is due or on its way.
+    Client d(20000); givenUp(d); const uint64_t first = d.now; d.clear(); d.at(first + 119000);
+    require(!d.controls(kindKeyframe) && !d.controls(kindLoss), "With no recovery frame ever seen, the repeat went before an answer could have come");
+    d.clear(); d.at(first + 120000);
+    require(d.controls(kindLoss) == 1 && d.controls(kindKeyframe) == 1 && d.out.control[0][0] == kindLoss, "With no recovery frame ever seen, a LOSS left unanswered waited out the interval, or the repeat dropped LOSS");
+    d.clear(); d.at(first + 120000 + 249000); require(!d.controls(kindLoss) && !d.controls(kindKeyframe), "The second repeat of the first wait went before a quarter second");
+    d.at(first + 120000 + 250000); require(d.controls(kindLoss) == 1 && d.controls(kindKeyframe) == 1, "The second repeat of the first wait did not go a quarter second on");
+    // An IDR that visibly arrives holds the repeat as a recovery frame does.
+    { Client i(20000); givenUp(i); const uint64_t asked = i.now; i.clear(); const auto idr = split(classVideo, 4, video(40, 5000, true)); i.feed(idr[0]);
+      i.at(asked + 120000); i.at(asked + 370000); require(!i.controls(kindLoss) && !i.controls(kindKeyframe), "The repeat went while an IDR was arriving"); }
+    // The Host answers with a recovery frame. The next LOSS left unanswered is asked again the
+    // same way: after three round trips and the Host's time to code a frame (RTT 20 ms: 120 ms),
+    // once more a quarter second on, and then every interval.
     const auto lose = [](Client& c, uint32_t id, uint64_t pts) { c.feed(split(classVideo, id, video(pts))); const auto lost = split(classVideo, id + 1, video(pts + 10, 5000)); c.feed(lost[0]); c.feed(lost[2]); c.clear(); };
     d.clear(); d.feed(split(classRecovery, 4, video(40, 3000))); require(d.videos() == 1 && !d.receiver.awaitingKey(), "The answer did not end the wait");
     lose(d, 5, 50); d.at(d.now + 90000); require(d.controls(kindLoss) == 1, "The next loss was not reported"); const uint64_t second = d.now;
