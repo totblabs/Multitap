@@ -173,10 +173,50 @@ double sessionInterval() {
 }
 }
 
+// frame-cap-v1 on a made-up clock: `arrival(n)` is when the n-th composed frame is there,
+// and each tick starts at the later of that and the cap. Returns the time the last tick
+// began and counts the ticks the cap held back.
+template <class F> Clock::time_point capped(std::chrono::microseconds period, int frames, F arrival, int& held) {
+  host::FrameCap cap; Clock::time_point lastWork{}, tick{}; held = 0;
+  for (int n = 0; n < frames; ++n) {
+    const Clock::time_point frame = arrival(n), earliest = cap.earliest(lastWork, period);
+    if (earliest > frame) ++held;
+    tick = std::max(frame, earliest); lastWork = tick;
+  }
+  return tick;
+}
+void frameCap() {
+  using std::chrono::microseconds;
+  const Clock::time_point start = Clock::time_point{} + std::chrono::seconds(100);
+  for (const int fps : {60, 120, 180}) {
+    const microseconds period(1000000 / fps); int held = 0;
+    // A source that always has a new frame: held to the target and a sixty-fourth, not to ten ninths of it.
+    const auto last = capped(period, 20001, [&](int) { return start; }, held);
+    const double rate = 20000.0 / std::chrono::duration<double>(last - start).count();
+    require(rate <= fps * 1.017 && rate >= fps * 1.010, "A source faster than the target was not held to the target");
+    // Frames a period apart that come up to 4 % early or late: none waits.
+    uint32_t state = 7; const auto jitter = [&] { state = state * 1664525u + 1013904223u; return int64_t(state >> 8) % (period.count() * 8 / 100 + 1) - period.count() * 4 / 100; };
+    capped(period, 20000, [&](int n) { return start + period * n + microseconds(jitter()); }, held);
+    require(held == 0, "A frame that came on time waited for the cap");
+    // A display whose clock runs 1 % fast: never held (holding it would add delay in a sawtooth).
+    capped(period, 200000, [&](int n) { return start + microseconds(int64_t(n) * period.count() * 99 / 100); }, held);
+    require(held == 0, "A source 1 % faster than the target was held back");
+    // 4 % fast, as the field case: held, to within 1.7 % of the target.
+    const auto fast = capped(period, 20001, [&](int n) { return start + microseconds(int64_t(n) * period.count() * 96 / 100); }, held);
+    const double fastRate = 20000.0 / std::chrono::duration<double>(fast - start).count();
+    require(held > 100 && fastRate <= fps * 1.017, "A source 4 % faster than the target was not held to it");
+    // After a pause the first frame starts a tick at once.
+    host::FrameCap cap; Clock::time_point lastWork = start; cap.earliest(lastWork, period);
+    require(cap.earliest(lastWork, period) <= start + period, "The cap moved without a tick");
+    const auto later = start + std::chrono::seconds(3); lastWork = later;
+    require(cap.earliest(lastWork, period) == later + host::captureMinimumGap(period), "After a pause the cap was not the gap after the tick");
+  }
+}
+
 int main() {
   try {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
-    pacer(); watch(); priority(); const double defaultMs = sessionInterval();
+    frameCap(); pacer(); watch(); priority(); const double defaultMs = sessionInterval();
     std::cout << "{\"kind\":\"capture-pacing\",\"checks\":" << checks << ",\"wgcDefaultMinUpdateIntervalMs\":" << defaultMs << ",\"result\":\"pass\"}" << std::endl;
     return 0;
   } catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }

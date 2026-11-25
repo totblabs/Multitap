@@ -86,7 +86,7 @@ Result run(bool event, int trials, bool work, HWND window, bool boost) {
     std::unique_ptr<host::StreamPriority> priority; if (boost) priority = std::make_unique<host::StreamPriority>();
     const int width = 1920, height = 1080; std::vector<uint8_t> bgra(size_t(width) * height * 4), nv12(size_t(width) * height * 3 / 2);
     std::unique_ptr<host::Encoder> encoder; if (work) encoder = std::make_unique<host::Encoder>(width, height, 60, 12000000);
-    host::FramePacer pacer; const auto period = std::chrono::microseconds(1000000 / 60); auto next = Clock::now(); const auto start = next; uint64_t pts = 0, frame = 0;
+    host::FramePacer pacer; host::FrameCap cap; const auto period = std::chrono::microseconds(1000000 / 60); auto next = Clock::now(); const auto start = next; uint64_t pts = 0, frame = 0;
     Clock::time_point lastWork{};  // as the product loop: last tick with a new frame
     ULONG64 cycles0 = 0, cycles1 = 0; QueryThreadCycleTime(GetCurrentThread(), &cycles0);
     while (!stop) {
@@ -114,7 +114,7 @@ Result run(bool event, int trials, bool work, HWND window, bool boost) {
         if (change) encodedAt = Clock::now().time_since_epoch().count();
       }
       const auto now = Clock::now(); next += period; if (next < now) next = now;
-      if (event) { if (pacer.wait(next, std::span<const HANDLE>(&signal, 1), lastWork + host::captureMinimumGap(period))) { next = Clock::now(); ++result.wakes; } }
+      if (event) { if (pacer.wait(next, std::span<const HANDLE>(&signal, 1), cap.earliest(lastWork, period))) { next = Clock::now(); ++result.wakes; } }
       else pacer.wait(next);
     }
     QueryThreadCycleTime(GetCurrentThread(), &cycles1); result.loopCpuMs = double(cycles1 - cycles0) / 1e6;  // megacycles

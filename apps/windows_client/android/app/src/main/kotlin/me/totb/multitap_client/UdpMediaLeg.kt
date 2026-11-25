@@ -35,6 +35,15 @@ internal class UdpReading(
     val keyRequests: Long = 0,
     val stalls: Long = 0,
     val stallCause: Int = 0,
+    /** NACK datagrams sent, parity datagrams that came, and lost fragments parity repaired (parity-v1). */
+    val nacks: Long = 0,
+    val parities: Long = 0,
+    val repaired: Long = 0,
+    /** quick-nack-v1: runs of skipped datagrams by length, datagrams out of order, the longest lateness, the NACK wait now. */
+    val runs: LongArray = LongArray(Udp.SEQUENCE_RUN_BUCKETS),
+    val late: Long = 0,
+    val lateMaxUs: Long = 0,
+    val nackDelayUs: Long = 0,
     val local: InetSocketAddress? = null,
     val directPath: Int = 0,
     val directRttMs: Long = -1,
@@ -89,6 +98,7 @@ internal class UdpMediaLeg(
     private var sealer: UdpSealer? = null
     private var opener: UdpOpener? = null
     private var receiver: UdpReceiver? = null
+    private val track = UdpSequenceTrack()
     private val output = UdpReceiver.Output()
     private val handoff = UdpHandoff { gate.offerUdp(token, it.bytes, it.video, it.key, it.epoch, it.pts) }
     private val opened = ByteArray(Udp.MAX_PLAINTEXT)
@@ -109,6 +119,13 @@ internal class UdpMediaLeg(
     private var keyRequests = 0L
     private var stalls = 0L
     private var stallCause = 0
+    private var nacks = 0L
+    private var parities = 0L
+    private var repaired = 0L
+    private val runs = LongArray(Udp.SEQUENCE_RUN_BUCKETS)
+    private var late = 0L
+    private var lateMaxUs = 0L
+    private var nackDelayUs = 0L
     private var hostKey: ByteArray? = null
     private var failed = false
 
@@ -120,7 +137,7 @@ internal class UdpMediaLeg(
         val path = gate.view()
         synchronized(lock) {
             return UdpReading(report.copy(), running, media, publicKey?.copyOf(), ArrayList(arrivals), audioBytes, gaps, path, failed,
-                keyRequests, stalls, stallCause, local, directPath, directRttMs, relayRttMs, reflexive).also { arrivals.clear(); audioBytes = 0 }
+                keyRequests, stalls, stallCause, nacks, parities, repaired, runs.copyOf(), late, lateMaxUs, nackDelayUs, local, directPath, directRttMs, relayRttMs, reflexive).also { arrivals.clear(); audioBytes = 0 }
         }
     }
 
@@ -276,7 +293,13 @@ internal class UdpMediaLeg(
         val opener = opener
         if ((relay >= 0 && relay != probe.chosen()) || opener == null) return
         val plain = opener.open(data, size, opened)
-        if (plain > 0) { if(grant.direct)synchronized(lock){directPath=if(relay<0)2 else 1};sync(); receiver!!.datagram(opened, plain, now, output); deliver(now) }
+        if (plain > 0) {
+            if(grant.direct)synchronized(lock){directPath=if(relay<0)2 else 1}
+            // quick-nack-v1: the sealer's sequence shows what the path lost in a row and what it
+            // delivered out of order; the receiver's NACK waits no longer than that needs.
+            track.arrived(Udp.get64(data, 9), now); if (track.known()) receiver!!.setReorder(track.lateUs(now))
+            sync(); receiver!!.datagram(opened, plain, now, output); deliver(now)
+        }
     }
 
     private fun keys(probe: UdpProbe, now: Long) {
@@ -346,6 +369,8 @@ internal class UdpMediaLeg(
             if (plain.size == Udp.FEEDBACK_BYTES && plain[0].toInt() == Udp.KIND_FEEDBACK) synchronized(lock) {
                 gaps = Udp.get32(plain, 10)
                 keyRequests = receiver.keyRequests; stalls = receiver.stalls; stallCause = receiver.stallCause
+                nacks = receiver.nacks; parities = receiver.parities; repaired = receiver.repaired
+                track.runs.copyInto(runs); late = track.late; lateMaxUs = track.lateMaxUs; nackDelayUs = receiver.nackDelayUs()
             }
             val size = sealer.seal(plain, plain.size, sealed)
             if (size > 0) { val target = if(grant.direct)direct.target(now) else null; if(target != null)directSend(target,sealed.copyOf(size)) else send(chosen, sealed, size) }
@@ -483,6 +508,10 @@ internal fun udpReadingValue(reading: UdpReading): Map<String, Any> {
         // Why the Host may hear no progress (its 271 cause 3): requests, stalls and the last one's wait.
         report["udpKeyRequests"] = reading.keyRequests; report["udpStalls"] = reading.stalls
         if (reading.stalls > 0) report["udpStallCause"] = reading.stallCause.toLong()
+        report["udpNacks"] = reading.nacks; report["udpParities"] = reading.parities; report["udpRepaired"] = reading.repaired
+        report["udpRuns1"] = reading.runs[0]; report["udpRuns2"] = reading.runs[1]; report["udpRuns4"] = reading.runs[2]
+        report["udpRuns16"] = reading.runs[3]; report["udpRuns64"] = reading.runs[4]; report["udpRunsMore"] = reading.runs[5]
+        report["udpLate"] = reading.late; report["udpLateMaxUs"] = reading.lateMaxUs; report["udpNackDelayUs"] = reading.nackDelayUs
     }
     if(reading.directPath>0){report["udpDirectPath"]=reading.directPath.toLong();if(reading.directRttMs>=0)report["udpDirectRttMs"]=reading.directRttMs;if(reading.relayRttMs>=0)report["udpRelayRttMs"]=reading.relayRttMs}
     // A plain list of ints, never a typed array (see udp_media_channel.h).

@@ -17,6 +17,30 @@ inline std::chrono::microseconds paceLate(std::chrono::steady_clock::time_point 
   const auto from = std::max(entered, target);
   return returned > from ? std::chrono::duration_cast<std::chrono::microseconds>(returned - from) : std::chrono::microseconds::zero();
 }
+// The frame-rate cap of a loop that a newly composed frame wakes. The gap alone
+// (captureMinimumGap) lets a source that composes faster than the target start a tick
+// every nine tenths of a period: 11 % over the rate. Field 2026-11-25, a game on a
+// 180 fps stream: 187 frames a second were encoded and sent, the client's 180 Hz screen
+// could not show the rest, and it skipped 15 to 18 pictures a second. So the cap also
+// keeps a schedule. Each tick that did work moves the time the next is due on by a
+// period less a sixty-fourth, from the later of that tick and the time it was due, and
+// a frame may start a tick up to one period before it is due. Frames that come a period
+// apart, early or late by the gap's tenth, pass exactly as before, and so does a source
+// up to 1.5 % faster than the target (a display's clock is never the Host's; holding
+// that back would add up to a period of delay in a slow sawtooth). A source faster than
+// that is held to 101.6 % of the target once its one period of credit is used up.
+class FrameCap {
+ public:
+  using Clock = std::chrono::steady_clock;
+  // The earliest a new frame may start the next tick. `lastWork`: the last tick that
+  // captured or submitted a frame, as the loop keeps it (idle ticks do not count).
+  Clock::time_point earliest(Clock::time_point lastWork, std::chrono::microseconds period) {
+    if (lastWork != counted_) { counted_ = lastWork; due_ = std::max(lastWork, due_) + (period - period / 64); }
+    return std::max(lastWork + captureMinimumGap(period), due_ - period);
+  }
+ private:
+  Clock::time_point counted_{}, due_{};
+};
 // Paces a capture/encode loop on a high-resolution waitable timer. A loop
 // that owns a WGC capture also passes its frame-arrival events: a newly
 // composed frame then starts the next tick at once instead of waiting for the

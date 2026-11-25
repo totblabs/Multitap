@@ -350,10 +350,10 @@ test('stream-stall-v1 rows survive upload with their fixed fields, are acknowled
     // A session's closing row: only the count of stalls no row carried.
     const closing=sent(4);closing.events[0].values={stallDropped:12};assert.deepEqual(safeClientDiagnosticReport(closing).events[0].values,{stallDropped:12});
     // New statistics-window fields.
-    const window=statsReport(3);Object.assign(window.events[0].values,{stalls:4,stallMaxMs:1029,fpsTarget:45,udpQueueWaits:12,udpQueueSkips:1,udpNacks:30,udpParities:1700,udpRepaired:43});
+    const window=statsReport(3);Object.assign(window.events[0].values,{stalls:4,stallMaxMs:1029,fpsTarget:45,udpQueueWaits:12,udpQueueSkips:1,udpNacks:30,udpParities:1700,udpRepaired:43,udpRuns1:5,udpRuns2:4,udpRuns4:3,udpRuns16:2,udpRuns64:1,udpRunsMore:1,udpLate:7,udpLateMaxUs:3100,udpNackDelayUs:2000});
     receiveClientDiagnostics(store,alice,window,now);
     const stats=clientDiagnostics(store,'pve-149').events.find(e=>e.sequence===3);
-    for(const [key,value] of Object.entries({stalls:4,stallMaxMs:1029,fpsTarget:45,udpQueueWaits:12,udpQueueSkips:1,udpNacks:30,udpParities:1700,udpRepaired:43}))assert.equal(stats.values[key],value,key);
+    for(const [key,value] of Object.entries({stalls:4,stallMaxMs:1029,fpsTarget:45,udpQueueWaits:12,udpQueueSkips:1,udpNacks:30,udpParities:1700,udpRepaired:43,udpRuns1:5,udpRuns2:4,udpRuns4:3,udpRuns16:2,udpRuns64:1,udpRunsMore:1,udpLate:7,udpLateMaxUs:3100,udpNackDelayUs:2000}))assert.equal(stats.values[key],value,key);
     // Many stall rows do not evict a failure.
     const failure=report();failure.sequence=1000;receiveClientDiagnostics(store,alice,failure,now);
     for(let sequence=4;sequence<=PER+72;sequence++)receiveClientDiagnostics(store,alice,sent(sequence),now+sequence);

@@ -68,6 +68,8 @@ class UdpMediaChannel {
       add("udpActivePath", reading.path.active); add("udpFallbacks", reading.path.fallbacks); add("udpGaps", reading.gaps);
       add("udpQueueWaits", reading.queueWaits); add("udpQueueSkips", reading.queueSkips); add("udpKeyRequests", reading.keyRequests); add("udpNacks", reading.nacks);
       add("udpParities", reading.parities); add("udpRepaired", reading.repaired);
+      add("udpRuns1", reading.runs[0]); add("udpRuns2", reading.runs[1]); add("udpRuns4", reading.runs[2]); add("udpRuns16", reading.runs[3]); add("udpRuns64", reading.runs[4]); add("udpRunsMore", reading.runs[5]);
+      add("udpLate", reading.late); add("udpLateMaxUs", reading.lateMaxUs); add("udpNackDelayUs", reading.nackDelayUs);
     }
     if(reading.directPath){add("udpDirectPath",reading.directPath);if(reading.directRttMs>=0)add("udpDirectRttMs",reading.directRttMs);if(reading.relayRttMs>=0)add("udpRelayRttMs",reading.relayRttMs);}
     // A plain list: this codec writes no alignment for an empty typed list, Dart's reader

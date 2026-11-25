@@ -38,8 +38,9 @@ class UdpReceiverTest {
     private val audio = Udp.CLASS_AUDIO
 
     /** A receiver with its output kept, and a clock. A given RTT arrives the only way it can: in a TAIL. */
-    private class Client(rtt: Long = 0, epoch: Int = 1) {
-        val receiver = UdpReceiver(epoch, 1000000)
+    // `parity` false: the cases written before parity-v1 count controls and deadlines without ABILITIES.
+    private class Client(rtt: Long = 0, epoch: Int = 1, parity: Boolean = false) {
+        val receiver = UdpReceiver(epoch, 1000000, parity)
         val out = UdpReceiver.Output()
         var now = 1000000L
         init { if (rtt != 0L) feed(tailFor(0, 1, TEST_CHALLENGE, rtt)) }
@@ -194,8 +195,9 @@ class UdpReceiverTest {
             c.at(gap + 90000); assertTrue(c.receiver.awaitingKey() && c.controls(Udp.KIND_NACK) == 4 && c.controls(Udp.KIND_KEYFRAME) == 1)
             assertEquals(1100000L, c.receiver.nextTickUs())
             c.at(1100000); assertEquals(1200000L, c.receiver.nextTickUs())
-            c.at(1500000); assertEquals("The KEYFRAME repeat is a deadline", 1590000L, c.receiver.nextTickUs())
-            c.at(1590000); assertEquals(2, c.controls(Udp.KIND_KEYFRAME)); assertEquals(1600000L, c.receiver.nextTickUs())
+            // After a loss the first repeat goes three round trips and 60 ms after the request.
+            c.at(1200000); assertEquals("The KEYFRAME repeat is a deadline", 1210000L, c.receiver.nextTickUs())
+            c.at(1210000); assertEquals(2, c.controls(Udp.KIND_KEYFRAME)); assertEquals(1300000L, c.receiver.nextTickUs())
         }
         run {  // A held repeat is no deadline, even when it is overdue: the key frame is arriving.
             val c = Client(20000); c.feed(split(video, 1, videoMessage(1, 100, true))); c.clear()
@@ -295,8 +297,14 @@ class UdpReceiverTest {
         c.clear()
         c.feed(split(video, 3, videoMessage(3))); c.feed(split(video, 4, videoMessage(4)))
         assertTrue(c.out.messages.isEmpty() && c.receiver.heldBytes() == 0L)
-        c.at(c.now + 499999); assertEquals(0, c.controls(Udp.KIND_KEYFRAME))
-        c.at(c.now + 1); assertEquals(1, c.controls(Udp.KIND_KEYFRAME))
+        // The request may be lost: asked again after three round trips and 60 ms, then a
+        // quarter second on, then every interval.
+        c.at(c.now + 119999); assertEquals(0, c.controls(Udp.KIND_KEYFRAME))
+        c.at(c.now + 1); assertEquals("The first repeat after a loss", 1, c.controls(Udp.KIND_KEYFRAME))
+        c.at(c.now + 249999); assertEquals(1, c.controls(Udp.KIND_KEYFRAME))
+        c.at(c.now + 1); assertEquals("The second repeat after a loss", 2, c.controls(Udp.KIND_KEYFRAME))
+        c.at(c.now + 499999); assertEquals(2, c.controls(Udp.KIND_KEYFRAME))
+        c.at(c.now + 1); assertEquals("Later repeats keep the interval", 3, c.controls(Udp.KIND_KEYFRAME))
         c.clear()
         // No gap, no NACK for frames it will drop.
         c.at(c.now + 100000); assertEquals(0, c.controls(Udp.KIND_NACK))
@@ -331,7 +339,8 @@ class UdpReceiverTest {
             c.feed(tailFor(3, 1)); val closed = c.now
             c.at(closed + 89999); assertEquals(0, c.controls(Udp.KIND_KEYFRAME))
             c.at(closed + 90000); assertTrue(c.controls(Udp.KIND_KEYFRAME) == 1 && c.receiver.awaitingKey())
-            c.clear(); c.at(closed + 90000 + 499999); assertEquals(0, c.controls(Udp.KIND_KEYFRAME)); c.at(closed + 90000 + 500000); assertEquals(1, c.controls(Udp.KIND_KEYFRAME))
+            // The second request of this wait: the next goes a quarter second on.
+            c.clear(); c.at(closed + 90000 + 249999); assertEquals(0, c.controls(Udp.KIND_KEYFRAME)); c.at(closed + 90000 + 250000); assertEquals(1, c.controls(Udp.KIND_KEYFRAME))
         }
         run {  // It finishes: no repeat at all.
             val c = Client(20000); c.feed(split(video, 1, videoMessage(1, 100, true))); c.clear()
@@ -343,8 +352,8 @@ class UdpReceiverTest {
         for (waiting in listOf(videoMessage(4), videoMessage(4, 100, true, 0))) {
             val c = Client(20000); c.feed(split(video, 1, videoMessage(1, 100, true))); c.clear()
             val lost = split(video, 2, videoMessage(2, 5000)); c.feed(lost[0]); c.feed(lost[2]); c.at(c.now + 90000); val asked = c.now; c.clear()
-            c.now = asked + 495000; c.feed(split(video, 4, waiting)); assertEquals("Fixture", 2, c.receiver.windowMessages())
-            c.at(asked + 500000); assertEquals(1, c.controls(Udp.KIND_KEYFRAME))
+            c.now = asked + 115000; c.feed(split(video, 4, waiting)); assertEquals("Fixture", 2, c.receiver.windowMessages())
+            c.at(asked + 120000); assertEquals(1, c.controls(Udp.KIND_KEYFRAME))
         }
         run {  // A newer key frame leaves an older one under repair alone: killing it is how IDRs cascade.
             val c = Client(20000); val first = split(video, 1, videoMessage(1, 5000, true)); val second = split(video, 3, videoMessage(3, 5000, true))
@@ -578,7 +587,7 @@ class UdpReceiverTest {
             for (n in 0 until 500000) {
                 val size = random.nextInt(64) + if (n % 16 == 0) random.nextInt(Udp.MAX_PLAINTEXT) else 0
                 val plain = random.nextBytes(size)
-                if (size != 0 && n % 2 == 1) plain[0] = (1 + random.nextInt(5)).toByte()
+                if (size != 0 && n % 2 == 1) plain[0] = (1 + random.nextInt(8)).toByte()
                 c.feed(plain)
                 c.now += 50; if (n % 8 == 0) c.tick()
                 delivered += c.out.messages.size; c.clear()
@@ -610,6 +619,205 @@ class UdpReceiverTest {
                 c.clear()
             }
             assertTrue("The fixture delivered too little: $delivered", delivered > 100)
+        }
+    }
+
+    private fun parityOf(id: Long, message: ByteArray, slot: Int): ByteArray {
+        val out = ByteArray(Udp.MAX_PLAINTEXT)
+        return out.copyOf(Udp.writeParity(out, video, id, message, slot, Udp.parityCount(Udp.fragmentCount(message.size))))
+    }
+    private fun paritiesOf(id: Long, message: ByteArray) = List(Udp.parityCount(Udp.fragmentCount(message.size))) { parityOf(id, message, it) }
+    private fun fnv(bytes: ByteArray): ULong { var h = 1469598103934665603UL; for (b in bytes) { h = h xor (b.toLong() and 0xff).toULong(); h *= 1099511628211UL }; return h }
+
+    // The parity datagrams are the Host's, byte for byte: these are the FNV-1a hashes of what
+    // native/windows_video/udp_media.hpp writeParity writes for the same messages (ID 9).
+    @Test fun parityWire() {
+        val expected = mapOf(
+            100 to listOf(0xcac03a0db11d27fbUL),
+            5000 to listOf(0xc64db82303dafef5UL),
+            40000 to listOf(0x8f9a4833150ed410UL, 0x1b9bd7f244c40c22UL, 0x6ba8cb5d4e42b5a9UL),
+            300000 to listOf(0xb3b03d3c45f8960bUL, 0x98c52c0b466f59e9UL, 0xe975a0902c9a11a1UL, 0x7b3c5b200cc6f4f8UL, 0xd35a51fc86c3a131UL, 0xc10c99f40c57342aUL,
+                0x3b355be8e00e4c7cUL, 0x85d1b4054a63c24bUL, 0xad54285c25871e10UL, 0xf4dae30ced2a6309UL, 0xafe009688a463420UL, 0xd19f714b1d8fbfa8UL,
+                0x7f6a026827df3806UL, 0xadb57ba96e30a87aUL, 0x7e185ae6deb30e36UL, 0x976114b4027c81b6UL))
+        for ((payload, hashes) in expected) {
+            val m = mediaMessage(1, true, 1, 7, payload, 3)
+            assertEquals("Parity count for $payload", hashes.size, Udp.parityCount(Udp.fragmentCount(m.size)))
+            assertEquals("Parity bytes for $payload differ from the Host's", hashes, paritiesOf(9, m).map(::fnv))
+        }
+        assertTrue(Udp.parityCount(0) == 0 && Udp.parityCount(1) == 1 && Udp.parityCount(16) == 1 && Udp.parityCount(17) == 2 &&
+            Udp.parityCount(256) == 16 && Udp.parityCount(2048) == 16)
+        assertEquals(Udp.MAX_PLAINTEXT, Udp.PARITY_BYTES)
+    }
+
+    // parity-v1, as apps/windows_host/src/udp_media_test.cpp (parityRules) checks the C++ receiver.
+    @Test fun parityRules() {
+        for (lost in listOf(0, 2, 4)) {  // Any one lost fragment comes back at once: the first, a middle one, the short last one.
+            val c = Client(20000, parity = true); val m = videoMessage(1, 5000, true); val parts = split(video, 1, m)
+            assertEquals("Fixture", 5, parts.size)
+            for (i in parts.indices) if (i != lost) c.feed(parts[i])
+            assertEquals(0, c.videos())
+            c.feed(paritiesOf(1, m))
+            assertTrue("Fragment $lost was not rebuilt", c.videos() == 1 && c.out.messages[0].bytes.contentEquals(m) && c.out.messages[0].key)
+            c.at(c.now + 300000)
+            assertTrue("A rebuilt fragment was asked for again", c.controls(Udp.KIND_NACK) == 0 && !c.receiver.awaitingKey())
+            assertTrue(c.receiver.rebuilt == 1L && c.receiver.repaired == 1L && c.receiver.parities == 1L && c.receiver.heldBytes() == 0L)
+        }
+        run {  // A run of lost fragments as long as the parity count comes back whole.
+            val c = Client(20000, parity = true); val m = videoMessage(1, 40000); val parts = split(video, 1, m)
+            assertTrue("Fixture", parts.size == 35 && Udp.parityCount(parts.size) == 3)
+            for (i in parts.indices) if (i !in 10..12) c.feed(parts[i])
+            c.feed(paritiesOf(1, m))
+            assertTrue(c.videos() == 1 && c.out.messages[0].bytes.contentEquals(m) && c.receiver.rebuilt == 3L)
+        }
+        run {  // Two lost in one class: parity cannot tell them apart. The NACK goes, and one repair lets parity bring the other.
+            val c = Client(20000, parity = true); val m = videoMessage(1, 40000); val parts = split(video, 1, m)
+            for (i in parts.indices) if (i != 4 && i != 7) c.feed(parts[i])
+            c.feed(paritiesOf(1, m)); assertEquals(0, c.videos())
+            c.at(c.now + 10000); val n = c.taken(Udp.KIND_NACK)
+            assertTrue("Both were not asked for", n.size == 1 && n[0][1].toInt() == 2 && Udp.get16(n[0], 6) == 4 && Udp.get16(n[0], 14) == 7)
+            c.feed(parts[7])
+            assertTrue("The waiting parity did not rebuild the other", c.videos() == 1 && c.out.messages[0].bytes.contentEquals(m) && c.receiver.rebuilt == 1L)
+        }
+        run {  // A message of one datagram that was lost: its parity alone is the message.
+            val c = Client(20000, parity = true); val m = videoMessage(1, 300, true)
+            c.feed(paritiesOf(1, m))
+            assertTrue(c.videos() == 1 && c.out.messages[0].bytes.contentEquals(m) && c.out.messages[0].key)
+        }
+        run {  // A parity that overtook its fragment rebuilds it too, and that is no loss: not counted as repaired.
+            val c = Client(20000, parity = true); val m = videoMessage(1, 5000); val parts = split(video, 1, m)
+            for (i in parts.indices) if (i != 3) c.feed(parts[i])
+            c.feed(paritiesOf(1, m)); assertEquals(1, c.videos())
+            c.now += 20000; c.feed(parts[3]); c.at(c.now + 200000)
+            assertTrue(c.receiver.rebuilt == 1L && c.receiver.repaired == 0L)
+        }
+        run {  // A parity for a message whose fragments are still on their way: it waits, and no gap is closed twice.
+            val c = Client(20000, parity = true); val m = videoMessage(1, 5000); val parts = split(video, 1, m)
+            c.feed(paritiesOf(1, m)); assertEquals(0, c.videos())
+            for (i in 0 until 4) c.feed(parts[i])
+            assertTrue("The last fragment was not rebuilt from the waiting parity", c.videos() == 1 && c.out.messages[0].bytes.contentEquals(m))
+        }
+        run {  // ABILITIES: at once, then every second, with the bit and the count of repaired fragments.
+            val c = Client(20000, parity = true); c.tick()
+            var a = c.taken(Udp.KIND_ABILITIES)
+            assertTrue(a.size == 1 && a[0].size == Udp.ABILITIES_BYTES && a[0][1].toInt() == 0 && Udp.get16(a[0], 2) == Udp.ABILITY_PARITY && Udp.get32(a[0], 4) == 0L)
+            val m = videoMessage(1, 5000, true); val parts = split(video, 1, m)
+            for (i in parts.indices) if (i != 1) c.feed(parts[i])
+            c.feed(paritiesOf(1, m)); c.clear()
+            c.at(c.now + 999999); assertEquals(0, c.controls(Udp.KIND_ABILITIES))
+            assertEquals("ABILITIES is a deadline", 2000000L, c.receiver.nextTickUs())
+            c.at(c.now + 1); a = c.taken(Udp.KIND_ABILITIES)
+            assertTrue("The repaired count did not go to the Host", a.size == 1 && Udp.get32(a[0], 4) == 1L)
+            val old = Client(20000); old.tick(); old.at(old.now + 3000000)
+            assertEquals("A receiver that takes no parity said it does", 0, old.controls(Udp.KIND_ABILITIES))
+        }
+        run {  // Malformed parity only ever drops data.
+            val m = videoMessage(1, 40000); val parts = split(video, 1, m); val good = paritiesOf(1, m)
+            val bad = ArrayList<ByteArray>()
+            bad.add(good[0].copyOf().also { it[1] = (video or (5 shl 4)).toByte() })                 // a parity count that is not the message's
+            bad.add(good[0].copyOf().also { Udp.put16(it, 6, (3 shl 11) or (Udp.get16(it, 6) and 2047)) })  // a slot past the count
+            bad.add(good[0].copyOf().also { Udp.put16(it, 6, 0) })                                    // a last fragment of no bytes
+            bad.add(good[0].copyOf().also { Udp.put16(it, 6, Udp.FRAGMENT_PAYLOAD + 1) })             // or of too many
+            bad.add(good[0].copyOf().also { it[1] = (Udp.CLASS_AUDIO or (2 shl 4)).toByte() })        // sound has no parity
+            bad.add(good[0].copyOf().also { it[1] = (2 or (2 shl 4)).toByte() })                      // a recovery frame is never sent to this client
+            bad.add(good[0].copyOf().also { Udp.put32(it, 2, 0) })                                    // no message 0
+            bad.add(good[0].copyOf(good[0].size - 1))                                                 // short
+            bad.add(good[0].copyOf().also { Udp.put16(it, 8, 0) })                                    // no fragments
+            val c = Client(20000, parity = true)
+            for (i in parts.indices) if (i != 5) c.feed(parts[i])
+            for (p in bad) c.feed(p)
+            assertTrue("A malformed parity was used", c.videos() == 0 && c.receiver.rebuilt == 0L)
+            // A parity whose fragment count is not the started message's is ignored as well.
+            val other = videoMessage(1, 30000); c.feed(paritiesOf(1, other)); assertEquals(0, c.videos())
+            c.feed(good); assertTrue(c.videos() == 1 && c.out.messages[0].bytes.contentEquals(m))
+        }
+    }
+
+    // Loss, reordering and duplicates with parity behind every message: what comes out is
+    // exactly what went in, in order, and parity saves requests.
+    @Test fun parityFuzz() {
+        val random = Random(0x70617231)
+        val c = Client(4000, parity = true); val sent = ArrayList<ByteArray>(); val wire = ArrayList<ByteArray>()
+        var nextId = 1L; var pts = 1L; var delivered = 0; var lastPts = 0L
+        for (n in 0 until 40000) {
+            if (wire.size < 8) {
+                val key = random.nextInt(50) == 0
+                val m = videoMessage(pts, random.nextInt(30000) + 10, key, 1, pts.toInt()); ++pts
+                sent.add(m); wire.addAll(split(video, nextId, m)); wire.addAll(paritiesOf(nextId, m)); ++nextId
+            }
+            val at = random.nextInt(minOf(wire.size, 4)); val f = wire[at]
+            if (random.nextInt(30) != 0) wire.removeAt(at)
+            if (random.nextInt(25) != 0) c.feed(f)
+            c.now += 300; c.tick()
+            for (m in c.out.messages) {
+                assertTrue("A delivered message is not an input message, or is out of order",
+                    m.video && m.pts > lastPts && m.pts <= sent.size && m.bytes.contentEquals(sent[(m.pts - 1).toInt()]))
+                lastPts = m.pts; ++delivered
+            }
+            c.clear()
+            if (n % 512 == 0) assertTrue(c.receiver.windowMessages() <= Udp.VIDEO_WINDOW && c.receiver.heldBytes() <= Udp.MAX_VIDEO_BYTES)
+        }
+        assertTrue("The fixture delivered too little: $delivered", delivered > 300)
+        assertTrue("Parity rebuilt nothing: ${c.receiver.rebuilt}", c.receiver.rebuilt > 100)
+    }
+
+    // quick-nack-v1, as apps/windows_host/src/udp_media_test.cpp (quickNack) checks the C++ one.
+    @Test fun quickNack() {
+        run {  // The buckets of a run's length.
+            val lengths = longArrayOf(1, 2, 3, 4, 5, 16, 17, 64, 65, 100000); val buckets = intArrayOf(0, 1, 2, 2, 3, 3, 4, 4, 5, 5)
+            for (n in lengths.indices) assertEquals("A run's bucket", buckets[n], UdpSequenceTrack.bucket(lengths[n]))
+        }
+        run {  // In order: nothing counted. A jump is a run; what comes after all is late by the time since the jump.
+            val t = UdpSequenceTrack(); var now = 1000000L
+            for (q in 40L until 50L) { now += 100; assertEquals(0L, t.arrived(q, now)) }
+            assertFalse("Ten datagrams were enough to know the path", t.known())
+            now += 100; assertTrue("A run of three was not counted", t.arrived(53, now) == 0L && t.runs[2] == 1L)
+            val jump = now
+            assertTrue("A datagram that came after all was not late by the time since its jump", t.arrived(51, jump + 3000) == 3000L && t.late == 1L && t.lateMaxUs == 3000L)
+            assertEquals(3000L, t.lateUs(jump + 3000))
+            assertTrue("A run of one was not counted", t.arrived(54, jump + 3100) == 0L && t.arrived(56, jump + 3200) == 0L && t.runs[0] == 1L)
+            assertTrue("The longest lateness was not kept", t.arrived(55, jump + 9000) == 5800L && t.lateMaxUs == 5800L && t.lateUs(jump + 9000) == 5800L)
+            assertEquals("The window before was forgotten at once", 5800L, t.lateUs(1000000 + Udp.SEQUENCE_WINDOW_US + 5))
+            assertEquals("An old lateness was kept for good", 0L, t.lateUs(1000000 + 2 * Udp.SEQUENCE_WINDOW_US + 10))
+            assertTrue("The counts are not the leg's lifetime", t.lateMaxUs == 5800L && t.late == 2L)
+        }
+        run {  // A jump older than the ones remembered: later than any NACK should wait for.
+            val t = UdpSequenceTrack(); var now = 1000000L; var q = 10L; t.arrived(q, now)
+            for (n in 0..Udp.SEQUENCE_JUMPS) { q += 2; now += 100; t.arrived(q, now) }
+            assertEquals("A datagram of a forgotten jump was given a short lateness", Udp.SEQUENCE_LATE_UNKNOWN_US, t.arrived(11, now + 100))
+            assertEquals("The newest jump was forgotten", 200L, t.arrived(q - 1, now + 200))
+        }
+        run {  // Known after SEQUENCE_KNOWN_AFTER datagrams in order.
+            val t = UdpSequenceTrack(); for (q in 1L..Udp.SEQUENCE_KNOWN_AFTER) t.arrived(q, 1000000 + q)
+            assertFalse("Known one datagram early", t.known()); t.arrived(Udp.SEQUENCE_KNOWN_AFTER + 1L, 2000000); assertTrue(t.known())
+        }
+        fun firstNack(c: Client): Long {  // microseconds from a gap to its NACK
+            val parts = split(video, 1, videoMessage(1, 5000)); c.feed(parts[0]); c.feed(parts[2]); val gap = c.now
+            var at = 0L
+            while (at <= 40000) { c.at(gap + at); if (c.controls(Udp.KIND_NACK) != 0) return at; at += 100 }
+            return -1
+        }
+        run { val c = Client(4000); assertTrue("A receiver that was told nothing did not wait 10 ms", firstNack(c) == 10000L && c.receiver.nackDelayUs() == 10000L) }
+        run { val c = Client(4000); c.receiver.setReorder(0); assertEquals("A path that reorders nothing did not ask after 2 ms", 2000L, firstNack(c)) }
+        run { val c = Client(4000); c.receiver.setReorder(3000); assertEquals("Half again the lateness and a millisecond", 5500L, firstNack(c)) }
+        run { val c = Client(4000); c.receiver.setReorder(400); assertEquals("The quick delay has no floor", 2000L, firstNack(c)) }
+        run { val c = Client(4000); c.receiver.setReorder(50000); assertEquals("A path that reorders badly waited longer than before", 10000L, firstNack(c)) }
+        run { val c = Client(120000); c.receiver.setReorder(50000); assertEquals("A long path waited longer than a quarter of its round trip", 30000L, firstNack(c)) }
+        run { val c = Client(120000); c.receiver.setReorder(0); assertEquals(2000L, firstNack(c)) }
+        run {  // The deadline the leg sleeps to follows the quick wait.
+            val c = Client(4000); c.receiver.setReorder(0); val parts = split(video, 1, videoMessage(1, 5000)); c.feed(parts[0]); c.feed(parts[2])
+            assertEquals(c.now + 2000, c.receiver.nextTickUs())
+        }
+        run {  // Asked for, then rebuilt from a parity that came after the NACK: it was lost, and the repair that follows does not undo the count.
+            val c = Client(4000, parity = true); c.receiver.setReorder(0); val m = videoMessage(1, 5000, true); val parts = split(video, 1, m)
+            c.feed(parts[0]); c.feed(parts[2]); c.feed(parts[3]); c.at(c.now + 2000); assertEquals("Fixture: no NACK", 1, c.controls(Udp.KIND_NACK))
+            c.feed(parts[4]); c.feed(paritiesOf(1, m)); assertTrue(c.videos() == 1 && c.out.messages[0].bytes.contentEquals(m))
+            assertEquals("A fragment asked for and then rebuilt was not counted as repaired at once", 1L, c.receiver.repaired)
+            c.now += 8000; c.feed(parts[1]); c.at(c.now + 200000); assertTrue("Its repair changed the count", c.receiver.repaired == 1L && c.receiver.rebuilt == 1L)
+        }
+        run {  // Not asked for: its own datagram within 50 ms still means it was only out of order.
+            val c = Client(4000, parity = true); c.receiver.setReorder(0); val m = videoMessage(1, 5000, true); val parts = split(video, 1, m)
+            c.feed(parts[0]); c.feed(parts[2]); c.feed(parts[3]); c.feed(parts[4]); c.feed(paritiesOf(1, m)); assertEquals(1, c.videos())
+            c.now += 1000; c.feed(parts[1]); c.at(c.now + 200000); assertTrue(c.receiver.repaired == 0L && c.controls(Udp.KIND_NACK) == 0)
         }
     }
 }

@@ -104,6 +104,19 @@ constexpr uint64_t abilitiesIntervalUs = 1000000, parityHoldUs = 60000000, parit
 constexpr double parityCutShare = 0.03, parityLossShare = 0.04;
 constexpr uint64_t parityLossWindowUs = 1000000, parityLossDatagrams = 200;
 constexpr size_t maxRebuiltWatched = 256;
+// quick-nack-v1. A NACK waited minimumNackDelayUs (10 ms) for a datagram that might only be out
+// of order, so a repaired frame reached the decoder that wait and a round trip late: 18 ms at a
+// 7 ms round trip, three or four pictures at 180 fps. Field 2026-11-25, a game over Wi-Fi with
+// parity on: in two minutes 44 NACKs went and parity rebuilt two fragments; what that path
+// loses comes in runs longer than a message's parities, which only a repair brings back.
+// Each datagram carries the sealer's sequence, one per datagram and a new one for a repair, so
+// the client sees exactly what came out of order and how late (SequenceTrack). Once that is
+// known the NACK waits half again the longest lateness of the last windows and a millisecond,
+// at least quickNackDelayUs and never longer than before. A path that reorders nothing asks
+// after 2 ms; one that does keeps its wait.
+constexpr uint64_t quickNackDelayUs = 2000, sequenceWindowUs = 15000000, sequenceLateUnknownUs = 100000;
+constexpr uint32_t sequenceKnownAfter = 500;
+constexpr size_t sequenceJumps = 32, sequenceRunBuckets = 6;
 // FEEDBACK that shows none of this many sent datagrams arrived proves nothing.
 constexpr uint64_t unconfirmedLimit = 16;
 
@@ -192,6 +205,46 @@ class Partial {
   std::vector<uint8_t> bytes_;
 };
 
+// What the path did to the datagrams, from their sequences (quick-nack-v1). Pure; the caller
+// passes each authenticated datagram's sequence as it arrives, repairs and all.
+class SequenceTrack {
+ public:
+  // runs: stretches of sequences that were skipped, by length: 1, 2, 3-4, 5-16, 17-64, more.
+  // late: datagrams that came after a later one (each was counted in a run before), and the
+  // longest any came after the datagram that skipped it.
+  struct Counts { uint32_t runs[sequenceRunBuckets] = {}; uint32_t late = 0; uint64_t lateMaxUs = 0; };
+  static size_t bucket(uint64_t length) { return length <= 1 ? 0 : length == 2 ? 1 : length <= 4 ? 2 : length <= 16 ? 3 : length <= 64 ? 4 : 5; }
+  // Returns how late this datagram came after one sent later (0: in order).
+  uint64_t arrived(uint64_t sequence, uint64_t nowUs) {
+    roll(nowUs);
+    if (!highest_) { highest_ = sequence; return 0; }
+    if (sequence > highest_) {
+      if (const uint64_t missing = sequence - highest_ - 1) { ++counts_.runs[bucket(missing)]; jumps_[jumpAt_++ % jumps_.size()] = {highest_ + 1, sequence - 1, nowUs}; }
+      highest_ = sequence; if (inOrder_ < UINT32_MAX) ++inOrder_;
+      return 0;
+    }
+    // The jump that skipped it is forgotten: later than anything a NACK should wait for.
+    uint64_t late = sequenceLateUnknownUs;
+    for (const auto& jump : jumps_) if (sequence >= jump.first && sequence <= jump.last) { late = std::max<uint64_t>(nowUs - jump.at, 1); break; }
+    ++counts_.late; counts_.lateMaxUs = std::max(counts_.lateMaxUs, late); lateNow_ = std::max(lateNow_, late);
+    return late;
+  }
+  // Enough came in order to say what this path reorders.
+  bool known() const { return inOrder_ >= sequenceKnownAfter; }
+  // The longest lateness of this window and the one before.
+  uint64_t lateUs(uint64_t nowUs) { roll(nowUs); return std::max(lateNow_, lateBefore_); }
+  const Counts& counts() const { return counts_; }
+ private:
+  struct Jump { uint64_t first = 1, last = 0, at = 0; };
+  void roll(uint64_t nowUs) {
+    if (nowUs - windowAt_ < sequenceWindowUs) return;
+    lateBefore_ = nowUs - windowAt_ < 2 * sequenceWindowUs ? lateNow_ : 0; lateNow_ = 0; windowAt_ = nowUs;
+  }
+  uint64_t highest_ = 0, windowAt_ = 0, lateNow_ = 0, lateBefore_ = 0; uint32_t inOrder_ = 0;
+  std::array<Jump, sequenceJumps> jumps_{}; size_t jumpAt_ = 0;
+  Counts counts_;
+};
+
 // Client side. The caller opens each datagram and passes the plaintext; `tick`
 // runs the timers, every few milliseconds whether or not media arrives. It gets
 // messages to hand to the decoder and control plaintexts to seal and send. Its RTT
@@ -208,6 +261,10 @@ class Receiver {
   uint32_t repaired() const { return repaired_; }
   uint32_t parities() const { return parities_; }
   uint64_t rttUs() const { return rtt_; }
+  // quick-nack-v1: the longest this path delivered a datagram out of order lately
+  // (SequenceTrack::lateUs), once the caller knows it. Until then a NACK waits as before.
+  void setReorder(uint64_t lateUs) { reorderKnown_ = true; reorderUs_ = lateUs; }
+  uint64_t nackDelayUs() const { return nackDelay(); }
   // Announced on WSS. What carries another epoch is dropped, and no frame of it is known good.
   void setEpoch(uint16_t epoch) { if (epoch != epoch_) { haveLast_ = lossWait_ = false; } epoch_ = epoch; }
 
@@ -302,7 +359,10 @@ class Receiver {
   }
   // Counted from gap detection: a paced IDR can take longer than this with no loss at all.
   uint64_t giveUpDelay() const { return std::clamp<uint64_t>(rtt_ * 7 / 2 + giveUpSlackUs, minimumGiveUpUs, maximumGiveUpUs); }
-  uint64_t nackDelay() const { return std::max(rtt_ / 4, minimumNackDelayUs); }
+  uint64_t nackDelay() const {
+    const uint64_t slow = std::max(rtt_ / 4, minimumNackDelayUs);
+    return reorderKnown_ ? std::clamp<uint64_t>(reorderUs_ ? reorderUs_ * 3 / 2 + 1000 : 0, quickNackDelayUs, slow) : slow;
+  }
   // How long after a LOSS the next one goes while no answer shows: see tick.
   uint64_t askAgainDelay() const {
     const uint64_t first = std::clamp<uint64_t>(rtt_ * 3 + answerSlackUs, minimumAskAgainUs, keyframeIntervalUs);
@@ -403,8 +463,13 @@ class Receiver {
     Fragment f; f.cls = m.recovery ? classRecovery : classVideo; f.id = id; f.index = uint16_t(missing); f.count = m.count(); f.data = mixed.data();
     f.size = missing + 1 == int(m.count()) ? m.lastSize : fragmentPayload;
     if (!m.add(f)) return;
-    ++rebuilt_; made_.push_back({id, f.index, nowUs});
-    if (made_.size() > maxRebuiltWatched) { made_.pop_front(); ++repaired_; }
+    ++rebuilt_;
+    // Already asked for: it was lost, and the repair now on its way must not read as its own
+    // datagram coming after all (a NACK may go before a long message's parity arrives).
+    bool asked = false;
+    for (const auto& gap : gaps_) if (gap.id == id && gap.nacks && (gap.whole ? gap.nacks <= maxNackRepeats : gap.index == f.index)) { asked = true; break; }
+    if (asked) ++repaired_;
+    else { made_.push_back({id, f.index, nowUs}); if (made_.size() > maxRebuiltWatched) { made_.pop_front(); ++repaired_; } }
     if (f.index == 0) inspect(id, m, f, nowUs);
   }
   // A parity datagram. Its message's fragments have all left the Host by now.
@@ -507,7 +572,7 @@ class Receiver {
     out.control.push_back(std::move(plain));
   }
 
-  uint64_t rtt_ = assumedRttUs;
+  uint64_t rtt_ = assumedRttUs, reorderUs_ = 0; bool reorderKnown_ = false;
   uint16_t epoch_;
   uint64_t feedbackAt_, abilitiesAt_, keyAt_ = 0, echoUs_ = 0, echoAt_ = 0, challenge_ = 0;
   uint32_t rebuilt_ = 0, repaired_ = 0, parities_ = 0;

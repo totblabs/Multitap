@@ -39,11 +39,19 @@ class UdpChannelTest {
         val report = UdpProbe.Report(UdpProbe.PROBE_REACHABLE, 1, 12, 30, 4, 3, 1)
         val value = udpReadingValue(UdpReading(report, false, true, ByteArray(32) { 7 }, listOf(100L, 5000000L, 4000L), 1920, 2, UdpPathGate.View(1, 3, 9)))
         assertEquals(mapOf("udpProbe" to 1L, "udpRelayIndex" to 1L, "udpRttP50Ms" to 12L, "udpRttP95Ms" to 30L, "udpLossPct" to 4L, "udpKeepSent" to 3L,
-            "udpKeepLost" to 1L, "udpActivePath" to 1L, "udpFallbacks" to 3L, "udpGaps" to 2L, "udpKeyRequests" to 0L, "udpStalls" to 0L), value["report"])
+            "udpKeepLost" to 1L, "udpActivePath" to 1L, "udpFallbacks" to 3L, "udpGaps" to 2L, "udpKeyRequests" to 0L, "udpStalls" to 0L,
+            "udpNacks" to 0L, "udpParities" to 0L, "udpRepaired" to 0L, "udpRuns1" to 0L, "udpRuns2" to 0L, "udpRuns4" to 0L, "udpRuns16" to 0L,
+            "udpRuns64" to 0L, "udpRunsMore" to 0L, "udpLate" to 0L, "udpLateMaxUs" to 0L, "udpNackDelayUs" to 0L), value["report"])
         // The receiver's stall watch: the cause only once a stall was seen.
         val stalled = udpReadingValue(UdpReading(report, true, true, null, emptyList(), 0, 0, UdpPathGate.View(1, 1, 0), keyRequests = 4, stalls = 2, stallCause = 3))
         val fields = stalled["report"] as Map<*, *>
         assertTrue(fields["udpKeyRequests"] == 4L && fields["udpStalls"] == 2L && fields["udpStallCause"] == 3L)
+        // parity-v1 and quick-nack-v1: the receiver's and the sequence track's counts, keyed as on Windows.
+        val counted = udpReadingValue(UdpReading(report, true, true, null, emptyList(), 0, 0, UdpPathGate.View(1, 1, 0), nacks = 9, parities = 700, repaired = 5,
+            runs = longArrayOf(6, 5, 4, 3, 2, 1), late = 8, lateMaxUs = 3100, nackDelayUs = 2000))["report"] as Map<*, *>
+        assertTrue(counted["udpNacks"] == 9L && counted["udpParities"] == 700L && counted["udpRepaired"] == 5L && counted["udpRuns1"] == 6L && counted["udpRuns2"] == 5L &&
+            counted["udpRuns4"] == 4L && counted["udpRuns16"] == 3L && counted["udpRuns64"] == 2L && counted["udpRunsMore"] == 1L && counted["udpLate"] == 8L &&
+            counted["udpLateMaxUs"] == 3100L && counted["udpNackDelayUs"] == 2000L)
         assertEquals(false, value["running"])
         // A plain list of ints, never a typed array.
         assertTrue(value["arrivals"] is ArrayList<*> && value["arrivals"] == listOf(100L, 5000000L, 4000L))

@@ -29,6 +29,9 @@ const udpProbeBounds = Object.freeze({ udpProbe: 5, udpRttP50Ms: 60000, udpRttP9
   udpQueueWaits: 0xffffffff, udpQueueSkips: 0xffffffff, udpNacks: 0xffffffff,
   // parity-v1 (Windows leg, lifetime): parity datagrams that came, lost fragments rebuilt from them.
   udpParities: 0xffffffff, udpRepaired: 0xffffffff,
+  // quick-nack-v1 (the leg, lifetime): runs of skipped datagrams by length (1, 2, 3-4, 5-16, 17-64, more), datagrams out of order, the longest lateness, the NACK wait now.
+  udpRuns1: 0xffffffff, udpRuns2: 0xffffffff, udpRuns4: 0xffffffff, udpRuns16: 0xffffffff, udpRuns64: 0xffffffff, udpRunsMore: 0xffffffff,
+  udpLate: 0xffffffff, udpLateMaxUs: 0xffffffff, udpNackDelayUs: 600000,
   // stream-stall-v1 rows: 1 no frame was published (decode side), 2 a frame waited for the client's
   // presentation; the frame that ended the gap was a key frame (1).
   stallKind: 2, stallKey: 1 });

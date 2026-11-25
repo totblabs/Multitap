@@ -89,7 +89,7 @@ void run(const Config& config, int trials, HWND window, int ambientMs, std::ostr
   std::atomic<bool> stop{false}; std::atomic<uint32_t> wantedEffect{0};
   std::map<uint32_t, Observed> tagged;  // sample -> the tagged frame
   std::thread loop([&] {
-    host::FramePacer pacer; const auto period = std::chrono::microseconds(1000000 / 60); auto next = Clock::now(); Clock::time_point lastWork{};
+    host::FramePacer pacer; host::FrameCap cap; const auto period = std::chrono::microseconds(1000000 / 60); auto next = Clock::now(); Clock::time_point lastWork{};
     uint64_t previous = 0, pts = 0;
     while (!stop) {
       const auto began = Clock::now(); ResetEvent(signal);
@@ -113,7 +113,7 @@ void run(const Config& config, int trials, HWND window, int ambientMs, std::ostr
         ++pts; tagger.submitted(pts, changed);
         if (const auto tag = tagger.output(pts, host::hostMonotonicUs())) tagged[tag->sample] = {tag->captureUs.value_or(0), effectSeen}; }
       const auto now = Clock::now(); next += period; if (next < now) next = now;
-      if (pacer.wait(next, std::span<const HANDLE>(&signal, 1), lastWork + host::captureMinimumGap(period))) next = Clock::now();
+      if (pacer.wait(next, std::span<const HANDLE>(&signal, 1), cap.earliest(lastWork, period))) next = Clock::now();
     }
   });
   Sleep(1500);  // settle: the first frames and the blink rhythm

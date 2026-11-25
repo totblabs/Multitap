@@ -211,7 +211,13 @@ struct UdpMediaLeg::Impl {
     if(relay<0 && (!grant.direct || !direct.accepts(Endpoint(from),now)))return;
     if (!probe.bound() || size == udp::probeBytes) return probe.received(size_t(relay), data, size, now);
     if ((relay>=0 && size_t(relay) != probe.chosen()) || !opener) return;
-    if (const size_t plain = opener->open(data, size, opened.bytes.data())) { if(grant.direct){std::lock_guard<std::mutex> lock(mutex);shared.directPath=relay<0?2:1;}Sync(); receiver->datagram(opened.bytes.data(), plain, now, output); Deliver(now); }
+    if (const size_t plain = opener->open(data, size, opened.bytes.data())) {
+      if(grant.direct){std::lock_guard<std::mutex> lock(mutex);shared.directPath=relay<0?2:1;}
+      // quick-nack-v1: the sealer's sequence shows what the path lost in a row and what it
+      // delivered out of order; the receiver's NACK waits no longer than that needs.
+      track.arrived(udp::get64(data + 9), now); if (track.known()) receiver->setReorder(track.lateUs(now));
+      Sync(); receiver->datagram(opened.bytes.data(), plain, now, output); Deliver(now);
+    }
   }
 
   void Keys(const udp::Probe& probe, uint64_t now) {
@@ -287,7 +293,9 @@ struct UdpMediaLeg::Impl {
       if (const size_t size = sealer->seal(plain.data(), plain.size(), sealed.data())) {if(const auto endpoint=direct.target(now);grant.direct&&endpoint)DirectSend(*endpoint,sealed.data(),size);else Send(chosen,sealed.data(),size);}
     }
     output.control.clear();
-    { std::lock_guard<std::mutex> lock(mutex); shared.keyRequests += keys; shared.nacks += nacks; shared.parities = receiver->parities(); shared.repaired = receiver->repaired(); }
+    { std::lock_guard<std::mutex> lock(mutex); shared.keyRequests += keys; shared.nacks += nacks; shared.parities = receiver->parities(); shared.repaired = receiver->repaired();
+      const auto& counts = track.counts(); for (size_t n = 0; n < 6; ++n) shared.runs[n] = counts.runs[n];
+      shared.late = counts.late; shared.lateMaxUs = uint32_t(std::min<uint64_t>(counts.lateMaxUs, UINT32_MAX)); shared.nackDelayUs = uint32_t(receiver->nackDelayUs()); }
   }
 
   void Release(uint64_t now) {
@@ -340,6 +348,7 @@ struct UdpMediaLeg::Impl {
   std::optional<udp::Sealer> sealer;
   std::optional<udp::Opener> opener;
   std::optional<udp::Receiver> receiver;
+  udp::SequenceTrack track;
   udp::Receiver::Output output;
   struct Held { udp::Receiver::Message message; uint64_t since = 0; bool waited = false; };
   std::deque<Held> held;  // whole video in order, behind a full decode queue

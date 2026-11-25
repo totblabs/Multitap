@@ -265,6 +265,18 @@ const streamStatsFields = <String>{
   // fragments rebuilt from them without a NACK.
   'udpParities',
   'udpRepaired',
+  // quick-nack-v1 (the leg's lifetime): runs of datagrams the path skipped, by
+  // length (1, 2, 3-4, 5-16, 17-64, more), datagrams that came out of order,
+  // the longest one came late, and what a NACK waits now.
+  'udpRuns1',
+  'udpRuns2',
+  'udpRuns4',
+  'udpRuns16',
+  'udpRuns64',
+  'udpRunsMore',
+  'udpLate',
+  'udpLateMaxUs',
+  'udpNackDelayUs',
   // stream-stall-v1: displayed-video gaps of 250 ms or more in the window and
   // the longest (ms); each one is also its own streamStall row.
   'stalls',

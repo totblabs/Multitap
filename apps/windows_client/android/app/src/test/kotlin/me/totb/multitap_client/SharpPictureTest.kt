@@ -189,7 +189,7 @@ class SharpPictureTest {
             SharpPictureRequest(2176, 1642, 0, 0, 60),
             SharpPictureRequest(0, 1642, 1142, 862, 60),
             SharpPictureRequest(2176, 1642, 1142, 862, 0),
-            SharpPictureRequest(2176, 1642, 1142, 862, 120),
+            SharpPictureRequest(2176, 1642, 1142, 862, 241),
             SharpPictureRequest(40000, 1642, 1142, 862, 60),
         )) {
             val plan = sharpPicturePlan(bad, uhd, plenty)

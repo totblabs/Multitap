@@ -2,6 +2,7 @@
 // link. Nothing here opens a socket. The link table is a simulation with a fixed
 // seed, not a network measurement; the AES figure is this PC only.
 #include "../../../native/windows_video/udp_media_crypto.hpp"
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <iostream>
@@ -1632,6 +1633,11 @@ struct Scenario {
   // dropped 17,862 datagrams in 44 minutes, media and the client's requests alike).
   double clumpPct = 0; uint64_t clumpEveryUs = 0, clumpUs = 0;
   bool parity = false;  // the client asks for parity (parity-v1)
+  // A radio that loses datagrams in runs, Host to client: a run about every runEveryUs, runMean
+  // datagrams long on average (field 2026-11-25: with parity on, NACKs went and parity rebuilt
+  // next to nothing, so what was lost came in runs).
+  uint64_t runEveryUs = 0; double runMean = 0;
+  bool quick = false;  // the client measures reordering from the sequences and tells its receiver (quick-nack-v1)
 };
 struct Result {
   int generated = 0, delivered = 0, idrs = 0, keysDelivered = 0, keyRequests = 0, giveUps = 0, recoveries = 0, longWaits = 0;
@@ -1639,12 +1645,20 @@ struct Result {
   double overheadPct = 0; bool gaveUp = false, proven = false;
   // parity-v1: frames that reached the decoder later than the path and its pacing explain; parity sent and used.
   int late = 0; uint64_t lateUs = 0, parities = 0, parityBytes = 0, rebuilt = 0, wireBytes = 0;
+  // quick-nack-v1: frames that took over 6 ms more than half the round trip, and how much more in all.
+  int slow = 0; uint64_t slowUs = 0, lateDatagrams = 0;
 };
 class Link {
  public:
   Link(uint64_t seed, const Scenario& s, double rateBps, bool forward) : random_(seed), s_(s), bytesPerUs_(rateBps / 8e6), forward_(forward) {}
   void send(const uint8_t* data, size_t size, uint64_t now) {
     if ((forward_ && s_.spoofed) || down(now) || uniform() * 100 < s_.lossPct) return;
+    if (forward_ && s_.runEveryUs) {
+      const auto spread = [&](double mean) { return -std::log(1 - uniform()) * mean; };
+      if (!nextRun_) nextRun_ = 2000000 + uint64_t(spread(double(s_.runEveryUs)));
+      if (now >= nextRun_) { runLeft_ = 1 + uint64_t(spread(std::max(s_.runMean - 1, 0.0)) + 0.5); nextRun_ = now + 1 + uint64_t(spread(double(s_.runEveryUs))); }
+      if (runLeft_) { --runLeft_; return; }
+    }
     if (s_.clumpEveryUs && now > 2000000 && now % s_.clumpEveryUs < s_.clumpUs && uniform() * 100 < s_.clumpPct) return;
     if (s_.queueUs && free_ > now + s_.queueUs) return;  // tail drop
     free_ = std::max(free_, now) + uint64_t(double(size + 28) / bytesPerUs_);
@@ -1668,7 +1682,7 @@ class Link {
     const uint64_t start = slot * 2000000 + slotRandom() % 1800000, length = 20000 + slotRandom() % 100000;
     return now >= start && now < start + length;
   }
-  std::mt19937_64 random_; Scenario s_; double bytesPerUs_; bool forward_; uint64_t free_ = 0, order_ = 0;
+  std::mt19937_64 random_; Scenario s_; double bytesPerUs_; bool forward_; uint64_t free_ = 0, order_ = 0, nextRun_ = 0, runLeft_ = 0;
   std::priority_queue<Packet, std::vector<Packet>, std::greater<Packet>> queue_;
 };
 
@@ -1683,7 +1697,7 @@ Result simulate(const Scenario& s, uint64_t seed, bool recovery = false) {
   Result result; Pair keys; constexpr int target = 20000000; constexpr uint64_t frameUs = 16667, audioUs = 10000;
   Link forward(seed, s, s.linkMbps * 1e6, true), reverse(seed + 1, s, s.linkMbps * 1e6, false); std::mt19937_64 sizes(seed + 2);
   std::mt19937_64 challenges(seed + 3); Sender sender(target, 1000, [&] { return challenges() | 1; });
-  Receiver receiver(1, 1000, s.parity); Receiver::Output out; PathState path; Plain plain;
+  Receiver receiver(1, 1000, s.parity); Receiver::Output out; PathState path; Plain plain; SequenceTrack track;
   std::vector<Bytes> sentFrames; std::vector<bool> answers; std::vector<uint64_t> madeAt; uint64_t nextFrame = 1000, nextAudio = 1000, lastDelivered = 0, audioPts = 1, waitingSince = 0; bool forceIdr = true, answerNext = false, widened = false; int64_t lastFrame = -1; uint8_t sealed[maxDatagram], opened[maxPlaintext];
   const auto byFrame = [&](uint64_t pts) { return int64_t(pts / frameUs) - 1; };
   uint64_t now = 1000;
@@ -1710,7 +1724,12 @@ Result simulate(const Scenario& s, uint64_t seed, bool recovery = false) {
       const size_t n = keys.hostSeal.seal(plain.bytes.data(), plain.size, sealed); require(n != 0, "Seal failed in the simulation");
       result.bytesToAddress += n; forward.send(sealed, n, now);
     }
-    forward.arrive(now, [&](const Bytes& d) { const size_t n = keys.clientOpen.open(d.data(), d.size(), opened); if (n) receiver.datagram(opened, n, now, out); });
+    forward.arrive(now, [&](const Bytes& d) {
+      const size_t n = keys.clientOpen.open(d.data(), d.size(), opened); if (!n) return;
+      // As the client's leg: the sequence of every datagram that opened, then the plaintext.
+      if (s.quick) { track.arrived(get64(d.data() + 9), now); if (track.known()) receiver.setReorder(track.lateUs(now)); }
+      receiver.datagram(opened, n, now, out);
+    });
     if (now % 1000 == 0) {
       receiver.tick(now, out);
       if (receiver.awaitingKey() && !waitingSince) { waitingSince = now; ++result.giveUps; }
@@ -1732,7 +1751,10 @@ Result simulate(const Scenario& s, uint64_t seed, bool recovery = false) {
       if (lastDelivered) result.stallUs = std::max(result.stallUs, now - lastDelivered);
       lastDelivered = now; lastFrame = frame; ++result.delivered; result.keysDelivered += m.key;
       // Half the round trip, the link's own jitter and a frame's pacing: 12 ms more than that is a repair's wait.
-      if (!m.key && !answers[size_t(frame)]) { const uint64_t took = now - madeAt[size_t(frame)], due = s.rttUs / 2 + lateAfterUs; if (took > due) { ++result.late; result.lateUs += took - due; } }
+      if (!m.key && !answers[size_t(frame)]) {
+        const uint64_t took = now - madeAt[size_t(frame)], due = s.rttUs / 2 + lateAfterUs; if (took > due) { ++result.late; result.lateUs += took - due; }
+        if (took > s.rttUs / 2 + 6000) { ++result.slow; result.slowUs += took - s.rttUs / 2 - 6000; }
+      }
     }
     out.messages.clear();
     reverse.arrive(now, [&](const Bytes& d) {
@@ -1751,6 +1773,7 @@ Result simulate(const Scenario& s, uint64_t seed, bool recovery = false) {
   result.overheadPct = 100.0 * double(sender.stats().repairBytes) / double(std::max<uint64_t>(sender.stats().videoBytes, 1));
   result.repairs = sender.stats().repairs; result.refused = sender.stats().refused; result.videoBytes = sender.stats().videoBytes + sender.stats().repairBytes;
   result.parities = sender.stats().parities; result.parityBytes = sender.stats().parityBytes; result.rebuilt = receiver.repaired(); result.wireBytes = sender.stats().wireBytes;
+  result.lateDatagrams = track.counts().late;
   return result;
 }
 
@@ -1839,6 +1862,107 @@ void paritySimulation() {
   ++cases;
 }
 
+// quick-nack-v1: what the sequences show, and the NACK delay that follows from it.
+void quickNack() {
+  {  // The buckets of a run's length.
+    const uint64_t lengths[] = {1, 2, 3, 4, 5, 16, 17, 64, 65, 100000}; const size_t buckets[] = {0, 1, 2, 2, 3, 3, 4, 4, 5, 5};
+    for (size_t n = 0; n < 10; ++n) require(SequenceTrack::bucket(lengths[n]) == buckets[n], "A run's bucket");
+  }
+  {  // In order: nothing counted. A jump is a run; what comes after all is late by the time since the jump.
+    SequenceTrack t; uint64_t now = 1000000;
+    for (uint64_t q = 40; q < 50; ++q) require(t.arrived(q, now += 100) == 0, "An in-order datagram was late");
+    require(!t.known(), "Ten datagrams were enough to know the path");
+    require(t.arrived(53, now += 100) == 0 && t.counts().runs[2] == 1, "A run of three was not counted");
+    const uint64_t jump = now;
+    require(t.arrived(51, jump + 3000) == 3000 && t.counts().late == 1 && t.counts().lateMaxUs == 3000, "A datagram that came after all was not late by the time since its jump");
+    require(t.lateUs(jump + 3000) == 3000, "The lateness is not the window's");
+    require(t.arrived(54, jump + 3100) == 0 && t.arrived(56, jump + 3200) == 0 && t.counts().runs[0] == 1, "A run of one was not counted");
+    require(t.arrived(55, jump + 9000) == 5800 && t.counts().lateMaxUs == 5800 && t.lateUs(jump + 9000) == 5800, "The longest lateness was not kept");
+    // The lateness stays for the window it was seen in and the next, then it is forgotten.
+    require(t.lateUs(1000000 + sequenceWindowUs + 5) == 5800, "The window before was forgotten at once");
+    require(t.lateUs(1000000 + 2 * sequenceWindowUs + 10) == 0, "An old lateness was kept for good");
+    require(t.counts().lateMaxUs == 5800 && t.counts().late == 2, "The counts are not the leg's lifetime");
+  }
+  {  // A jump older than the ones remembered: later than any NACK should wait for.
+    SequenceTrack t; uint64_t now = 1000000, q = 10; t.arrived(q, now);
+    for (size_t n = 0; n < sequenceJumps + 1; ++n) { q += 2; t.arrived(q, now += 100); }
+    require(t.arrived(11, now + 100) == sequenceLateUnknownUs, "A datagram of a forgotten jump was given a short lateness");
+    require(t.arrived(q - 1, now + 200) == 200, "The newest jump was forgotten");
+  }
+  {  // Known after sequenceKnownAfter datagrams in order.
+    SequenceTrack t; for (uint64_t q = 1; q <= sequenceKnownAfter; ++q) t.arrived(q, 1000000 + q);
+    require(!t.known(), "Known one datagram early"); t.arrived(sequenceKnownAfter + 1, 2000000); require(t.known(), "Not known after enough datagrams");
+  }
+  const auto firstNack = [](Client& c) {  // microseconds from a gap to its NACK
+    const auto parts = split(classVideo, 1, video(1, 5000)); c.feed(parts[0]); c.feed(parts[2]); const uint64_t gap = c.now;
+    for (uint64_t at = 0; at <= 40000; at += 100) { c.at(gap + at); if (c.controls(kindNack)) return at; }
+    return uint64_t(0);
+  };
+  { Client c(4000); require(firstNack(c) == 10000 && c.receiver.nackDelayUs() == 10000, "A receiver that was told nothing did not wait 10 ms"); }
+  { Client c(4000); c.receiver.setReorder(0); require(firstNack(c) == 2000, "A path that reorders nothing did not ask after 2 ms"); }
+  { Client c(4000); c.receiver.setReorder(3000); require(firstNack(c) == 5500, "A path that delivered 3 ms late did not wait half again that and a millisecond"); }
+  { Client c(4000); c.receiver.setReorder(400); require(firstNack(c) == 2000, "The quick delay has no floor"); }
+  { Client c(4000); c.receiver.setReorder(50000); require(firstNack(c) == 10000, "A path that reorders badly waited longer than before"); }
+  { Client c(120000); c.receiver.setReorder(50000); require(firstNack(c) == 30000, "A long path waited longer than a quarter of its round trip"); }
+  { Client c(120000); c.receiver.setReorder(0); require(firstNack(c) == 2000, "A long path that reorders nothing did not ask after 2 ms"); }
+  const auto parities = [](uint32_t id, const Bytes& message) {
+    std::vector<Bytes> result; const unsigned count = parityCount(fragmentCount(message.size()));
+    for (unsigned slot = 0; slot < count; ++slot) { Plain q; writeParity(q, classVideo, id, message, slot, count); result.emplace_back(q.bytes.data(), q.bytes.data() + q.size); }
+    return result;
+  };
+  {  // Asked for, then rebuilt from a parity that came after the NACK: it was lost, and the repair that follows does not undo the count.
+    Client c(4000, 1, true); c.receiver.setReorder(0); const Bytes m = video(1, 5000, true); const auto parts = split(classVideo, 1, m);
+    c.feed(parts[0]); c.feed(parts[2]); c.feed(parts[3]); c.at(c.now + 2000); require(c.controls(kindNack) == 1, "Fixture: no NACK");
+    c.feed(parts[4]); c.feed(parities(1, m)); require(c.videos() == 1 && c.out.messages[0].bytes == m, "The parity did not rebuild a fragment already asked for");
+    require(c.receiver.repaired() == 1, "A fragment asked for and then rebuilt was not counted as repaired at once");
+    c.now += 8000; c.feed(parts[1]); c.at(c.now + 200000); require(c.receiver.repaired() == 1 && c.receiver.rebuilt() == 1, "Its repair changed the count");
+  }
+  {  // Not asked for: its own datagram within 50 ms still means it was only out of order.
+    Client c(4000, 1, true); c.receiver.setReorder(0); const Bytes m = video(1, 5000, true); const auto parts = split(classVideo, 1, m);
+    c.feed(parts[0]); c.feed(parts[2]); c.feed(parts[3]); c.feed(parts[4]); c.feed(parities(1, m)); require(c.videos() == 1, "Fixture: not rebuilt");
+    c.now += 1000; c.feed(parts[1]); c.at(c.now + 200000); require(c.receiver.repaired() == 0 && c.controls(kindNack) == 0, "A fragment that came after all was counted as repaired");
+  }
+  ++cases;
+}
+
+// quick-nack-v1 against the 10 ms wait on links that lose runs of datagrams. Both clients take parity.
+void quickSimulation() {
+  std::vector<Scenario> scenarios;
+  const auto field = [](Scenario& s) { s.rttUs = 8000; s.idrBytes = 60000; s.recoveryScale = 1.5; s.parity = true; };
+  for (const double mean : {1.0, 3.0, 10.0, 40.0}) { Scenario s; field(s); char name[40]; std::snprintf(name, sizeof(name), "RTT 8 ms, runs of %.0f", mean); s.name = name; s.runEveryUs = 2500000; s.runMean = mean; scenarios.push_back(s); }
+  { Scenario s; field(s); s.name = "RTT 30 ms, runs of 10"; s.rttUs = 30000; s.runEveryUs = 2500000; s.runMean = 10; scenarios.push_back(s); }
+  { Scenario s; field(s); s.name = "RTT 8 ms, 0.20%"; s.lossPct = 0.2; scenarios.push_back(s); }
+  { Scenario s; field(s); s.name = "runs of 10 + reorder 5%"; s.runEveryUs = 2500000; s.runMean = 10; s.reorderPct = 5; scenarios.push_back(s); }
+  { Scenario s; field(s); s.name = "reorder 5%, no loss"; s.reorderPct = 5; scenarios.push_back(s); }
+  { Scenario s; field(s); s.name = "RTT 8 ms, no loss"; scenarios.push_back(s); }
+  { Scenario s; field(s); s.name = "RTT 8 ms, 18 Mbps link"; s.linkMbps = 18; s.queueUs = 30000; scenarios.push_back(s); }
+  char text[8] = {}; size_t length = 0; getenv_s(&length, text, sizeof(text), "UDP_SIM_SEEDS");
+  const int seeds = length > 1 ? std::clamp(std::atoi(text), 1, 200) : 5;
+  std::printf("QUICK NACK, %d seeds summed, a Host that answers LOSS with recovery frames, parity asked. Slow: a frame at the decoder more than 6 ms past half the round trip.\n", seeds);
+  std::printf("%-26s %-6s %13s %6s %9s %6s %9s %7s %8s %8s %6s %8s %9s\n", "case", "quick", "frames", "slow", "slow ms", "late", "late ms", "NACKs", "repairs", "repaired", "IDRs", "wait ms", "wire MB");
+  for (auto s : scenarios) {
+    Result sum[2];
+    for (int k = 0; k < 2; ++k) for (int seed = 0; seed < seeds; ++seed) {
+      s.quick = k == 1;
+      const Result r = simulate(s, 0x51c4 + uint64_t(seed) * 15485863, true);
+      sum[k].delivered += r.delivered; sum[k].generated += r.generated; sum[k].late += r.late; sum[k].lateUs += r.lateUs; sum[k].slow += r.slow; sum[k].slowUs += r.slowUs; sum[k].nacks += r.nacks; sum[k].repairs += r.repairs;
+      sum[k].rebuilt += r.rebuilt; sum[k].idrs += r.idrs; sum[k].waitUs += r.waitUs; sum[k].wireBytes += r.wireBytes; sum[k].giveUps += r.giveUps;
+    }
+    for (int k = 0; k < 2; ++k) {
+      char frames[32]; std::snprintf(frames, sizeof(frames), "%d/%d", sum[k].delivered, sum[k].generated);
+      std::printf("%-26s %-6s %13s %6d %9.1f %6d %9.1f %7llu %8llu %8llu %6d %8.1f %9.2f\n", s.name.c_str(), k ? "on" : "off", frames, sum[k].slow, double(sum[k].slowUs) / 1000, sum[k].late, double(sum[k].lateUs) / 1000,
+        static_cast<unsigned long long>(sum[k].nacks), static_cast<unsigned long long>(sum[k].repairs), static_cast<unsigned long long>(sum[k].rebuilt), sum[k].idrs, double(sum[k].waitUs) / 1000, double(sum[k].wireBytes) / 1e6);
+    }
+    require(sum[1].delivered >= sum[0].delivered - sum[0].delivered / 100, "Asking sooner delivered fewer frames");
+    // Short runs on a short path: the frames a repair held up wait under two thirds as long in all.
+    if (seeds == 5 && s.rttUs == 8000 && !s.reorderPct && (s.runMean == 3 || s.runMean == 10)) require(sum[1].slowUs * 3 <= sum[0].slowUs * 2, "Asking sooner did not cut the time repaired frames came late");
+    // A path that reorders keeps its wait: no repairs for datagrams that were only late.
+    if (s.reorderPct) require(sum[1].repairs <= sum[0].repairs + sum[0].repairs / 10 + 5 && sum[1].nacks <= sum[0].nacks + sum[0].nacks / 10 + 5, "A reordering path was asked for datagrams that were only late");
+    if (!s.lossPct && !s.runEveryUs && !s.reorderPct && s.linkMbps == 100) require(!sum[1].nacks && !sum[1].repairs, "A clean path was asked for a repair");
+  }
+  ++cases;
+}
+
 void simulation() {
   std::vector<Scenario> scenarios;
   for (const uint64_t rtt : {30, 60, 120}) for (const int loss : {0, 1, 3, 5}) {
@@ -1914,12 +2038,13 @@ int main() {
   try {
     // UDP_SIM_ONLY=recovery: the recovery table alone, for a one-off measurement.
     char only[16] = {}; size_t onlyLength = 0; getenv_s(&onlyLength, only, sizeof(only), "UDP_SIM_ONLY");
+    if (std::string(only) == "quick") { quickSimulation(); std::cout << "udp-media: quick table only\n"; return 0; }
     if (std::string(only) == "parity") { paritySimulation(); std::cout << "udp-media: parity table only\n"; return 0; }
     if (std::string(only) == "recovery") { recoverySimulation(); std::cout << "udp-media: recovery table only\n"; return 0; }
     rfc7748(); rfc5869(); nistGcm(); keySchedule(); framingLayout(); tamper(); replay(); retransmissionTakesNewSequence();
     fragments(); inOrderDelivery(); nackTiming(); rttFromTail(); giveUpDeadline(); dropUntilKey(); keyFrameRules(); epochs(); tailHandling();
-    feedbackTiming(); audioRules(); pacer(); resendBuffer(); repairBudget(); tailTiming(); silence(); addressProof(); keyFrameMerging(); lossRecovery(); parityRules(); resendMemory(); backoff(); sendQueue(); pathRule();
-    maliciousPlaintext(); windowBounds(); fuzz(); simulation(); recoverySimulation(); paritySimulation(); aesCost();
+    feedbackTiming(); audioRules(); pacer(); resendBuffer(); repairBudget(); tailTiming(); silence(); addressProof(); keyFrameMerging(); lossRecovery(); parityRules(); quickNack(); resendMemory(); backoff(); sendQueue(); pathRule();
+    maliciousPlaintext(); windowBounds(); fuzz(); simulation(); recoverySimulation(); paritySimulation(); quickSimulation(); aesCost();
     std::cout << "udp-media: " << cases << " cases, " << checks << " checks passed\n";
     return 0;
   } catch (const std::exception& error) {

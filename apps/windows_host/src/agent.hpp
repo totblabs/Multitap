@@ -555,7 +555,7 @@ class Agent {
           pipeline->onSecure(std::move(hooks));
         }
         text(trackSourceInfo(sent,available));audioEnabled=available;audioGo=true;
-        auto measured=Clock::now(),next=measured;FramePacer pacer;
+        auto measured=Clock::now(),next=measured;FramePacer pacer;FrameCap cap;
         Clock::time_point lastWork{};  // last tick that emitted media
         cursor::PointerAsk pointerAsk;  // worker.pointer.absent (pointer_device.hpp), as for one output
         while(!streamStop_&&!stopped_){
@@ -590,7 +590,7 @@ class Agent {
           const auto period=std::chrono::microseconds(1000000/pipeline->captureFps());
           next+=period;if(next<now)next=now;
           auto wakeEvents=pipeline->frameEvents();if(inputWake_.handle)wakeEvents.push_back(inputWake_.handle);
-          if(pacer.wait(next,wakeEvents,lastWork+captureMinimumGap(period)))next=Clock::now();
+          if(pacer.wait(next,wakeEvents,cap.earliest(lastWork,period)))next=Clock::now();
         }
       }catch(const std::exception& error){
         // A locked session (and a notice at its limit) ends as for one output: no_interactive_session, which the
@@ -1264,7 +1264,7 @@ class Agent {
         std::unique_ptr<LosslessTileSource> lossless;std::unique_ptr<ParallelWork> losslessHelper;CapturedComposedFrame<Capture> composed(capture);bool losslessRetired=false;uint64_t losslessResyncSeen=losslessResync(session);
         uint64_t losslessBytes=0,losslessPackets=0;double losslessMs=0;
         // A software encoder's overload may pace capture below the requested rate (EncodeScaleController::fps).
-        auto period = std::chrono::microseconds(1000000 / encoder.captureFps()); FramePacer pacer;
+        auto period = std::chrono::microseconds(1000000 / encoder.captureFps()); FramePacer pacer; FrameCap cap;
         report(audioAvailable ? L"원격 세션 연결됨 · CPU H.264 · 시스템 소리" : L"원격 세션 연결됨 · CPU H.264 · 오디오 장치 없음");
         // The owned selection and the device's geometry, re-checked every
         // 100 ms off this thread (it used to run on every tick; see
@@ -1679,7 +1679,7 @@ class Agent {
           stall.waitBegan = Clock::now(); loopStats.tail(stall.waitBegan - now);
           const HANDLE frameEvent = capture.frameEvent();
           HANDLE wakeEvents[2]; DWORD wakeCount = 0; if (frameEvent) wakeEvents[wakeCount++] = frameEvent; if (inputWake_.handle) wakeEvents[wakeCount++] = inputWake_.handle;
-          if (pacer.wait(next, std::span<const HANDLE>(wakeEvents, wakeCount), lastWork + captureMinimumGap(period))) next = Clock::now();
+          if (pacer.wait(next, std::span<const HANDLE>(wakeEvents, wakeCount), cap.earliest(lastWork, period))) next = Clock::now();
           loopStats.overshoot(pacer.late());
         }
         // The notice leaves before this scope's capture, encoder and threads are torn down.

@@ -604,6 +604,16 @@ datagrams of a second did not arrive: those are a full queue or a blackout,
 where parity is only load. A Host or client that does not know these kinds
 ignores them, and a Host never sends parity to a client that did not ask.
 
+How long a client waits before a NACK is its own choice (quick-nack-v1). Every
+datagram carries the sealer's sequence, one per datagram and a new one for a
+repair, so a client sees which sequences were skipped and which of those came
+after all, and how late. Until 500 datagrams have come in order it waits a
+quarter of the round trip, at least 10 ms. After that it waits half again the
+longest lateness it saw in the last 15 to 30 s and a millisecond, at least
+2 ms and never longer than the first rule. The Android client takes parity
+and asks for a key frame again sooner after a loss (three round trips and
+60 ms, then a quarter second, then every half second), but sends no LOSS.
+
 ### Direct UDP (udp-direct-v1)
 
 This is a bounded IPv4 hole-punching extension to the existing encrypted UDP
