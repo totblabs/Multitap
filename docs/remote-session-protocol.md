@@ -614,8 +614,13 @@ longest lateness it saw in the last 15 to 30 s and a millisecond, at least
 and asks for a key frame again sooner after a loss (three round trips and
 60 ms, then a quarter second, then every half second), but sends no LOSS.
 
-A Host sends a picture's datagrams in one burst, as large as its pacer allows
-(three times the target for 6 ms: 135 KB at 60 Mbps). Its socket's send buffer
+A Host's pacer lets a picture's datagrams leave at once (three times the target
+for 6 ms: 135 KB at 60 Mbps), but the wire takes them a clump at a time: at
+most 40 datagrams back to back, the next ones half a millisecond later. A PC
+sends as fast as its network card goes, and where the path steps down to a
+slower link a longer burst overflows that device's queue: of the pictures of
+more than 160 datagrams, 17 to 19 % was lost between a 2.5 Gbps Host and the
+relay, and nothing of those of up to 100. Its socket's send buffer
 is 1 MB. With the 64 KB Windows gives by default, the socket refused the end
 of such a burst whenever the network card was not taken at once, and those
 datagrams were lost on that PC with their sequences used. What a Host's socket

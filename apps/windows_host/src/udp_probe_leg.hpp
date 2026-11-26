@@ -117,6 +117,7 @@ inline void udpProbeRun(UdpGrant& grant,const UdpProbeLegOptions& options,HANDLE
     const HANDLE events[]{stop,sock.readable,wake,sock.pacer};const DWORD count=sock.pacer?4:3;
     bool localReported=false;
     for(;;){
+      uint64_t pumped=0;
       const auto now=udpProbeNowMs();const auto due=probe.tick(now);
       if(WaitForSingleObject(stop,0)==WAIT_OBJECT_0)return;
       report(probe.takeOutcome());if(probe.failed())return;
@@ -126,11 +127,17 @@ inline void udpProbeRun(UdpGrant& grant,const UdpProbeLegOptions& options,HANDLE
         media.directRelay(udpEndpoint(*addresses[*relay]));
         if(grant.direct&&!localReported){localReported=true;if(const auto local=udpLocalEndpoint(sock.handle,*addresses[*relay])){char text[INET_ADDRSTRLEN]{};in_addr address{};address.s_addr=local->address;if(inet_ntop(AF_INET,&address,text,sizeof(text)))media.local(text,local->port);}}
         if(probe.answered()&&sock.pacer)media.probePassed();
-        const auto stamp=udpProbeNowUs();
+        const auto stamp=udpProbeNowUs();pumped=stamp;
         media.pump(stamp,[&](std::span<const uint8_t> bytes){if(const auto direct=media.directTarget(stamp))directSend(*direct,bytes);else sendTo(*relay,bytes);});
         media.directTick(stamp,directSend);
       }
-      if(const DWORD pace=media.paceMs()){LARGE_INTEGER after{};after.QuadPart=-10000LL*pace;SetWaitableTimer(sock.pacer,&after,0,nullptr,nullptr,FALSE);}
+      // The pace runs from when this pump began: its sends took time (30 us a datagram on a virtual PC, measured
+      // 2026-11-26: a clump of 40 and then a full pace made a picture of 180 take 8 ms where it took 6). A pace
+      // that is already over fires at once, behind what the socket has to read.
+      if(const uint32_t pace=media.paceUs()){
+        const uint64_t spent=pumped?udpProbeNowUs()-pumped:0;
+        LARGE_INTEGER after{};after.QuadPart=-10LL*LONGLONG(spent<pace?pace-spent:1);SetWaitableTimer(sock.pacer,&after,0,nullptr,nullptr,FALSE);
+      }
       const DWORD signaled=WaitForMultipleObjects(count,events,FALSE,due?DWORD(*due>now?*due-now:0):INFINITE);
       if(signaled==WAIT_TIMEOUT||signaled==WAIT_OBJECT_0+2||signaled==WAIT_OBJECT_0+3)continue;
       if(signaled!=WAIT_OBJECT_0+1)return;

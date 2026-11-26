@@ -111,7 +111,7 @@ void exchangeRules(){
   // The small-order point gives an all-zero secret, which aborts and spends the grant.
   {Link link;link.path.probePassed();const std::array<uint8_t,32> zero{};require(!link.path.exchange(keyMessage(base64(zero)),sessionId,link.target),"An all-zero shared secret was accepted");
     require(!link.path.exchange(keyMessage(link.client.publicKey()),sessionId,link.target),"A grant was reused after a failed exchange");
-    link.step(500);require(link.wire==0&&link.path.paceMs()==0,"A failed exchange started a sender");}
+    link.step(500);require(link.wire==0&&link.path.paceUs()==0,"A failed exchange started a sender");}
   ++passed;
 }
 void proofRequired(){
@@ -136,7 +136,7 @@ void switching(){
   require(link.paths==std::vector<bool>{true}&&link.records.size()==1&&link.records[0]==std::pair{udpPathOnUdp,uint32_t(udpPathProven)},"The switch was not recorded once");
   const auto bytesOf=[&](uint64_t pts){for(const auto& message:link.client.delivered)if(message.pts==pts)return message.bytes;return Bytes{};};
   require(bytesOf(2000)==key&&bytesOf(2100)==next&&bytesOf(2110)==sound,"Delivered bytes differ from the WSS message");require(bytesOf(1000).empty()&&bytesOf(1100).empty(),"A WebSocket message reached the UDP receiver");
-  require(link.stat("udpPath")==1&&link.path.paceMs()==1,"Stats or pacing do not show UDP");++passed;
+  require(link.stat("udpPath")==1&&link.path.paceUs()==1000,"Stats or pacing do not show UDP");++passed;
 }
 void firstIdrStaysOnWss(){
   // The leg started after the stream's first IDR: it asks for one on WebSocket, once,

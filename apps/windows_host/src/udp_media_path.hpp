@@ -182,9 +182,10 @@ class UdpMediaPath {
       refusedRecorded_=count;refusedAt_=nowUs;
     }
   }
-  // Leg thread: its sender's timer, in milliseconds; 0 with nothing to send. 200 ms
-  // TAILs and what is left in the queue need no pacing precision off UDP.
-  DWORD paceMs()const{return !sender_||over_?0:onUdp_?1:5;}
+  // Leg thread: its sender's timer, in microseconds; 0 with nothing to send. 200 ms
+  // TAILs and what is left in the queue need no pacing precision off UDP. On UDP, what the
+  // sender holds leaves a clump at a time (udp_media.hpp, wireClumpUs).
+  uint32_t paceUs()const{return !sender_||over_?0:!onUdp_?5000:sender_->waiting()?uint32_t(udpcore::wireClumpUs):1000;}
   // Leg thread, on its way out for any reason. A closed leg has already detached, so
   // media still on UDP here means this leg failed under a working session.
   void ended()noexcept{

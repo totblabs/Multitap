@@ -66,6 +66,21 @@ constexpr size_t maxAudioQueue = 64, maxRepairs = 2048, maxKeptBytes = 16 * 1024
 constexpr size_t audioRepeats = 2;
 constexpr uint64_t audioRepeatUs = 100000;
 constexpr uint64_t queuePacingUs = 250000, repairWindowUs = 100000, pacerBurstUs = 6000;
+// The wire pace, under the pacer: however much credit there is, at most wireClump datagrams
+// leave back to back, and the next ones wireClumpUs later (768 Mbps; `next` returns false in
+// between, and the caller comes back that soon while `waiting`). A PC sends a burst as fast as
+// its network card goes, and where the path steps down to a slower link the burst waits in
+// that device's queue. Field 2026-11-26, a game at 20 to 43 Mbps, three 45 s captures where
+// the stream reached the relay: of the pictures of up to 100 datagrams nothing was lost; of
+// those of 100 to 119, 1.1 to 1.4 %; 120 to 139, 6 to 7 %; 140 to 159, 10 to 14 %; over 160,
+// 17 to 19 % (2.2 to 3.9 % of all). The first loss came 102 to 106 datagrams into a burst,
+// then two of five arrived, 12 us apart: a 2.5 Gbps sender into a 1 Gbps link behind a queue
+// of about 60 packets. The IP IDs counted on through the gaps, so the PC had sent them. A
+// clump of 40 fills 24 places of such a queue, and it has emptied before the next one; it
+// is also one average frame at 20 Mbps and 60 fps, which still leaves at once.
+constexpr size_t wireClump = 40;
+constexpr uint64_t wireClumpUs = 500;
+constexpr double wireClumpBytes = double(wireClump * maxDatagram), wireBytesPerUs = wireClumpBytes / double(wireClumpUs);
 // parity-v1. A lost video fragment is asked for again (NACK), and its frame then reaches the
 // decoder a NACK delay and a round trip late: about 20 ms on a LAN, two or three pictures at
 // 120 fps. Field 2026-11-25, a game over Wi-Fi: 2.7 such repairs a second with 0.04 % of the
@@ -684,6 +699,7 @@ class Sender {
   bool next(uint64_t nowUs, Plain& out) {
     if (stopped_) return false;
     refill(nowUs); expire(nowUs);
+    if (wire_ < double(maxDatagram)) return false;  // the wire pace: this clump is out
     if (tailAt_ && nowUs >= tailAt_ && !queue_.empty()) tailAt_ = 0;  // a newer message is starting
     if (nowUs >= proofAt_ || (tailAt_ && nowUs >= tailAt_)) { tail(nowUs, out); return emitted(out); }
     // The target is a video rate; audio stays outside it, as in BitrateController.
@@ -760,6 +776,8 @@ class Sender {
   const Stats& stats() const { return stats_; }
   size_t heldBytes() const { return queuedBytes_ + keptBytes_; }
   size_t waitingRepairs() const { return repairs_.size(); }
+  // Something is held here: the caller comes back a wireClumpUs later, not at its idle pace.
+  bool waiting() const { return !queue_.empty() || !repairs_.empty() || !audio_.empty(); }
 
  private:
   // parity, paritySent: parity datagrams this message is followed by, and how many have gone.
@@ -790,6 +808,7 @@ class Sender {
   void refill(uint64_t nowUs) {
     const double elapsed = double(nowUs - at_); at_ = nowUs;
     credit_ = std::min(credit_ + elapsed * bytesPerUs_ * pacerFactor, creditLimit());
+    wire_ = std::min(wire_ + elapsed * wireBytesPerUs, wireClumpBytes);
     budget_ = std::min(budget_ + elapsed * bytesPerUs_ * repairShare, budgetLimit());
   }
   bool charge(size_t plainBytes) {
@@ -810,7 +829,7 @@ class Sender {
     if (tailAt_ && nowUs >= tailAt_) tailAt_ = tailsLeft_-- > 1 ? nowUs + tailSecondUs : 0;
     proofAt_ = nowUs + proofTailUs; ++stats_.tails;
   }
-  bool emitted(const Plain& out) { ++sent_; ++stats_.datagrams; stats_.wireBytes += out.size + headerBytes + tagBytes; return true; }
+  bool emitted(const Plain& out) { ++sent_; ++stats_.datagrams; stats_.wireBytes += out.size + headerBytes + tagBytes; wire_ -= double(out.size + headerBytes + tagBytes); return true; }
   const Item* find(uint32_t id) const {
     for (const auto& item : kept_) if (item.id == id) return &item;
     return !queue_.empty() && queue_.front().sent && queue_.front().id == id ? &queue_.front() : nullptr;
@@ -870,7 +889,7 @@ class Sender {
 
   std::function<uint64_t()> random_;
   uint64_t at_, alive_, proofAt_, challengeAt_, challenge_, previous_ = 0, rtt_ = 0;
-  double bytesPerUs_ = 0, credit_ = 0, budget_ = 0;
+  double bytesPerUs_ = 0, credit_ = 0, budget_ = 0, wire_ = wireClumpBytes;
   bool proven_ = false, awaitingKey_ = false, stopped_ = false, arriving_ = true, staleEcho_ = false;  // as the last FEEDBACK showed
   uint32_t videoId_ = 1, audioId_ = 1;  // given when a message starts, so a dropped one leaves no gap
   size_t queuedBytes_ = 0, queuedKeyBytes_ = 0, keptBytes_ = 0;  // a key frame alone must not look like a backlog

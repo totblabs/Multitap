@@ -809,6 +809,39 @@ void pacer() {
   ++cases;
 }
 
+// The wire pace: whatever the pacer's credit, a clump at a time.
+void wirePace() {
+  constexpr int target = 100000000;  // credit for 225 KB at once
+  auto sender = provenSender(target); Plain p; uint64_t now = 1000000;
+  while (sender.next(now, p)) {}
+  require(!sender.waiting(), "An idle sender said it holds something");
+  now += 1000; sender.video(video(1, 180000, true), true);
+  require(sender.waiting(), "A queued frame is not held");
+  size_t first = 0; while (sender.next(now, p)) ++first;
+  require(first == wireClump, "The first clump is not wireClump datagrams");
+  require(!sender.next(now, p), "A datagram left after the clump at the same instant");
+  // The caller comes back every 100 us: no window of wireClumpUs carries more than a clump and what refilled in it.
+  std::vector<uint64_t> times(first, now); const uint64_t start = now;
+  for (now += 100; sender.waiting() && now < start + 20000; now += 100) while (sender.next(now, p)) if (p.bytes[0] != kindTail) times.push_back(now);
+  require(!sender.waiting(), "The frame did not leave");
+  const size_t datagrams = fragmentCount(video(1, 180000, true).size());
+  require(times.size() >= datagrams, "Not every fragment left");
+  require(times.back() - start <= (datagrams / wireClump + 1) * wireClumpUs, "The frame took longer than its clumps");
+  size_t most = 0; for (size_t a = 0, b = 0; b < times.size(); ++b) { while (times[b] - times[a] >= wireClumpUs) ++a; most = std::max(most, b - a + 1); }
+  require(most <= wireClump * 2, "More than two clumps left within one clump time");
+  // A caller that comes back late gets one clump, not what it missed.
+  auto late = provenSender(target); now = 1000000; late.video(video(1, 180000, true), true);
+  while (late.next(now, p)) {}
+  size_t after = 0; now += 5000; while (late.next(now, p)) ++after;
+  require(after == wireClump, "A late caller sent more than one clump");
+  // Sound waits for the clump too, and no longer than it.
+  auto sound = provenSender(target); now = 1000000; sound.video(video(1, 180000, true), true);
+  while (sound.next(now, p)) {}
+  require(sound.audio(Bytes(200, 7)).queued && !sound.next(now, p), "Sound left inside a clump that was out");
+  require(sound.next(now + wireClumpUs, p) && p.bytes[0] == kindFragment && p.bytes[1] == classAudio, "Sound did not lead the next clump");
+  ++cases;
+}
+
 void resendBuffer() {
   auto sender = provenSender(); Plain p; uint64_t now = 1000;
   const Bytes message = video(1, 5000, true);
@@ -2043,7 +2076,7 @@ int main() {
     if (std::string(only) == "recovery") { recoverySimulation(); std::cout << "udp-media: recovery table only\n"; return 0; }
     rfc7748(); rfc5869(); nistGcm(); keySchedule(); framingLayout(); tamper(); replay(); retransmissionTakesNewSequence();
     fragments(); inOrderDelivery(); nackTiming(); rttFromTail(); giveUpDeadline(); dropUntilKey(); keyFrameRules(); epochs(); tailHandling();
-    feedbackTiming(); audioRules(); pacer(); resendBuffer(); repairBudget(); tailTiming(); silence(); addressProof(); keyFrameMerging(); lossRecovery(); parityRules(); quickNack(); resendMemory(); backoff(); sendQueue(); pathRule();
+    feedbackTiming(); audioRules(); pacer(); wirePace(); resendBuffer(); repairBudget(); tailTiming(); silence(); addressProof(); keyFrameMerging(); lossRecovery(); parityRules(); quickNack(); resendMemory(); backoff(); sendQueue(); pathRule();
     maliciousPlaintext(); windowBounds(); fuzz(); simulation(); recoverySimulation(); paritySimulation(); quickSimulation(); aesCost();
     std::cout << "udp-media: " << cases << " cases, " << checks << " checks passed\n";
     return 0;
