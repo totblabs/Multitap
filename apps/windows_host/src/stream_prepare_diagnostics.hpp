@@ -61,10 +61,20 @@ inline std::optional<std::pair<uint32_t,uint32_t>> streamPreparationObservation(
   if(!std::isfinite(stage)||std::floor(stage)!=stage||stage<1||stage>255||!std::isfinite(error)||std::floor(error)!=error||error<0||error>UINT32_MAX)return {};
   return std::pair{uint32_t(stage),uint32_t(error)};
 }
+// 19: the session worker's stream start threw in its own checks, before its capture thread ran (agent.hpp, stream):
+//     error = streamCaptureFailureCode of what it threw, 0 for a text that has no code. The client is told as for
+//     a capture that failed: a resize restart's failure is the resize's, any other start's the stream's.
+// 20: the session worker's command loop ended by an exception (service.hpp): error likewise. The worker restores
+//     the display and stops; the service tells the Broker (worker_failed).
+// Field 2026-11-26, a PC with its own monitor: 38 ms after a resize's own result said ok, the worker was stopping,
+// with exit code 0 and no record. Nothing told the Broker, and the client waited out the 90 s of its resize.
+inline constexpr uint32_t streamStartCheckStage=19,workerLoopExceptionStage=20;
 inline uint32_t streamCaptureFailureCode(const std::string& text){
   // 14-20: the topology check of a running capture (capture_selection.hpp); before they all recorded 0.
-  static const std::array<const char*,20> known{"No initial virtual display frame","Virtual display geometry changed; reconnect","Virtual display geometry changed; reconnect the session","Interactive desktop is locked, secure or unavailable","Desktop capture is unavailable","Selected display rectangle cuts a monitor","Capture monitor pixel geometry mismatch","Selected displays are not contiguous","Desktop capture failed; check the interactive desktop","frame_layout_unsupported","frame_memory_unavailable","frame_memory_insufficient","encoder_format_unsupported",
-    "Selected virtual monitor changed; reconnect the session","A console or unselected monitor intersects the capture area","Cannot validate the selected virtual monitor topology","Virtual monitors must be adjacent; gaps or console displays are not captured","Overlapping virtual monitors cannot be captured","Selected monitor lies outside the validated capture area","Invalid owned virtual monitor geometry"};
+  // 21-25: what a stream start checks before its capture thread (agent.hpp, startStream).
+  static const std::array<const char*,25> known{"No initial virtual display frame","Virtual display geometry changed; reconnect","Virtual display geometry changed; reconnect the session","Interactive desktop is locked, secure or unavailable","Desktop capture is unavailable","Selected display rectangle cuts a monitor","Capture monitor pixel geometry mismatch","Selected displays are not contiguous","Desktop capture failed; check the interactive desktop","frame_layout_unsupported","frame_memory_unavailable","frame_memory_insufficient","encoder_format_unsupported",
+    "Selected virtual monitor changed; reconnect the session","A console or unselected monitor intersects the capture area","Cannot validate the selected virtual monitor topology","Virtual monitors must be adjacent; gaps or console displays are not captured","Overlapping virtual monitors cannot be captured","Selected monitor lies outside the validated capture area","Invalid owned virtual monitor geometry",
+    "Validated virtual display geometry required","Validated owned monitor selection is required","Invalid monitor coordinate","Only the selected owned virtual monitors can be captured","Invalid stream epoch"};
   for(size_t i=0;i<known.size();++i)if(text==known[i])return uint32_t(i+1);return 0;
 }
 // Only fixed public codes from the negotiated v2 vocabulary cross the wire.

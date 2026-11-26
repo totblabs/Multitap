@@ -1537,7 +1537,7 @@ class ServiceBridge final : public AgentBridge {
               if(secureTracks?secureTracks->consume(value):secureService->consume(value))return ControlAction::handled;
               // System input: the worker's rectangle for the injector (worker.input.*), consumed whether or not one runs.
               if(systemInput->consume(value,id_))return ControlAction::handled;
-              if(value.get("type").string()=="worker.session.stopped"){if(!stopFence_.acknowledge(value))return ControlAction::invalid;terminal=true;return ControlAction::ended;}if(value.get("type").string()=="clip.diag"){recordClipboardWorkerDiagnostic(value,id_);return ControlAction::handled;}if(value.get("type").string()=="clip.packet"){if(value.get("sessionId").string()==id_)clipboard_.send(jsonObject(value.get("payload")),clipboardGenerationNumber(value.get("generation").number()));return ControlAction::handled;}
+              if(value.get("type").string()=="worker.session.stopped"){if(!stopFence_.acknowledge(value))return ControlAction::invalid;return ControlAction::ended;}if(value.get("type").string()=="clip.diag"){recordClipboardWorkerDiagnostic(value,id_);return ControlAction::handled;}if(value.get("type").string()=="clip.packet"){if(value.get("sessionId").string()==id_)clipboard_.send(jsonObject(value.get("payload")),clipboardGenerationNumber(value.get("generation").number()));return ControlAction::handled;}
             if(value.get("type").string()=="worker.stream.failure"){const auto diagnostic=streamPreparationObservation(value,id_);if(!diagnostic)return ControlAction::invalid;preparationLog(streamObservationOk(diagnostic->first,diagnostic->second),200+diagnostic->first,diagnostic->second);observeGpuPath(diagnostic->first,diagnostic->second);return ControlAction::handled;}
             if(value.get("type").string()=="stream.unavailable"&&value.get("sessionId").string()==id_)preparationLog(false,90,streamPreparationReasonCode(value.get("reason").string()));
             if(value.get("type").string()=="worker.profile.active"){
@@ -1587,6 +1587,9 @@ class ServiceBridge final : public AgentBridge {
         relayProbe.capture();
         endChannelRedials();
         clipboard_.stop();print_.stop();drives_.stop();usb_.stop();gamepadsEnd();
+        // `terminal`: a packet that ends the stream went to the Broker in this pass, so it knows. A worker that
+        // stopped with nobody having asked (its own stop packet, or its pipe ending) sent no such packet: the
+        // Broker is told here. Field 2026-11-26: it was not, and a client waited out its resize (90 s).
         const bool wasStopped=stopped_.exchange(true);const bool unexpected=!wasStopped&&!stopping_;streaming_=false;if(unexpected){invalidateDisplay();if(!terminal)unavailable("worker_failed");}
         pipe_=nullptr;
       } catch (...) { relayFacts.ended(WorkerRelayCause::exception);if(!relayFacts.captured)relayFacts.requested=stopped_||stopping_;preparationLog(false,prepareStage);if(trackSession)tracks_.stop();endChannelRedials();clipboard_.stop();print_.stop();drives_.stop();usb_.stop();gamepadsEnd();pipe_=nullptr;const bool wasStopped=stopped_.exchange(true);const bool unexpected=!wasStopped&&!stopping_;streaming_=false;if(unexpected){invalidateDisplay();unavailable(initialFallback?"host_maintenance":initialSdkUnsupported?"unsupported_display_mode":"worker_failed");} }
@@ -3341,7 +3344,10 @@ inline int interactiveWorker(const std::wstring& pipeName, DWORD servicePid) {
     worker.localControl(jsonObject(command));
     if(command.get("type").string()=="session.start")applyScale(streamCommand);
   }
-  }catch(...){ }
+  // An exception ends this worker in order (the display is restored and the stop reported below); it is recorded,
+  // because its exit code is 0 and nothing else says why it stopped (stream_prepare_diagnostics.hpp, stage 20).
+  }catch(const std::exception& error){preparationFailure(workerLoopExceptionStage,streamCaptureFailureCode(error.what()));}
+  catch(...){preparationFailure(workerLoopExceptionStage,0);}
   // speaker_mute.hpp: the session is over, so the PC's speakers get their sound back before the stop is reported.
   // Its records go out like the stop packet below, also when a stop seen during an RPC already set `stopped`.
   clipboard.reset();worker.suspendStreaming();{std::atomic<bool> speakerStopped{false};diagnosticStop=&speakerStopped;worker.speakerMuteEnd();diagnosticStop=&stopped;}try{(void)displayScale.restore();}catch(...){ }try{(void)trackScale.restore();}catch(...){ }bool restored=cleanupHandled?cleanupResult:(streamProfile?streamProfile->finish():!profileRequired);

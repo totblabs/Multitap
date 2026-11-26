@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.50 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.51 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -301,6 +301,12 @@ add_executable(MultitapHostTextInputTest EXCLUDE_FROM_ALL src/text_input_test.cp
 target_compile_definitions(MultitapHostTextInputTest PRIVATE MULTITAP_INPUT_LATENCY_TEST MULTITAP_AGENT_PUBLICATION_TEST)
 target_link_libraries(MultitapHostTextInputTest PRIVATE host_engine winhttp crypt32)
 target_compile_options(MultitapHostTextInputTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
+# A session worker's stream start that fails before its capture thread: recorded and told to the client,
+# on the worker Agent path (no capture, encoder or display change is started).
+add_executable(MultitapHostStreamStartFailureTest EXCLUDE_FROM_ALL src/stream_start_failure_test.cpp)
+target_compile_definitions(MultitapHostStreamStartFailureTest PRIVATE MULTITAP_INPUT_LATENCY_TEST MULTITAP_AGENT_PUBLICATION_TEST)
+target_link_libraries(MultitapHostStreamStartFailureTest PRIVATE host_engine winhttp crypt32)
+target_compile_options(MultitapHostStreamStartFailureTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # display-scale-v1: request validation, step math, keeper apply/restore and
 # crash recovery (substituted DisplayConfig/record) and Session0 forwarding.
 # stream-size-v1: decoder limits, full-size encoding, measured-load scale controller.

@@ -174,6 +174,9 @@ composite. A Host that cannot stream sends
 `stream.unavailable {sessionId, reason}` (`no_interactive_session`,
 `virtual_display_required`, `worker_failed`, `capture_failed`,
 `encoder_failed`, `host_maintenance`) and keeps its channel.
+A Host whose streaming process stops without having been asked to says so
+too (`worker_failed`), also while a resize is pending: the Broker does not
+wait out that resize.
 
 Host -> client once per second:
 `{"type":"stream.stats","capturedFps":0,"encodedFps":0,"bitrateKbps":0}`, with
@@ -313,7 +316,9 @@ keeps only its latest wish, with one change in flight.
 A rejection before dispatch is `stream.resize.failed` with `unchanged:true`
 (the old decoder continues). A failure after dispatch reports
 `unchanged:false` and ends the session; the Host's display transaction
-restores the saved configuration or reports that recovery is needed. A
+restores the saved configuration or reports that recovery is needed. A stream
+that cannot start at the new size after the display has changed is such a
+failure, reported at once. A
 superseded request cannot complete its successor; revocation, timeout and
 disconnect end a pending change.
 

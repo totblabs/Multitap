@@ -1021,7 +1021,33 @@ class Agent {
     keyFrameRequested_ = false; recoverRequested_ = 0;
     sessionId_.clear();
   }
+  // The session worker's start. What startStream throws before its capture thread runs (the checks of the
+  // command and of the monitors as Windows lists them at that instant) is a failed start like one its capture
+  // thread finds a line later: recorded (stage streamStartCheckStage) and told to the client, and the worker goes
+  // on to be stopped in order. Left to its caller, the exception ended the worker's command loop with exit code 0,
+  // no record and no word to anyone. A session ID that cannot be named in a notice is still the caller's.
   void stream(const Json& control) {
+    if (bridge_ || !local_) { startStream(control); return; }
+    try { startStream(control); }
+    catch (const std::exception& error) { if (!startFailed(control, error.what())) throw; }
+    catch (...) { if (!startFailed(control, "")) throw; }
+  }
+  bool startFailed(const Json& control, const std::string& what) noexcept {
+    try {
+      const auto session = control.get("sessionId").string();
+      if (session.empty() || session.size() > 80 || session.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos) return false;
+      streamStop_ = true; active_ = false; input_.reset();
+      try { if (captureDiagnostic_) captureDiagnostic_(streamStartCheckStage, streamCaptureFailureCode(what)); } catch (...) { }
+      report(L"화면 전송 시작 실패: " + wide(what));
+      const auto epoch = control.get("epoch").number(0);
+      const bool resized = control.get("resizeProtocol").string() == "epoch-v1" && !control.get("resizeId").string().empty() && epoch >= 0 && epoch <= 65535 && std::floor(epoch) == epoch;
+      const std::string epochFields = resized ? ",\"sessionId\":" + jsonQuote(session) + ",\"epoch\":" + std::to_string(uint16_t(epoch)) + ",\"requestId\":" + jsonQuote(control.get("requestId").string()) + ",\"resizeId\":" + jsonQuote(control.get("resizeId").string()) : std::string();
+      const char* reason = interactiveDesktopAvailable() ? streamCapturePublicFailure(what, "capture_failed", streamSizeV2(control)) : "no_interactive_session";
+      text(captureFailureNotice(resized, false, epochFields, session, reason));
+      return true;
+    } catch (...) { return false; }
+  }
+  void startStream(const Json& control) {
     const auto startBegan = std::chrono::steady_clock::now();
     stopStream(); sessionId_ = control.get("sessionId").string();
     const bool epochProtocol=control.get("resizeProtocol").string()=="epoch-v1";const auto requestedEpoch=control.get("epoch").number(0);if(requestedEpoch<0||requestedEpoch>65535||std::floor(requestedEpoch)!=requestedEpoch)throw std::runtime_error("Invalid stream epoch");mediaEpoch_=epochProtocol?uint16_t(requestedEpoch):0;

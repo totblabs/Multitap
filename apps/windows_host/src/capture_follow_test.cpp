@@ -126,6 +126,11 @@ void recordsWhatTheLastReadingShowed() {
   require(streamCaptureFailureCode("A console or unselected monitor intersects the capture area") == 15, "the intersecting-monitor code");
   require(streamCaptureFailureCode("Cannot validate the selected virtual monitor topology") == 16, "the unreadable-topology code");
   require(streamCaptureFailureCode("Invalid owned virtual monitor geometry") == 20, "the last topology code");
+  // What a stream start checks before its capture thread: codes of their own, the earlier ones unchanged.
+  require(streamCaptureFailureCode("Validated virtual display geometry required") == 21 && streamCaptureFailureCode("Validated owned monitor selection is required") == 22, "the start's geometry codes");
+  require(streamCaptureFailureCode("Invalid monitor coordinate") == 23 && streamCaptureFailureCode("Only the selected owned virtual monitors can be captured") == 24, "the start's selection codes");
+  require(streamCaptureFailureCode("Invalid stream epoch") == 25 && streamCaptureFailureCode("encoder_format_unsupported") == 13 && streamCaptureFailureCode("anything else") == 0, "the start's command codes");
+  require(!streamObservationOk(streamStartCheckStage, 14) && !streamObservationOk(workerLoopExceptionStage, 0), "A failed start was recorded as an observation");
 }
 }
 
