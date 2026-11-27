@@ -949,3 +949,54 @@ test('UDP로 화면과 소리 보내기 fixed by .env: shown with its value and 
   const updater = fixture(t, { snapshot: response({ udpMedia: udpRelay(), udpSwitch: udpSwitch() }) });
   assert.equal(updater.find('.server-access-udp'), null);
 });
+
+// ---- host-route-v1: the address Hosts in this server's network are sent to (src/host-route.mjs) ----
+const route = (extra = {}) => ({ fixed: null, saved: null, current: null, ...extra });
+const routePanel = f => f.find('.server-access-host-route');
+
+test('같은 내부망의 Host: not set, saved on its own with one press; a wrong address is said and nothing is sent', async t => {
+  let answer = route({ saved: '10.20.30.40', current: '10.20.30.40' });
+  const f = fixture(t, { snapshot: response({ hostRoute: route() }), handler: async path => { assert.equal(path, '/host-route'); return answer; } });
+  assert.equal(routePanel(f).querySelector('h2').textContent, '같은 내부망의 Host');
+  assert.equal(f.find('[data-access-host-route]').textContent, '정해 두지 않았어요. Host는 외부 접속 주소로 와요.');
+  assert.equal(routePanel(f).querySelector('.field-hint').textContent, 'Host가 이 서버와 같은 내부망에 있으면 공유기를 거치지 않고 이 주소로 바로 와요.\n닿지 않는 Host는 전처럼 외부 접속 주소로 가요.');
+  assert.equal(f.find('[data-access-host-route-enter]').textContent, '이 서버의 내부 IPv4 주소를 넣으세요.');
+  assert.equal(f.find('[name="hostRoute"]').value, '');
+  assert.equal(f.find('[name="hostRoute"]').getAttribute('placeholder'), '예: 192.168.0.10');
+  for (const wrong of ['10.20.30.4000', '10.20.30', 'server.lan']) {
+    f.change('hostRoute', wrong); f.find('[data-access-host-route-save]').click(); await flush();
+    assert.equal(f.writes.length, 0, wrong);
+    assert.equal(f.find('[data-access-host-route-message]').textContent, 'IPv4 주소를 넣으세요. 예: 192.168.0.10');
+    assert.equal(f.find('[data-access-host-route-message]').getAttribute('role'), 'alert');
+  }
+  f.change('hostRoute', ' 10.20.30.40 '); f.find('[data-access-host-route-save]').click(); await flush();
+  assert.deepEqual(f.writes, [{ path: '/host-route', method: 'PUT', body: { address: '10.20.30.40' } }]);
+  assert.deepEqual(f.loads.at(-1), { key: 'serverAccess', options: { force: true } }, 'the page reads what is in force again');
+  assert.equal(f.find('[data-access-host-route-message]').textContent, '저장했어요. 새로 시작하는 연결부터 이 주소를 써요.');
+  assert.equal(f.state.ui.serverAccess?.dirty ?? false, false, 'no unsaved edit of the addresses: the route is saved on its own');
+  // The page read again: what is saved is shown and is in the field; emptied and saved, it is cleared.
+  f.setSnapshot(response({ hostRoute: route({ saved: '10.20.30.40', current: '10.20.30.40' }) }));
+  assert.equal(f.find('[data-access-host-route]').textContent, 'Host가 10.20.30.40로 와요.');
+  assert.equal(f.find('[name="hostRoute"]').value, '10.20.30.40');
+  answer = route();
+  f.change('hostRoute', ''); f.find('[data-access-host-route-save]').click(); await flush();
+  assert.deepEqual(f.writes.at(-1), { path: '/host-route', method: 'PUT', body: { address: '' } });
+  assert.equal(f.find('[data-access-host-route-message]').textContent, '지웠어요. 새로 시작하는 연결부터 외부 접속 주소를 써요.');
+});
+
+test('같은 내부망의 Host: what the server refuses is said; fixed by .env it is shown with its value and not to be changed here; an older server shows nothing', async t => {
+  const refused = Object.assign(new Error('fixture'), { code: 'invalid_host_route' });
+  const f = fixture(t, { snapshot: response({ hostRoute: route() }), handler: async () => { throw refused; } });
+  f.change('hostRoute', '127.0.0.1'); f.find('[data-access-host-route-save]').click(); await flush();
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.find('[data-access-host-route-message]').textContent, 'IPv4 주소를 넣으세요. 예: 192.168.0.10');
+  const fixed = fixture(t, { snapshot: response({ hostRoute: route({ fixed: '192.0.2.101', current: '192.0.2.101' }) }) });
+  assert.equal(fixed.find('[data-access-host-route]').getAttribute('data-access-host-route'), 'fixed');
+  assert.equal(fixed.find('[data-access-host-route]').textContent, '서버 .env의 MULTITAP_HOST_ROUTE(192.0.2.101)로 정해져 있어요.\n여기서 바꾸려면 .env에서 그 줄을 지우세요.');
+  assert.equal(fixed.find('[name="hostRoute"]'), null); assert.equal(fixed.find('[data-access-host-route-save]'), null); assert.equal(fixed.find('[data-access-host-route-enter]'), null);
+  for (const value of [undefined, null, 'x', { fixed: 'not-an-address', saved: 5 }]) {
+    const older = fixture(t, { snapshot: response(value === undefined ? {} : { hostRoute: value }) });
+    if (value && typeof value === 'object') assert.equal(older.find('[data-access-host-route]').textContent, '정해 두지 않았어요. Host는 외부 접속 주소로 와요.', 'a value that is no address is not shown');
+    else assert.equal(routePanel(older), null, String(value));
+  }
+});

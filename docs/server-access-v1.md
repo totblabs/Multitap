@@ -115,6 +115,8 @@ docker compose run --rm --no-deps -T --entrypoint node broker /app/src/access-cl
 
 UDP 미디어는 이 방식에서 `.env`의 중계 목록 없이 동작한다. 앱과 Host 각각에 자기가 접속한 주소의 호스트와 게시된 UDP 포트(`MULTITAP_UDP_PUBLISHED_PORT`, Compose가 넘김)를 준다. UDP 포트가 루프백에만 게시됐거나, 접속 주소가 IPv6 숫자 주소이거나, 목록이 하나만 설정된 경우에는 쓰지 않는다([Docker 배포](docker-deployment.md#udp-미디어)).
 
+Host가 같은 내부망에서 서버에 닿는 주소(host-route-v1, `src/host-route.mjs`)는 상태 응답의 `hostRoute {fixed, saved, current}`에 있다. `fixed`는 `.env`의 `MULTITAP_HOST_ROUTE`, `saved`는 콘솔에서 저장한 값, `current`는 그중 쓰는 것이다. `PUT /api/v1/admin/host-route {address}`로 저장하고(빈 문자열은 지운다) 접속 설정 저장과 따로 바로 적용된다. IPv4가 아니거나 0.0.0.0/8, 루프백, 링크 로컬, 멀티캐스트, 브로드캐스트면 400 `invalid_host_route`, `.env`가 정하면 409 `host_route_fixed`다. 저장하면 그때부터 시작하는 세션이 Host의 UDP 중계 목록 맨 앞에 그 주소를 넣고, Host 채널은 다음에 연결할 때 `host.capabilities.ack`로 받는다.
+
 `POST /api/v1/admin/server-restart {confirm:true}`는 이 방식에서 서버를 다시 시작한다(202). 저장이나 복원이 진행 중이면 409, 다른 설치에서는 503 `server_restart_unavailable`이다.
 
 ## HTTP 설치의 서버 업데이트와 HSTS

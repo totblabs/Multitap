@@ -34,7 +34,7 @@ function expectedAccountId(input) {
   return value;
 }
 
-export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests, notices = null, resources = null, login, mfaRoutes = null, passwordJob, body, backup = null, stream = () => { throw new HttpError(503, 'backup_unavailable'); }, publicOrigin, setupScriptSha256 = () => null, cookieScope = null, legacyCookieOrigin = null, accessRuntime = null, accessAdmitted = null, hostRemovalActivity = null, serverInfo, serverUpdate, restartServer = null, initialSetup, certificates = null, agentAccess = { denied: () => false, reset: () => {} }, audioInventory = null, consoleAccess = { state: () => null, record: () => {} }, relocation = null }) {
+export function adminRoutes({ store, vault, proxmox, relay, hostRoute = null, power, hostRequests, notices = null, resources = null, login, mfaRoutes = null, passwordJob, body, backup = null, stream = () => { throw new HttpError(503, 'backup_unavailable'); }, publicOrigin, setupScriptSha256 = () => null, cookieScope = null, legacyCookieOrigin = null, accessRuntime = null, accessAdmitted = null, hostRemovalActivity = null, serverInfo, serverUpdate, restartServer = null, initialSetup, certificates = null, agentAccess = { denied: () => false, reset: () => {} }, audioInventory = null, consoleAccess = { state: () => null, record: () => {} }, relocation = null }) {
   // The public installation scheme owns cookie policy, never the backend hop.
   const secureCookie = publicOrigin === undefined || new URL(publicOrigin).protocol === 'https:';
   const legacyCookieName = secureCookie ? '__Secure-multitap-admin' : 'multitap-admin-http';
@@ -247,6 +247,8 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
           result = await accessRuntime.status({ ...context, listener: serverInfo.listener, deploymentKind: serverInfo.deployment?.kind, udpPort: serverInfo.udpPort ?? null, udpMedia: relay?.udp?.describe?.() ?? null });
           // How many people a save would cut off right now (counts only).
           if (relay?.sessions) result = { ...result, connections: connectionCounts(relay) };
+          // host-route-v1: the address Hosts in this network are sent to, and whether .env decides it (host-route.mjs).
+          if (hostRoute) result = { ...result, hostRoute: hostRoute.describe() };
         } else if (path.endsWith('/cancel')) {
           if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed');
           const input = await body(req, 1024); fields(input, ['operationId']);
@@ -371,6 +373,15 @@ export function adminRoutes({ store, vault, proxmox, relay, power, hostRequests,
         const current = currentAdmin();
         if (noticeWithdraw) { fields(input, []); send(200, notices.withdraw(noticeWithdraw[1], current, currentAdmin), false); return true; }
         send(201, notices.send(input, current, currentAdmin, requestLanguage(req.headers['accept-language'])), false); return true;
+      }
+      // host-route-v1 (host-route.mjs): GET what is in force, PUT {address} to save one ('' clears it).
+      if (path === '/api/v1/admin/host-route') {
+        if (!hostRoute) throw new HttpError(503, 'host_route_unavailable');
+        if (req.method === 'GET') { send(200, hostRoute.describe()); return true; }
+        if (req.method !== 'PUT') throw new HttpError(405, 'method_not_allowed');
+        const input = await body(req, 256); fields(input, ['address']);
+        const current = currentAdmin();
+        send(200, hostRoute.save(input.address, current.id)); return true;
       }
       // desktop-preview-v1 off switch (미리보기 화면 끄기); on unless turned off.
       // Turning it off forgets every picture; clients re-read their list.

@@ -60,6 +60,10 @@
 .server-access-steps .is-now{color:var(--ink);font-weight:600}
 .server-access-udp-switch{padding:0 var(--pad) 4px}
 .server-access-udp .field-hint{white-space:pre-line}
+/* 같은 내부망의 Host (host-route-v1): its lines keep their breaks; the address and its save button share a row. */
+.server-access-host-route .field-hint,.server-access-host-route [role="status"]{white-space:pre-line}
+.server-access-host-route-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 10px}
+.server-access-host-route-row>.server-access-field{flex:1 1 180px;margin:0}
 .server-access-outside-list{margin:0 0 8px;padding:0;list-style:none}
 .server-access-outside-list li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:4px 0;overflow-wrap:anywhere}
 .server-access-outside-list small{color:var(--muted)}

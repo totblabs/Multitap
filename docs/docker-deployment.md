@@ -141,7 +141,7 @@ MULTITAP_UDP_CLIENT_RELAYS=udp.example.com:18481
 MULTITAP_UDP_MEDIA=on
 ```
 
-목록 없이 `MULTITAP_UDP_MEDIA=off`를 넣으면 UDP 경로는 확인만 하고 화면은 WebSocket으로 보냅니다. 바깥 포트를 바꾸려면 `MULTITAP_UDP_PUBLISH_PORT`를 바꿉니다. Host가 같은 내부망에 있고 공유기가 자기 공인 주소로 되돌아오는 연결을 처리하지 못하면 `MULTITAP_HOST_ROUTE`에 브로커의 내부 IPv4 주소를 넣습니다.
+목록 없이 `MULTITAP_UDP_MEDIA=off`를 넣으면 UDP 경로는 확인만 하고 화면은 WebSocket으로 보냅니다. 바깥 포트를 바꾸려면 `MULTITAP_UDP_PUBLISH_PORT`를 바꿉니다. Host가 같은 내부망에 있으면 관리자 페이지의 **서버 접속 설정** 화면에서 **같은 내부망의 Host**에 서버의 내부 IPv4 주소를 넣고 저장합니다. Host는 공유기를 돌지 않고 그 주소로 오고, 닿지 않으면 외부 접속 주소로 갑니다. `.env`에 `MULTITAP_HOST_ROUTE`가 있으면 그 값이 정하고, 화면에서는 바꿀 수 없습니다.
 
 지금 상태는 서버 접속 설정의 **UDP 화면 전송**에 나옵니다. 미디어는 브로커의 중계를 거칩니다. 브로커는 STUN 서버에 접속하지 않습니다.
 

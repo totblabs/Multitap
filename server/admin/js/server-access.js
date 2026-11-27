@@ -574,6 +574,40 @@ function udpPanel(ctx, model, snapshot, disabled, repaint) {
     reach ? el('p', { class: 'field-hint', 'data-access-udp-reach': '' }, reach) : null,
     small ? el('p', { class: 'server-access-warning', 'data-access-udp-buffer': '' }, small) : null);
 }
+// host-route-v1 (src/host-route.mjs): the address Hosts in this server's own network are sent to, so they skip the
+// router's loop back to its own public address. Saved on its own and at once: it cannot shut anyone out, because
+// a Host that does not reach it goes to the external address as before. Fixed, with its value, where .env decides.
+const ipv4Text = value => typeof value === 'string' && /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/.test(value);
+export function hostRoutePanel(ctx, snapshot) {
+  const value = snapshot?.hostRoute;
+  if (!value || typeof value !== 'object') return null;
+  const fixed = ipv4Text(value.fixed) ? value.fixed : null, saved = ipv4Text(value.saved) ? value.saved : null;
+  ctx.state.ui ??= {};
+  const ui = ctx.state.ui.hostRoute ??= { text: null, message: '', error: false, busy: false };
+  const status = fixed ? t('server-access.hostRouteEnv', { value: fixed }) : saved ? t('server-access.hostRouteOn', { value: saved }) : t('server-access.hostRouteOff');
+  const save = async () => {
+    if (ui.busy) return;
+    const text = (ui.text ?? saved ?? '').trim();
+    if (text && !ipv4Text(text)) { ui.message = t('server-access.hostRouteInvalid'); ui.error = true; ctx.render(); return; }
+    ui.busy = true; ui.message = ''; ui.error = false; ctx.render();
+    try {
+      await ctx.api('/host-route', 'PUT', { address: text });
+      ui.text = null; ui.message = text ? t('server-access.hostRouteSaved') : t('server-access.hostRouteCleared');
+      await ctx.load('serverAccess', { force: true });
+    } catch (error) {
+      ui.error = true;
+      ui.message = error?.code === 'invalid_host_route' ? t('server-access.hostRouteInvalid') : error?.message || t('server-access.hostRouteFailed');
+    } finally { ui.busy = false; ctx.render(); }
+  };
+  return panel({ title: t('server-access.hostRouteTitle'), className: 'server-access-host-route' },
+    el('p', { role: 'status', 'data-access-host-route': fixed ? 'fixed' : saved ? 'saved' : 'off' }, status),
+    el('p', { class: 'field-hint' }, t('server-access.hostRouteHelp')),
+    fixed ? null : el('div', { class: 'server-access-host-route-row' },
+      addressField(t('server-access.hostRouteField'), 'hostRoute', ui.text ?? saved ?? '', text => { ui.text = text; }, { placeholder: t('server-access.hostRoutePlaceholder'), max: 15, disabled: ui.busy }),
+      button(t('common.20'), save, 'secondary', null, { 'data-access-host-route-save': '', disabled: ui.busy })),
+    fixed ? null : el('p', { class: 'field-hint', 'data-access-host-route-enter': '' }, t('server-access.hostRouteEnter')),
+    ui.message ? el('p', { class: ui.error ? 'server-access-warning' : 'field-hint', role: ui.error ? 'alert' : 'status', 'data-access-host-route-message': '' }, ui.message) : null);
+}
 function endpointCard(ctx, model, snapshot, kind, edit, redraw, disabled, { editExtra, settle }) {
   const draft = model.draft[kind], secure = kind === 'https', placeholder = secure ? t('server-access.88') : t('server-access.89');
   draft.extraOrigins ??= [];
@@ -943,6 +977,6 @@ export function render(ctx) {
       model.draft.https.enabled && model.draft.https.mode === 'proxy' ? addressField(t('server-access.205'), 'assist.proxyPort', model.assist.proxyPort, value => assistEdit('proxyPort', value), { type: 'number', max: 5 }) : null),
     el('div', { class: 'server-access-table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, [t('server-access.206'), t('server-access.207'), t('server-access.208'), t('server-access.listenColumnF2')].map(text => el('th', { scope: 'col' }, text)))), el('tbody', { 'data-access-forward-rows': '' }, forwardRows()))),
     config.https.enabled && config.https.mode === 'proxy' ? el('p', { class: 'field-hint', 'data-access-upstream': '' }, upstreamText()) : null);
-  root.append(el('div', { class: 'server-access-layout' }, form, el('aside', { class: 'server-access-side' }, currentInfo, testPanel, model.draft.fixed ? udpPanel(ctx, model, snapshot, disabled, repaint) : null)), outsideHelp(helpPorts()), forwarding);
+  root.append(el('div', { class: 'server-access-layout' }, form, el('aside', { class: 'server-access-side' }, currentInfo, testPanel, model.draft.fixed ? udpPanel(ctx, model, snapshot, disabled, repaint) : null, hostRoutePanel(ctx, snapshot))), outsideHelp(helpPorts()), forwarding);
   return [header, root];
 }
