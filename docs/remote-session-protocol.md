@@ -1247,7 +1247,10 @@ the size Windows shows on that output, which is not always the size of the
 cursor's own bitmap: Windows scales a cursor for the monitor it is on, by the
 monitor's DPI over the DPI the cursor was made for. The system cursors are
 sent at the nominal cursor size of the output's scale (32 pixels at 100 %, 48
-at 150 %, 64 at 200 %; `CopyImage` makes that size as Windows does), a cursor
+at 150 %, 64 at 200 %; `CopyImage` makes that size as Windows does, from the
+cursor's resource when a reload has exactly that size and kind, and by
+stretching the cursor itself otherwise: at 150 % the built-in I-beam and cross
+reload as their 32-pixel monochrome resource whatever size is asked), a cursor
 of a window Windows scales itself (DPI unaware, or system DPI aware at another
 DPI) by the same ratio, and a per-monitor DPI aware program's own cursor as it
 is. A shape pixel therefore stays one source pixel for every client. Visible means
@@ -1524,6 +1527,22 @@ format, invalidation rules and measurements:
 the mouse the client sends `lt0-<n>` instead (at once, and in every ping until
 the release): the Host drops every tile with its next video frame and sends
 none until the next `lt1-`.
+
+The Host also rests the tiles by itself while the whole picture keeps moving
+(motion-rest-v1, `apps/windows_host/src/tile_motion.hpp`): a tick that wants
+tiles reads its picture back to the CPU, which a picture that changes almost
+everywhere pays for nothing. After two seconds in a row in which at least 40
+pictures a second changed over at least 60 % of the picture on average (as the
+tiles compared them) and no pane scrolled as a move, it drops every tile with
+its next video frame and encodes from the GPU; one second with fewer than 15
+changed pictures resumes the tiles on the same sequence. A video beside a
+document (half the picture) keeps the tiles. While they rest the Host does not
+measure how much of the picture changes (a readback for it would make that
+tick late), so a part that keeps changing 15 times a second or more keeps the
+rest until it stops. The client sees what
+it sees after `lt0-` and `lt1-`. The Host records each change as hostAction
+200 stage 253 (error 1 began or 2 ended, plus the stream's count of rests << 8;
+at most one record in 10 s besides the first).
 
 ## Clipboard
 

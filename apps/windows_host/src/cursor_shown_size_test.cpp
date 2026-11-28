@@ -52,13 +52,17 @@ Owned make(unsigned width, unsigned height, bool monochrome) {
   return out;
 }
 // Something is drawn: an opaque colour pixel, a mask bit that is not
-// "transparent", or (monochrome) an inverting pixel (AND 1, XOR 1: the I-beam).
+// "transparent", or an inverting pixel: monochrome AND 1, XOR 1 (the I-beam at
+// 100 %), or a colour cursor without any alpha, which Windows draws through its
+// mask, so AND 1 under a colour that is not black inverts (the I-beam at 150 %).
 bool visible(const cursor::Shape& shape) {
   if (shape.format == cursor::Format::colour) { for (size_t at = 3; at < shape.colour.size(); at += 4) if (shape.colour[at]) return true; }
+  // Past here a colour shape has no alpha at all.
   const size_t stride = cursor::maskStride(shape.width);
   const auto bit = [&](unsigned row, unsigned x) { return (shape.mask[row * stride + x / 8] & uint8_t(0x80u >> (x % 8))) != 0; };
+  const auto lit = [&](unsigned y, unsigned x) { const auto* pixel = shape.colour.data() + (size_t(y) * shape.width + x) * 4; return pixel[0] || pixel[1] || pixel[2]; };
   for (unsigned y = 0; y < shape.height; ++y) for (unsigned x = 0; x < shape.width; ++x)
-    if (!bit(y, x) || (shape.format == cursor::Format::monochrome && bit(y + shape.height, x))) return true;
+    if (!bit(y, x) || (shape.format == cursor::Format::monochrome ? bit(y + shape.height, x) : lit(y, x))) return true;
   return false;
 }
 cursor::ShownInputs systemAt(unsigned dpi, unsigned arrowSide) {

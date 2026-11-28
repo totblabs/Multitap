@@ -341,6 +341,11 @@ class LosslessTileSource {
   bool present(uint32_t index) const { return index < count_ && tiles_[index].present; }
   uint32_t tileCount() const { return count_; }
   const Stats& stats() const { return stats_; }
+  // The share of the picture (in tiles) that changed on the last beforeEncode (motion-rest-v1, tile_motion.hpp).
+  double changedShare() const {
+    if (!count_) return 0;
+    return double(std::count(pictureChanged_.begin(), pictureChanged_.end(), uint8_t(1))) / double(count_);
+  }
   // Frame-sized buffers held now (the BGRA mirror and the previous picture).
   size_t frameBytesHeld() const { return mirror_.capacity() + previous_.capacity(); }
  private:

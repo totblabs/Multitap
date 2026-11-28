@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MultitapHost VERSION 1.1.51 LANGUAGES CXX)
+project(MultitapHost VERSION 1.1.52 LANGUAGES CXX)
 # No build-machine folder in the programs (__FILE__, std::source_location); before any target.
 include(../../native/cmake/msvc-source-paths.cmake)
 option(MULTITAP_SIGNIN_BACKEND "Compile the broker-admitted signin backend (machine preference defaults ON)" OFF)
@@ -303,6 +303,9 @@ target_link_libraries(MultitapHostTextInputTest PRIVATE host_engine winhttp cryp
 target_compile_options(MultitapHostTextInputTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 # A session worker's stream start that fails before its capture thread: recorded and told to the client,
 # on the worker Agent path (no capture, encoder or display change is started).
+# motion-rest-v1: when lossless tiles rest for a picture that keeps moving, and when they come back (pure).
+add_executable(MultitapHostTileMotionTest EXCLUDE_FROM_ALL src/tile_motion_test.cpp)
+target_compile_options(MultitapHostTileMotionTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
 add_executable(MultitapHostStreamStartFailureTest EXCLUDE_FROM_ALL src/stream_start_failure_test.cpp)
 target_compile_definitions(MultitapHostStreamStartFailureTest PRIVATE MULTITAP_INPUT_LATENCY_TEST MULTITAP_AGENT_PUBLICATION_TEST)
 target_link_libraries(MultitapHostStreamStartFailureTest PRIVATE host_engine winhttp crypt32)

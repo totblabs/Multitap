@@ -220,19 +220,36 @@ inline SIZE shownSize(unsigned width, unsigned height, double factor) {
 // (CopyImage reloads a resource cursor at the new size when its file has one,
 // as Windows does for the screen, and stretches otherwise). The unscaled shape
 // when Windows cannot make it.
+//
+// A reload is taken only when it has the size asked for and the cursor's kind.
+// Windows does not always give that: on a desktop at 150 % (system cursors of
+// 48 pixels) the session's own I-beam and cross (user32's built-in cursors, no
+// scheme file) reload as their 32-pixel monochrome resource whatever size is
+// asked. That reload is not the cursor at another size; the cursor itself is
+// stretched instead, as for a cursor without a resource. Field 2026-11-28: the
+// I-beam asked for at 72 and 96 pixels went out at its own 48.
 inline std::optional<Shape> extractScaled(HCURSOR handle, double factor) {
   auto base = extract(handle);
   if (!base) return std::nullopt;
   const SIZE size = shownSize(base->width, base->height, factor);
   if (size.cx == LONG(base->width) && size.cy == LONG(base->height)) return base;
-  detail::IconCopy scaled{reinterpret_cast<HICON>(CopyImage(handle, IMAGE_CURSOR, int(size.cx), int(size.cy), LR_COPYFROMRESOURCE))};
-  if (!scaled.value) scaled.value = reinterpret_cast<HICON>(CopyImage(handle, IMAGE_CURSOR, int(size.cx), int(size.cy), 0));
-  if (!scaled.value) return base;
-  auto shape = extract(reinterpret_cast<HCURSOR>(scaled.value));
-  if (!shape || shape->format != base->format || LONG(shape->width) != size.cx || LONG(shape->height) != size.cy) return base;
-  return shape;
+  for (const UINT flags : {UINT(LR_COPYFROMRESOURCE), UINT(0)}) {
+    detail::IconCopy scaled{reinterpret_cast<HICON>(CopyImage(handle, IMAGE_CURSOR, int(size.cx), int(size.cy), flags))};
+    if (!scaled.value) continue;
+    auto shape = extract(reinterpret_cast<HCURSOR>(scaled.value));
+    if (shape && shape->format == base->format && LONG(shape->width) == size.cx && LONG(shape->height) == size.cy) return shape;
+  }
+  return base;
 }
 namespace detail {
+// Whether a cursor's own bitmap is width x height (a monochrome mask holds two rows per pixel row).
+inline bool hasSize(HCURSOR handle, int width, int height) {
+  IconBitmaps icon;
+  if (!handle || !GetIconInfo(handle, &icon.info)) return false;
+  BITMAP bitmap{};
+  if (icon.info.hbmColor) return GetObjectW(icon.info.hbmColor, sizeof(bitmap), &bitmap) == sizeof(bitmap) && bitmap.bmWidth == width && bitmap.bmHeight == height;
+  return icon.info.hbmMask && GetObjectW(icon.info.hbmMask, sizeof(bitmap), &bitmap) == sizeof(bitmap) && bitmap.bmWidth == width && bitmap.bmHeight == height * 2;
+}
 inline bool systemCursor(HCURSOR handle) {
   // The shared handles of the session's cursor scheme (winuser.h OCR_* ids).
   for (const int id : {32512, 32513, 32514, 32515, 32516, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651, 32671, 32672})
@@ -346,7 +363,9 @@ class VideoCursor {
     else if (icon.hbmMask && GetObjectW(icon.hbmMask, sizeof(bitmap), &bitmap)) { own = bitmap.bmWidth; ownHeight = bitmap.bmHeight / 2; }
     if (!handle || width <= 0 || height <= 0 || (own == width && ownHeight == height)) return handle;
     const auto make = [&] {
+      // A reload of another size than asked is not this cursor at that size (extractScaled): the cursor itself is stretched.
       HCURSOR made = reinterpret_cast<HCURSOR>(CopyImage(handle, IMAGE_CURSOR, width, height, LR_COPYFROMRESOURCE));
+      if (made && !detail::hasSize(made, width, height)) { DestroyCursor(made); made = nullptr; }
       return made ? made : reinterpret_cast<HCURSOR>(CopyImage(handle, IMAGE_CURSOR, width, height, 0));
     };
     for (auto& copy : copies_) if (copy.source == handle && copy.width == width && copy.height == height) {

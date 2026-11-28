@@ -40,6 +40,9 @@ inline bool streamObservationOk(uint32_t stage,uint32_t error)noexcept{
   // 46: where input went (secure_desktop_scope.hpp, system_input.hpp): counts and levels only, every one an
   // observation. The stream is never ended by any of them.
   if(stage==46)return true;
+  // 53: lossless tiles began or ended a rest for a picture that keeps moving (tile_motion.hpp): an observation.
+  // (51, the capture on GDI because WGC failed, is a failure and stays one.)
+  if(stage==53)return true;
   // 47: the stream's sound capture (audio_capture_control.hpp): started, restarting and a changed default
   // device are observations; a failed capture is a failure, which the capture itself answers by opening again.
   if(stage==audioCaptureRecordStage)return audioCaptureRecordOk(error);

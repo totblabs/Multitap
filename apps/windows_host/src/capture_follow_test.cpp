@@ -4,8 +4,10 @@
 // the worker's notice when a capture still fails after its stream started.
 // Pure: no display, capture, input, encoder or network is touched.
 #include "capture_follow.hpp"
+#include "capture_wgc_retry.hpp"
 #include "media.hpp"
 #include "stream_prepare_diagnostics.hpp"
+#include "tile_motion.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -131,6 +133,10 @@ void recordsWhatTheLastReadingShowed() {
   require(streamCaptureFailureCode("Invalid monitor coordinate") == 23 && streamCaptureFailureCode("Only the selected owned virtual monitors can be captured") == 24, "the start's selection codes");
   require(streamCaptureFailureCode("Invalid stream epoch") == 25 && streamCaptureFailureCode("encoder_format_unsupported") == 13 && streamCaptureFailureCode("anything else") == 0, "the start's command codes");
   require(!streamObservationOk(streamStartCheckStage, 14) && !streamObservationOk(workerLoopExceptionStage, 0), "A failed start was recorded as an observation");
+  // The capture on GDI because WGC failed stays a failure; the tiles' rest for a moving picture is an observation
+  // (the first build of 1.1.52 gave the rest the WGC failure's stage and journalled both ok).
+  require(!streamObservationOk(wgcFailedStage, 0x80070057u) && !streamObservationOk(wgcFailedStage, 1), "A WGC failure was recorded as an observation");
+  require(tileMotionRecordStage != wgcFailedStage && streamObservationOk(tileMotionRecordStage, 1u | (1u << 8)) && streamObservationOk(tileMotionRecordStage, 2u | (3u << 8)), "The tiles' rest was not an observation of its own");
 }
 }
 

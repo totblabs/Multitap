@@ -214,6 +214,10 @@ class EncodeScaleController {
   // The capture rate now (at most the requested rate; lower only for a software encoder).
   int fps() const { return fps_; }
   const EncodeCeiling& ceiling() const { return ceiling_; }
+  // The Host's work per frame changed by itself (motion-rest-v1: lossless tiles began to rest, so no frame is read
+  // back to the CPU any more). A rate step up that failed under the old work says nothing about the new one: the
+  // next rung is tried after the usual wait again, not after the doubled one.
+  void freshWork() { rateRetry_ = upAfterDown; rateUp_.reset(); }
 
   // One window; true when the picture size changed (restart the encoder).
   // software: the encoder is x264 or the MFT, so a frame rate step relieves it.

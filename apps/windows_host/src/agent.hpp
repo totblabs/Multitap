@@ -38,6 +38,7 @@
 #include "gpu_capture.hpp"
 #include "stream_encode_size.hpp"
 #include "stream_size.hpp"
+#include "tile_motion.hpp"
 #include "path_frame_rate.hpp"
 #include "send_queue.hpp"
 #include "websocket_send.hpp"
@@ -67,6 +68,16 @@
 #include <thread>
 
 namespace host {
+// The worker's records (hostAction 200 stage 200 + N, stream_prepare_diagnostics.hpp) each have their own stage:
+// two meanings under one number read as each other, and one of them may be journalled ok and the other not.
+// 41 a followed mode, 42 the GPU priority and 45 the way back to the GPU encoder are written as numbers below.
+static_assert([] {
+  constexpr uint32_t stages[]{streamStartCheckStage, workerLoopExceptionStage, 41, 42, gpucapture::gpuPathStage, secureDesktopNoticeStage, 45,
+                              secure::inputRecordStage, audioCaptureRecordStage, cursor::cursorRecordStage, speakerMuteRecordStage,
+                              captureTopologyRecordStage, wgcFailedStage, wgcRecoveredStage, tileMotionRecordStage};
+  for (size_t i = 0; i < std::size(stages); ++i) for (size_t j = i + 1; j < std::size(stages); ++j) if (stages[i] == stages[j]) return false;
+  return true;
+}(), "two worker records share a stage");
 // Video, audio and cursor-v1 records (kind 3) carry the same media epoch.
 inline void stampMediaEpoch(std::vector<uint8_t>& bytes,uint16_t epoch) {if(bytes.size()>=12&&(bytes[0]==1||bytes[0]==2||bytes[0]==cursor::mediaKind)){bytes[2]=uint8_t(epoch);bytes[3]=uint8_t(epoch>>8);}}
 // Keep only an active streaming thread out of automatic display/system idle.
@@ -1314,6 +1325,8 @@ class Agent {
         // size (`captureChanged`) is always rebuilt.
         const bool followable=selection.monitors.size()==1&&!device.empty();
         Clock::time_point followedAt{},followRecordedAt{};bool tilesAllowed=true;
+        // motion-rest-v1 (tile_motion.hpp): tiles rest while the whole picture keeps moving.
+        TileMotion tileMotion;uint64_t tileMovesSeen=0;
         // hostAction 200 stage 250: the last reading of a follow that could not hold its output (capture_follow.hpp).
         const auto recordTopology=[&]{
           if(!captureDiagnostic_||selection.monitors.empty())return;
@@ -1517,7 +1530,7 @@ class Agent {
           // The client wants tiles now (opted in, not paused by 게임 마우스) and the
           // capture still describes the announced source (no follow since).
           // Decided before frame(): tiles read the CPU picture (gpu-capture-v1).
-          const bool tilesWanted=tilesAllowed&&losslessRequested(session);
+          const bool tilesWanted=tilesAllowed&&losslessRequested(session)&&!tileMotion.resting();
           capture.gpuOutput(gpuPath.tick(tilesWanted,encoder.textureDevice()&&encoder.textureDevice()==capture.gpuDevice()));
           // Injections reported before this point precede this frame's capture.
           inputLatency_.beginCapture(hostMonotonicUs());
@@ -1588,6 +1601,15 @@ class Agent {
             for(auto& output:outputs)emit(std::move(output));
           }else{const auto decision=gpuPicture?encodePolicy.prepareChanged(capture.gpuPictureChanged(),uint64_t(pts),force):encodePolicy.prepare(frame,uint64_t(pts),force);submitted=decision.submit;changedTick=decision.contentChanged;inputLatency_.submitted(uint64_t(pts),decision.contentChanged);if(decision.submit)encoder.encode(encoderInput, uint64_t(pts), emit);}
           if(submitted||capture.frameUpdated())lastWork=iteration;
+          // motion-rest-v1: this tick for the tiles' rest. The share is measured only where the tiles compared the
+          // picture (a CPU tick that wanted them); a pane scrolled as a move keeps them.
+          {
+            std::optional<double> share;bool moved=false;
+            if(tiled&&lossless&&tilesWanted&&!gpuPicture){share=lossless->changedShare();moved=lossless->stats().moves!=tileMovesSeen;tileMovesSeen=lossless->stats().moves;}
+            const auto change=tileMotion.tick(uint64_t(pts),changedTick,share,moved);
+            if(change==TileMotion::Change::began&&scaler)scaler->freshWork();
+            if(const auto value=tileMotion.record(change,uint64_t(pts)))try{if(captureDiagnostic_)captureDiagnostic_(tileMotionRecordStage,*value);}catch(...){ }
+          }
           if(changedTick&&priorTick!=Clock::time_point{})stall.changeLate=std::max(stall.changeLate,std::chrono::duration<double,std::milli>(encodeBegan-priorTick).count());
           // cursor-v1: the cursor this frame() read, after this tick's video.
           // An unrepresentable cursor is composed from the next frame on.
